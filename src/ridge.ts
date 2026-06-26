@@ -1,18 +1,11 @@
-// Ridge Regression polinomial de 3ª ordem para mapeamento do olhar
-// Upgrade: 2ª ordem (6 features) → 3ª ordem (10 features)
-// Feature vector: φ(x, y) = [1, x, y, x², y², xy, x³, y³, x²y, xy²] → 10 coeficientes por eixo
-// O grau cúbico captura melhor a distorção não-linear nos cantos e bordas da tela.
-// Sistema normal regularizado: (ΦᵀΦ + λI) β = Φᵀy   (λ = 0.3)
+// Regressão Ridge Múltipla Linear (sem expansão polinomial)
+// Recebe o vetor denso de features (53 dimensões) + Bias
+// Sistema normal regularizado: (ΦᵀΦ + λI) β = Φᵀy
 
 export interface RidgeModel {
-  betaX: number[];  // 10 coeficientes para predizer screenX
-  betaY: number[];  // 10 coeficientes para predizer screenY
-}
-
-function phi(x: number, y: number): number[] {
-  const x2 = x * x;
-  const y2 = y * y;
-  return [1, x, y, x2, y2, x * y, x2 * x, y2 * y, x2 * y, x * y2];
+  betaX: number[];  // coeficientes para predizer screenX
+  betaY: number[];  // coeficientes para predizer screenY
+  numFeatures: number;
 }
 
 // Eliminação gaussiana com pivotação parcial para resolver Aβ = b
@@ -28,7 +21,7 @@ function solveLinear(A: number[][], b: number[]): number[] {
     [M[col], M[pivot]] = [M[pivot], M[col]];
 
     const d = M[col][col];
-    if (Math.abs(d) < 1e-12) continue;
+    if (Math.abs(d) < 1e-12) continue; // Singularity
     for (let j = col; j <= n; j++) M[col][j] /= d;
 
     for (let r = 0; r < n; r++) {
@@ -42,47 +35,67 @@ function solveLinear(A: number[][], b: number[]): number[] {
 }
 
 export function trainRidgeModel(
-  profile: { rawX: number; rawY: number; screenX: number; screenY: number }[],
-  lambda = 0.3
+  features: number[][],
+  targets: { screenX: number; screenY: number }[],
+  lambda = 1.0
 ): RidgeModel {
-  const nf  = 10;
-  const Phi = profile.map(p => phi(p.rawX, p.rawY));
-  const m   = profile.length;
+  const m = features.length;
+  if (m === 0) return { betaX: [], betaY: [], numFeatures: 0 };
+  
+  const rawFeatures = features[0].length;
+  const nf = rawFeatures + 1; // +1 para o Bias term
+
+  // Prepara matriz Phi com Bias
+  const Phi = features.map(f => [1.0, ...f]);
 
   // A = ΦᵀΦ + λI
   const A: number[][] = Array.from({ length: nf }, (_, i) =>
     Array.from({ length: nf }, (_, j) => {
       let s = 0;
       for (let k = 0; k < m; k++) s += Phi[k][i] * Phi[k][j];
-      return s + (i === j ? lambda : 0);
+      // Regulariza a diagonal (exceto o Bias term no índice 0)
+      return s + (i === j && i > 0 ? lambda : 0);
     })
   );
 
   // b = Φᵀy  (para screenX e screenY separadamente)
   const bX = Array.from({ length: nf }, (_, i) => {
     let s = 0;
-    for (let k = 0; k < m; k++) s += Phi[k][i] * profile[k].screenX;
+    for (let k = 0; k < m; k++) s += Phi[k][i] * targets[k].screenX;
     return s;
   });
+  
   const bY = Array.from({ length: nf }, (_, i) => {
     let s = 0;
-    for (let k = 0; k < m; k++) s += Phi[k][i] * profile[k].screenY;
+    for (let k = 0; k < m; k++) s += Phi[k][i] * targets[k].screenY;
     return s;
   });
 
-  return { betaX: solveLinear(A, bX), betaY: solveLinear(A, bY) };
+  return { 
+    betaX: solveLinear(A, bX), 
+    betaY: solveLinear(A, bY),
+    numFeatures: rawFeatures 
+  };
 }
 
 export function predictRidge(
   model: RidgeModel,
-  rawX: number,
-  dy: number
+  features: number[]
 ): { x: number; y: number } {
-  const f    = phi(rawX, dy);
+  if (features.length !== model.numFeatures) {
+    return { x: 0, y: 0 };
+  }
+  const f = [1.0, ...features];
   const clmp = (v: number) => Math.min(Math.max(v, 0), 1);
-  const normX = f.reduce((s, v, i) => s + model.betaX[i] * v, 0);
-  const normY = f.reduce((s, v, i) => s + model.betaY[i] * v, 0);
-  // Usa clientWidth/Height para considerar a viewport real do CSS (sem scrollbars)
+  
+  let normX = 0;
+  let normY = 0;
+  for (let i = 0; i < f.length; i++) {
+    normX += model.betaX[i] * f[i];
+    normY += model.betaY[i] * f[i];
+  }
+
+  // Usa clientWidth/Height para considerar a viewport real do CSS
   return {
     x: clmp(normX) * document.documentElement.clientWidth,
     y: clmp(normY) * document.documentElement.clientHeight,

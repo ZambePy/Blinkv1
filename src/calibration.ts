@@ -1,19 +1,18 @@
 import { trainRidgeModel, predictRidge } from './ridge';
 import type { RidgeModel } from './ridge';
 import { startAccuracyTest } from './accuracy';
+import { StandardScaler } from './scaler';
 
 interface CalibrationPoint {
   screenX: number;
   screenY: number;
-  rawX: number;
-  rawY: number;
+  features: number[];
 }
 
 interface DynamicSample {
   screenX: number;
   screenY: number;
-  rawX: number;
-  rawY: number;
+  features: number[];
   weight: number;
 }
 
@@ -30,15 +29,10 @@ const TARGET_POINTS = [
   { name: "Canto Inferior Direito",   screenX: 0.95, screenY: 0.95 },
 ];
 
-const GRID_NORM = [0.0, 0.5, 1.0];
-
 const COLLECTION_MS        = 1500;
 const TRANSITION_MS        = 1000;
 const DYN_MOVE_MS          = 1200;
 const DYN_PULSE_MS         = 1500;
-const STD_THRESHOLD_X      = 0.015;
-const STD_THRESHOLD_Y      = 0.010;
-const MAX_UNSTABLE_RETRIES = 2;
 
 // Snake path 3×3 cobrindo toda a tela
 const DYNAMIC_WAYPOINTS = [
@@ -59,9 +53,7 @@ let isDynamicCalibrating = false;
 let currentPointIndex = 0;
 let isCollecting = false;
 let collectionStartTime = 0;
-let collectedRawX: number[] = [];
-let collectedRawY: number[] = [];
-let unstableRetries = 0;
+let collectedFeatures: number[][] = [];
 
 let dynamicSamples: DynamicSample[] = [];
 let dynamicBallX = 0.5;
@@ -70,6 +62,7 @@ let dynamicIsFixation = false;
 
 // ── Ridge Regression model ───────────────────────────────────────────────────
 let ridgeModel: RidgeModel | null = null;
+export const featureScaler = new StandardScaler();
 
 // ── Session counter ──────────────────────────────────────────────────────────
 let sessionCount = 0;
@@ -101,22 +94,27 @@ export function loadProfile(): boolean {
   try {
     const saved = localStorage.getItem("calibrationProfile");
     if (saved) {
-      profile = JSON.parse(saved);
-      if (profile.length === 9) {
-        ridgeModel = trainRidgeModel(profile);
+      const parsed = JSON.parse(saved);
+      if (parsed.ridgeModel && parsed.scalerParams) {
+        ridgeModel = parsed.ridgeModel;
+        featureScaler.setParams(parsed.scalerParams.means, parsed.scalerParams.stds);
         return true;
       }
     }
   } catch (e) {
     console.error("Erro ao carregar calibrationProfile:", e);
   }
-  profile    = [];
   ridgeModel = null;
   return false;
 }
 
 function saveProfile() {
-  localStorage.setItem("calibrationProfile", JSON.stringify(profile));
+  if (ridgeModel) {
+    localStorage.setItem("calibrationProfile", JSON.stringify({
+      ridgeModel,
+      scalerParams: featureScaler.getParams()
+    }));
+  }
 }
 
 export function clearCalibration() {
@@ -128,7 +126,7 @@ export function clearCalibration() {
 }
 
 export function isCalibrated(): boolean {
-  return profile.length === 9;
+  return ridgeModel !== null;
 }
 
 // ── Pré-Calibração: tela de setup antes da calibração ────────────────────────
@@ -293,8 +291,9 @@ export function startCalibrationMode() {
   isCalibrating = true;
   currentPointIndex = 0;
   isCollecting = false;
-  unstableRetries = 0;
-  profile    = [];
+  profile = [];
+  dynamicSamples = [];
+  collectedFeatures = [];
   ridgeModel = null;
 
   createCalibrationOverlay();
@@ -379,10 +378,9 @@ function showNextPoint() {
 
 function startCollection() {
   if (isDynamicCalibrating || isCollecting || !isCalibrating) return;
-  collectedRawX = [];
-  collectedRawY = [];
   isCollecting = true;
   collectionStartTime = performance.now();
+  collectedFeatures = [];
 
   const dot = document.getElementById("calibration-dot");
   if (dot) {
@@ -392,38 +390,14 @@ function startCollection() {
   }
 }
 
-function stdDev(values: number[]): number {
-  if (values.length < 2) return 0;
-  const mean = values.reduce((s, v) => s + v, 0) / values.length;
-  return Math.sqrt(values.reduce((s, v) => s + (v - mean) ** 2, 0) / values.length);
-}
+// ── Funções Removidas ────────────────────────────────────────────
 
-// ── Funções estatísticas robustas ────────────────────────────────────────────
-
-function median(values: number[]): number {
-  if (values.length === 0) return 0;
-  const sorted = [...values].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-}
-
-function filterOutliers(values: number[]): number[] {
-  if (values.length < 6) return values;
-  const med = median(values);
-  const deviations = values.map(v => Math.abs(v - med));
-  const mad = median(deviations);
-  // MAD-based filtering: ~2× MAD corresponde a ~1.5 desvios padrão
-  const threshold = Math.max(mad * 2.5, 1e-6);
-  return values.filter(v => Math.abs(v - med) <= threshold);
-}
-
-export function feedRawData(ratioX: number, dy: number) {
+export function feedRawData(features: number[]) {
   if (isDynamicCalibrating) {
     dynamicSamples.push({
       screenX: dynamicBallX,
       screenY: dynamicBallY,
-      rawX: ratioX,
-      rawY: dy,
+      features,
       weight: dynamicIsFixation ? 3.0 : 1.0
     });
     return;
@@ -431,8 +405,7 @@ export function feedRawData(ratioX: number, dy: number) {
 
   if (!isCalibrating || !isCollecting) return;
 
-  collectedRawX.push(ratioX);
-  collectedRawY.push(dy);
+  collectedFeatures.push(features);
 
   if (performance.now() - collectionStartTime >= COLLECTION_MS) {
     isCollecting = false;
@@ -441,31 +414,18 @@ export function feedRawData(ratioX: number, dy: number) {
 }
 
 function processStaticPoint() {
-  const isUnstable =
-    stdDev(collectedRawX) > STD_THRESHOLD_X ||
-    stdDev(collectedRawY) > STD_THRESHOLD_Y;
+  // Em vez de extrair mediana, adicionamos todos os frames do ponto no profile
+  // O Standard Scaler e Ridge L2 vão tratar ruídos e redundâncias
+  const targetX = TARGET_POINTS[currentPointIndex].screenX;
+  const targetY = TARGET_POINTS[currentPointIndex].screenY;
 
-  if (isUnstable && unstableRetries < MAX_UNSTABLE_RETRIES) {
-    unstableRetries++;
-    showInstableWarning();
-    return;
+  for (const f of collectedFeatures) {
+    profile.push({
+      screenX: targetX,
+      screenY: targetY,
+      features: f
+    });
   }
-
-  unstableRetries = 0;
-
-  // Filtra outliers e usa mediana para robustez (especialmente nos cantos)
-  const filteredX = filterOutliers(collectedRawX);
-  const filteredY = filterOutliers(collectedRawY);
-
-  const avgX = median(filteredX);
-  const avgY = median(filteredY);
-
-  profile.push({
-    screenX: TARGET_POINTS[currentPointIndex].screenX,
-    screenY: TARGET_POINTS[currentPointIndex].screenY,
-    rawX: avgX,
-    rawY: avgY
-  });
 
   currentPointIndex++;
 
@@ -484,22 +444,7 @@ function processStaticPoint() {
   }, TRANSITION_MS);
 }
 
-function showInstableWarning() {
-  const dot = document.getElementById("calibration-dot");
-  if (dot) {
-    dot.classList.remove("capturing");
-    dot.classList.add("unstable");
-  }
-
-  const instruction = document.getElementById("calibration-instruction");
-  if (instruction) {
-    instruction.innerHTML = `
-      <span class="warning-text">Movimento detectado — olhe fixamente e tente novamente</span><br>
-      <span class="highlight">${currentPointIndex + 1}/${TARGET_POINTS.length}</span> &nbsp;
-      <span class="action-highlight">ESPAÇO</span> ou <span class="action-highlight">Clique</span>
-    `;
-  }
-}
+// Warnings removidos
 
 function handleGlobalKeyDown(e: KeyboardEvent) {
   if (!isCalibrating || isCollecting || isDynamicCalibrating) return;
@@ -635,43 +580,34 @@ function pulseBall(ball: HTMLElement, onComplete: () => void) {
 
 function completeDynamicCalibration() {
   isDynamicCalibrating = false;
-  if (dynamicSamples.length >= 20) refineDynamicProfile();
+  
+  // Adiciona amostras dinâmicas ao profile para treino massivo
+  for (const s of dynamicSamples) {
+    profile.push({
+      screenX: s.screenX,
+      screenY: s.screenY,
+      features: s.features
+    });
+  }
 
-  // Treina o modelo Ridge após refinamento dinâmico
-  ridgeModel = trainRidgeModel(profile);
+  // Extrai matrizes de treino
+  const trainFeatures = profile.map(p => p.features);
+  const trainTargets = profile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
+
+  // Fit the Standard Scaler
+  featureScaler.fit(trainFeatures);
+
+  // Normaliza features
+  const scaledFeatures = featureScaler.transform(trainFeatures);
+
+  // Treina o modelo Ridge
+  ridgeModel = trainRidgeModel(scaledFeatures, trainTargets);
 
   saveProfile();
   cleanupOverlay();
   isCalibrating = false;
   window.removeEventListener("keydown", handleGlobalKeyDown);
   runAccuracyTest();
-}
-
-function refineDynamicProfile() {
-  const SIGMA    = 0.15;
-  const MAX_DIST = 0.35;
-
-  for (const pt of profile) {
-    let totalW = 0, sumX = 0, sumY = 0;
-
-    for (const s of dynamicSamples) {
-      const dx   = s.screenX - pt.screenX;
-      const dy   = s.screenY - pt.screenY;
-      const dist = Math.sqrt(dx * dx + dy * dy);
-      if (dist > MAX_DIST) continue;
-      const w = Math.exp(-(dist * dist) / (2 * SIGMA * SIGMA)) * s.weight;
-      totalW += w;
-      sumX   += s.rawX * w;
-      sumY   += s.rawY * w;
-    }
-
-    if (totalW > 5) {
-      // Influência dinâmica conservadora: máximo 30% de ajuste
-      const alpha = Math.min((totalW - 5) / 200, 0.30);
-      pt.rawX = pt.rawX * (1 - alpha) + (sumX / totalW) * alpha;
-      pt.rawY = pt.rawY * (1 - alpha) + (sumY / totalW) * alpha;
-    }
-  }
 }
 
 // ── Painel de Controle ───────────────────────────────────────────────────────
@@ -793,65 +729,9 @@ export function init() {
 
 // ── Mapeamento de Olhar ───────────────────────────────────────────────────────
 
-export function mapGaze(ratioX: number, dy: number): { x: number; y: number } | null {
-  if (profile.length !== 9) return null;
+export function mapGaze(features: number[]): { x: number; y: number } | null {
+  if (!ridgeModel) return null;
 
-  // Usa Ridge Regression se o modelo estiver disponível
-  if (ridgeModel) {
-    return predictRidge(ridgeModel, ratioX, dy);
-  }
-
-  // Fallback: interpolação bilinear 3×3 (9 pontos)
-  const lerpVal     = (a: number, b: number, t: number) => a + (b - a) * t;
-  const clampVal    = (v: number, lo: number, hi: number) => Math.min(Math.max(v, lo), hi);
-  const mapRangeVal = (v: number, iMin: number, iMax: number, oMin: number, oMax: number) => {
-    if (Math.abs(iMax - iMin) < 1e-6) return oMin;
-    return (v - iMin) * (oMax - oMin) / (iMax - iMin) + oMin;
-  };
-
-  const pt = profile;
-
-  function getColRawX(col: number, y: number): number {
-    const rows = [pt[col], pt[col + 3], pt[col + 6]];
-    for (let i = 0; i < 2; i++) {
-      const a = rows[i], b = rows[i + 1];
-      if (y <= Math.max(a.rawY, b.rawY) || i === 1) {
-        if (Math.abs(a.rawY - b.rawY) < 1e-6) return a.rawX;
-        return lerpVal(a.rawX, b.rawX, clampVal((y - a.rawY) / (b.rawY - a.rawY), 0, 1));
-      }
-    }
-    return rows[0].rawX;
-  }
-
-  function getRowRawY(row: number, x: number): number {
-    const cols = [pt[row * 3], pt[row * 3 + 1], pt[row * 3 + 2]];
-    for (let i = 0; i < 2; i++) {
-      const a = cols[i], b = cols[i + 1];
-      if (x <= Math.max(a.rawX, b.rawX) || i === 1) {
-        if (Math.abs(a.rawX - b.rawX) < 1e-6) return a.rawY;
-        return lerpVal(a.rawY, b.rawY, clampVal((x - a.rawX) / (b.rawX - a.rawX), 0, 1));
-      }
-    }
-    return cols[0].rawY;
-  }
-
-  const c0 = getColRawX(0, dy), c1 = getColRawX(1, dy), c2 = getColRawX(2, dy);
-
-  let normX: number;
-  if (ratioX <= c1) normX = mapRangeVal(ratioX, c0, c1, GRID_NORM[0], GRID_NORM[1]);
-  else              normX = mapRangeVal(ratioX, c1, c2, GRID_NORM[1], GRID_NORM[2]);
-
-  const r0 = getRowRawY(0, ratioX), r1 = getRowRawY(1, ratioX), r2 = getRowRawY(2, ratioX);
-
-  let normY: number;
-  if (dy <= r1) normY = mapRangeVal(dy, r0, r1, GRID_NORM[0], GRID_NORM[1]);
-  else          normY = mapRangeVal(dy, r1, r2, GRID_NORM[1], GRID_NORM[2]);
-
-  const vw = document.documentElement.clientWidth;
-  const vh = document.documentElement.clientHeight;
-
-  return {
-    x: clampVal(normX, 0, 1) * vw,
-    y: clampVal(normY, 0, 1) * vh,
-  };
+  const scaled = featureScaler.transformSingle(features);
+  return predictRidge(ridgeModel, scaled);
 }

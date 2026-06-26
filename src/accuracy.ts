@@ -47,17 +47,15 @@ const COLLECTION_MS = 1000;
 // Assume 60 cm a 96 CSS DPI: 60 × 96 / 2.54 ≈ 2268 px
 const ASSUMED_DIST_PX = 2268;
 
-let rawFeedX = 0;
-let rawFeedY = 0;
+let currentFeatures: number[] = [];
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
 export let isAccuracyTesting = false;
 
 // Recebe a posição crua do olhar a cada frame — chamado por main.ts
-export function feedAccuracyRaw(ratioX: number, dy: number) {
-  rawFeedX = ratioX;
-  rawFeedY = dy;
+export function feedAccuracyRaw(features: number[]) {
+  currentFeatures = features;
 }
 
 // Inicia o teste de validação de precisão pós-calibração
@@ -91,7 +89,7 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
     function collect() {
       const elapsed = performance.now() - startTime;
 
-      const gaze = mapGaze(rawFeedX, rawFeedY);
+      const gaze = mapGaze(currentFeatures);
       if (gaze) {
         predictedX.push(gaze.x);
         predictedY.push(gaze.y);
