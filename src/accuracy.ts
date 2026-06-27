@@ -30,15 +30,15 @@ interface PointDiagnostic {
 
 // 9 pontos de validação em grade 3×3
 const VALIDATION_POINTS = [
-  { name: "Superior Esq",    screenX: 0.10, screenY: 0.10 },
+  { name: "Superior Esq", screenX: 0.10, screenY: 0.10 },
   { name: "Superior Centro", screenX: 0.50, screenY: 0.10 },
-  { name: "Superior Dir",    screenX: 0.90, screenY: 0.10 },
-  { name: "Médio Esq",       screenX: 0.10, screenY: 0.50 },
-  { name: "Centro",          screenX: 0.50, screenY: 0.50 },
-  { name: "Médio Dir",       screenX: 0.90, screenY: 0.50 },
-  { name: "Inferior Esq",    screenX: 0.10, screenY: 0.90 },
+  { name: "Superior Dir", screenX: 0.90, screenY: 0.10 },
+  { name: "Médio Esq", screenX: 0.10, screenY: 0.50 },
+  { name: "Centro", screenX: 0.50, screenY: 0.50 },
+  { name: "Médio Dir", screenX: 0.90, screenY: 0.50 },
+  { name: "Inferior Esq", screenX: 0.10, screenY: 0.90 },
   { name: "Inferior Centro", screenX: 0.50, screenY: 0.90 },
-  { name: "Inferior Dir",    screenX: 0.90, screenY: 0.90 },
+  { name: "Inferior Dir", screenX: 0.90, screenY: 0.90 },
 ];
 
 const COLLECTION_MS = 1000;
@@ -47,15 +47,17 @@ const COLLECTION_MS = 1000;
 // Assume 60 cm a 96 CSS DPI: 60 × 96 / 2.54 ≈ 2268 px
 const ASSUMED_DIST_PX = 2268;
 
-let currentFeatures: number[] = [];
+let currentFeaturesLeft: number[] = [];
+let currentFeaturesRight: number[] = [];
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
 export let isAccuracyTesting = false;
 
 // Recebe a posição crua do olhar a cada frame — chamado por main.ts
-export function feedAccuracyRaw(features: number[]) {
-  currentFeatures = features;
+export function feedAccuracyRaw(featuresLeft: number[], featuresRight: number[]) {
+  currentFeaturesLeft = featuresLeft;
+  currentFeaturesRight = featuresRight;
 }
 
 // Inicia o teste de validação de precisão pós-calibração
@@ -79,7 +81,7 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
     const vp = VALIDATION_POINTS[pointIndex];
     showValidationDot(overlay, vp, pointIndex);
 
-    const startTime  = performance.now();
+    const startTime = performance.now();
     const predictedX: number[] = [];
     const predictedY: number[] = [];
 
@@ -89,7 +91,7 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
     function collect() {
       const elapsed = performance.now() - startTime;
 
-      const gaze = mapGaze(currentFeatures);
+      const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
       if (gaze) {
         predictedX.push(gaze.x);
         predictedY.push(gaze.y);
@@ -107,7 +109,7 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
       if (predictedX.length > 0) {
         meanPX = predictedX.reduce((s, v) => s + v, 0) / predictedX.length;
         meanPY = predictedY.reduce((s, v) => s + v, 0) / predictedY.length;
-        const dx  = meanPX - targetScreenX;
+        const dx = meanPX - targetScreenX;
         const dy2 = meanPY - targetScreenY;
         error = Math.sqrt(dx * dx + dy2 * dy2);
       }
@@ -158,8 +160,8 @@ function showValidationDot(
   dot.id = "accuracy-dot";
   dot.className = "accuracy-dot";
   dot.style.left = `${vp.screenX * 100}vw`;
-  dot.style.top  = `${vp.screenY * 100}vh`;
-  dot.innerHTML  = `<div class="dot-inner"></div>`;
+  dot.style.top = `${vp.screenY * 100}vh`;
+  dot.innerHTML = `<div class="dot-inner"></div>`;
 
   const instr = overlay.querySelector(".accuracy-instruction") as HTMLElement;
   if (instr) {
@@ -182,9 +184,9 @@ function finishTest(
   const vh = document.documentElement.clientHeight;
 
   const meanError = pointErrors.reduce((s, v) => s + v, 0) / pointErrors.length;
-  const maxError  = Math.max(...pointErrors);
-  const diagonal  = Math.sqrt(vw ** 2 + vh ** 2);
-  const errorPct  = (meanError / diagonal) * 100;
+  const maxError = Math.max(...pointErrors);
+  const diagonal = Math.sqrt(vw ** 2 + vh ** 2);
+  const errorPct = (meanError / diagonal) * 100;
 
   // Converte erro médio para graus angulares
   const meanErrorDeg = (Math.atan(meanError / ASSUMED_DIST_PX) * 180) / Math.PI;
@@ -215,7 +217,7 @@ function finishTest(
     localStorage.setItem("accuracyResult", JSON.stringify({
       meanError, maxError, errorPct, meanErrorDeg, score, colorClass
     }));
-  } catch (_) {}
+  } catch (_) { }
 
   // Mostra o diagnóstico visual antes de chamar onComplete
   showDiagnosticOverlay(diagnostics, result, onComplete);
@@ -318,8 +320,8 @@ function showDiagnosticOverlay(
 
   const scoreColor = result.colorClass === 'accuracy-excellent' ? '#22c55e'
     : result.colorClass === 'accuracy-good' ? '#00fff0'
-    : result.colorClass === 'accuracy-regular' ? '#ffcc00'
-    : '#ef4444';
+      : result.colorClass === 'accuracy-regular' ? '#ffcc00'
+        : '#ef4444';
 
   footer.innerHTML = `
     <div class="diagnostic-card">

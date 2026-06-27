@@ -1,165 +1,166 @@
 export type Point3D = { x: number; y: number; z: number; visibility?: number };
 
-// Helpers de Geometria
-function dist3D(p1: Point3D, p2: Point3D): number {
-  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + (p1.z - p2.z) ** 2);
+export interface ExtractorResult {
+  featuresLeft: number[];
+  featuresRight: number[];
+  blinkDetected: boolean;
 }
 
-function getCenter(points: Point3D[]): Point3D {
-  let cx = 0, cy = 0, cz = 0;
-  for (const p of points) {
-    cx += p.x; cy += p.y; cz += p.z;
+// EyeTrax Indices
+const LEFT_EYE_INDICES = [
+  107,  66, 105,  63,  70,  55,  65,  52,  53,  46, 468, 469, 470, 471, 472,
+  133,  33, 173, 157, 158, 159, 160, 161, 246, 155, 154, 153, 145, 144, 163,   7,
+  243, 190,  56,  28,  27,  29,  30, 247, 130,  25, 110,  24,  23,  22,  26, 112,
+  244, 189, 221, 222, 223, 224, 225, 113, 226,  31, 228, 229, 230, 231, 232, 233,
+  193, 245, 128, 121, 120, 119, 118, 117, 111,  35, 124, 143, 156
+];
+
+const RIGHT_EYE_INDICES = [
+  336, 296, 334, 293, 300, 285, 295, 282, 283, 276, 473, 476, 475, 474, 477,
+  362, 263, 398, 384, 385, 386, 387, 388, 466, 382, 381, 380, 374, 373, 390, 249,
+  463, 414, 286, 258, 257, 259, 260, 467, 359, 255, 339, 254, 253, 252, 256, 341,
+  464, 413, 441, 442, 443, 444, 445, 342, 446, 261, 448, 449, 450, 451, 452, 453,
+  417, 465, 357, 350, 349, 348, 347, 346, 340, 265, 353, 372, 383
+];
+
+const MUTUAL_INDICES = [
+  4, 10, 151, 9, 152, 234, 454, 58, 288
+];
+
+// Vector Math Helpers
+function sub(v1: Point3D, v2: Point3D): Point3D { return { x: v1.x - v2.x, y: v1.y - v2.y, z: v1.z - v2.z }; }
+function add(v1: Point3D, v2: Point3D): Point3D { return { x: v1.x + v2.x, y: v1.y + v2.y, z: v1.z + v2.z }; }
+function scale(v: Point3D, s: number): Point3D { return { x: v.x * s, y: v.y * s, z: v.z * s }; }
+function norm(v: Point3D): number { return Math.sqrt(v.x*v.x + v.y*v.y + v.z*v.z); }
+function normalize(v: Point3D): Point3D { 
+  const n = norm(v) + 1e-9;
+  return scale(v, 1/n);
+}
+function dot(v1: Point3D, v2: Point3D): number { return v1.x*v2.x + v1.y*v2.y + v1.z*v2.z; }
+function cross(v1: Point3D, v2: Point3D): Point3D {
+  return {
+    x: v1.y * v2.z - v1.z * v2.y,
+    y: v1.z * v2.x - v1.x * v2.z,
+    z: v1.x * v2.y - v1.y * v2.x
+  };
+}
+function dist2D(p1: Point3D, p2: Point3D): number {
+  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
+}
+
+// R^T * v = [dot(x_axis, v), dot(y_axis, v), dot(z_axis, v)]
+function mulRT(xAxis: Point3D, yAxis: Point3D, zAxis: Point3D, v: Point3D): Point3D {
+  return {
+    x: dot(xAxis, v),
+    y: dot(yAxis, v),
+    z: dot(zAxis, v)
+  };
+}
+
+// EAR Blink Detection History
+const earHistory: number[] = [];
+const EAR_HISTORY_LEN = 50;
+const BLINK_THRESHOLD_RATIO = 0.8;
+const MIN_HISTORY = 15;
+
+export function extractEyeFeatures(landmarks: Point3D[]): ExtractorResult {
+  if (landmarks.length < 478) {
+    return { featuresLeft: [], featuresRight: [], blinkDetected: false };
   }
-  return { x: cx / points.length, y: cy / points.length, z: cz / points.length };
-}
 
-// Retorna [pitch, yaw, roll] de uma matriz de rotação 3x3
-function matrixToEuler(R: number[][]): [number, number, number] {
-  const sy = Math.sqrt(R[0][0] * R[0][0] +  R[1][0] * R[1][0]);
-  const singular = sy < 1e-6;
+  // 1. Head Pose Normalization (EyeTrax Logic)
+  const leftCorner = landmarks[33];
+  const rightCorner = landmarks[263];
+  const topOfHead = landmarks[10];
 
-  let x, y, z;
-  if (!singular) {
-    x = Math.atan2(R[2][1], R[2][2]);
-    y = Math.atan2(-R[2][0], sy);
-    z = Math.atan2(R[1][0], R[0][0]);
-  } else {
-    x = Math.atan2(-R[1][2], R[1][1]);
-    y = Math.atan2(-R[2][0], sy);
-    z = 0;
-  }
-  return [x, y, z]; // pitch, yaw, roll
-}
-
-export function extractEyeFeatures(
-  landmarks: Point3D[],
-  matrixData?: Float32Array | number[]
-): number[] {
-  const f: number[] = [];
-
-  // Indices do MediaPipe Face Mesh
-  // Íris Direita (olho esquerdo na imagem espelhada): 468-472
-  // Íris Esquerda (olho direito na imagem espelhada): 473-477
-  // Olho Direito Contorno: 33 (outer), 159 (top), 133 (inner), 145 (bottom)
-  // Olho Esquerdo Contorno: 362 (inner), 386 (top), 263 (outer), 374 (bottom)
+  const eyeCenter = scale(add(leftCorner, rightCorner), 0.5);
   
-  const irisLPoints = [landmarks[468], landmarks[469], landmarks[470], landmarks[471], landmarks[472]];
-  const irisRPoints = [landmarks[473], landmarks[474], landmarks[475], landmarks[476], landmarks[477]];
+  let xAxis = sub(rightCorner, leftCorner);
+  xAxis = normalize(xAxis);
   
-  const eyeLOuter = landmarks[33], eyeLInner = landmarks[133], eyeLTop = landmarks[159], eyeLBottom = landmarks[145];
-  const eyeROuter = landmarks[263], eyeRInner = landmarks[362], eyeRTop = landmarks[386], eyeRBottom = landmarks[374];
+  let yApprox = sub(topOfHead, eyeCenter);
+  yApprox = normalize(yApprox);
+  
+  // y_axis = y_approx - dot(y_approx, x_axis) * x_axis
+  let yAxis = sub(yApprox, scale(xAxis, dot(yApprox, xAxis)));
+  yAxis = normalize(yAxis);
+  
+  let zAxis = cross(xAxis, yAxis);
+  zAxis = normalize(zAxis);
 
-  const nose = landmarks[1];
-  const faceLeft = landmarks[234];
-  const faceRight = landmarks[454];
-  const faceTop = landmarks[10];
-  const faceBottom = landmarks[152];
-
-  const irisLCenter = getCenter(irisLPoints);
-  const irisRCenter = getCenter(irisRPoints);
-
-  // === Grupo 1: Íris (10 features) ===
-  f.push(irisLCenter.x, irisLCenter.y);
-  f.push(irisRCenter.x, irisRCenter.y);
-
-  const radiusL = (dist3D(irisLCenter, irisLPoints[1]) + dist3D(irisLCenter, irisLPoints[3])) / 2;
-  const radiusR = (dist3D(irisRCenter, irisRPoints[1]) + dist3D(irisRCenter, irisRPoints[3])) / 2;
-  f.push(radiusL, radiusR);
-
-  const areaIrisL = Math.PI * radiusL * radiusL;
-  const areaIrisR = Math.PI * radiusR * radiusR;
-  f.push(areaIrisL, areaIrisR);
-
-  const circL = dist3D(irisLPoints[1], irisLPoints[3]) / (dist3D(irisLPoints[2], irisLPoints[4]) + 1e-6);
-  const circR = dist3D(irisRPoints[1], irisRPoints[3]) / (dist3D(irisRPoints[2], irisRPoints[4]) + 1e-6);
-  f.push(circL, circR);
-
-  // === Grupo 2: Geometria dos Olhos (10 features) ===
-  const widthL = dist3D(eyeLOuter, eyeLInner);
-  const widthR = dist3D(eyeROuter, eyeRInner);
-  f.push(widthL, widthR);
-
-  const heightL = dist3D(eyeLTop, eyeLBottom);
-  const heightR = dist3D(eyeRTop, eyeRBottom);
-  f.push(heightL, heightR);
-
-  const areaEyeL = Math.PI * (widthL / 2) * (heightL / 2);
-  const areaEyeR = Math.PI * (widthR / 2) * (heightR / 2);
-  f.push(areaEyeL, areaEyeR);
-
-  const earL = heightL / (widthL + 1e-6);
-  const earR = heightR / (widthR + 1e-6);
-  f.push(earL, earR);
-
-  const rotL = Math.atan2(eyeLOuter.y - eyeLInner.y, eyeLOuter.x - eyeLInner.x);
-  const rotR = Math.atan2(eyeROuter.y - eyeRInner.y, eyeROuter.x - eyeRInner.x);
-  f.push(rotL, rotR);
-
-  // === Grupo 3: Relações Íris × Olho (12 features) ===
-  const hRatioL = dist3D(irisLCenter, eyeLInner) / (widthL + 1e-6);
-  const hRatioR = dist3D(irisRCenter, eyeRInner) / (widthR + 1e-6);
-  f.push(hRatioL, hRatioR);
-
-  const vRatioL = dist3D(irisLCenter, eyeLTop) / (heightL + 1e-6);
-  const vRatioR = dist3D(irisRCenter, eyeRTop) / (heightR + 1e-6);
-  f.push(vRatioL, vRatioR);
-
-  f.push(dist3D(irisLCenter, eyeLTop), dist3D(irisRCenter, eyeRTop));
-  f.push(dist3D(irisLCenter, eyeLBottom), dist3D(irisRCenter, eyeRBottom));
-  f.push(dist3D(irisLCenter, eyeLInner), dist3D(irisRCenter, eyeRInner));
-  f.push(dist3D(irisLCenter, eyeLOuter), dist3D(irisRCenter, eyeROuter));
-
-  // === Grupo 4: Head Pose (6 features) ===
-  let pitch = 0, yaw = 0, roll = 0;
-  let tx = 0, ty = 0, tz = 0;
-
-  if (matrixData && matrixData.length === 16) {
-    const R = [
-      [matrixData[0], matrixData[4], matrixData[8]],
-      [matrixData[1], matrixData[5], matrixData[9]],
-      [matrixData[2], matrixData[6], matrixData[10]]
-    ];
-    [pitch, yaw, roll] = matrixToEuler(R);
-    tx = matrixData[12];
-    ty = matrixData[13];
-    tz = matrixData[14];
+  // Rotate points using R^T
+  const rotatedPoints: Point3D[] = [];
+  for (let i = 0; i < landmarks.length; i++) {
+    const shifted = sub(landmarks[i], eyeCenter);
+    const rot = mulRT(xAxis, yAxis, zAxis, shifted);
+    rotatedPoints.push(rot);
   }
-  f.push(yaw, pitch, roll, tx, ty, tz);
 
-  // === Grupo 5: Geometria da Face (5 features) ===
-  const iod = dist3D(eyeLInner, eyeRInner);
-  f.push(iod);
+  // Inter eye dist scale
+  const leftCornerRot = mulRT(xAxis, yAxis, zAxis, sub(leftCorner, eyeCenter));
+  const rightCornerRot = mulRT(xAxis, yAxis, zAxis, sub(rightCorner, eyeCenter));
+  const interEyeDist = norm(sub(rightCornerRot, leftCornerRot));
 
-  const eyeLCenter = getCenter([eyeLOuter, eyeLInner, eyeLTop, eyeLBottom]);
-  const eyeRCenter = getCenter([eyeROuter, eyeRInner, eyeRTop, eyeRBottom]);
-  const noseDist = (dist3D(nose, eyeLCenter) + dist3D(nose, eyeRCenter)) / 2;
-  f.push(noseDist);
+  if (interEyeDist > 1e-7) {
+    for (let i = 0; i < rotatedPoints.length; i++) {
+      rotatedPoints[i] = scale(rotatedPoints[i], 1 / interEyeDist);
+    }
+  }
 
-  const faceW = dist3D(faceLeft, faceRight);
-  const faceH = dist3D(faceTop, faceBottom);
-  f.push(faceW, faceH);
+  // Flatten subset features Binocularly
+  const featuresLeft: number[] = [];
+  const featuresRight: number[] = [];
+  
+  for (const idx of LEFT_EYE_INDICES) {
+    const p = rotatedPoints[idx];
+    featuresLeft.push(p.x, p.y, p.z);
+  }
+  for (const idx of RIGHT_EYE_INDICES) {
+    const p = rotatedPoints[idx];
+    featuresRight.push(p.x, p.y, p.z);
+  }
 
-  const cameraDistEst = 1.0 / (faceW + 1e-6);
-  f.push(cameraDistEst);
+  // Mutual features go to both
+  for (const idx of MUTUAL_INDICES) {
+    const p = rotatedPoints[idx];
+    featuresLeft.push(p.x, p.y, p.z);
+    featuresRight.push(p.x, p.y, p.z);
+  }
 
-  // === Grupo 6: Simetria (5 features) ===
-  f.push(earL / (earR + 1e-6));
-  f.push(heightL / (heightR + 1e-6));
-  f.push(radiusL / (radiusR + 1e-6));
-  f.push(widthL / (widthR + 1e-6));
-  f.push(areaEyeL / (areaEyeR + 1e-6));
+  // Compute Euler angles from R = [xAxis, yAxis, zAxis]
+  const yaw = Math.atan2(xAxis.y, xAxis.x);
+  const pitch = Math.atan2(-xAxis.z, Math.sqrt(yAxis.z ** 2 + zAxis.z ** 2));
+  const roll = Math.atan2(yAxis.z, zAxis.z);
+  
+  featuresLeft.push(yaw, pitch, roll);
+  featuresRight.push(yaw, pitch, roll);
 
-  // === Grupo 7: Qualidade (5 features) ===
-  const faceVis = landmarks[1].visibility ?? 1.0;
-  f.push(faceVis);
+  // 2. Blink Detection (Eye Aspect Ratio)
+  const lInner = landmarks[133], lOuter = landmarks[33], lTop = landmarks[159], lBottom = landmarks[145];
+  const rInner = landmarks[362], rOuter = landmarks[263], rTop = landmarks[386], rBottom = landmarks[374];
 
-  const eyeVisL = eyeLOuter.visibility ?? 1.0;
-  const eyeVisR = eyeROuter.visibility ?? 1.0;
-  f.push(eyeVisL, eyeVisR);
+  const lWidth = dist2D(lOuter, lInner);
+  const lHeight = dist2D(lTop, lBottom);
+  const leftEAR = lHeight / (lWidth + 1e-9);
 
-  const irisVisL = irisLCenter.visibility ?? 1.0;
-  const irisVisR = irisRCenter.visibility ?? 1.0;
-  f.push(irisVisL, irisVisR);
+  const rWidth = dist2D(rOuter, rInner);
+  const rHeight = dist2D(rTop, rBottom);
+  const rightEAR = rHeight / (rWidth + 1e-9);
 
-  return f;
+  const ear = (leftEAR + rightEAR) / 2;
+  
+  earHistory.push(ear);
+  if (earHistory.length > EAR_HISTORY_LEN) {
+    earHistory.shift();
+  }
+
+  let thr = 0.2;
+  if (earHistory.length >= MIN_HISTORY) {
+    const meanEar = earHistory.reduce((a, b) => a + b, 0) / earHistory.length;
+    thr = meanEar * BLINK_THRESHOLD_RATIO;
+  }
+
+  const blinkDetected = ear < thr;
+
+  return { featuresLeft, featuresRight, blinkDetected };
 }

@@ -6,13 +6,15 @@ import { StandardScaler } from './scaler';
 interface CalibrationPoint {
   screenX: number;
   screenY: number;
-  features: number[];
+  featuresLeft: number[];
+  featuresRight: number[];
 }
 
 interface DynamicSample {
   screenX: number;
   screenY: number;
-  features: number[];
+  featuresLeft: number[];
+  featuresRight: number[];
   weight: number;
 }
 
@@ -53,7 +55,8 @@ let isDynamicCalibrating = false;
 let currentPointIndex = 0;
 let isCollecting = false;
 let collectionStartTime = 0;
-let collectedFeatures: number[][] = [];
+let collectedFeaturesLeft: number[][] = [];
+let collectedFeaturesRight: number[][] = [];
 
 let dynamicSamples: DynamicSample[] = [];
 let dynamicBallX = 0.5;
@@ -61,8 +64,10 @@ let dynamicBallY = 0.5;
 let dynamicIsFixation = false;
 
 // ── Ridge Regression model ───────────────────────────────────────────────────
-let ridgeModel: RidgeModel | null = null;
-export const featureScaler = new StandardScaler();
+let ridgeModelLeft: RidgeModel | null = null;
+let ridgeModelRight: RidgeModel | null = null;
+export const featureScalerLeft = new StandardScaler();
+export const featureScalerRight = new StandardScaler();
 
 // ── Session counter ──────────────────────────────────────────────────────────
 let sessionCount = 0;
@@ -95,38 +100,44 @@ export function loadProfile(): boolean {
     const saved = localStorage.getItem("calibrationProfile");
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.ridgeModel && parsed.scalerParams) {
-        ridgeModel = parsed.ridgeModel;
-        featureScaler.setParams(parsed.scalerParams.means, parsed.scalerParams.stds);
+      if (parsed.ridgeModelLeft && parsed.ridgeModelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
+        ridgeModelLeft = parsed.ridgeModelLeft;
+        ridgeModelRight = parsed.ridgeModelRight;
+        featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
+        featureScalerRight.setParams(parsed.scalerParamsRight.means, parsed.scalerParamsRight.stds);
         return true;
       }
     }
   } catch (e) {
     console.error("Erro ao carregar calibrationProfile:", e);
   }
-  ridgeModel = null;
+  ridgeModelLeft = null;
+  ridgeModelRight = null;
   return false;
 }
 
 function saveProfile() {
-  if (ridgeModel) {
+  if (ridgeModelLeft && ridgeModelRight) {
     localStorage.setItem("calibrationProfile", JSON.stringify({
-      ridgeModel,
-      scalerParams: featureScaler.getParams()
+      ridgeModelLeft,
+      ridgeModelRight,
+      scalerParamsLeft: featureScalerLeft.getParams(),
+      scalerParamsRight: featureScalerRight.getParams()
     }));
   }
 }
 
 export function clearCalibration() {
   profile    = [];
-  ridgeModel = null;
+  ridgeModelLeft = null;
+  ridgeModelRight = null;
   localStorage.removeItem("calibrationProfile");
   localStorage.removeItem("accuracyResult");
   updateStatusUI();
 }
 
 export function isCalibrated(): boolean {
-  return ridgeModel !== null;
+  return ridgeModelLeft !== null && ridgeModelRight !== null;
 }
 
 // ── Pré-Calibração: tela de setup antes da calibração ────────────────────────
@@ -293,8 +304,10 @@ export function startCalibrationMode() {
   isCollecting = false;
   profile = [];
   dynamicSamples = [];
-  collectedFeatures = [];
-  ridgeModel = null;
+  collectedFeaturesLeft = [];
+  collectedFeaturesRight = [];
+  ridgeModelLeft = null;
+  ridgeModelRight = null;
 
   createCalibrationOverlay();
   showNextPoint();
@@ -380,7 +393,8 @@ function startCollection() {
   if (isDynamicCalibrating || isCollecting || !isCalibrating) return;
   isCollecting = true;
   collectionStartTime = performance.now();
-  collectedFeatures = [];
+  collectedFeaturesLeft = [];
+  collectedFeaturesRight = [];
 
   const dot = document.getElementById("calibration-dot");
   if (dot) {
@@ -392,12 +406,13 @@ function startCollection() {
 
 // ── Funções Removidas ────────────────────────────────────────────
 
-export function feedRawData(features: number[]) {
+export function feedRawData(featuresLeft: number[], featuresRight: number[]) {
   if (isDynamicCalibrating) {
     dynamicSamples.push({
       screenX: dynamicBallX,
       screenY: dynamicBallY,
-      features,
+      featuresLeft,
+      featuresRight,
       weight: dynamicIsFixation ? 3.0 : 1.0
     });
     return;
@@ -405,7 +420,8 @@ export function feedRawData(features: number[]) {
 
   if (!isCalibrating || !isCollecting) return;
 
-  collectedFeatures.push(features);
+  collectedFeaturesLeft.push(featuresLeft);
+  collectedFeaturesRight.push(featuresRight);
 
   if (performance.now() - collectionStartTime >= COLLECTION_MS) {
     isCollecting = false;
@@ -419,11 +435,12 @@ function processStaticPoint() {
   const targetX = TARGET_POINTS[currentPointIndex].screenX;
   const targetY = TARGET_POINTS[currentPointIndex].screenY;
 
-  for (const f of collectedFeatures) {
+  for (let i = 0; i < collectedFeaturesLeft.length; i++) {
     profile.push({
       screenX: targetX,
       screenY: targetY,
-      features: f
+      featuresLeft: collectedFeaturesLeft[i],
+      featuresRight: collectedFeaturesRight[i]
     });
   }
 
@@ -586,22 +603,27 @@ function completeDynamicCalibration() {
     profile.push({
       screenX: s.screenX,
       screenY: s.screenY,
-      features: s.features
+      featuresLeft: s.featuresLeft,
+      featuresRight: s.featuresRight
     });
   }
 
   // Extrai matrizes de treino
-  const trainFeatures = profile.map(p => p.features);
+  const trainFeaturesLeft = profile.map(p => p.featuresLeft);
+  const trainFeaturesRight = profile.map(p => p.featuresRight);
   const trainTargets = profile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
 
   // Fit the Standard Scaler
-  featureScaler.fit(trainFeatures);
+  featureScalerLeft.fit(trainFeaturesLeft);
+  featureScalerRight.fit(trainFeaturesRight);
 
   // Normaliza features
-  const scaledFeatures = featureScaler.transform(trainFeatures);
+  const scaledFeaturesLeft = featureScalerLeft.transform(trainFeaturesLeft);
+  const scaledFeaturesRight = featureScalerRight.transform(trainFeaturesRight);
 
-  // Treina o modelo Ridge
-  ridgeModel = trainRidgeModel(scaledFeatures, trainTargets);
+  // Treina o modelo Ridge Binocularmente
+  ridgeModelLeft = trainRidgeModel(scaledFeaturesLeft, trainTargets);
+  ridgeModelRight = trainRidgeModel(scaledFeaturesRight, trainTargets);
 
   saveProfile();
   cleanupOverlay();
@@ -729,9 +751,17 @@ export function init() {
 
 // ── Mapeamento de Olhar ───────────────────────────────────────────────────────
 
-export function mapGaze(features: number[]): { x: number; y: number } | null {
-  if (!ridgeModel) return null;
+export function mapGaze(featuresLeft: number[], featuresRight: number[]): { x: number; y: number } | null {
+  if (!ridgeModelLeft || !ridgeModelRight) return null;
 
-  const scaled = featureScaler.transformSingle(features);
-  return predictRidge(ridgeModel, scaled);
+  const scaledLeft = featureScalerLeft.transformSingle(featuresLeft);
+  const scaledRight = featureScalerRight.transformSingle(featuresRight);
+  
+  const predLeft = predictRidge(ridgeModelLeft, scaledLeft);
+  const predRight = predictRidge(ridgeModelRight, scaledRight);
+  
+  return {
+    x: (predLeft.x + predRight.x) / 2,
+    y: (predLeft.y + predRight.y) / 2
+  };
 }

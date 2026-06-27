@@ -2,7 +2,9 @@ import './style.css';
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import * as calibration from './calibration';
 import { feedAccuracyRaw, isAccuracyTesting } from './accuracy';
-import { KalmanGaze2D } from './kalman';
+import { KalmanEMASmoother } from './kalman';
+import { KeyboardUI } from './keyboard/KeyboardUI';
+import { dwellManager } from './keyboard/DwellManager';
 import { updateDwell, resetDwell } from './dwell';
 import { extractEyeFeatures } from './extractor';
 
@@ -41,8 +43,8 @@ function weightedBufferAvg(buf: number[]): number {
   return valueSum / weightSum;
 }
 
-// Filtro de Kalman 2D — inserido após o rolling buffer e antes do lerp (Adição A)
-const kalmanGaze = new KalmanGaze2D();
+// Filtro de Kalman 2D + EMA — inserido após o rolling buffer e antes do lerp (Adição A)
+const kalmanGaze = new KalmanEMASmoother(0.25);
 
 const lerp = (start: number, end: number, factor: number) => {
   return start + (end - start) * factor;
@@ -181,21 +183,24 @@ async function predictWebcam() {
       );
       calibration.feedFaceMetrics(true, rawIod);
 
-      let matrixData: Float32Array | number[] | undefined;
-      if (results.facialTransformationMatrixes && results.facialTransformationMatrixes.length > 0) {
-        matrixData = results.facialTransformationMatrixes[0].data;
+      const extractorResult = extractEyeFeatures(landmarks);
+      if (extractorResult.blinkDetected || extractorResult.featuresLeft.length === 0) {
+        // Ignora piscar e erros
+        window.requestAnimationFrame(predictWebcam);
+        return;
       }
       
-      const features = extractEyeFeatures(landmarks, matrixData);
+      const featuresLeft = extractorResult.featuresLeft;
+      const featuresRight = extractorResult.featuresRight;
 
       // Envia coordenadas cruas para o sistema de calibração
-      calibration.feedRawData(features);
+      calibration.feedRawData(featuresLeft, featuresRight);
 
       // Alimenta o módulo de precisão com as coordenadas cruas
-      feedAccuracyRaw(features);
+      feedAccuracyRaw(featuresLeft, featuresRight);
 
-      // Tenta mapear o olhar usando o perfil calibrado
-      const calibratedGaze = calibration.mapGaze(features);
+      // Tenta mapear o olhar usando o perfil calibrado binocularmente
+      const calibratedGaze = calibration.mapGaze(featuresLeft, featuresRight);
 
       if (calibratedGaze) {
         targetX = calibratedGaze.x;
@@ -235,6 +240,9 @@ async function predictWebcam() {
         updateDwell(landmarks, currentX, currentY, (evt) => {
           console.debug('[IrisFlow] DwellEvent:', evt.type, evt.x.toFixed(0), evt.y.toFixed(0));
         });
+        
+        // Atualiza nosso gerenciador de colisão do Teclado Virtual (500ms dwell)
+        dwellManager.update(currentX, currentY);
       } else {
         resetDwell();
       }
@@ -261,5 +269,12 @@ async function predictWebcam() {
 
 // Inicializa o painel de calibração e carrega perfis salvos
 calibration.init();
+
+// Inicializa o teclado virtual
+const app = document.getElementById('app');
+if (app) {
+  const keyboard = new KeyboardUI();
+  keyboard.mount(app);
+}
 
 initMediaPipe();

@@ -57,7 +57,7 @@ body {
   height: 24px;
   background-color: #fff;
   border-radius: 50%;
-  z-index: 10;
+  z-index: 10000; /* Laser acima de TUDO, inclusive do teclado fullscreen */
   transform: translate(-50%, -50%);
   
   box-shadow: 
@@ -797,6 +797,56 @@ body {
   font-size: 0.75rem;
   color: rgba(255, 255, 255, 0.45);
   transition: color 0.3s ease;
+}
+
+/* --- Botão Flutuante de Abrir Teclado --- */
+#open-keyboard-btn {
+  position: absolute;
+  bottom: 40px;
+  right: 40px;
+  background: rgba(0, 255, 240, 0.15);
+  border: 1px solid rgba(0, 255, 240, 0.4);
+  color: #00fff0;
+  padding: 16px 24px;
+  border-radius: 12px;
+  font-size: 1.2rem;
+  font-weight: 600;
+  cursor: pointer;
+  z-index: 50;
+  overflow: hidden;
+  box-shadow: 0 4px 15px rgba(0, 255, 240, 0.2);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+}
+
+#open-keyboard-btn .dwell-fill {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 0%;
+  background: rgba(0, 255, 240, 0.4);
+  z-index: 0;
+  pointer-events: none;
+}
+
+#open-keyboard-btn .key-content {
+  position: relative;
+  z-index: 1;
+  pointer-events: none;
+}
+
+#open-keyboard-btn.dwelling .dwell-fill {
+  width: 100%;
+  transition: width 500ms linear;
+}
+
+#open-keyboard-btn.clicked {
+  background: #00fff0;
+  color: #050505;
+  transform: scale(0.95);
+  box-shadow: 0 0 20px rgba(0, 255, 240, 0.6);
 }
 
 /* Barra de distância */
