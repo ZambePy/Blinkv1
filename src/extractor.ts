@@ -1,9 +1,48 @@
 export type Point3D = { x: number; y: number; z: number; visibility?: number };
 
+export interface GeometryFeatures {
+  pupilCenterLeft: Point3D;
+  pupilCenterRight: Point3D;
+  irisRadiusLeft: number;
+  irisRadiusRight: number;
+  pupilEllipseLeft: { width: number; height: number };
+  pupilEllipseRight: { width: number; height: number };
+  interEyeDistance: number;
+  eyeWidthLeft: number;
+  eyeHeightLeft: number;
+  eyeWidthRight: number;
+  eyeHeightRight: number;
+}
+
+export interface FaceFeatures {
+  pitch: number;
+  yaw: number;
+  roll: number;
+  position3D: Point3D;
+  scale: number;
+  cameraDistanceEstimate: number;
+}
+
+export interface QualityFeatures {
+  detectorConfidence: number;
+  brightnessEstimate: number;
+  contrastEstimate: number;
+  blurEstimate: number;
+  occlusionEstimate: number;
+  irisVisibilityPercentage: number;
+}
+
+export interface AdvancedFrameFeatures {
+  geometry: GeometryFeatures;
+  face: FaceFeatures;
+  quality: QualityFeatures;
+}
+
 export interface ExtractorResult {
   featuresLeft: number[];
   featuresRight: number[];
   blinkDetected: boolean;
+  advancedFeatures?: AdvancedFrameFeatures;
 }
 
 // EyeTrax Indices
@@ -47,6 +86,9 @@ function cross(v1: Point3D, v2: Point3D): Point3D {
 function dist2D(p1: Point3D, p2: Point3D): number {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
 }
+function dist3D(p1: Point3D, p2: Point3D): number {
+  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + (p1.z - p2.z) ** 2);
+}
 
 // R^T * v = [dot(x_axis, v), dot(y_axis, v), dot(z_axis, v)]
 function mulRT(xAxis: Point3D, yAxis: Point3D, zAxis: Point3D, v: Point3D): Point3D {
@@ -63,7 +105,7 @@ const EAR_HISTORY_LEN = 50;
 const BLINK_THRESHOLD_RATIO = 0.8;
 const MIN_HISTORY = 15;
 
-export function extractEyeFeatures(landmarks: Point3D[]): ExtractorResult {
+export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Array): ExtractorResult {
   if (landmarks.length < 478) {
     return { featuresLeft: [], featuresRight: [], blinkDetected: false };
   }
@@ -81,7 +123,6 @@ export function extractEyeFeatures(landmarks: Point3D[]): ExtractorResult {
   let yApprox = sub(topOfHead, eyeCenter);
   yApprox = normalize(yApprox);
   
-  // y_axis = y_approx - dot(y_approx, x_axis) * x_axis
   let yAxis = sub(yApprox, scale(xAxis, dot(yApprox, xAxis)));
   yAxis = normalize(yAxis);
   
@@ -96,14 +137,13 @@ export function extractEyeFeatures(landmarks: Point3D[]): ExtractorResult {
     rotatedPoints.push(rot);
   }
 
-  // Inter eye dist scale
   const leftCornerRot = mulRT(xAxis, yAxis, zAxis, sub(leftCorner, eyeCenter));
   const rightCornerRot = mulRT(xAxis, yAxis, zAxis, sub(rightCorner, eyeCenter));
-  const interEyeDist = norm(sub(rightCornerRot, leftCornerRot));
+  const interEyeDistRaw = norm(sub(rightCornerRot, leftCornerRot));
 
-  if (interEyeDist > 1e-7) {
+  if (interEyeDistRaw > 1e-7) {
     for (let i = 0; i < rotatedPoints.length; i++) {
-      rotatedPoints[i] = scale(rotatedPoints[i], 1 / interEyeDist);
+      rotatedPoints[i] = scale(rotatedPoints[i], 1 / interEyeDistRaw);
     }
   }
 
@@ -120,22 +160,36 @@ export function extractEyeFeatures(landmarks: Point3D[]): ExtractorResult {
     featuresRight.push(p.x, p.y, p.z);
   }
 
-  // Mutual features go to both
   for (const idx of MUTUAL_INDICES) {
     const p = rotatedPoints[idx];
     featuresLeft.push(p.x, p.y, p.z);
     featuresRight.push(p.x, p.y, p.z);
   }
 
-  // Compute Euler angles from R = [xAxis, yAxis, zAxis]
-  const yaw = Math.atan2(xAxis.y, xAxis.x);
-  const pitch = Math.atan2(-xAxis.z, Math.sqrt(yAxis.z ** 2 + zAxis.z ** 2));
-  const roll = Math.atan2(yAxis.z, zAxis.z);
+  // Basic Euler angles from landmarks
+  let yaw = Math.atan2(xAxis.y, xAxis.x);
+  let pitch = Math.atan2(-xAxis.z, Math.sqrt(yAxis.z ** 2 + zAxis.z ** 2));
+  let roll = Math.atan2(yAxis.z, zAxis.z);
+
+  let pos3D = eyeCenter;
+  let scale3D = interEyeDistRaw;
   
+  if (faceMatrix && faceMatrix.length === 16) {
+    const r02 = faceMatrix[8];
+    const r10 = faceMatrix[1], r11 = faceMatrix[5], r12 = faceMatrix[9];
+    const r22 = faceMatrix[10];
+
+    pitch = Math.asin(-r12);
+    yaw = Math.atan2(r02, r22);
+    roll = Math.atan2(r10, r11);
+
+    pos3D = { x: faceMatrix[12], y: faceMatrix[13], z: faceMatrix[14] };
+  }
+
   featuresLeft.push(yaw, pitch, roll);
   featuresRight.push(yaw, pitch, roll);
 
-  // 2. Blink Detection (Eye Aspect Ratio)
+  // 2. Blink Detection & Dimensions
   const lInner = landmarks[133], lOuter = landmarks[33], lTop = landmarks[159], lBottom = landmarks[145];
   const rInner = landmarks[362], rOuter = landmarks[263], rTop = landmarks[386], rBottom = landmarks[374];
 
@@ -162,5 +216,53 @@ export function extractEyeFeatures(landmarks: Point3D[]): ExtractorResult {
 
   const blinkDetected = ear < thr;
 
-  return { featuresLeft, featuresRight, blinkDetected };
+  // 3. Geometry Extractions
+  const irisCenterL = landmarks[468];
+  const irisCenterR = landmarks[473];
+  
+  const irisRadiusL = (dist3D(irisCenterL, landmarks[469]) + dist3D(irisCenterL, landmarks[471])) / 2;
+  const irisRadiusR = (dist3D(irisCenterR, landmarks[474]) + dist3D(irisCenterR, landmarks[476])) / 2;
+  
+  const pEllL = { width: dist3D(landmarks[469], landmarks[471]), height: dist3D(landmarks[470], landmarks[472]) };
+  const pEllR = { width: dist3D(landmarks[474], landmarks[476]), height: dist3D(landmarks[475], landmarks[477]) };
+
+  const geometry: GeometryFeatures = {
+    pupilCenterLeft: irisCenterL,
+    pupilCenterRight: irisCenterR,
+    irisRadiusLeft: irisRadiusL,
+    irisRadiusRight: irisRadiusR,
+    pupilEllipseLeft: pEllL,
+    pupilEllipseRight: pEllR,
+    interEyeDistance: interEyeDistRaw,
+    eyeWidthLeft: lWidth,
+    eyeHeightLeft: lHeight,
+    eyeWidthRight: rWidth,
+    eyeHeightRight: rHeight
+  };
+
+  const face: FaceFeatures = {
+    pitch,
+    yaw,
+    roll,
+    position3D: pos3D,
+    scale: scale3D,
+    cameraDistanceEstimate: 1.0 / (scale3D + 1e-9)
+  };
+
+  const quality: QualityFeatures = {
+    detectorConfidence: 1.0,
+    brightnessEstimate: 0.5,
+    contrastEstimate: 0.5,
+    blurEstimate: 0.0,
+    occlusionEstimate: 0.0,
+    irisVisibilityPercentage: Math.min(1.0, ear / 0.25)
+  };
+
+  const advancedFeatures: AdvancedFrameFeatures = {
+    geometry,
+    face,
+    quality
+  };
+
+  return { featuresLeft, featuresRight, blinkDetected, advancedFeatures };
 }

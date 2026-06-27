@@ -27,6 +27,10 @@ export class KalmanEMASmoother {
     this.emaAlpha = emaAlpha;
   }
 
+  public setEmaAlpha(alpha: number): void {
+    this.emaAlpha = alpha;
+  }
+
   private stepKalman(s: KalmanAxis, meas: number, Q: number, R: number): KalmanAxis {
     // Predição
     const xp = s.x + s.v;

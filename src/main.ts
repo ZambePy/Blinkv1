@@ -4,6 +4,8 @@ import * as calibration from './calibration';
 import { feedAccuracyRaw, isAccuracyTesting } from './accuracy';
 import { KalmanEMASmoother } from './kalman';
 import { KeyboardUI } from './keyboard/KeyboardUI';
+
+import { KeyboardState } from './keyboard/KeyboardState';
 import { dwellManager } from './keyboard/DwellManager';
 import { updateDwell, resetDwell } from './dwell';
 import { extractEyeFeatures } from './extractor';
@@ -230,6 +232,14 @@ async function predictWebcam() {
       // Aplica Filtro de Kalman após o rolling buffer e antes do lerp
       // Pula Kalman durante teste de precisão para evitar lag na medição
       if (!isAccuracyTesting) {
+        // Dinamic sensitivity for virtual keyboard
+        const isKeyboardVisible = KeyboardState.getState().isVisible;
+        if (isKeyboardVisible) {
+          kalmanGaze.setEmaAlpha(0.05);
+        } else {
+          kalmanGaze.setEmaAlpha(0.25);
+        }
+
         const kalmanOut = kalmanGaze.update(targetX, targetY);
         targetX = kalmanOut.x;
         targetY = kalmanOut.y;
@@ -251,7 +261,11 @@ async function predictWebcam() {
 
   // Suavizar o movimento (Lerp)
   // Durante teste de precisão, lerp mais responsivo para medição fiel
-  const lerpFactor = isAccuracyTesting ? 0.25 : 0.08;
+  const isKeyboardVisible = KeyboardState.getState().isVisible;
+  let lerpFactor = isAccuracyTesting ? 0.25 : 0.08;
+  if (isKeyboardVisible && !isAccuracyTesting) {
+    lerpFactor = 0.02;
+  }
   currentX = lerp(currentX, targetX, lerpFactor);
   currentY = lerp(currentY, targetY, lerpFactor);
 

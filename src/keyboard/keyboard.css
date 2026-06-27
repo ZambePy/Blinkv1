@@ -4,70 +4,106 @@
   left: 0;
   width: 100vw;
   height: 100vh;
-  background: rgba(5, 5, 5, 0.98);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  background: #000;
   display: flex;
   flex-direction: column;
   z-index: 9000;
   transform: translateY(100%);
   transition: transform 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
-  pointer-events: none; /* Ignora eventos quando invisível */
+  pointer-events: none;
 }
 
 .keyboard-container.active {
   transform: translateY(0);
-  pointer-events: auto; /* Aceita eventos apenas quando visível */
+  pointer-events: auto;
+}
+
+/* Suggestions Bar */
+.kb-suggestions-bar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #000;
+  height: 90px;
+  border-bottom: 1px solid #333;
+}
+
+.kb-arrow-btn {
+  width: 90px;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-size: 4rem;
+  font-weight: 300;
+  border-right: 1px solid #333;
+}
+
+.kb-suggestions-bar .kb-arrow-btn:last-child {
+  border-right: none;
+  border-left: 1px solid #333;
+}
+
+.kb-suggestions-list {
+  flex: 1;
+  display: flex;
+  height: 100%;
+}
+
+.kb-suggestion-btn {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-size: 2.5rem;
+  font-weight: 300;
+  border-right: 1px solid #333;
+  cursor: pointer;
+}
+.kb-suggestion-btn:last-child {
+  border-right: none;
 }
 
 /* Display Bar */
 .kb-display-bar {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  padding: 16px 24px;
-  background: rgba(255, 255, 255, 0.03);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  background: #000;
   height: 80px;
+  border-bottom: 1px solid #333;
+}
+
+.kb-icon-btn {
+  width: 80px;
+  height: 100%;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  color: #fff;
+  font-size: 2rem;
+  border-right: 1px solid #333;
 }
 
 .kb-text-display {
   flex: 1;
-  font-size: 2rem;
-  font-weight: 600;
-  color: #fff;
+  display: flex;
+  align-items: center;
+  padding: 0 20px;
+  font-size: 1.5rem;
+  font-weight: 400;
+  color: #00fff0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  letter-spacing: 1px;
+  border-right: 1px solid #333;
+  height: 100%;
 }
 
-.kb-suggestions {
-  display: flex;
-  gap: 12px;
-}
-
-.kb-suggestion-btn {
-  background: rgba(0, 255, 240, 0.1);
-  border: 1px solid rgba(0, 255, 240, 0.3);
+.placeholder-text {
   color: #00fff0;
-  padding: 8px 16px;
-  border-radius: 8px;
-  font-size: 1.2rem;
-  font-weight: 600;
-  cursor: pointer;
-  min-width: 120px;
-  min-height: 48px;
-  text-align: center;
-  position: relative;
-  overflow: hidden;
-}
-
-.close-btn {
-  background: rgba(255, 0, 60, 0.1);
-  border-color: rgba(255, 0, 60, 0.4);
-  color: #ff003c;
-  margin-left: 12px;
+  opacity: 0.5;
 }
 
 /* Key Grid */
@@ -75,54 +111,52 @@
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 16px;
-  gap: 12px;
 }
 
 .kb-row {
   display: flex;
-  justify-content: center;
-  gap: 12px;
   flex: 1;
+  border-bottom: 1px solid #333;
+}
+
+/* Indent row 2 specifically like the design */
+.kb-row.row-1 {
+  padding: 0 5%;
 }
 
 .kb-key {
   flex: 1;
-  max-width: 140px;
-  background: rgba(255, 255, 255, 0.08);
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 12px;
+  background: #000;
+  border-right: 1px solid #333;
   color: #fff;
-  font-size: 2.2rem;
-  font-weight: 600;
+  font-size: 3.5rem;
+  font-weight: 300;
   display: flex;
   justify-content: center;
   align-items: center;
   position: relative;
-  overflow: hidden;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
-  transition: all 0.1s ease;
   user-select: none;
 }
 
-.kb-key.action-key {
-  background: rgba(255, 255, 255, 0.12);
-  font-size: 1.4rem;
-  max-width: 180px;
+.kb-row .kb-key:first-child {
+  border-left: 1px solid #333;
+}
+.kb-row.row-1 .kb-key:first-child {
+  border-left: 1px solid #333;
 }
 
-.kb-key.action-speak {
-  background: rgba(0, 255, 240, 0.15);
-  color: #00fff0;
-  border-color: rgba(0, 255, 240, 0.4);
-}
-
-.kb-key.space-key {
-  max-width: 400px;
+.space-key {
+  flex: 3;
+  font-size: 2.5rem;
 }
 
 /* Dwell Click Animation */
-.kb-key .dwell-fill {
+.dwell-target {
+  position: relative;
+  overflow: hidden;
+}
+
+.dwell-fill {
   position: absolute;
   top: 0;
   left: 0;
@@ -133,23 +167,19 @@
   pointer-events: none;
 }
 
-.kb-key .key-content {
+.key-content {
   position: relative;
   z-index: 1;
   pointer-events: none;
 }
 
-/* Quando o olho fixa na tecla, adicionamos a classe 'dwelling' 
-   O transition deve corresponder ao Dwell Time de 500ms */
-.kb-key.dwelling .dwell-fill {
+.dwell-target.dwelling .dwell-fill {
   width: 100%;
   transition: width 500ms linear;
 }
 
-/* Quando atinge o final e clica */
-.kb-key.clicked {
+.dwell-target.clicked {
   background: #00fff0;
-  color: #050505;
-  transform: scale(0.95);
-  box-shadow: 0 0 20px rgba(0, 255, 240, 0.6);
+  color: #000;
+  transition: all 0.1s;
 }

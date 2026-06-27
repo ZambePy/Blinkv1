@@ -2,13 +2,12 @@ import './keyboard.css';
 import { Component } from './Component';
 import { KeyboardState } from './KeyboardState';
 import type { KeyboardStateData } from './KeyboardState';
-import { speakText } from './Engine';
 
 const LAYOUT = [
   ['q', 'w', 'e', 'r', 't', 'y', 'u', 'i', 'o', 'p'],
   ['a', 's', 'd', 'f', 'g', 'h', 'j', 'k', 'l'],
-  ['caps', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'backspace'],
-  ['clear', 'space', 'speak']
+  ['caps', 'z', 'x', 'c', 'v', 'b', 'n', 'm', 'backspace', 'clear'],
+  ['+', 'num_toggle', '-', 'space', 'power']
 ];
 
 export class KeyboardUI extends Component<{}, KeyboardStateData> {
@@ -16,107 +15,105 @@ export class KeyboardUI extends Component<{}, KeyboardStateData> {
     super();
     this.state = KeyboardState.getState();
     KeyboardState.subscribe((state) => {
-      // Small optimization to only re-render parts or just full re-render for simplicity here
       this.state = state;
       this.update();
     });
   }
 
+  // @ts-ignore
   private handleKeyPress(key: string) {
-    if (key === 'backspace') {
-      KeyboardState.backspace();
-    } else if (key === 'space') {
-      KeyboardState.appendText(' ');
-    } else if (key === 'caps') {
-      KeyboardState.toggleCaps();
-    } else if (key === 'clear') {
-      KeyboardState.clear();
-    } else if (key === 'speak') {
-      speakText(this.state.text);
-    } else {
-      const char = this.state.isCaps ? key.toUpperCase() : key.toLowerCase();
-      KeyboardState.appendText(char);
-    }
+    // Legacy internal handler, actual clicks handled by DwellManager
   }
 
   render(): HTMLElement | null {
     if (!this.state.isVisible && this.element) {
-      // Just hide it if already rendered
       this.element.classList.remove('active');
       return this.element;
     } else if (this.element && this.state.isVisible) {
       this.element.classList.add('active');
-      // If we don't need a full re-render for just visibility, we could optimize here,
-      // but let's re-render to keep it simple.
     }
 
     const container = document.createElement('div');
     container.className = `keyboard-container ${this.state.isVisible ? 'active' : ''}`;
     container.id = 'virtual-keyboard';
 
-    // Display Bar
+    // 1. Suggestions Bar (Top)
+    const suggestionsBar = document.createElement('div');
+    suggestionsBar.className = 'kb-suggestions-bar';
+
+    const leftArrow = this.createButton('arrow_left', 'kb-arrow-btn', '◀');
+    suggestionsBar.appendChild(leftArrow);
+
+    const suggestionsList = document.createElement('div');
+    suggestionsList.className = 'kb-suggestions-list';
+    const currentSuggestions = this.state.suggestions && this.state.suggestions.length > 0 
+      ? this.state.suggestions 
+      : ['jum', 'jump', 'jumbo', 'jumps']; // fallback for UI mockup
+
+    currentSuggestions.forEach(suggestion => {
+      const btn = this.createButton(`sug_${suggestion}`, 'kb-suggestion-btn', suggestion);
+      suggestionsList.appendChild(btn);
+    });
+    suggestionsBar.appendChild(suggestionsList);
+
+    const rightArrow = this.createButton('arrow_right', 'kb-arrow-btn', '▶');
+    suggestionsBar.appendChild(rightArrow);
+
+    container.appendChild(suggestionsBar);
+
+    // 2. Display Bar (Second Row)
     const displayBar = document.createElement('div');
     displayBar.className = 'kb-display-bar';
+
+    const copyBtn = this.createButton('copy', 'kb-icon-btn', '📄');
+    const speakBtn = this.createButton('speak', 'kb-icon-btn', '📢');
+    displayBar.appendChild(copyBtn);
+    displayBar.appendChild(speakBtn);
 
     const textDisplay = document.createElement('div');
     textDisplay.className = 'kb-text-display';
     textDisplay.innerText = this.state.text || ' ';
-    // Pinking a blinking cursor effect
     if (this.state.text.length > 0) {
       textDisplay.innerText += '|';
     } else {
-      textDisplay.innerHTML = '<span style="opacity: 0.3;">Comece a digitar...</span>|';
+      textDisplay.innerHTML = '<span class="placeholder-text">The quick brown fox jumps over the lazy dog</span>';
     }
-
-    const suggestionsDiv = document.createElement('div');
-    suggestionsDiv.className = 'kb-suggestions';
-    this.state.suggestions.forEach(suggestion => {
-      const btn = document.createElement('div');
-      btn.className = 'kb-suggestion-btn dwell-target';
-      btn.dataset.key = `sug_${suggestion}`;
-      btn.innerText = suggestion;
-      suggestionsDiv.appendChild(btn);
-    });
-
-    const closeBtn = document.createElement('div');
-    closeBtn.className = 'kb-suggestion-btn dwell-target close-btn';
-    closeBtn.dataset.key = 'close_keyboard';
-    closeBtn.innerText = '✕ FECHAR';
-    suggestionsDiv.appendChild(closeBtn);
-
     displayBar.appendChild(textDisplay);
-    displayBar.appendChild(suggestionsDiv);
+
+    const rightArrowDisp = this.createButton('arrow_right_disp', 'kb-icon-btn', '❯');
+    const zzzBtn = this.createButton('zzz', 'kb-icon-btn', 'Zzz ☁');
+    displayBar.appendChild(rightArrowDisp);
+    displayBar.appendChild(zzzBtn);
+
     container.appendChild(displayBar);
 
-    // Grid
+    // 3. Grid
     const grid = document.createElement('div');
     grid.className = 'kb-grid';
 
-    LAYOUT.forEach(rowKeys => {
+    LAYOUT.forEach((rowKeys, rowIndex) => {
       const rowDiv = document.createElement('div');
-      rowDiv.className = 'kb-row';
+      rowDiv.className = `kb-row row-${rowIndex}`;
       
       rowKeys.forEach(key => {
         const keyDiv = document.createElement('div');
         keyDiv.className = 'kb-key dwell-target';
         keyDiv.dataset.key = key;
 
-        if (['backspace', 'space', 'caps', 'clear'].includes(key)) {
-          keyDiv.classList.add('action-key');
-        }
-        if (key === 'space') keyDiv.classList.add('space-key');
-        if (key === 'speak') keyDiv.classList.add('action-key', 'action-speak');
-
         const label = document.createElement('span');
         label.className = 'key-content';
         
         switch (key) {
-          case 'backspace': label.innerText = '⌫'; break;
-          case 'space': label.innerText = 'ESPAÇO'; break;
-          case 'caps': label.innerText = '⇧'; break;
-          case 'clear': label.innerText = 'LIMPAR'; break;
-          case 'speak': label.innerText = 'FALAR 🔊'; break;
-          default: label.innerText = this.state.isCaps ? key.toUpperCase() : key.toLowerCase();
+          case 'backspace': label.innerHTML = '⌫'; break;
+          case 'space': label.innerHTML = '␣'; keyDiv.classList.add('space-key'); break;
+          case 'caps': label.innerHTML = '⇧'; break;
+          case 'clear': label.innerHTML = '⌧'; break;
+          case 'speak': label.innerHTML = '📢'; break;
+          case '+': label.innerHTML = '+'; break;
+          case '-': label.innerHTML = '-'; break;
+          case 'num_toggle': label.innerHTML = '1250'; break;
+          case 'power': label.innerHTML = '⏻'; keyDiv.classList.add('power-key'); break;
+          default: label.innerHTML = this.state.isCaps ? key.toUpperCase() : key.toLowerCase();
         }
 
         const fill = document.createElement('div');
@@ -132,5 +129,22 @@ export class KeyboardUI extends Component<{}, KeyboardStateData> {
     container.appendChild(grid);
 
     return container;
+  }
+
+  private createButton(key: string, className: string, text: string): HTMLElement {
+    const btn = document.createElement('div');
+    btn.className = `${className} dwell-target`;
+    btn.dataset.key = key;
+
+    const fill = document.createElement('div');
+    fill.className = 'dwell-fill';
+    
+    const content = document.createElement('span');
+    content.className = 'key-content';
+    content.innerText = text;
+
+    btn.appendChild(fill);
+    btn.appendChild(content);
+    return btn;
   }
 }

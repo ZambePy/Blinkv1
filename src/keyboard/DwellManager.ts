@@ -89,10 +89,19 @@ export class DwellManager {
       KeyboardState.clear();
     } else if (key === 'speak') {
       speakText(KeyboardState.getState().text);
+    } else if (key === 'power') {
+      KeyboardState.setVisible(false);
+    } else if (key === 'zzz') {
+      console.log('Pause tracking (Zzz)');
+      // Future: add tracking pause logic here
+    } else if (key === 'copy') {
+      navigator.clipboard.writeText(KeyboardState.getState().text).catch(e => console.error(e));
     } else {
-      const state = KeyboardState.getState();
-      const char = state.isCaps ? key.toUpperCase() : key.toLowerCase();
-      KeyboardState.appendText(char);
+      if (key.length === 1) {
+        const state = KeyboardState.getState();
+        const char = state.isCaps ? key.toUpperCase() : key.toLowerCase();
+        KeyboardState.appendText(char);
+      }
     }
   }
 }
