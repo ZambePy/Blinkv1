@@ -802,14 +802,14 @@ body {
 /* --- Botão Flutuante de Abrir Teclado --- */
 #open-keyboard-btn {
   position: absolute;
-  bottom: 40px;
-  right: 40px;
+  bottom: 50px;
+  right: 50px;
   background: rgba(0, 255, 240, 0.15);
   border: 1px solid rgba(0, 255, 240, 0.4);
   color: #00fff0;
-  padding: 16px 24px;
-  border-radius: 12px;
-  font-size: 1.2rem;
+  padding: 24px 36px;
+  border-radius: 16px;
+  font-size: 1.8rem;
   font-weight: 600;
   cursor: pointer;
   z-index: 50;

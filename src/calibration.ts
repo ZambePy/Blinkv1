@@ -295,6 +295,24 @@ function closePreCalibration() {
   document.getElementById("precalib-overlay")?.remove();
 }
 
+function calculateFeatureVariance(featuresList: number[][]): number {
+  if (featuresList.length === 0) return 0;
+  const numFeatures = featuresList[0].length;
+  let totalVar = 0;
+  for (let j = 0; j < numFeatures; j++) {
+    let sum = 0;
+    for (let i = 0; i < featuresList.length; i++) sum += featuresList[i][j];
+    const mean = sum / featuresList.length;
+    let sumSq = 0;
+    for (let i = 0; i < featuresList.length; i++) {
+      const diff = featuresList[i][j] - mean;
+      sumSq += diff * diff;
+    }
+    totalVar += sumSq / featuresList.length;
+  }
+  return totalVar / numFeatures;
+}
+
 // ── Calibração Estática (9 pontos) ───────────────────────────────────────────
 
 export function startCalibrationMode() {
@@ -310,8 +328,46 @@ export function startCalibrationMode() {
   ridgeModelRight = null;
 
   createCalibrationOverlay();
-  showNextPoint();
-  window.addEventListener("keydown", handleGlobalKeyDown);
+  startCountdown();
+}
+
+let countdownTimer: number | null = null;
+function startCountdown() {
+  const overlay = document.getElementById("calibration-overlay");
+  if (!overlay) return;
+
+  const instruction = document.getElementById("calibration-instruction");
+  if (instruction) {
+    instruction.innerHTML = `
+      Prepare-se! A calibração começará em breve.<br>
+      <span class="highlight">Foque no ponto que aparecerá e não desvie o olhar.</span>
+    `;
+  }
+  
+  let count = 5;
+  const countDisplay = document.createElement("div");
+  countDisplay.id = "calibration-countdown";
+  countDisplay.style.position = "absolute";
+  countDisplay.style.top = "50%";
+  countDisplay.style.left = "50%";
+  countDisplay.style.transform = "translate(-50%, -50%)";
+  countDisplay.style.fontSize = "6rem";
+  countDisplay.style.color = "#00fff0";
+  countDisplay.style.fontWeight = "bold";
+  countDisplay.style.textShadow = "0 0 20px rgba(0, 255, 240, 0.5)";
+  countDisplay.innerText = count.toString();
+  overlay.appendChild(countDisplay);
+
+  countdownTimer = window.setInterval(() => {
+    count--;
+    if (count > 0) {
+      countDisplay.innerText = count.toString();
+    } else {
+      if (countdownTimer) clearInterval(countdownTimer);
+      countDisplay.remove();
+      showNextPoint();
+    }
+  }, 1000);
 }
 
 function runAccuracyTest() {
@@ -327,7 +383,7 @@ function cancelCalibration() {
   loadProfile();
   updateStatusUI();
   isCalibrating = false;
-  window.removeEventListener("keydown", handleGlobalKeyDown);
+  if (countdownTimer) clearInterval(countdownTimer);
 }
 
 function createCalibrationOverlay() {
@@ -337,17 +393,11 @@ function createCalibrationOverlay() {
   overlay.id = "calibration-overlay";
   overlay.className = "calibration-overlay";
   overlay.innerHTML = `
-    <div id="calibration-instruction" class="calibration-instruction">
-      Olhe fixamente para o ponto e pressione Espaço ou clique
-    </div>
+    <div id="calibration-instruction" class="calibration-instruction"></div>
     <button id="btn-cancel-calibration" class="btn btn-secondary cancel-btn">Cancelar</button>
   `;
   document.body.appendChild(overlay);
 
-  overlay.addEventListener("click", (e) => {
-    if ((e.target as HTMLElement).id === "btn-cancel-calibration") return;
-    startCollection();
-  });
   document.getElementById("btn-cancel-calibration")?.addEventListener("click", (e) => {
     e.stopPropagation();
     cancelCalibration();
@@ -383,10 +433,14 @@ function showNextPoint() {
   const instruction = document.getElementById("calibration-instruction");
   if (instruction) {
     instruction.innerHTML = `
-      Olhe fixamente para o ponto <span class="highlight">${currentPointIndex + 1}/${TARGET_POINTS.length}</span><br>
-      <span class="action-highlight">ESPAÇO</span> ou <span class="action-highlight">Clique</span> para capturar
+      Olhe fixamente para o ponto <span class="highlight">${currentPointIndex + 1}/${TARGET_POINTS.length}</span>
     `;
   }
+  
+  // Transição Automática após um breve momento visual
+  setTimeout(() => {
+    startCollection();
+  }, TRANSITION_MS);
 }
 
 function startCollection() {
@@ -430,6 +484,26 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[]) {
 }
 
 function processStaticPoint() {
+  const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
+  const avgVarRight = calculateFeatureVariance(collectedFeaturesRight);
+  
+  const VARIANCE_THRESHOLD = 0.0005; // Sensibilidade para distração (cabeça ou olhos)
+  
+  if (avgVarLeft > VARIANCE_THRESHOLD || avgVarRight > VARIANCE_THRESHOLD) {
+    const instruction = document.getElementById("calibration-instruction");
+    if (instruction) {
+      instruction.innerHTML = `<span class="highlight" style="color: #ff3366;">Atenção! Você se distraiu ou piscou muito.</span><br>Reiniciando este ponto...`;
+    }
+    const dot = document.getElementById("calibration-dot");
+    if (dot) dot.classList.add("unstable");
+    
+    // Reinicia o mesmo ponto após um feedback visual
+    setTimeout(() => {
+      showNextPoint();
+    }, 2000);
+    return;
+  }
+
   // Em vez de extrair mediana, adicionamos todos os frames do ponto no profile
   // O Standard Scaler e Ridge L2 vão tratar ruídos e redundâncias
   const targetX = TARGET_POINTS[currentPointIndex].screenX;

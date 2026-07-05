@@ -42,7 +42,8 @@ export class DwellManager {
       } else {
         // Continua no mesmo alvo, checa o tempo
         const elapsed = performance.now() - this.dwellStartTime;
-        if (elapsed >= this.DWELL_TIME) {
+        const requiredDwellTime = this.currentTarget.dataset.key === 'power' ? 2000 : this.DWELL_TIME;
+        if (elapsed >= requiredDwellTime) {
           // Dispara o clique
           this.triggerClick(this.currentTarget);
           this.clearTarget();

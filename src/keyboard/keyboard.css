@@ -178,6 +178,10 @@
   transition: width 500ms linear;
 }
 
+.dwell-target.power-key.dwelling .dwell-fill {
+  transition: width 2000ms linear;
+}
+
 .dwell-target.clicked {
   background: #00fff0;
   color: #000;
