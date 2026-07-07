@@ -10,7 +10,15 @@ lerna-debug.log*
 node_modules
 dist
 dist-ssr
+dist-electron
+release
 *.local
+
+# Modelos treinados (binários grandes, não versionados)
+resources/models/*.onnx
+
+# Claude Code
+.claude/
 
 # Editor directories and files
 .vscode/*

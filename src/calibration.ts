@@ -1,6 +1,6 @@
 import { trainRidgeModel, predictRidge } from './ridge';
 import type { RidgeModel } from './ridge';
-import { startAccuracyTest } from './accuracy';
+import { startAccuracyTest, isAccuracyTesting } from './accuracy';
 import { StandardScaler } from './scaler';
 
 interface CalibrationPoint {
@@ -68,6 +68,95 @@ let ridgeModelLeft: RidgeModel | null = null;
 let ridgeModelRight: RidgeModel | null = null;
 export const featureScalerLeft = new StandardScaler();
 export const featureScalerRight = new StandardScaler();
+
+// ── Diagnóstico: distância ao ponto de calibração mais próximo ──────────────
+// Instrumentação PURAMENTE ADITIVA para investigar a hipótese de extrapolação
+// do Ridge fora do fecho convexo dos pontos de calibração. Não influencia em
+// nada o valor retornado por mapGaze/predictRidge — apenas observa.
+// Fase em que a amostra foi capturada, a partir do estado que calibration.ts
+// já rastreia internamente (isCalibrating/isDynamicCalibrating) + a flag
+// isAccuracyTesting exportada por accuracy.ts. 'live' cobre o rastreamento
+// contínuo normal (main.ts) fora da calibração e fora do teste de validação.
+// Nota: 'calibration' e 'dynamic' nunca aparecerão na prática, porque
+// ridgeModelLeft/Right só existem DEPOIS que o treino termina — e mapGaze
+// retorna null (antes de logar) sempre que os modelos ainda não existem.
+// Mantidos mesmo assim para representar o estado real, sem mentir sobre ele.
+export type GazeLogPhase = 'calibration' | 'dynamic' | 'validation' | 'live';
+
+export interface GazeDistanceLogEntry {
+  timestamp: number;
+  phase: GazeLogPhase;
+  screenX: number;
+  screenY: number;
+  nearestDistLeft: number;
+  nearestDistRight: number;
+  nearestDistAvg: number;
+}
+
+function currentGazePhase(): GazeLogPhase {
+  if (isAccuracyTesting) return 'validation';
+  if (isDynamicCalibrating) return 'dynamic';
+  if (isCalibrating) return 'calibration';
+  return 'live';
+}
+
+const DIST_LOG_CAPACITY = 500;
+const distanceLog: GazeDistanceLogEntry[] = [];
+
+// Cache das features de calibração já normalizadas pelo StandardScaler
+// (mesmo espaço em que o Ridge opera), preenchido ao final do treino.
+let scaledProfileLeft: number[][] = [];
+let scaledProfileRight: number[][] = [];
+
+function nearestDistance(vec: number[], pool: number[][]): number {
+  if (pool.length === 0) return NaN;
+  let best = Infinity;
+  for (const p of pool) {
+    let sumSq = 0;
+    for (let i = 0; i < vec.length; i++) {
+      const d = vec[i] - p[i];
+      sumSq += d * d;
+    }
+    const dist = Math.sqrt(sumSq);
+    if (dist < best) best = dist;
+  }
+  return best;
+}
+
+function logGazeDistance(entry: GazeDistanceLogEntry): void {
+  distanceLog.push(entry);
+  if (distanceLog.length > DIST_LOG_CAPACITY) distanceLog.shift();
+}
+
+/** Retorna uma cópia do buffer circular de diagnóstico (últimas até 500 amostras). */
+export function getGazeDistanceLog(): GazeDistanceLogEntry[] {
+  return distanceLog.slice();
+}
+
+/** Baixa o buffer de diagnóstico atual como um arquivo JSON, para inspeção manual. */
+export function exportGazeDistanceLog(): void {
+  // TEMPORÁRIO (debug): visibilidade do estado no momento do export, para
+  // investigar por que o buffer pode vir vazio. Remover depois do diagnóstico.
+  console.log(
+    '[gaze-distance-log] buffer size:', distanceLog.length,
+    '| isCalibrated():', isCalibrated(),
+    '| ridgeModelLeft null?', ridgeModelLeft === null,
+    '| ridgeModelRight null?', ridgeModelRight === null,
+    '| scaledProfileLeft.length:', scaledProfileLeft.length,
+    '| scaledProfileRight.length:', scaledProfileRight.length,
+  );
+
+  const json = JSON.stringify(distanceLog, null, 2);
+  const blob = new Blob([json], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `gaze-distance-log-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 // ── Session counter ──────────────────────────────────────────────────────────
 let sessionCount = 0;
@@ -699,6 +788,11 @@ function completeDynamicCalibration() {
   ridgeModelLeft = trainRidgeModel(scaledFeaturesLeft, trainTargets);
   ridgeModelRight = trainRidgeModel(scaledFeaturesRight, trainTargets);
 
+  // Cacheia as features de calibração já normalizadas para o diagnóstico de
+  // distância ao ponto mais próximo (ver mapGaze). Puramente para observação.
+  scaledProfileLeft = scaledFeaturesLeft;
+  scaledProfileRight = scaledFeaturesRight;
+
   saveProfile();
   cleanupOverlay();
   isCalibrating = false;
@@ -821,6 +915,25 @@ export function init() {
     const saved = localStorage.getItem("accuracyResult");
     if (saved && isCalibrated()) updateStatusUI(JSON.parse(saved));
   } catch (_) {}
+
+  // TEMPORÁRIO (debug): botão removido da tela do cursor; export continua
+  // disponível via console do DevTools enquanto o diagnóstico está em
+  // andamento: window.__exportGazeDistanceLog()
+  (window as unknown as Record<string, unknown>).__exportGazeDistanceLog = exportGazeDistanceLog;
+
+  // TEMPORÁRIO (debug): contador periódico do buffer de diagnóstico, para
+  // observar ao vivo no console se/quando ele começa a crescer. Remover
+  // depois de confirmar a causa do buffer vazio.
+  let lastLoggedSize = -1;
+  setInterval(() => {
+    if (distanceLog.length !== lastLoggedSize) {
+      lastLoggedSize = distanceLog.length;
+      console.log(
+        '[gaze-distance-log] buffer size agora:', distanceLog.length,
+        '| isCalibrated():', isCalibrated(),
+      );
+    }
+  }, 2000);
 }
 
 // ── Mapeamento de Olhar ───────────────────────────────────────────────────────
@@ -830,12 +943,28 @@ export function mapGaze(featuresLeft: number[], featuresRight: number[]): { x: n
 
   const scaledLeft = featureScalerLeft.transformSingle(featuresLeft);
   const scaledRight = featureScalerRight.transformSingle(featuresRight);
-  
+
   const predLeft = predictRidge(ridgeModelLeft, scaledLeft);
   const predRight = predictRidge(ridgeModelRight, scaledRight);
-  
-  return {
+
+  const result = {
     x: (predLeft.x + predRight.x) / 2,
     y: (predLeft.y + predRight.y) / 2
   };
+
+  // Diagnóstico aditivo: distância (no espaço normalizado pelo scaler) ao
+  // ponto de calibração mais próximo do perfil salvo. Não afeta `result`.
+  const nearestDistLeft = nearestDistance(scaledLeft, scaledProfileLeft);
+  const nearestDistRight = nearestDistance(scaledRight, scaledProfileRight);
+  logGazeDistance({
+    timestamp: Date.now(),
+    phase: currentGazePhase(),
+    screenX: result.x,
+    screenY: result.y,
+    nearestDistLeft,
+    nearestDistRight,
+    nearestDistAvg: (nearestDistLeft + nearestDistRight) / 2,
+  });
+
+  return result;
 }
