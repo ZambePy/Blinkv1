@@ -87,7 +87,7 @@ export function predictRidge(
   }
   const f = [1.0, ...features];
   const clmp = (v: number) => Math.min(Math.max(v, 0), 1);
-  
+
   let normX = 0;
   let normY = 0;
   for (let i = 0; i < f.length; i++) {
@@ -100,4 +100,26 @@ export function predictRidge(
     x: clmp(normX) * document.documentElement.clientWidth,
     y: clmp(normY) * document.documentElement.clientHeight,
   };
+}
+
+export class RidgeRegressor {
+  private model: RidgeModel | null;
+
+  constructor(model?: RidgeModel) {
+    this.model = model ?? null;
+  }
+
+  train(features: number[][], targetsX: number[], targetsY: number[]): void {
+    const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
+    this.model = trainRidgeModel(features, targets);
+  }
+
+  predict(features: number[]): { x: number; y: number } {
+    if (!this.model) return { x: 0, y: 0 };
+    return predictRidge(this.model, features);
+  }
+
+  getModel(): RidgeModel | null {
+    return this.model;
+  }
 }

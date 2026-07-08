@@ -8,7 +8,7 @@ import { KeyboardUI } from './keyboard/KeyboardUI';
 import { KeyboardState } from './keyboard/KeyboardState';
 import { dwellManager } from './keyboard/DwellManager';
 import { updateDwell, resetDwell } from './dwell';
-import { extractEyeFeatures } from './extractor';
+import { extractFeatures } from './featurePipeline';
 
 const video     = document.getElementById('webcam') as HTMLVideoElement;
 const canvas    = document.getElementById('output_canvas') as HTMLCanvasElement;
@@ -185,7 +185,7 @@ async function predictWebcam() {
       );
       calibration.feedFaceMetrics(true, rawIod);
 
-      const extractorResult = extractEyeFeatures(landmarks);
+      const extractorResult = extractFeatures(landmarks);
       if (extractorResult.blinkDetected || extractorResult.featuresLeft.length === 0) {
         // Ignora piscar e erros
         window.requestAnimationFrame(predictWebcam);

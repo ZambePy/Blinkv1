@@ -1,5 +1,5 @@
-import { trainRidgeModel, predictRidge } from './ridge';
-import type { RidgeModel } from './ridge';
+import type { GazeRegressor } from './gazeRegressor';
+import { createRegressor, ridgeRegressorFromModel, ridgeModelFromRegressor } from './gazeRegressor';
 import { startAccuracyTest, isAccuracyTesting } from './accuracy';
 import { StandardScaler } from './scaler';
 
@@ -63,9 +63,9 @@ let dynamicBallX = 0.5;
 let dynamicBallY = 0.5;
 let dynamicIsFixation = false;
 
-// ── Ridge Regression model ───────────────────────────────────────────────────
-let ridgeModelLeft: RidgeModel | null = null;
-let ridgeModelRight: RidgeModel | null = null;
+// ── Gaze regressors (implementation selected via GazeRegressor interface) ────
+let regressorLeft: GazeRegressor | null = null;
+let regressorRight: GazeRegressor | null = null;
 export const featureScalerLeft = new StandardScaler();
 export const featureScalerRight = new StandardScaler();
 
@@ -140,8 +140,8 @@ export function exportGazeDistanceLog(): void {
   console.log(
     '[gaze-distance-log] buffer size:', distanceLog.length,
     '| isCalibrated():', isCalibrated(),
-    '| ridgeModelLeft null?', ridgeModelLeft === null,
-    '| ridgeModelRight null?', ridgeModelRight === null,
+    '| regressorLeft null?', regressorLeft === null,
+    '| regressorRight null?', regressorRight === null,
     '| scaledProfileLeft.length:', scaledProfileLeft.length,
     '| scaledProfileRight.length:', scaledProfileRight.length,
   );
@@ -190,8 +190,8 @@ export function loadProfile(): boolean {
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.ridgeModelLeft && parsed.ridgeModelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
-        ridgeModelLeft = parsed.ridgeModelLeft;
-        ridgeModelRight = parsed.ridgeModelRight;
+        regressorLeft = ridgeRegressorFromModel(parsed.ridgeModelLeft);
+        regressorRight = ridgeRegressorFromModel(parsed.ridgeModelRight);
         featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
         featureScalerRight.setParams(parsed.scalerParamsRight.means, parsed.scalerParamsRight.stds);
         return true;
@@ -200,33 +200,37 @@ export function loadProfile(): boolean {
   } catch (e) {
     console.error("Erro ao carregar calibrationProfile:", e);
   }
-  ridgeModelLeft = null;
-  ridgeModelRight = null;
+  regressorLeft = null;
+  regressorRight = null;
   return false;
 }
 
 function saveProfile() {
-  if (ridgeModelLeft && ridgeModelRight) {
-    localStorage.setItem("calibrationProfile", JSON.stringify({
-      ridgeModelLeft,
-      ridgeModelRight,
-      scalerParamsLeft: featureScalerLeft.getParams(),
-      scalerParamsRight: featureScalerRight.getParams()
-    }));
+  if (regressorLeft && regressorRight) {
+    const modelLeft = ridgeModelFromRegressor(regressorLeft);
+    const modelRight = ridgeModelFromRegressor(regressorRight);
+    if (modelLeft && modelRight) {
+      localStorage.setItem("calibrationProfile", JSON.stringify({
+        ridgeModelLeft: modelLeft,
+        ridgeModelRight: modelRight,
+        scalerParamsLeft: featureScalerLeft.getParams(),
+        scalerParamsRight: featureScalerRight.getParams()
+      }));
+    }
   }
 }
 
 export function clearCalibration() {
   profile    = [];
-  ridgeModelLeft = null;
-  ridgeModelRight = null;
+  regressorLeft = null;
+  regressorRight = null;
   localStorage.removeItem("calibrationProfile");
   localStorage.removeItem("accuracyResult");
   updateStatusUI();
 }
 
 export function isCalibrated(): boolean {
-  return ridgeModelLeft !== null && ridgeModelRight !== null;
+  return regressorLeft !== null && regressorRight !== null;
 }
 
 // ── Pré-Calibração: tela de setup antes da calibração ────────────────────────
@@ -413,8 +417,8 @@ export function startCalibrationMode() {
   dynamicSamples = [];
   collectedFeaturesLeft = [];
   collectedFeaturesRight = [];
-  ridgeModelLeft = null;
-  ridgeModelRight = null;
+  regressorLeft = null;
+  regressorRight = null;
 
   createCalibrationOverlay();
   startCountdown();
@@ -784,9 +788,13 @@ function completeDynamicCalibration() {
   const scaledFeaturesLeft = featureScalerLeft.transform(trainFeaturesLeft);
   const scaledFeaturesRight = featureScalerRight.transform(trainFeaturesRight);
 
-  // Treina o modelo Ridge Binocularmente
-  ridgeModelLeft = trainRidgeModel(scaledFeaturesLeft, trainTargets);
-  ridgeModelRight = trainRidgeModel(scaledFeaturesRight, trainTargets);
+  // Treina os regressores binocularmente via interface GazeRegressor
+  const targetsX = trainTargets.map(t => t.screenX);
+  const targetsY = trainTargets.map(t => t.screenY);
+  regressorLeft = createRegressor('ridge');
+  regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY);
+  regressorRight = createRegressor('ridge');
+  regressorRight.train(scaledFeaturesRight, targetsX, targetsY);
 
   // Cacheia as features de calibração já normalizadas para o diagnóstico de
   // distância ao ponto mais próximo (ver mapGaze). Puramente para observação.
@@ -939,13 +947,13 @@ export function init() {
 // ── Mapeamento de Olhar ───────────────────────────────────────────────────────
 
 export function mapGaze(featuresLeft: number[], featuresRight: number[]): { x: number; y: number } | null {
-  if (!ridgeModelLeft || !ridgeModelRight) return null;
+  if (!regressorLeft || !regressorRight) return null;
 
   const scaledLeft = featureScalerLeft.transformSingle(featuresLeft);
   const scaledRight = featureScalerRight.transformSingle(featuresRight);
 
-  const predLeft = predictRidge(ridgeModelLeft, scaledLeft);
-  const predRight = predictRidge(ridgeModelRight, scaledRight);
+  const predLeft = regressorLeft.predict(scaledLeft);
+  const predRight = regressorRight.predict(scaledRight);
 
   const result = {
     x: (predLeft.x + predRight.x) / 2,

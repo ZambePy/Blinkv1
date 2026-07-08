@@ -17,6 +17,13 @@ release
 # Modelos treinados (binários grandes, não versionados)
 resources/models/*.onnx
 
+# Datasets e artefatos ML pesados
+python_ml/datasets/
+python_ml/.git/
+
+# Scratch / experimentos externos
+scratch/
+
 # Claude Code
 .claude/
 
