@@ -33,7 +33,7 @@ scratch/
 .idea
 .DS_Store
 *.suo
-*.ntvs*
+*.ntv's*
 *.njsproj
 *.sln
 *.sw?
