@@ -7,7 +7,7 @@
 //   • Erro em pixels ao lado de cada par
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
-import { mapGaze, startPreCalibration } from './calibration';
+import { mapGaze, mapGazeWithConfig, hasDevConfigs, startPreCalibration } from './calibration';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
@@ -26,6 +26,8 @@ interface PointDiagnostic {
   predY: number;
   error: number;
   name: string;
+  errorB: number | null;
+  errorC: number | null;
 }
 
 // 9 pontos de validação em grade 3×3
@@ -49,15 +51,24 @@ const ASSUMED_DIST_PX = 2268;
 
 let currentFeaturesLeft: number[] = [];
 let currentFeaturesRight: number[] = [];
+let currentFusedLeft: number[] | null = null;
+let currentFusedRight: number[] | null = null;
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
 export let isAccuracyTesting = false;
 
 // Recebe a posição crua do olhar a cada frame — chamado por main.ts
-export function feedAccuracyRaw(featuresLeft: number[], featuresRight: number[]) {
+export function feedAccuracyRaw(
+  featuresLeft: number[],
+  featuresRight: number[],
+  fusedLeft?: number[] | null,
+  fusedRight?: number[] | null,
+) {
   currentFeaturesLeft = featuresLeft;
   currentFeaturesRight = featuresRight;
+  currentFusedLeft  = fusedLeft  ?? null;
+  currentFusedRight = fusedRight ?? null;
 }
 
 // Inicia o teste de validação de precisão pós-calibração
@@ -84,6 +95,10 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
     const startTime = performance.now();
     const predictedX: number[] = [];
     const predictedY: number[] = [];
+    const predictedBX: number[] = [];
+    const predictedBY: number[] = [];
+    const predictedCX: number[] = [];
+    const predictedCY: number[] = [];
 
     const targetScreenX = vp.screenX * vw;
     const targetScreenY = vp.screenY * vh;
@@ -96,6 +111,11 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
         predictedX.push(gaze.x);
         predictedY.push(gaze.y);
       }
+
+      const gazeB = mapGazeWithConfig('B', currentFeaturesLeft, currentFeaturesRight);
+      if (gazeB) { predictedBX.push(gazeB.x); predictedBY.push(gazeB.y); }
+      const gazeC = mapGazeWithConfig('C', currentFeaturesLeft, currentFeaturesRight, currentFusedLeft, currentFusedRight);
+      if (gazeC) { predictedCX.push(gazeC.x); predictedCY.push(gazeC.y); }
 
       if (elapsed < COLLECTION_MS) {
         requestAnimationFrame(collect);
@@ -114,6 +134,19 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
         error = Math.sqrt(dx * dx + dy2 * dy2);
       }
 
+      let errorB: number | null = null;
+      if (predictedBX.length > 0) {
+        const bx = predictedBX.reduce((s, v) => s + v, 0) / predictedBX.length;
+        const by = predictedBY.reduce((s, v) => s + v, 0) / predictedBY.length;
+        errorB = Math.sqrt((bx - targetScreenX) ** 2 + (by - targetScreenY) ** 2);
+      }
+      let errorC: number | null = null;
+      if (predictedCX.length > 0) {
+        const cx = predictedCX.reduce((s, v) => s + v, 0) / predictedCX.length;
+        const cy = predictedCY.reduce((s, v) => s + v, 0) / predictedCY.length;
+        errorC = Math.sqrt((cx - targetScreenX) ** 2 + (cy - targetScreenY) ** 2);
+      }
+
       pointErrors.push(error);
       diagnostics.push({
         groundX: targetScreenX,
@@ -122,6 +155,8 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
         predY: meanPY,
         error,
         name: vp.name,
+        errorB,
+        errorC,
       });
 
       pointIndex++;
@@ -323,6 +358,74 @@ function showDiagnosticOverlay(
       : result.colorClass === 'accuracy-regular' ? '#ffcc00'
         : '#ef4444';
 
+  const { B: hasB, C: hasC, cReason } = hasDevConfigs();
+  let comparisonHtml = '';
+  if (hasB || hasC) {
+    const errorsB = diagnostics.map(d => d.errorB);
+    const errorsC = diagnostics.map(d => d.errorC);
+
+    const meanA = result.meanError;
+    const maxA  = result.maxError;
+    const degA  = result.meanErrorDeg;
+
+    const validB = errorsB.filter((e): e is number => e !== null);
+    const meanB  = validB.length ? validB.reduce((s, v) => s + v, 0) / validB.length : null;
+    const maxB   = validB.length ? Math.max(...validB) : null;
+    const degB   = meanB !== null ? (Math.atan(meanB / ASSUMED_DIST_PX) * 180) / Math.PI : null;
+
+    const validC = errorsC.filter((e): e is number => e !== null);
+    const meanC  = validC.length ? validC.reduce((s, v) => s + v, 0) / validC.length : null;
+    const maxC   = validC.length ? Math.max(...validC) : null;
+    const degC   = meanC !== null ? (Math.atan(meanC / ASSUMED_DIST_PX) * 180) / Math.PI : null;
+
+    const THRESH_PX  = 45;
+    const THRESH_DEG = 1.5;
+    const flag = (err: number | null) => err !== null && err > THRESH_PX ? ' ✗' : '';
+    const fmtErr = (e: number | null) => e !== null ? `${Math.round(e)}px${flag(e)}` : 'N/A';
+    const fmtMean = (m: number | null, d: number | null) =>
+      m !== null ? `${Math.round(m)}px / ${d!.toFixed(2)}°${(m > THRESH_PX || d! > THRESH_DEG) ? ' ✗' : ''}` : 'N/A';
+
+    const rows = diagnostics.map(d => `
+      <tr style="border-top:1px solid #222">
+        <td style="padding:3px 6px;color:#aaa">${d.name}</td>
+        <td style="text-align:right;padding:3px 6px;color:${d.error > THRESH_PX ? '#ef4444' : '#22c55e'}">${Math.round(d.error)}px${flag(d.error)}</td>
+        ${hasB ? `<td style="text-align:right;padding:3px 6px;color:${d.errorB !== null && d.errorB > THRESH_PX ? '#ef4444' : '#22c55e'}">${fmtErr(d.errorB)}</td>` : ''}
+        ${hasC ? `<td style="text-align:right;padding:3px 6px;color:${d.errorC !== null && d.errorC > THRESH_PX ? '#ef4444' : '#22c55e'}">${fmtErr(d.errorC)}</td>` : ''}
+      </tr>
+    `).join('');
+
+    comparisonHtml = `
+      <div style="margin-top:16px;border-top:1px solid #333;padding-top:12px">
+        <div style="font-size:11px;font-weight:600;color:#00fff0;margin-bottom:8px;letter-spacing:.05em">
+          COMPARAÇÃO DEV — A vs B${hasC ? ' vs C' : ''} (não é produção)
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <tr style="color:#666">
+            <th style="text-align:left;padding:3px 6px">Ponto</th>
+            <th style="text-align:right;padding:3px 6px">A Ridge+geo</th>
+            ${hasB ? '<th style="text-align:right;padding:3px 6px">B KR+geo</th>' : ''}
+            ${hasC ? '<th style="text-align:right;padding:3px 6px">C KR+fused</th>' : ''}
+          </tr>
+          ${rows}
+          <tr style="border-top:2px solid #444;font-weight:600">
+            <td style="padding:4px 6px;color:#ccc">Média / graus</td>
+            <td style="text-align:right;padding:4px 6px;color:${meanA > THRESH_PX || degA > THRESH_DEG ? '#ef4444' : '#22c55e'}">${fmtMean(meanA, degA)}</td>
+            ${hasB ? `<td style="text-align:right;padding:4px 6px;color:${meanB !== null && (meanB > THRESH_PX || (degB ?? 0) > THRESH_DEG) ? '#ef4444' : '#22c55e'}">${fmtMean(meanB, degB)}</td>` : ''}
+            ${hasC ? `<td style="text-align:right;padding:4px 6px;color:${meanC !== null && (meanC > THRESH_PX || (degC ?? 0) > THRESH_DEG) ? '#ef4444' : '#22c55e'}">${fmtMean(meanC, degC)}</td>` : ''}
+          </tr>
+          <tr>
+            <td style="padding:2px 6px;color:#666">Máximo</td>
+            <td style="text-align:right;padding:2px 6px;color:#888">${Math.round(maxA)}px</td>
+            ${hasB ? `<td style="text-align:right;padding:2px 6px;color:#888">${maxB !== null ? Math.round(maxB)+'px' : 'N/A'}</td>` : ''}
+            ${hasC ? `<td style="text-align:right;padding:2px 6px;color:#888">${maxC !== null ? Math.round(maxC)+'px' : 'N/A'}</td>` : ''}
+          </tr>
+        </table>
+        <div style="font-size:10px;color:#555;margin-top:6px">✗ = acima do limiar de produção (≤45px / ≤1.5°)</div>
+        ${hasB && !hasC && cReason ? `<div style="font-size:10px;color:#888;margin-top:6px">Config C não disponível: ${cReason}</div>` : ''}
+      </div>
+    `;
+  }
+
   footer.innerHTML = `
     <div class="diagnostic-card">
       <div class="diagnostic-title">Calibração Concluída</div>
@@ -368,6 +471,8 @@ function showDiagnosticOverlay(
           </div>
         `).join('')}
       </div>
+
+      ${comparisonHtml}
 
       <div class="diagnostic-actions">
         Pressione <kbd>Espaço</kbd> para continuar ou <kbd>R</kbd> para recalibrar

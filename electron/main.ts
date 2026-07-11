@@ -1,6 +1,11 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
-import { runEncoder, configureEncoderModelPath } from './inference/encoderRunner';
+import {
+  configureEncoderModelPath,
+  ensureSession,
+  runEncoderInference,
+  type EncoderInput,
+} from './inference/encoderRunner';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173';
 
@@ -25,24 +30,40 @@ function createWindow(): void {
   if (!app.isPackaged) {
     win.loadURL(DEV_SERVER_URL);
     win.webContents.openDevTools({ mode: 'detach' });
+    // Espelha logs do renderer no terminal (util para timing e diagnostico).
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (win.webContents as any).on('console-message', (_e: unknown, _level: number, message: string) => {
+      if (message?.includes('[eyeCrop]') || message?.includes('[IrisFlow]') || message?.includes('[fusion]') || message?.includes('[IPC]')) {
+        console.log(`[renderer] ${message}`);
+      }
+    });
   } else {
     win.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
   }
 }
 
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
   configureEncoderModelPath(resolveModelPath());
 
-  // getUserMedia (câmera) precisa de autorização explícita fora do Chromium padrão do browser.
+  // Carrega a sessao ONNX no boot, nao na primeira chamada de inferencia.
+  // Isso garante latencia previsivel na primeira inferencia real.
+  const bootStart = Date.now();
+  await ensureSession();
+  console.log(`[main] sessao ONNX carregada no boot em ${Date.now() - bootStart} ms`);
+
+  // getUserMedia (camera) precisa de autorizacao explicita fora do Chromium padrao.
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(permission === 'media');
   });
 
-  ipcMain.handle('encoder:infer', async (_event, input: Float32Array) => {
+  ipcMain.handle('encoder:infer', async (_event, input: EncoderInput) => {
     try {
-      return await runEncoder(input);
+      const result = await runEncoderInference(input);
+      // Float32Array não sobrevive ao boundary IPC+contextBridge com sandbox:true —
+      // serializamos como number[] e o preload reconstrói Float32Array no renderer.
+      return result ? Array.from(result) : null;
     } catch (err) {
-      console.error('[main] erro não tratado em encoder:infer', err);
+      console.error('[main] erro nao tratado em encoder:infer', err);
       return null;
     }
   });

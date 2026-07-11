@@ -78,8 +78,6 @@ describe('GazeRegressor golden snapshot', () => {
   });
 
   it('createRegressor throws for unsupported mode', () => {
-    expect(() => createRegressor('kernel_ridge' as never)).toThrow(
-      /Only 'ridge' is currently implemented/
-    );
+    expect(() => createRegressor('svr' as never)).toThrow(/Unsupported regressor mode/);
   });
 });

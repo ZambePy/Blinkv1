@@ -9,7 +9,7 @@ export interface RidgeModel {
 }
 
 // Eliminação gaussiana com pivotação parcial para resolver Aβ = b
-function solveLinear(A: number[][], b: number[]): number[] {
+export function solveLinear(A: number[][], b: number[]): number[] {
   const n = A.length;
   const M: number[][] = A.map((row, i) => [...row, b[i]]);
 

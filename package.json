@@ -11,10 +11,11 @@
     "test": "vitest run",
     "electron:compile": "node electron/build.mjs",
     "electron:dev": "node electron/dev.mjs",
-    "electron:build": "npm run build && node electron/build.mjs && electron-builder"
+    "electron:build": "npm run build && node electron/build.mjs && node electron/package-app.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
+    "canvas": "^3.2.3",
     "electron": "^43.0.0",
     "electron-builder": "^26.0.0",
     "esbuild": "^0.28.1",

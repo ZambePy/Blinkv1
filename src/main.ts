@@ -8,7 +8,9 @@ import { KeyboardUI } from './keyboard/KeyboardUI';
 import { KeyboardState } from './keyboard/KeyboardState';
 import { dwellManager } from './keyboard/DwellManager';
 import { updateDwell, resetDwell } from './dwell';
-import { extractFeatures } from './featurePipeline';
+import { extractFeatures, FEATURE_MODE } from './featurePipeline';
+import { extractCrops, exportEyeCropLog } from './eyeCrop';
+import { loadPCA, fusedDims } from './fusion';
 
 const video     = document.getElementById('webcam') as HTMLVideoElement;
 const canvas    = document.getElementById('output_canvas') as HTMLCanvasElement;
@@ -17,6 +19,23 @@ const loadingMsg = document.getElementById('loading') as HTMLDivElement;
 
 let faceLandmarker: FaceLandmarker;
 let lastVideoTime = -1;
+
+// ── eyeCrop timing diagnostics ────────────────────────────────────────────────
+let _cropFrameCount = 0;
+let _cropTotalMs    = 0;
+
+// ── Embedding do encoder (assíncrono, buffer de 1 frame) ──────────────────────
+// Fire-and-forget: o resultado chega no próximo requestAnimationFrame.
+// Se a inferência falhar ou o encoder não estiver carregado, fica null.
+let _lastEmbedding: Float32Array | null = null;
+let _fusionLogCount = 0;
+
+// ── IPC round-trip latency diagnostics ────────────────────────────────────────
+let _ipcCallCount  = 0;
+let _ipcTotalMs    = 0;
+let _ipcMinMs      = Infinity;
+let _ipcMaxMs      = -Infinity;
+const _ipcSamples: number[] = [];
 
 // Coordenadas para interpolação (Lerp)
 let targetX  = document.documentElement.clientWidth / 2;
@@ -185,21 +204,71 @@ async function predictWebcam() {
       );
       calibration.feedFaceMetrics(true, rawIod);
 
-      const extractorResult = extractFeatures(landmarks);
+      // Passa o embedding do frame anterior (buffer de 1 frame, assíncrono)
+      const extractorResult = extractFeatures(landmarks, undefined, _lastEmbedding);
       if (extractorResult.blinkDetected || extractorResult.featuresLeft.length === 0) {
         // Ignora piscar e erros
         window.requestAnimationFrame(predictWebcam);
         return;
       }
-      
+
+      // Extrai tensores CNN + dispara inferência encoder (fire-and-forget)
+      const cropT0    = performance.now();
+      const cropInput = extractCrops(video, landmarks, video.videoWidth, video.videoHeight);
+      const cropMs    = performance.now() - cropT0;
+      _cropFrameCount++;
+      _cropTotalMs += cropMs;
+      if (_cropFrameCount % 60 === 0) {
+        console.debug(`[eyeCrop] avg ${(_cropTotalMs / _cropFrameCount).toFixed(2)} ms/frame | last ${cropMs.toFixed(2)} ms | input=${cropInput ? 'ok' : 'null'}`);
+      }
+
+      if (cropInput && window.irisflowAPI) {
+        const _ipcT0 = performance.now();
+        window.irisflowAPI.runEncoderInference(cropInput).then(emb => {
+          const ipcMs = performance.now() - _ipcT0;
+          _lastEmbedding = emb;
+          _ipcCallCount++;
+          _ipcTotalMs += ipcMs;
+          if (ipcMs < _ipcMinMs) _ipcMinMs = ipcMs;
+          if (ipcMs > _ipcMaxMs) _ipcMaxMs = ipcMs;
+          _ipcSamples.push(ipcMs);
+          if (_ipcCallCount % 20 === 0) {
+            const avg = _ipcTotalMs / _ipcCallCount;
+            const recent = _ipcSamples.slice(-20);
+            const p50 = [...recent].sort((a,b)=>a-b)[Math.floor(recent.length/2)];
+            console.log(
+              `[IPC] round-trip n=${_ipcCallCount} | ` +
+              `avg=${avg.toFixed(1)} ms | ` +
+              `last=${ipcMs.toFixed(1)} ms | ` +
+              `min=${_ipcMinMs.toFixed(1)} ms | ` +
+              `max=${_ipcMaxMs.toFixed(1)} ms | ` +
+              `p50(last20)=${p50.toFixed(1)} ms`
+            );
+          }
+        });
+      }
+
+      // Log de validação do vetor fundido (a cada 60 frames, apenas para diagnóstico)
+      // FEATURE_MODE='geometry_only': o vetor fundido é calculado mas não usado na predição.
+      _fusionLogCount++;
+      if (_fusionLogCount % 60 === 0) {
+        const { fusedLeft } = extractorResult;
+        const dims = fusedDims(extractorResult.featuresLeft.length);
+        if (fusedLeft !== null && fusedLeft !== undefined) {
+          console.log(`[fusion] FEATURE_MODE=${FEATURE_MODE} | fused dims=${fusedLeft.length} (pca=${dims !== null ? dims - extractorResult.featuresLeft.length : '?'}+geo=${extractorResult.featuresLeft.length}) | embedding=${_lastEmbedding ? 'ok' : 'null'}`);
+        } else {
+          console.log(`[fusion] FEATURE_MODE=${FEATURE_MODE} | fused=null | embedding=${_lastEmbedding ? 'ok' : 'null'} | pcaReady=${dims !== null}`);
+        }
+      }
+
       const featuresLeft = extractorResult.featuresLeft;
       const featuresRight = extractorResult.featuresRight;
 
       // Envia coordenadas cruas para o sistema de calibração
-      calibration.feedRawData(featuresLeft, featuresRight);
+      calibration.feedRawData(featuresLeft, featuresRight, extractorResult.fusedLeft, extractorResult.fusedRight);
 
       // Alimenta o módulo de precisão com as coordenadas cruas
-      feedAccuracyRaw(featuresLeft, featuresRight);
+      feedAccuracyRaw(featuresLeft, featuresRight, extractorResult.fusedLeft, extractorResult.fusedRight);
 
       // Tenta mapear o olhar usando o perfil calibrado binocularmente
       const calibratedGaze = calibration.mapGaze(featuresLeft, featuresRight);
@@ -280,6 +349,12 @@ async function predictWebcam() {
 
   window.requestAnimationFrame(predictWebcam);
 }
+
+// Expõe exportEyeCropLog para diagnóstico de campo via console do DevTools
+window.__exportEyeCropLog = exportEyeCropLog;
+
+// Carrega a matriz PCA (fire-and-forget — app funciona em geometry_only se falhar)
+loadPCA().catch(() => { /* silenciado — loadPCA já loga o erro internamente */ });
 
 // Inicializa o painel de calibração e carrega perfis salvos
 calibration.init();

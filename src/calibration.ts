@@ -8,6 +8,8 @@ interface CalibrationPoint {
   screenY: number;
   featuresLeft: number[];
   featuresRight: number[];
+  fusedLeft?: number[] | null;   // NEW
+  fusedRight?: number[] | null;  // NEW
 }
 
 interface DynamicSample {
@@ -15,6 +17,8 @@ interface DynamicSample {
   screenY: number;
   featuresLeft: number[];
   featuresRight: number[];
+  fusedLeft?: number[] | null;   // NEW
+  fusedRight?: number[] | null;  // NEW
   weight: number;
 }
 
@@ -58,6 +62,9 @@ let collectionStartTime = 0;
 let collectedFeaturesLeft: number[][] = [];
 let collectedFeaturesRight: number[][] = [];
 
+let collectedFusedLeft: (number[] | null)[] = [];
+let collectedFusedRight: (number[] | null)[] = [];
+
 let dynamicSamples: DynamicSample[] = [];
 let dynamicBallX = 0.5;
 let dynamicBallY = 0.5;
@@ -68,6 +75,18 @@ let regressorLeft: GazeRegressor | null = null;
 let regressorRight: GazeRegressor | null = null;
 export const featureScalerLeft = new StandardScaler();
 export const featureScalerRight = new StandardScaler();
+
+// ── Dev-only: configs B e C para sprint de validação comparativa ─────────────
+// Treinados sobre os mesmos dados de calibração que Config A; nunca persistidos.
+// Config B: KernelRidge + geo (mesmo scaler de A)
+// Config C: KernelRidge + fused (scaler separado, 276 dims)
+let devConfigB: { left: GazeRegressor; right: GazeRegressor } | null = null;
+let devConfigC: { left: GazeRegressor; right: GazeRegressor } | null = null;
+let devConfigCReason: string | null = null;
+export const fusedScalerLeft  = new StandardScaler();
+export const fusedScalerRight = new StandardScaler();
+// Contador de inferências Config C logadas (diagnóstico temporário — resetado a cada treino).
+let _configCPredLogCount = 0;
 
 // ── Diagnóstico: distância ao ponto de calibração mais próximo ──────────────
 // Instrumentação PURAMENTE ADITIVA para investigar a hipótese de extrapolação
@@ -224,6 +243,10 @@ export function clearCalibration() {
   profile    = [];
   regressorLeft = null;
   regressorRight = null;
+  devConfigB = null;
+  devConfigC = null;
+  devConfigCReason = null;
+  _configCPredLogCount = 0;
   localStorage.removeItem("calibrationProfile");
   localStorage.removeItem("accuracyResult");
   updateStatusUI();
@@ -417,8 +440,14 @@ export function startCalibrationMode() {
   dynamicSamples = [];
   collectedFeaturesLeft = [];
   collectedFeaturesRight = [];
+  collectedFusedLeft = [];
+  collectedFusedRight = [];
   regressorLeft = null;
   regressorRight = null;
+  devConfigB = null;
+  devConfigC = null;
+  devConfigCReason = null;
+  _configCPredLogCount = 0;
 
   createCalibrationOverlay();
   startCountdown();
@@ -436,7 +465,7 @@ function startCountdown() {
       <span class="highlight">Foque no ponto que aparecerá e não desvie o olhar.</span>
     `;
   }
-  
+
   let count = 5;
   const countDisplay = document.createElement("div");
   countDisplay.id = "calibration-countdown";
@@ -529,7 +558,7 @@ function showNextPoint() {
       Olhe fixamente para o ponto <span class="highlight">${currentPointIndex + 1}/${TARGET_POINTS.length}</span>
     `;
   }
-  
+
   // Transição Automática após um breve momento visual
   setTimeout(() => {
     startCollection();
@@ -542,6 +571,8 @@ function startCollection() {
   collectionStartTime = performance.now();
   collectedFeaturesLeft = [];
   collectedFeaturesRight = [];
+  collectedFusedLeft = [];
+  collectedFusedRight = [];
 
   const dot = document.getElementById("calibration-dot");
   if (dot) {
@@ -553,13 +584,20 @@ function startCollection() {
 
 // ── Funções Removidas ────────────────────────────────────────────
 
-export function feedRawData(featuresLeft: number[], featuresRight: number[]) {
+export function feedRawData(
+  featuresLeft: number[],
+  featuresRight: number[],
+  fusedLeft?: number[] | null,
+  fusedRight?: number[] | null,
+) {
   if (isDynamicCalibrating) {
     dynamicSamples.push({
       screenX: dynamicBallX,
       screenY: dynamicBallY,
       featuresLeft,
       featuresRight,
+      fusedLeft: fusedLeft ?? null,
+      fusedRight: fusedRight ?? null,
       weight: dynamicIsFixation ? 3.0 : 1.0
     });
     return;
@@ -569,6 +607,8 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[]) {
 
   collectedFeaturesLeft.push(featuresLeft);
   collectedFeaturesRight.push(featuresRight);
+  collectedFusedLeft.push(fusedLeft ?? null);
+  collectedFusedRight.push(fusedRight ?? null);
 
   if (performance.now() - collectionStartTime >= COLLECTION_MS) {
     isCollecting = false;
@@ -579,17 +619,20 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[]) {
 function processStaticPoint() {
   const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
   const avgVarRight = calculateFeatureVariance(collectedFeaturesRight);
-  
+
   const VARIANCE_THRESHOLD = 0.0005; // Sensibilidade para distração (cabeça ou olhos)
-  
+
   if (avgVarLeft > VARIANCE_THRESHOLD || avgVarRight > VARIANCE_THRESHOLD) {
+    console.warn('[calib] ponto %d "%s" INSTÁVEL — retentando | frames=%d | varL=%.6f varR=%.6f | threshold=%.6f',
+      currentPointIndex + 1, TARGET_POINTS[currentPointIndex].name,
+      collectedFeaturesLeft.length, avgVarLeft, avgVarRight, VARIANCE_THRESHOLD);
     const instruction = document.getElementById("calibration-instruction");
     if (instruction) {
       instruction.innerHTML = `<span class="highlight" style="color: #ff3366;">Atenção! Você se distraiu ou piscou muito.</span><br>Reiniciando este ponto...`;
     }
     const dot = document.getElementById("calibration-dot");
     if (dot) dot.classList.add("unstable");
-    
+
     // Reinicia o mesmo ponto após um feedback visual
     setTimeout(() => {
       showNextPoint();
@@ -607,9 +650,14 @@ function processStaticPoint() {
       screenX: targetX,
       screenY: targetY,
       featuresLeft: collectedFeaturesLeft[i],
-      featuresRight: collectedFeaturesRight[i]
+      featuresRight: collectedFeaturesRight[i],
+      fusedLeft:  collectedFusedLeft[i]  ?? null,
+      fusedRight: collectedFusedRight[i] ?? null,
     });
   }
+
+  const fusedFrameCount = collectedFusedLeft.filter(f => f !== null).length;
+  console.log(`[calib] ponto ${currentPointIndex + 1}/${TARGET_POINTS.length} "${TARGET_POINTS[currentPointIndex].name}" aceito: frames=${collectedFeaturesLeft.length} (fused=${fusedFrameCount}/${collectedFeaturesLeft.length}) | varL=${avgVarLeft.toFixed(6)} varR=${avgVarRight.toFixed(6)} | threshold=${VARIANCE_THRESHOLD.toFixed(6)}`);
 
   currentPointIndex++;
 
@@ -762,16 +810,29 @@ function pulseBall(ball: HTMLElement, onComplete: () => void) {
   }, DYN_PULSE_MS);
 }
 
+// LOO-CV do KernelRidge é O(n⁴) — projetado para n≤25. Com o profile completo
+// (todos os frames de 9 pts × ~45fps × 1500ms ≈ 400+ amostras + dinâmicas) o
+// renderer main thread bloquearia por horas. Subsamplamos uniformemente para
+// manter cobertura geográfica dentro do limite de design.
+const MAX_KR_SAMPLES = 25;
+
+function subsampleIndices(total: number, maxN: number): number[] {
+  if (total <= maxN) return Array.from({ length: total }, (_, i) => i);
+  return Array.from({ length: maxN }, (_, i) => Math.round(i * (total - 1) / (maxN - 1)));
+}
+
 function completeDynamicCalibration() {
   isDynamicCalibrating = false;
-  
+
   // Adiciona amostras dinâmicas ao profile para treino massivo
   for (const s of dynamicSamples) {
     profile.push({
       screenX: s.screenX,
       screenY: s.screenY,
       featuresLeft: s.featuresLeft,
-      featuresRight: s.featuresRight
+      featuresRight: s.featuresRight,
+      fusedLeft:  s.fusedLeft  ?? null,
+      fusedRight: s.fusedRight ?? null,
     });
   }
 
@@ -800,6 +861,103 @@ function completeDynamicCalibration() {
   // distância ao ponto mais próximo (ver mapGaze). Puramente para observação.
   scaledProfileLeft = scaledFeaturesLeft;
   scaledProfileRight = scaledFeaturesRight;
+
+  // ── Dev: Config B (KernelRidge + geo, mesmo scaler de A) ────────────────────
+  try {
+    const idxB  = subsampleIndices(scaledFeaturesLeft.length, MAX_KR_SAMPLES);
+    const sfBL  = idxB.map(i => scaledFeaturesLeft[i]);
+    const sfBR  = idxB.map(i => scaledFeaturesRight[i]);
+    const tBX   = idxB.map(i => targetsX[i]);
+    const tBY   = idxB.map(i => targetsY[i]);
+    const krLeft  = createRegressor('kernel_ridge');
+    const krRight = createRegressor('kernel_ridge');
+    krLeft.train(sfBL,  tBX, tBY);
+    krRight.train(sfBR, tBX, tBY);
+    devConfigB = { left: krLeft, right: krRight };
+    console.log('[comparison] Config B (KR+geo) treinada — %d/%d amostras',
+      idxB.length, scaledFeaturesLeft.length);
+  } catch (e) {
+    console.warn('[comparison] Config B falhou:', e);
+    devConfigB = null;
+  }
+
+  // ── Dev: Config C (KernelRidge + fused, scaler separado 276 dims) ───────────
+  const fusedRowsLeft:  number[][] = [];
+  const fusedRowsRight: number[][] = [];
+  const fusedTgtsX: number[] = [];
+  const fusedTgtsY: number[] = [];
+  for (let i = 0; i < profile.length; i++) {
+    const fl = profile[i].fusedLeft;
+    const fr = profile[i].fusedRight;
+    if (fl && fr) {
+      fusedRowsLeft.push(fl);
+      fusedRowsRight.push(fr);
+      fusedTgtsX.push(trainTargets[i].screenX);
+      fusedTgtsY.push(trainTargets[i].screenY);
+    }
+  }
+  if (fusedRowsLeft.length >= 9) {
+    try {
+      // Fit scaler no conjunto completo (para estatísticas de normalização corretas),
+      // depois subsampla para o treino do KR que é O(n⁴).
+      fusedScalerLeft.fit(fusedRowsLeft);
+      fusedScalerRight.fit(fusedRowsRight);
+      const scaledFLAll = fusedScalerLeft.transform(fusedRowsLeft);
+      const scaledFRAll = fusedScalerRight.transform(fusedRowsRight);
+      const idxC   = subsampleIndices(scaledFLAll.length, MAX_KR_SAMPLES);
+      const scaledFL = idxC.map(i => scaledFLAll[i]);
+      const scaledFR = idxC.map(i => scaledFRAll[i]);
+      const cTgtsX   = idxC.map(i => fusedTgtsX[i]);
+      const cTgtsY   = idxC.map(i => fusedTgtsY[i]);
+      const krFL = createRegressor('kernel_ridge');
+      const krFR = createRegressor('kernel_ridge');
+      krFL.train(scaledFL, cTgtsX, cTgtsY);
+      krFR.train(scaledFR, cTgtsX, cTgtsY);
+      devConfigC = { left: krFL, right: krFR };
+      devConfigCReason = null;
+      console.log('[comparison] Config C (KR+fused %d dims) treinada — %d/%d amostras',
+        fusedRowsLeft[0].length, idxC.length, fusedRowsLeft.length);
+
+      // Diagnóstico temporário: verifica se o embedding CNN varia entre frames de calibração.
+      // Se pcaVarianceMean ≈ 0, o encoder gera embeddings constantes independente do gaze →
+      // Config C degenera para comportamento igual a Config B (só geometria).
+      const pcaDimsC = fusedRowsLeft[0].length - scaledFeaturesLeft[0].length;
+      let pcaVarAccum = 0;
+      for (let d = 0; d < pcaDimsC; d++) {
+        let s = 0;
+        for (let r = 0; r < fusedRowsLeft.length; r++) s += fusedRowsLeft[r][d];
+        const m = s / fusedRowsLeft.length;
+        let sq = 0;
+        for (let r = 0; r < fusedRowsLeft.length; r++) {
+          const diff = fusedRowsLeft[r][d] - m;
+          sq += diff * diff;
+        }
+        pcaVarAccum += sq / fusedRowsLeft.length;
+      }
+      const pcaVarianceMean = pcaVarAccum / pcaDimsC;
+      const embStatus = pcaVarianceMean < 1e-8
+        ? 'CONSTANTE (bug: CNN não variando — C degenerará para B)'
+        : pcaVarianceMean < 0.001
+          ? 'quase constante (suspeito — verificar eyeCrop/encoder)'
+          : 'variando (OK)';
+      console.log(`[comparison] Config C diagnóstico treino: dims=${fusedRowsLeft[0].length} (pca=${pcaDimsC} + geo=${scaledFeaturesLeft[0].length}) | pcaVarianceMean=${pcaVarianceMean.toFixed(8)} | embedding: ${embStatus}`);
+      const midIdx = Math.floor(fusedRowsLeft.length / 2);
+      console.log('[comparison] Config C PCA[0..2]: row[0]=%s | row[mid]=%s | row[-1]=%s',
+        JSON.stringify(fusedRowsLeft[0].slice(0, 3).map((v: number) => +v.toFixed(4))),
+        JSON.stringify(fusedRowsLeft[midIdx].slice(0, 3).map((v: number) => +v.toFixed(4))),
+        JSON.stringify(fusedRowsLeft[fusedRowsLeft.length - 1].slice(0, 3).map((v: number) => +v.toFixed(4))));
+      _configCPredLogCount = 0;
+    } catch (e) {
+      console.warn('[comparison] Config C falhou:', e);
+      devConfigC = null;
+      devConfigCReason = 'erro durante treinamento do KR+fused';
+    }
+  } else {
+    console.warn('[comparison] Config C ignorada: %d/%d amostras com fused features',
+      fusedRowsLeft.length, profile.length);
+    devConfigC = null;
+    devConfigCReason = `embedding insuficiente: ${fusedRowsLeft.length}/${profile.length} amostras com fused disponíveis (mínimo 9)`;
+  }
 
   saveProfile();
   cleanupOverlay();
@@ -945,6 +1103,45 @@ export function init() {
 }
 
 // ── Mapeamento de Olhar ───────────────────────────────────────────────────────
+
+/** Prediz usando Config B (KR+geo) ou C (KR+fused) — apenas para comparação dev. */
+export function mapGazeWithConfig(
+  config: 'B' | 'C',
+  featuresLeft: number[],
+  featuresRight: number[],
+  fusedLeft?: number[] | null,
+  fusedRight?: number[] | null,
+): { x: number; y: number } | null {
+  if (config === 'B') {
+    if (!devConfigB) return null;
+    const sl = featureScalerLeft.transformSingle(featuresLeft);
+    const sr = featureScalerRight.transformSingle(featuresRight);
+    const pl = devConfigB.left.predict(sl);
+    const pr = devConfigB.right.predict(sr);
+    return { x: (pl.x + pr.x) / 2, y: (pl.y + pr.y) / 2 };
+  }
+  if (config === 'C') {
+    if (!devConfigC || !fusedLeft || !fusedRight) return null;
+    // Log das primeiras 3 inferências: confirma dimensão e que PCA[0..2] varia entre pontos.
+    if (_configCPredLogCount < 3) {
+      _configCPredLogCount++;
+      console.log('[comparison] Config C inferência #%d: fusedLeft.length=%d | pca[0..2]=%s',
+        _configCPredLogCount, fusedLeft.length,
+        JSON.stringify(fusedLeft.slice(0, 3).map(v => +v.toFixed(4))));
+    }
+    const sl = fusedScalerLeft.transformSingle(fusedLeft);
+    const sr = fusedScalerRight.transformSingle(fusedRight);
+    const pl = devConfigC.left.predict(sl);
+    const pr = devConfigC.right.predict(sr);
+    return { x: (pl.x + pr.x) / 2, y: (pl.y + pr.y) / 2 };
+  }
+  return null;
+}
+
+/** Indica quais configs dev estão disponíveis e por que C pode estar ausente. */
+export function hasDevConfigs(): { B: boolean; C: boolean; cReason: string | null } {
+  return { B: devConfigB !== null, C: devConfigC !== null, cReason: devConfigCReason };
+}
 
 export function mapGaze(featuresLeft: number[], featuresRight: number[]): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
