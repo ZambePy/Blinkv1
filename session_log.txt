@@ -1,0 +1,208 @@
+
+> irisflow@0.0.0 electron:dev
+> node electron/dev.mjs
+
+[electron:dev] compilando electron main/preload (modo watch)...
+[electron:build] observando electron/ para recompilar automaticamente...
+[electron:dev] iniciando servidor Vite...
+[watch] build finished, watching for changes...
+(node:10192) [DEP0190] DeprecationWarning: Passing args to a child process with shell option true can lead to security vulnerabilities, as the arguments are not escaped, only concatenated.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+
+  [32m[1mVITE[22m v8.0.16[39m  [2mready in [0m[1m184[22m[2m[0m ms[22m
+
+  [32m➜[39m  [1mLocal[22m:   [36mhttp://localhost:[1m5173[22m/[39m
+[2m  [32m➜[39m  [1mNetwork[22m[2m: use [22m[1m--host[22m[2m to expose[22m
+[electron:dev] servidor Vite pronto em http://localhost:5173, abrindo Electron...
+
+[encoderRunner] modelo carregado (C:\Users\gabri\OneDrive\Desktop\PROJETO STARTUP\resources\models\gaze_encoder.onnx) com provider "dml"
+[main] sessao ONNX carregada no boot em 450 ms
+(electron) 'console-message' arguments are deprecated and will be removed. Please use Event<WebContentsConsoleMessageEventParams> object instead.
+[renderer] [fusion] PCA carregado: 18 componentes, 18.0 KB de dados
+[2m16:25:14[22m [33m[1m[vite][22m[39m [33m[2m(client)[22m[39m [2m[console.warn] [22mW0711 19:25:14.276000 2136208 face_landmarker_graph.cc:180] Sets FaceBlendshapesGraph acceleration to xnnpack by default.
+[2m16:25:14[22m [33m[1m[vite][22m[39m [33m[2m(client)[22m[39m [2m[console.warn] [22mW0711 19:25:14.360999 2136208 gl_context.cc:1118] OpenGL error checking is disabled
+[2m16:25:19[22m [31m[1m[vite][22m[39m [31m[2m(client)[22m[39m [2m[console.error] [22mINFO: Created TensorFlow Lite XNNPACK delegate for CPU.
+[renderer] [IPC] round-trip n=20 | avg=118.0 ms | last=4.0 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.8 ms
+[renderer] [IPC] round-trip n=40 | avg=62.5 ms | last=4.1 ms | min=3.7 ms | max=583.6 ms | p50(last20)=6.3 ms
+[renderer] [eyeCrop] avg 6.30 ms/frame | last 2.50 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=60 | avg=43.1 ms | last=4.2 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=80 | avg=33.3 ms | last=3.9 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=100 | avg=27.5 ms | last=4.0 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [eyeCrop] avg 4.41 ms/frame | last 2.90 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=120 | avg=23.6 ms | last=3.9 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=140 | avg=20.9 ms | last=5.5 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=160 | avg=18.8 ms | last=4.0 ms | min=3.7 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [eyeCrop] avg 4.02 ms/frame | last 2.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=180 | avg=17.1 ms | last=4.2 ms | min=3.6 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=200 | avg=15.8 ms | last=4.6 ms | min=3.6 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=220 | avg=14.8 ms | last=3.7 ms | min=3.6 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 3.65 ms/frame | last 2.40 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=240 | avg=13.9 ms | last=4.7 ms | min=3.6 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=260 | avg=13.1 ms | last=4.6 ms | min=3.6 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [IrisFlow] DwellEvent: dwell 1051 93
+[renderer] [IPC] round-trip n=280 | avg=12.5 ms | last=3.8 ms | min=3.6 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 3.46 ms/frame | last 2.00 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=300 | avg=11.9 ms | last=4.1 ms | min=3.6 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=320 | avg=11.4 ms | last=3.7 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=340 | avg=11.0 ms | last=3.5 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.7 ms
+[renderer] [eyeCrop] avg 3.52 ms/frame | last 14.40 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=360 | avg=10.7 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=380 | avg=10.3 ms | last=4.2 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [calib] ponto 1/9 "Canto Superior Esquerdo" aceito: frames=24 (fused=24/24) | varL=0.000002 varR=0.000002 | threshold=0.000500
+[renderer] [IPC] round-trip n=400 | avg=10.0 ms | last=4.1 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 5.10 ms/frame | last 14.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=420 | avg=9.7 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=440 | avg=9.5 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [calib] ponto 2/9 "Superior Centro" aceito: frames=24 (fused=24/24) | varL=0.000001 varR=0.000001 | threshold=0.000500
+[renderer] [IPC] round-trip n=460 | avg=9.2 ms | last=3.7 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 6.26 ms/frame | last 14.70 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=480 | avg=9.0 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [calib] ponto 3/9 "Canto Superior Direito" aceito: frames=24 (fused=24/24) | varL=0.000001 varR=0.000001 | threshold=0.000500
+[renderer] [IPC] round-trip n=500 | avg=8.8 ms | last=3.7 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=520 | avg=8.6 ms | last=3.8 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 7.19 ms/frame | last 14.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=540 | avg=8.5 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [calib] ponto 4/9 "Médio Esquerdo" aceito: frames=24 (fused=24/24) | varL=0.000002 varR=0.000001 | threshold=0.000500
+[renderer] [IPC] round-trip n=560 | avg=8.3 ms | last=5.8 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=580 | avg=8.1 ms | last=3.8 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [calib] ponto 5/9 "Centro" aceito: frames=23 (fused=23/23) | varL=0.000005 varR=0.000004 | threshold=0.000500
+[renderer] [eyeCrop] avg 7.93 ms/frame | last 14.50 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=600 | avg=8.0 ms | last=3.8 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=620 | avg=7.9 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [calib] ponto 6/9 "Médio Direito" aceito: frames=23 (fused=23/23) | varL=0.000003 varR=0.000003 | threshold=0.000500
+[renderer] [IPC] round-trip n=640 | avg=7.8 ms | last=3.7 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 8.53 ms/frame | last 14.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=660 | avg=7.6 ms | last=3.9 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=680 | avg=7.5 ms | last=3.8 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [calib] ponto 7/9 "Canto Inferior Esquerdo" aceito: frames=23 (fused=23/23) | varL=0.000002 varR=0.000002 | threshold=0.000500
+[renderer] [IPC] round-trip n=700 | avg=7.4 ms | last=3.6 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 9.02 ms/frame | last 14.40 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=720 | avg=7.3 ms | last=4.3 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=740 | avg=7.3 ms | last=3.9 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [calib] ponto 8/9 "Inferior Centro" aceito: frames=23 (fused=23/23) | varL=0.000003 varR=0.000003 | threshold=0.000500
+[renderer] [IPC] round-trip n=760 | avg=7.2 ms | last=6.4 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 9.45 ms/frame | last 14.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=780 | avg=7.1 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [calib] ponto 9/9 "Canto Inferior Direito" aceito: frames=23 (fused=23/23) | varL=0.000003 varR=0.000003 | threshold=0.000500
+[renderer] [IPC] round-trip n=800 | avg=7.0 ms | last=3.7 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.7 ms
+[renderer] [IPC] round-trip n=820 | avg=6.9 ms | last=4.6 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.7 ms
+[renderer] [eyeCrop] avg 9.26 ms/frame | last 2.10 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=840 | avg=6.9 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=860 | avg=6.8 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=880 | avg=6.7 ms | last=4.3 ms | min=3.5 ms | max=583.6 ms | p50(last20)=4.0 ms
+[renderer] [eyeCrop] avg 8.80 ms/frame | last 2.40 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=900 | avg=6.7 ms | last=4.4 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=920 | avg=6.6 ms | last=4.3 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=940 | avg=6.5 ms | last=3.9 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 8.45 ms/frame | last 2.50 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=960 | avg=6.5 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=980 | avg=6.4 ms | last=3.9 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=1000 | avg=6.4 ms | last=3.7 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 8.14 ms/frame | last 14.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1020 | avg=6.3 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=1040 | avg=6.3 ms | last=4.0 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=1060 | avg=6.3 ms | last=3.8 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 7.88 ms/frame | last 2.20 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1080 | avg=6.2 ms | last=4.1 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=1100 | avg=6.2 ms | last=3.9 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=1120 | avg=6.1 ms | last=3.6 ms | min=3.5 ms | max=583.6 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 7.59 ms/frame | last 2.40 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1140 | avg=6.1 ms | last=3.9 ms | min=3.4 ms | max=583.6 ms | p50(last20)=3.6 ms
+[renderer] [IPC] round-trip n=1160 | avg=6.1 ms | last=3.8 ms | min=3.4 ms | max=583.6 ms | p50(last20)=3.8 ms
+[renderer] [comparison] Config B (KR+geo) treinada — %d/%d amostras 25 560
+[renderer] [comparison] Config C (KR+fused %d dims) treinada — %d/%d amostras 276 25 560
+[renderer] [comparison] Config C diagnóstico treino: dims=276 (pca=18 + geo=258) | pcaVarianceMean=0.00512161 | embedding: variando (OK)
+[renderer] [comparison] Config C PCA[0..2]: row[0]=%s | row[mid]=%s | row[-1]=%s [-0.5175,-0.3094,-0.7224] [-0.5478,-0.2583,-0.628] [-0.403,-0.3846,-0.4611]
+[renderer] [IPC] round-trip n=1180 | avg=7.0 ms | last=1199.5 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 7.32 ms/frame | last 2.40 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1200 | avg=7.0 ms | last=3.9 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [comparison] Config C inferência #%d: fusedLeft.length=%d | pca[0..2]=%s 1 276 [-0.574,-0.2241,-0.7324]
+[renderer] [comparison] Config C inferência #%d: fusedLeft.length=%d | pca[0..2]=%s 2 276 [-0.574,-0.2241,-0.7324]
+[renderer] [comparison] Config C inferência #%d: fusedLeft.length=%d | pca[0..2]=%s 3 276 [-0.574,-0.2241,-0.7324]
+[renderer] [IPC] round-trip n=1220 | avg=6.9 ms | last=4.1 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.2 ms
+[renderer] [IPC] round-trip n=1240 | avg=6.9 ms | last=4.5 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.3 ms
+[renderer] [eyeCrop] avg 7.09 ms/frame | last 2.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1260 | avg=6.9 ms | last=4.4 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.1 ms
+[renderer] [IPC] round-trip n=1280 | avg=6.8 ms | last=4.2 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.1 ms
+[renderer] [IPC] round-trip n=1300 | avg=6.8 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.1 ms
+[renderer] [eyeCrop] avg 6.88 ms/frame | last 2.50 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1320 | avg=6.7 ms | last=4.4 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=1340 | avg=6.7 ms | last=5.5 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=1360 | avg=6.7 ms | last=4.0 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [accuracy] === RESULTADO FINAL ===
+[renderer] [accuracy] Resolução: 1920×983px | distância estimada: 2268px
+[renderer] [accuracy] Config A (Ridge+geo): mean=363px / 9.11° | max=812px | Ruim
+[renderer] [accuracy]   Superior Esq      : A=287px ✗ | B=853px ✗ | C=853px ✗
+[renderer] [accuracy]   Superior Centro   : A=156px ✗ | B=385px ✗ | C=385px ✗
+[renderer] [accuracy]   Superior Dir      : A=295px ✗ | B=865px ✗ | C=865px ✗
+[renderer] [accuracy]   Médio Esq         : A=738px ✗ | B=761px ✗ | C=761px ✗
+[renderer] [accuracy]   Centro            : A=255px ✗ | B=11px | C=11px
+[renderer] [accuracy]   Médio Dir         : A=242px ✗ | B=774px ✗ | C=775px ✗
+[renderer] [accuracy]   Inferior Esq      : A=812px ✗ | B=861px ✗ | C=861px ✗
+[renderer] [accuracy]   Inferior Centro   : A=185px ✗ | B=402px ✗ | C=402px ✗
+[renderer] [accuracy]   Inferior Dir      : A=300px ✗ | B=872px ✗ | C=872px ✗
+[renderer] [accuracy] Config B (KR+geo):   mean=643px / 15.82° | max=872px
+[renderer] [accuracy] Config C (KR+fused): mean=643px / 15.82° | max=872px
+[renderer] [accuracy] === FIM ===
+[renderer] [eyeCrop] avg 6.69 ms/frame | last 2.70 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1380 | avg=6.6 ms | last=4.6 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=1400 | avg=6.6 ms | last=3.9 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=1420 | avg=6.6 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.8 ms
+[renderer] [eyeCrop] avg 6.62 ms/frame | last 2.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1440 | avg=6.6 ms | last=8.2 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=1460 | avg=6.5 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=1480 | avg=6.5 ms | last=4.0 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 6.45 ms/frame | last 2.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1500 | avg=6.5 ms | last=4.2 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=1520 | avg=6.4 ms | last=3.7 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [IrisFlow] DwellEvent: dwell 1354 434
+[renderer] [IPC] round-trip n=1540 | avg=6.4 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 6.30 ms/frame | last 2.50 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1560 | avg=6.4 ms | last=6.4 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=1580 | avg=6.4 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.8 ms
+[renderer] [IPC] round-trip n=1600 | avg=6.3 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [eyeCrop] avg 6.16 ms/frame | last 2.60 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1620 | avg=6.3 ms | last=4.4 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [IrisFlow] DwellEvent: dwell 582 899
+[renderer] [IPC] round-trip n=1640 | avg=6.3 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.8 ms
+[renderer] [IrisFlow] DwellEvent: dwell 382 916
+[renderer] [IPC] round-trip n=1660 | avg=6.3 ms | last=4.3 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.1 ms
+[renderer] [eyeCrop] avg 6.05 ms/frame | last 2.30 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1680 | avg=6.2 ms | last=4.3 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IrisFlow] DwellEvent: dwell 72 889
+[renderer] [IPC] round-trip n=1700 | avg=6.2 ms | last=3.8 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IPC] round-trip n=1720 | avg=6.2 ms | last=3.7 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=4.0 ms
+[renderer] [IrisFlow] DwellEvent: dwell 13 669
+[renderer] [eyeCrop] avg 5.93 ms/frame | last 2.90 ms | input=ok
+[renderer] [fusion] FEATURE_MODE=geometry_only | fused dims=276 (pca=18+geo=258) | embedding=ok
+[renderer] [IPC] round-trip n=1740 | avg=6.2 ms | last=4.1 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [IPC] round-trip n=1760 | avg=6.2 ms | last=3.9 ms | min=3.4 ms | max=1199.5 ms | p50(last20)=3.9 ms
+[renderer] [IrisFlow] DwellEvent: dwell 2 798

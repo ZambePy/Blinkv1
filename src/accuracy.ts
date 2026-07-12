@@ -254,6 +254,36 @@ function finishTest(
     }));
   } catch (_) { }
 
+  // Loga resultados no terminal para captura em arquivo de sessão
+  console.log(`[accuracy] === RESULTADO FINAL ===`);
+  console.log(`[accuracy] Resolução: ${vw}×${vh}px | distância estimada: ${ASSUMED_DIST_PX}px`);
+  console.log(`[accuracy] Config A (Ridge+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | ${score}`);
+  for (const d of diagnostics) {
+    const bStr = d.errorB !== null ? `B=${Math.round(d.errorB)}px` : 'B=N/A';
+    const cStr = d.errorC !== null ? `C=${Math.round(d.errorC)}px` : 'C=N/A';
+    const flag = (e: number | null) => e !== null && e > 45 ? ' ✗' : '';
+    console.log(`[accuracy]   ${d.name.padEnd(18)}: A=${Math.round(d.error)}px${flag(d.error)} | ${bStr}${d.errorB !== null ? flag(d.errorB) : ''} | ${cStr}${d.errorC !== null ? flag(d.errorC) : ''}`);
+  }
+  const validB = diagnostics.map(d => d.errorB).filter((e): e is number => e !== null);
+  if (validB.length) {
+    const meanB = validB.reduce((s, v) => s + v, 0) / validB.length;
+    const maxB  = Math.max(...validB);
+    const degB  = (Math.atan(meanB / ASSUMED_DIST_PX) * 180) / Math.PI;
+    console.log(`[accuracy] Config B (KR+geo):   mean=${Math.round(meanB)}px / ${degB.toFixed(2)}° | max=${Math.round(maxB)}px`);
+  } else {
+    console.log('[accuracy] Config B: não disponível');
+  }
+  const validC = diagnostics.map(d => d.errorC).filter((e): e is number => e !== null);
+  if (validC.length) {
+    const meanC = validC.reduce((s, v) => s + v, 0) / validC.length;
+    const maxC  = Math.max(...validC);
+    const degC  = (Math.atan(meanC / ASSUMED_DIST_PX) * 180) / Math.PI;
+    console.log(`[accuracy] Config C (KR+fused): mean=${Math.round(meanC)}px / ${degC.toFixed(2)}° | max=${Math.round(maxC)}px`);
+  } else {
+    console.log('[accuracy] Config C: não disponível');
+  }
+  console.log(`[accuracy] === FIM ===`);
+
   // Mostra o diagnóstico visual antes de chamar onComplete
   showDiagnosticOverlay(diagnostics, result, onComplete);
 }

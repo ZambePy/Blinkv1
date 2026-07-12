@@ -33,7 +33,15 @@ function createWindow(): void {
     // Espelha logs do renderer no terminal (util para timing e diagnostico).
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (win.webContents as any).on('console-message', (_e: unknown, _level: number, message: string) => {
-      if (message?.includes('[eyeCrop]') || message?.includes('[IrisFlow]') || message?.includes('[fusion]') || message?.includes('[IPC]')) {
+      if (
+        message?.includes('[eyeCrop]') ||
+        message?.includes('[IrisFlow]') ||
+        message?.includes('[fusion]') ||
+        message?.includes('[IPC]') ||
+        message?.includes('[calib]') ||
+        message?.includes('[comparison]') ||
+        message?.includes('[accuracy]')
+      ) {
         console.log(`[renderer] ${message}`);
       }
     });

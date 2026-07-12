@@ -1,26 +1,19 @@
 import type { GazeRegressor } from './gazeRegressor';
-import { createRegressor, ridgeRegressorFromModel, ridgeModelFromRegressor } from './gazeRegressor';
+import { createRegressor, ridgeRegressorFromModel, ridgeModelFromRegressor, kernelRidgeRegressorFromModel, kernelRidgeModelFromRegressor, svrRegressorFromModel, svrModelFromRegressor, REGRESSOR_MODE } from './gazeRegressor';
 import { startAccuracyTest, isAccuracyTesting } from './accuracy';
 import { StandardScaler } from './scaler';
+import { FEATURE_MODE } from './featurePipeline';
 
-interface CalibrationPoint {
+export interface CalibrationPoint {
   screenX: number;
   screenY: number;
   featuresLeft: number[];
   featuresRight: number[];
-  fusedLeft?: number[] | null;   // NEW
-  fusedRight?: number[] | null;  // NEW
+  fusedLeft?: number[] | null;
+  fusedRight?: number[] | null;
 }
 
-interface DynamicSample {
-  screenX: number;
-  screenY: number;
-  featuresLeft: number[];
-  featuresRight: number[];
-  fusedLeft?: number[] | null;   // NEW
-  fusedRight?: number[] | null;  // NEW
-  weight: number;
-}
+
 
 // ── Grade 3×3 (9 pontos) — foco nos cantos, bordas e centro ──────────────────
 const TARGET_POINTS = [
@@ -37,25 +30,10 @@ const TARGET_POINTS = [
 
 const COLLECTION_MS        = 1500;
 const TRANSITION_MS        = 1000;
-const DYN_MOVE_MS          = 1200;
-const DYN_PULSE_MS         = 1500;
 
-// Snake path 3×3 cobrindo toda a tela
-const DYNAMIC_WAYPOINTS = [
-  { x: 0.05, y: 0.05 },
-  { x: 0.50, y: 0.05 },
-  { x: 0.95, y: 0.05 },
-  { x: 0.95, y: 0.50 },
-  { x: 0.50, y: 0.50 },
-  { x: 0.05, y: 0.50 },
-  { x: 0.05, y: 0.95 },
-  { x: 0.50, y: 0.95 },
-  { x: 0.95, y: 0.95 },
-];
 
 let profile: CalibrationPoint[] = [];
 export let isCalibrating = false;
-let isDynamicCalibrating = false;
 let currentPointIndex = 0;
 let isCollecting = false;
 let collectionStartTime = 0;
@@ -65,10 +43,6 @@ let collectedFeaturesRight: number[][] = [];
 let collectedFusedLeft: (number[] | null)[] = [];
 let collectedFusedRight: (number[] | null)[] = [];
 
-let dynamicSamples: DynamicSample[] = [];
-let dynamicBallX = 0.5;
-let dynamicBallY = 0.5;
-let dynamicIsFixation = false;
 
 // ── Gaze regressors (implementation selected via GazeRegressor interface) ────
 let regressorLeft: GazeRegressor | null = null;
@@ -114,7 +88,6 @@ export interface GazeDistanceLogEntry {
 
 function currentGazePhase(): GazeLogPhase {
   if (isAccuracyTesting) return 'validation';
-  if (isDynamicCalibrating) return 'dynamic';
   if (isCalibrating) return 'calibration';
   return 'live';
 }
@@ -208,7 +181,22 @@ export function loadProfile(): boolean {
     const saved = localStorage.getItem("calibrationProfile");
     if (saved) {
       const parsed = JSON.parse(saved);
-      if (parsed.ridgeModelLeft && parsed.ridgeModelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
+      if (parsed.modelLeft && parsed.modelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
+        if (parsed.regressorMode === 'svr') {
+          regressorLeft = svrRegressorFromModel(parsed.modelLeft);
+          regressorRight = svrRegressorFromModel(parsed.modelRight);
+        } else if (parsed.regressorMode === 'kernel_ridge') {
+          regressorLeft = kernelRidgeRegressorFromModel(parsed.modelLeft);
+          regressorRight = kernelRidgeRegressorFromModel(parsed.modelRight);
+        } else {
+          regressorLeft = ridgeRegressorFromModel(parsed.modelLeft);
+          regressorRight = ridgeRegressorFromModel(parsed.modelRight);
+        }
+        featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
+        featureScalerRight.setParams(parsed.scalerParamsRight.means, parsed.scalerParamsRight.stds);
+        return true;
+      } else if (parsed.ridgeModelLeft && parsed.ridgeModelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
+        // Fallback for old saved profiles
         regressorLeft = ridgeRegressorFromModel(parsed.ridgeModelLeft);
         regressorRight = ridgeRegressorFromModel(parsed.ridgeModelRight);
         featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
@@ -226,12 +214,23 @@ export function loadProfile(): boolean {
 
 function saveProfile() {
   if (regressorLeft && regressorRight) {
-    const modelLeft = ridgeModelFromRegressor(regressorLeft);
-    const modelRight = ridgeModelFromRegressor(regressorRight);
+    let modelLeft, modelRight;
+    if (REGRESSOR_MODE === 'svr') {
+      modelLeft = svrModelFromRegressor(regressorLeft);
+      modelRight = svrModelFromRegressor(regressorRight);
+    } else if (REGRESSOR_MODE === 'kernel_ridge') {
+      modelLeft = kernelRidgeModelFromRegressor(regressorLeft);
+      modelRight = kernelRidgeModelFromRegressor(regressorRight);
+    } else {
+      modelLeft = ridgeModelFromRegressor(regressorLeft);
+      modelRight = ridgeModelFromRegressor(regressorRight);
+    }
+
     if (modelLeft && modelRight) {
       localStorage.setItem("calibrationProfile", JSON.stringify({
-        ridgeModelLeft: modelLeft,
-        ridgeModelRight: modelRight,
+        regressorMode: REGRESSOR_MODE,
+        modelLeft: modelLeft,
+        modelRight: modelRight,
         scalerParamsLeft: featureScalerLeft.getParams(),
         scalerParamsRight: featureScalerRight.getParams()
       }));
@@ -437,7 +436,6 @@ export function startCalibrationMode() {
   currentPointIndex = 0;
   isCollecting = false;
   profile = [];
-  dynamicSamples = [];
   collectedFeaturesLeft = [];
   collectedFeaturesRight = [];
   collectedFusedLeft = [];
@@ -499,8 +497,6 @@ function runAccuracyTest() {
 }
 
 function cancelCalibration() {
-  isDynamicCalibrating = false;
-  dynamicSamples = [];
   cleanupOverlay();
   loadProfile();
   updateStatusUI();
@@ -566,7 +562,7 @@ function showNextPoint() {
 }
 
 function startCollection() {
-  if (isDynamicCalibrating || isCollecting || !isCalibrating) return;
+  if (isCollecting || !isCalibrating) return;
   isCollecting = true;
   collectionStartTime = performance.now();
   collectedFeaturesLeft = [];
@@ -590,18 +586,7 @@ export function feedRawData(
   fusedLeft?: number[] | null,
   fusedRight?: number[] | null,
 ) {
-  if (isDynamicCalibrating) {
-    dynamicSamples.push({
-      screenX: dynamicBallX,
-      screenY: dynamicBallY,
-      featuresLeft,
-      featuresRight,
-      fusedLeft: fusedLeft ?? null,
-      fusedRight: fusedRight ?? null,
-      weight: dynamicIsFixation ? 3.0 : 1.0
-    });
-    return;
-  }
+  
 
   if (!isCalibrating || !isCollecting) return;
 
@@ -617,6 +602,15 @@ export function feedRawData(
 }
 
 function processStaticPoint() {
+  // Descartar os últimos 3 frames de cada ponto para remover ruído de transição do olhar (GazeFollower approach)
+  const DROP_FRAMES = 3;
+  if (collectedFeaturesLeft.length > DROP_FRAMES) {
+    collectedFeaturesLeft.length -= DROP_FRAMES;
+    collectedFeaturesRight.length -= DROP_FRAMES;
+    collectedFusedLeft.length -= DROP_FRAMES;
+    collectedFusedRight.length -= DROP_FRAMES;
+  }
+
   const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
   const avgVarRight = calculateFeatureVariance(collectedFeaturesRight);
 
@@ -671,7 +665,7 @@ function processStaticPoint() {
     if (currentPointIndex < TARGET_POINTS.length) {
       showNextPoint();
     } else {
-      transitionToDynamicPhase();
+      completeCalibration();
     }
   }, TRANSITION_MS);
 }
@@ -679,141 +673,14 @@ function processStaticPoint() {
 // Warnings removidos
 
 function handleGlobalKeyDown(e: KeyboardEvent) {
-  if (!isCalibrating || isCollecting || isDynamicCalibrating) return;
+  if (!isCalibrating || isCollecting ) return;
   if (e.code === "Space" || e.code === "Enter") {
     e.preventDefault();
     startCollection();
   }
 }
 
-// ── Fase 2: Calibração Dinâmica ──────────────────────────────────────────────
-
-function transitionToDynamicPhase() {
-  document.getElementById("calibration-dot")?.remove();
-
-  const instruction = document.getElementById("calibration-instruction");
-  if (instruction) {
-    instruction.innerHTML = `
-      <span class="phase-badge">Fase 1 concluída ✓</span>
-      <p class="phase-sub">Preparando calibração dinâmica…</p>
-    `;
-  }
-
-  setTimeout(startDynamicCalibration, 2000);
-}
-
-function startDynamicCalibration() {
-  isDynamicCalibrating = true;
-  dynamicSamples = [];
-
-  const overlay = document.getElementById("calibration-overlay");
-  if (!overlay) return;
-  overlay.classList.add("dynamic-phase");
-
-  const instruction = document.getElementById("calibration-instruction");
-  if (instruction) {
-    instruction.innerHTML = `
-      <span class="phase-badge">Fase 2 / 2 — Calibração Dinâmica</span>
-      <p class="phase-sub">Acompanhe a bolinha com os olhos suavemente</p>
-    `;
-  }
-
-  // Indicador de progresso
-  const progressEl = document.createElement("div");
-  progressEl.id = "dynamic-progress";
-  progressEl.className = "dynamic-progress";
-  DYNAMIC_WAYPOINTS.forEach((_, i) => {
-    const d = document.createElement("div");
-    d.className = "progress-dot" + (i === 0 ? " active" : "");
-    d.id = `pdot-${i}`;
-    progressEl.appendChild(d);
-  });
-  overlay.appendChild(progressEl);
-
-  // Bolinha no primeiro waypoint
-  const ball = document.createElement("div");
-  ball.id = "dynamic-ball";
-  ball.className = "dynamic-ball";
-  const wp0 = DYNAMIC_WAYPOINTS[0];
-  ball.style.left = `${wp0.x * window.innerWidth}px`;
-  ball.style.top  = `${wp0.y * window.innerHeight}px`;
-  dynamicBallX = wp0.x;
-  dynamicBallY = wp0.y;
-  overlay.appendChild(ball);
-
-  setTimeout(() => pulseBall(ball, () => runDynamicSequence(1)), 500);
-}
-
-function runDynamicSequence(index: number) {
-  if (index >= DYNAMIC_WAYPOINTS.length) {
-    completeDynamicCalibration();
-    return;
-  }
-
-  const prev = document.getElementById(`pdot-${index - 1}`);
-  if (prev) { prev.classList.remove("active"); prev.classList.add("done"); }
-  const curr = document.getElementById(`pdot-${index}`);
-  if (curr) curr.classList.add("active");
-
-  const ball = document.getElementById("dynamic-ball") as HTMLElement | null;
-  if (!ball) return;
-
-  moveBallSmoothly(ball, DYNAMIC_WAYPOINTS[index], () => {
-    pulseBall(ball, () => runDynamicSequence(index + 1));
-  });
-}
-
-function moveBallSmoothly(
-  ball: HTMLElement,
-  target: { x: number; y: number },
-  onComplete: () => void
-) {
-  const startX = dynamicBallX * window.innerWidth;
-  const startY = dynamicBallY * window.innerHeight;
-  const endX   = target.x * window.innerWidth;
-  const endY   = target.y * window.innerHeight;
-  const t0     = performance.now();
-
-  dynamicIsFixation = false;
-
-  function frame() {
-    const t = Math.min((performance.now() - t0) / DYN_MOVE_MS, 1.0);
-    const e = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
-
-    dynamicBallX = (startX + (endX - startX) * e) / window.innerWidth;
-    dynamicBallY = (startY + (endY - startY) * e) / window.innerHeight;
-    ball.style.left = `${dynamicBallX * window.innerWidth}px`;
-    ball.style.top  = `${dynamicBallY * window.innerHeight}px`;
-
-    if (t < 1.0) {
-      requestAnimationFrame(frame);
-    } else {
-      dynamicBallX = target.x;
-      dynamicBallY = target.y;
-      onComplete();
-    }
-  }
-
-  requestAnimationFrame(frame);
-}
-
-function pulseBall(ball: HTMLElement, onComplete: () => void) {
-  dynamicIsFixation = true;
-  ball.classList.remove("pulsing");
-  void ball.offsetWidth;
-  ball.classList.add("pulsing");
-
-  setTimeout(() => {
-    ball.classList.remove("pulsing");
-    dynamicIsFixation = false;
-    onComplete();
-  }, DYN_PULSE_MS);
-}
-
-// LOO-CV do KernelRidge é O(n⁴) — projetado para n≤25. Com o profile completo
-// (todos os frames de 9 pts × ~45fps × 1500ms ≈ 400+ amostras + dinâmicas) o
-// renderer main thread bloquearia por horas. Subsamplamos uniformemente para
-// manter cobertura geográfica dentro do limite de design.
+// LOO-CV do KernelRidge é O(n⁴) — projetado para n≤25.
 const MAX_KR_SAMPLES = 25;
 
 function subsampleIndices(total: number, maxN: number): number[] {
@@ -821,54 +688,83 @@ function subsampleIndices(total: number, maxN: number): number[] {
   return Array.from({ length: maxN }, (_, i) => Math.round(i * (total - 1) / (maxN - 1)));
 }
 
-function completeDynamicCalibration() {
-  isDynamicCalibrating = false;
+function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): {
+  scaledFeaturesLeft: number[][];
+  scaledFeaturesRight: number[][];
+  targetsX: number[];
+  targetsY: number[];
+} {
+  const trainFeaturesLeft  = trainingProfile.map(p => p.featuresLeft);
+  const trainFeaturesRight = trainingProfile.map(p => p.featuresRight);
+  const trainTargets = trainingProfile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
 
-  // Adiciona amostras dinâmicas ao profile para treino massivo
-  for (const s of dynamicSamples) {
-    profile.push({
-      screenX: s.screenX,
-      screenY: s.screenY,
-      featuresLeft: s.featuresLeft,
-      featuresRight: s.featuresRight,
-      fusedLeft:  s.fusedLeft  ?? null,
-      fusedRight: s.fusedRight ?? null,
-    });
-  }
-
-  // Extrai matrizes de treino
-  const trainFeaturesLeft = profile.map(p => p.featuresLeft);
-  const trainFeaturesRight = profile.map(p => p.featuresRight);
-  const trainTargets = profile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
-
-  // Fit the Standard Scaler
   featureScalerLeft.fit(trainFeaturesLeft);
   featureScalerRight.fit(trainFeaturesRight);
 
-  // Normaliza features
-  const scaledFeaturesLeft = featureScalerLeft.transform(trainFeaturesLeft);
+  const scaledFeaturesLeft  = featureScalerLeft.transform(trainFeaturesLeft);
   const scaledFeaturesRight = featureScalerRight.transform(trainFeaturesRight);
 
-  // Treina os regressores binocularmente via interface GazeRegressor
   const targetsX = trainTargets.map(t => t.screenX);
   const targetsY = trainTargets.map(t => t.screenY);
-  regressorLeft = createRegressor('ridge');
-  regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY);
-  regressorRight = createRegressor('ridge');
-  regressorRight.train(scaledFeaturesRight, targetsX, targetsY);
 
-  // Cacheia as features de calibração já normalizadas para o diagnóstico de
-  // distância ao ponto mais próximo (ver mapGaze). Puramente para observação.
-  scaledProfileLeft = scaledFeaturesLeft;
-  scaledProfileRight = scaledFeaturesRight;
+  if (FEATURE_MODE === 'fused') {
+    const fusedRowsL: number[][] = [];
+    const fusedRowsR: number[][] = [];
+    const fusedTgtsX: number[]  = [];
+    const fusedTgtsY: number[]  = [];
+    for (let i = 0; i < trainingProfile.length; i++) {
+      const fl = trainingProfile[i].fusedLeft;
+      const fr = trainingProfile[i].fusedRight;
+      if (fl && fr) {
+        fusedRowsL.push(fl);
+        fusedRowsR.push(fr);
+        fusedTgtsX.push(trainTargets[i].screenX);
+        fusedTgtsY.push(trainTargets[i].screenY);
+      }
+    }
+    if (fusedRowsL.length < 9) {
+      throw new Error(`[calibration] FEATURE_MODE='fused' mas apenas \${fusedRowsL.length}/\${trainingProfile.length} amostras têm embedding`);
+    }
+    fusedScalerLeft.fit(fusedRowsL);
+    fusedScalerRight.fit(fusedRowsR);
+    const scaledFL = fusedScalerLeft.transform(fusedRowsL);
+    const scaledFR = fusedScalerRight.transform(fusedRowsR);
+    regressorLeft = createRegressor(REGRESSOR_MODE);
+    regressorLeft.train(scaledFL, fusedTgtsX, fusedTgtsY);
+    regressorRight = createRegressor(REGRESSOR_MODE);
+    regressorRight.train(scaledFR, fusedTgtsX, fusedTgtsY);
+    scaledProfileLeft  = scaledFL;
+    scaledProfileRight = scaledFR;
+  } else {
+    regressorLeft = createRegressor(REGRESSOR_MODE);
+    regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY);
+    regressorRight = createRegressor(REGRESSOR_MODE);
+    regressorRight.train(scaledFeaturesRight, targetsX, targetsY);
+    scaledProfileLeft  = scaledFeaturesLeft;
+    scaledProfileRight = scaledFeaturesRight;
+  }
+
+  return { scaledFeaturesLeft, scaledFeaturesRight, targetsX, targetsY };
+}
+
+export function runCalibrationTraining(testProfile: CalibrationPoint[]): void {
+  trainScalersAndRegressors(testProfile);
+}
+
+function completeCalibration() {
+
+  
+  // Treina scalers e regressores; retorna features geométricas escaladas (usadas por Config B)
+  const { scaledFeaturesLeft, scaledFeaturesRight, targetsX, targetsY } =
+    trainScalersAndRegressors(profile);
 
   // ── Dev: Config B (KernelRidge + geo, mesmo scaler de A) ────────────────────
   try {
     const idxB  = subsampleIndices(scaledFeaturesLeft.length, MAX_KR_SAMPLES);
-    const sfBL  = idxB.map(i => scaledFeaturesLeft[i]);
-    const sfBR  = idxB.map(i => scaledFeaturesRight[i]);
-    const tBX   = idxB.map(i => targetsX[i]);
-    const tBY   = idxB.map(i => targetsY[i]);
+    const sfBL  = idxB.map((i: number) => scaledFeaturesLeft[i]);
+    const sfBR  = idxB.map((i: number) => scaledFeaturesRight[i]);
+    const tBX   = idxB.map((i: number) => targetsX[i]);
+    const tBY   = idxB.map((i: number) => targetsY[i]);
     const krLeft  = createRegressor('kernel_ridge');
     const krRight = createRegressor('kernel_ridge');
     krLeft.train(sfBL,  tBX, tBY);
@@ -892,8 +788,8 @@ function completeDynamicCalibration() {
     if (fl && fr) {
       fusedRowsLeft.push(fl);
       fusedRowsRight.push(fr);
-      fusedTgtsX.push(trainTargets[i].screenX);
-      fusedTgtsY.push(trainTargets[i].screenY);
+      fusedTgtsX.push(profile[i].screenX);
+      fusedTgtsY.push(profile[i].screenY);
     }
   }
   if (fusedRowsLeft.length >= 9) {
@@ -905,10 +801,10 @@ function completeDynamicCalibration() {
       const scaledFLAll = fusedScalerLeft.transform(fusedRowsLeft);
       const scaledFRAll = fusedScalerRight.transform(fusedRowsRight);
       const idxC   = subsampleIndices(scaledFLAll.length, MAX_KR_SAMPLES);
-      const scaledFL = idxC.map(i => scaledFLAll[i]);
-      const scaledFR = idxC.map(i => scaledFRAll[i]);
-      const cTgtsX   = idxC.map(i => fusedTgtsX[i]);
-      const cTgtsY   = idxC.map(i => fusedTgtsY[i]);
+      const scaledFL = idxC.map((i: number) => scaledFLAll[i]);
+      const scaledFR = idxC.map((i: number) => scaledFRAll[i]);
+      const cTgtsX   = idxC.map((i: number) => fusedTgtsX[i]);
+      const cTgtsY   = idxC.map((i: number) => fusedTgtsY[i]);
       const krFL = createRegressor('kernel_ridge');
       const krFR = createRegressor('kernel_ridge');
       krFL.train(scaledFL, cTgtsX, cTgtsY);
@@ -1143,11 +1039,24 @@ export function hasDevConfigs(): { B: boolean; C: boolean; cReason: string | nul
   return { B: devConfigB !== null, C: devConfigC !== null, cReason: devConfigCReason };
 }
 
-export function mapGaze(featuresLeft: number[], featuresRight: number[]): { x: number; y: number } | null {
+export function mapGaze(
+  featuresLeft: number[],
+  featuresRight: number[],
+  fusedLeft?: number[] | null,
+  fusedRight?: number[] | null,
+): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
 
-  const scaledLeft = featureScalerLeft.transformSingle(featuresLeft);
-  const scaledRight = featureScalerRight.transformSingle(featuresRight);
+  let scaledLeft: number[];
+  let scaledRight: number[];
+
+  if (FEATURE_MODE === 'fused' && fusedLeft && fusedRight) {
+    scaledLeft  = fusedScalerLeft.transformSingle(fusedLeft);
+    scaledRight = fusedScalerRight.transformSingle(fusedRight);
+  } else {
+    scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
+    scaledRight = featureScalerRight.transformSingle(featuresRight);
+  }
 
   const predLeft = regressorLeft.predict(scaledLeft);
   const predRight = regressorRight.predict(scaledRight);

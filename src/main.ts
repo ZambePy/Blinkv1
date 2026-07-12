@@ -2,7 +2,7 @@ import './style.css';
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import * as calibration from './calibration';
 import { feedAccuracyRaw, isAccuracyTesting } from './accuracy';
-import { KalmanEMASmoother } from './kalman';
+import { OneEuroFilter2D } from './oneEuroFilter';
 import { KeyboardUI } from './keyboard/KeyboardUI';
 
 import { KeyboardState } from './keyboard/KeyboardState';
@@ -64,8 +64,8 @@ function weightedBufferAvg(buf: number[]): number {
   return valueSum / weightSum;
 }
 
-// Filtro de Kalman 2D + EMA — inserido após o rolling buffer e antes do lerp (Adição A)
-const kalmanGaze = new KalmanEMASmoother(0.25);
+// Filtro OneEuro (1€) 2D — substitui o antigo filtro de Kalman
+const oneEuroGaze = new OneEuroFilter2D();
 
 const lerp = (start: number, end: number, factor: number) => {
   return start + (end - start) * factor;
@@ -137,13 +137,17 @@ function checkLighting(): void {
 }
 
 async function initMediaPipe() {
-  const vision = await FilesetResolver.forVisionTasks(
-    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm"
-  );
+  // Assets empacotados localmente em public/mediapipe/ (copiados de node_modules em build-time).
+  // WASM: @mediapipe/tasks-vision@0.10.35 (node_modules/@mediapipe/tasks-vision/wasm/)
+  // Modelo: face_landmarker/float16/1 (3.6 MB)
+  //   origem: https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task
+  // Para atualizar: bump a versão em package.json, re-copie os WASMs e re-baixe o .task.
+  const _mediapipeBase = new URL('./mediapipe', location.href).href;
+  const vision = await FilesetResolver.forVisionTasks(`${_mediapipeBase}/wasm`);
 
   faceLandmarker = await FaceLandmarker.createFromOptions(vision, {
     baseOptions: {
-      modelAssetPath: `https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task`,
+      modelAssetPath: `${_mediapipeBase}/models/face_landmarker.task`,
       delegate: "GPU"
     },
     outputFaceBlendshapes: false,
@@ -271,7 +275,7 @@ async function predictWebcam() {
       feedAccuracyRaw(featuresLeft, featuresRight, extractorResult.fusedLeft, extractorResult.fusedRight);
 
       // Tenta mapear o olhar usando o perfil calibrado binocularmente
-      const calibratedGaze = calibration.mapGaze(featuresLeft, featuresRight);
+      const calibratedGaze = calibration.mapGaze(featuresLeft, featuresRight, extractorResult.fusedLeft, extractorResult.fusedRight);
 
       if (calibratedGaze) {
         targetX = calibratedGaze.x;
@@ -298,20 +302,13 @@ async function predictWebcam() {
       targetX = weightedBufferAvg(bufferX);
       targetY = weightedBufferAvg(bufferY);
 
-      // Aplica Filtro de Kalman após o rolling buffer e antes do lerp
-      // Pula Kalman durante teste de precisão para evitar lag na medição
+      // Aplica Filtro OneEuro após o rolling buffer e antes do lerp
+      // Pula o filtro durante teste de precisão para evitar lag na medição
       if (!isAccuracyTesting) {
-        // Dinamic sensitivity for virtual keyboard
-        const isKeyboardVisible = KeyboardState.getState().isVisible;
-        if (isKeyboardVisible) {
-          kalmanGaze.setEmaAlpha(0.05);
-        } else {
-          kalmanGaze.setEmaAlpha(0.25);
-        }
-
-        const kalmanOut = kalmanGaze.update(targetX, targetY);
-        targetX = kalmanOut.x;
-        targetY = kalmanOut.y;
+        const now = performance.now() / 1000.0;
+        const out = oneEuroGaze.filter(targetX, targetY, now);
+        targetX = out.x;
+        targetY = out.y;
       }
 
       // Adição D — dwell time e detecção de piscada (apenas quando não calibrando)
