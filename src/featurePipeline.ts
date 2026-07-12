@@ -1,5 +1,5 @@
 import { extractEyeFeatures } from './extractor';
-import type { Point3D } from './extractor';
+import type { Point3D, AdvancedFrameFeatures } from './extractor';
 import { buildFusedFeatureVector, isPCAReady } from './fusion';
 
 // ─── Modo de operação ─────────────────────────────────────────────────────────
@@ -17,6 +17,10 @@ import { buildFusedFeatureVector, isPCAReady } from './fusion';
 export type FeatureMode = 'geometry_only' | 'fused';
 export const FEATURE_MODE: FeatureMode = 'geometry_only';
 
+// Habilita a execução da extração de embeddings CNN mesmo se FEATURE_MODE for geometry_only
+// Útil para diagnosticar a fusão via Config C sob demanda sem ativar o modo de produção fusionado.
+export const ENABLE_CNN_EXTRACTION: boolean = false;
+
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export interface FeaturePipelineResult {
@@ -28,6 +32,7 @@ export interface FeaturePipelineResult {
    *  Não usado pela calibração enquanto FEATURE_MODE='geometry_only'. */
   fusedLeft?:  number[] | null;
   fusedRight?: number[] | null;
+  advancedFeatures?: AdvancedFrameFeatures;
 }
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
@@ -47,6 +52,7 @@ export function extractFeatures(
     featuresLeft,
     featuresRight,
     blinkDetected: geo.blinkDetected,
+    advancedFeatures: geo.advancedFeatures,
   };
 
   // Computar vetor fundido para validação — não é usado na predição enquanto

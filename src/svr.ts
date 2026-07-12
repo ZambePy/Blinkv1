@@ -8,7 +8,7 @@ export class SVRRegressor implements GazeRegressor {
   private cost: number;
   private gamma: number;
 
-  constructor(cost: number = 1.0, gamma: number = 0.005) {
+  constructor(cost: number = 100.0, gamma: number = 0.005) {
     this.cost = cost;
     this.gamma = gamma;
   }
@@ -21,6 +21,7 @@ export class SVRRegressor implements GazeRegressor {
       kernel: SVM.KERNEL_TYPES.RBF,
       cost: this.cost,
       gamma: this.gamma,
+      epsilon: 0.001,
       quiet: true
     });
 
@@ -29,6 +30,7 @@ export class SVRRegressor implements GazeRegressor {
       kernel: SVM.KERNEL_TYPES.RBF,
       cost: this.cost,
       gamma: this.gamma,
+      epsilon: 0.001,
       quiet: true
     });
 
@@ -44,8 +46,8 @@ export class SVRRegressor implements GazeRegressor {
     const py = this.svmY.predict([features])[0];
 
     return {
-      x: Math.max(0, Math.min(1, px)),
-      y: Math.max(0, Math.min(1, py))
+      x: Math.max(0, Math.min(1, px)) * document.documentElement.clientWidth,
+      y: Math.max(0, Math.min(1, py)) * document.documentElement.clientHeight
     };
   }
 

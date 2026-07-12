@@ -11,6 +11,7 @@ export interface CalibrationPoint {
   featuresRight: number[];
   fusedLeft?: number[] | null;
   fusedRight?: number[] | null;
+  quality?: any | null;
 }
 
 
@@ -42,6 +43,7 @@ let collectedFeaturesRight: number[][] = [];
 
 let collectedFusedLeft: (number[] | null)[] = [];
 let collectedFusedRight: (number[] | null)[] = [];
+let collectedQualities: (any | null)[] = [];
 
 
 // ── Gaze regressors (implementation selected via GazeRegressor interface) ────
@@ -569,6 +571,7 @@ function startCollection() {
   collectedFeaturesRight = [];
   collectedFusedLeft = [];
   collectedFusedRight = [];
+  collectedQualities = [];
 
   const dot = document.getElementById("calibration-dot");
   if (dot) {
@@ -585,6 +588,7 @@ export function feedRawData(
   featuresRight: number[],
   fusedLeft?: number[] | null,
   fusedRight?: number[] | null,
+  quality?: any | null,
 ) {
   
 
@@ -594,6 +598,7 @@ export function feedRawData(
   collectedFeaturesRight.push(featuresRight);
   collectedFusedLeft.push(fusedLeft ?? null);
   collectedFusedRight.push(fusedRight ?? null);
+  collectedQualities.push(quality ?? null);
 
   if (performance.now() - collectionStartTime >= COLLECTION_MS) {
     isCollecting = false;
@@ -609,6 +614,7 @@ function processStaticPoint() {
     collectedFeaturesRight.length -= DROP_FRAMES;
     collectedFusedLeft.length -= DROP_FRAMES;
     collectedFusedRight.length -= DROP_FRAMES;
+    collectedQualities.length -= DROP_FRAMES;
   }
 
   const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
@@ -647,11 +653,29 @@ function processStaticPoint() {
       featuresRight: collectedFeaturesRight[i],
       fusedLeft:  collectedFusedLeft[i]  ?? null,
       fusedRight: collectedFusedRight[i] ?? null,
+      quality: collectedQualities[i] ?? null,
     });
   }
 
   const fusedFrameCount = collectedFusedLeft.filter(f => f !== null).length;
-  console.log(`[calib] ponto ${currentPointIndex + 1}/${TARGET_POINTS.length} "${TARGET_POINTS[currentPointIndex].name}" aceito: frames=${collectedFeaturesLeft.length} (fused=${fusedFrameCount}/${collectedFeaturesLeft.length}) | varL=${avgVarLeft.toFixed(6)} varR=${avgVarRight.toFixed(6)} | threshold=${VARIANCE_THRESHOLD.toFixed(6)}`);
+  
+  // Calculate average quality metrics
+  let avgBrightness = 0;
+  let avgConfidence = 0;
+  let qCount = 0;
+  for (const q of collectedQualities) {
+    if (q) {
+      avgBrightness += q.brightnessEstimate ?? 0;
+      avgConfidence += q.detectorConfidence ?? 0;
+      qCount++;
+    }
+  }
+  if (qCount > 0) {
+    avgBrightness /= qCount;
+    avgConfidence /= qCount;
+  }
+
+  console.log(`[calib] ponto ${currentPointIndex + 1}/${TARGET_POINTS.length} "${TARGET_POINTS[currentPointIndex].name}" aceito: frames=${collectedFeaturesLeft.length} (fused=${fusedFrameCount}/${collectedFeaturesLeft.length}) | varL=${avgVarLeft.toFixed(6)} varR=${avgVarRight.toFixed(6)} | threshold=${VARIANCE_THRESHOLD.toFixed(6)} | brightness=${(avgBrightness*100).toFixed(1)}% confidence=${(avgConfidence*100).toFixed(1)}%`);
 
   currentPointIndex++;
 

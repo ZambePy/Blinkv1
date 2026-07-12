@@ -8,6 +8,7 @@
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
 import { mapGaze, mapGazeWithConfig, hasDevConfigs, startPreCalibration } from './calibration';
+import { REGRESSOR_MODE } from './gazeRegressor';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
@@ -257,7 +258,7 @@ function finishTest(
   // Loga resultados no terminal para captura em arquivo de sessão
   console.log(`[accuracy] === RESULTADO FINAL ===`);
   console.log(`[accuracy] Resolução: ${vw}×${vh}px | distância estimada: ${ASSUMED_DIST_PX}px`);
-  console.log(`[accuracy] Config A (Ridge+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | ${score}`);
+  console.log(`[accuracy] Config A (${REGRESSOR_MODE}+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | ${score}`);
   for (const d of diagnostics) {
     const bStr = d.errorB !== null ? `B=${Math.round(d.errorB)}px` : 'B=N/A';
     const cStr = d.errorC !== null ? `C=${Math.round(d.errorC)}px` : 'C=N/A';
@@ -432,7 +433,7 @@ function showDiagnosticOverlay(
         <table style="width:100%;border-collapse:collapse;font-size:11px">
           <tr style="color:#666">
             <th style="text-align:left;padding:3px 6px">Ponto</th>
-            <th style="text-align:right;padding:3px 6px">A Ridge+geo</th>
+            <th style="text-align:right;padding:3px 6px">A ${REGRESSOR_MODE}+geo</th>
             ${hasB ? '<th style="text-align:right;padding:3px 6px">B KR+geo</th>' : ''}
             ${hasC ? '<th style="text-align:right;padding:3px 6px">C KR+fused</th>' : ''}
           </tr>

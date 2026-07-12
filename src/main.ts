@@ -8,7 +8,7 @@ import { KeyboardUI } from './keyboard/KeyboardUI';
 import { KeyboardState } from './keyboard/KeyboardState';
 import { dwellManager } from './keyboard/DwellManager';
 import { updateDwell, resetDwell } from './dwell';
-import { extractFeatures, FEATURE_MODE } from './featurePipeline';
+import { extractFeatures, FEATURE_MODE, ENABLE_CNN_EXTRACTION } from './featurePipeline';
 import { extractCrops, exportEyeCropLog } from './eyeCrop';
 import { loadPCA, fusedDims } from './fusion';
 
@@ -216,40 +216,47 @@ async function predictWebcam() {
         return;
       }
 
-      // Extrai tensores CNN + dispara inferência encoder (fire-and-forget)
-      const cropT0    = performance.now();
-      const cropInput = extractCrops(video, landmarks, video.videoWidth, video.videoHeight);
-      const cropMs    = performance.now() - cropT0;
-      _cropFrameCount++;
-      _cropTotalMs += cropMs;
-      if (_cropFrameCount % 60 === 0) {
-        console.debug(`[eyeCrop] avg ${(_cropTotalMs / _cropFrameCount).toFixed(2)} ms/frame | last ${cropMs.toFixed(2)} ms | input=${cropInput ? 'ok' : 'null'}`);
-      }
+      // Extrai tensores CNN + dispara inferência encoder apenas se necessário
+      const shouldRunCNN = FEATURE_MODE === 'fused' || ENABLE_CNN_EXTRACTION;
 
-      if (cropInput && window.irisflowAPI) {
-        const _ipcT0 = performance.now();
-        window.irisflowAPI.runEncoderInference(cropInput).then(emb => {
-          const ipcMs = performance.now() - _ipcT0;
-          _lastEmbedding = emb;
-          _ipcCallCount++;
-          _ipcTotalMs += ipcMs;
-          if (ipcMs < _ipcMinMs) _ipcMinMs = ipcMs;
-          if (ipcMs > _ipcMaxMs) _ipcMaxMs = ipcMs;
-          _ipcSamples.push(ipcMs);
-          if (_ipcCallCount % 20 === 0) {
-            const avg = _ipcTotalMs / _ipcCallCount;
-            const recent = _ipcSamples.slice(-20);
-            const p50 = [...recent].sort((a,b)=>a-b)[Math.floor(recent.length/2)];
-            console.log(
-              `[IPC] round-trip n=${_ipcCallCount} | ` +
-              `avg=${avg.toFixed(1)} ms | ` +
-              `last=${ipcMs.toFixed(1)} ms | ` +
-              `min=${_ipcMinMs.toFixed(1)} ms | ` +
-              `max=${_ipcMaxMs.toFixed(1)} ms | ` +
-              `p50(last20)=${p50.toFixed(1)} ms`
-            );
-          }
-        });
+      if (shouldRunCNN) {
+        const cropT0    = performance.now();
+        const cropInput = extractCrops(video, landmarks, video.videoWidth, video.videoHeight);
+        const cropMs    = performance.now() - cropT0;
+        _cropFrameCount++;
+        _cropTotalMs += cropMs;
+        if (_cropFrameCount % 60 === 0) {
+          console.debug(`[eyeCrop] avg ${(_cropTotalMs / _cropFrameCount).toFixed(2)} ms/frame | last ${cropMs.toFixed(2)} ms | input=${cropInput ? 'ok' : 'null'}`);
+        }
+
+        if (cropInput && window.irisflowAPI) {
+          const _ipcT0 = performance.now();
+          window.irisflowAPI.runEncoderInference(cropInput).then(emb => {
+            const ipcMs = performance.now() - _ipcT0;
+            _lastEmbedding = emb;
+            _ipcCallCount++;
+            _ipcTotalMs += ipcMs;
+            if (ipcMs < _ipcMinMs) _ipcMinMs = ipcMs;
+            if (ipcMs > _ipcMaxMs) _ipcMaxMs = ipcMs;
+            _ipcSamples.push(ipcMs);
+            if (_ipcCallCount % 20 === 0) {
+              const avg = _ipcTotalMs / _ipcCallCount;
+              const recent = _ipcSamples.slice(-20);
+              const p50 = [...recent].sort((a,b)=>a-b)[Math.floor(recent.length/2)];
+              console.log(
+                `[IPC] round-trip n=${_ipcCallCount} | ` +
+                `avg=${avg.toFixed(1)} ms | ` +
+                `last=${ipcMs.toFixed(1)} ms | ` +
+                `min=${_ipcMinMs.toFixed(1)} ms | ` +
+                `max=${_ipcMaxMs.toFixed(1)} ms | ` +
+                `p50(last20)=${p50.toFixed(1)} ms`
+              );
+            }
+          });
+        }
+      } else {
+        // Se não deve rodar a CNN, reseta o embedding
+        _lastEmbedding = null;
       }
 
       // Log de validação do vetor fundido (a cada 60 frames, apenas para diagnóstico)
@@ -269,7 +276,13 @@ async function predictWebcam() {
       const featuresRight = extractorResult.featuresRight;
 
       // Envia coordenadas cruas para o sistema de calibração
-      calibration.feedRawData(featuresLeft, featuresRight, extractorResult.fusedLeft, extractorResult.fusedRight);
+      calibration.feedRawData(
+        featuresLeft, 
+        featuresRight, 
+        extractorResult.fusedLeft, 
+        extractorResult.fusedRight,
+        extractorResult.advancedFeatures?.quality
+      );
 
       // Alimenta o módulo de precisão com as coordenadas cruas
       feedAccuracyRaw(featuresLeft, featuresRight, extractorResult.fusedLeft, extractorResult.fusedRight);

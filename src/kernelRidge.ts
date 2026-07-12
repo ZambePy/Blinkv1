@@ -30,7 +30,7 @@ export interface KernelRidgeModel {
 
 // ─── Grid de hiperparâmetros ───────────────────────────────────────────────────
 
-const GAMMA_GRID  = [0.01, 0.03, 0.1, 0.3, 0.5, 1.0, 2.0] as const;
+const GAMMA_GRID  = [0.001, 0.005, 0.01, 0.03, 0.1, 0.3, 0.5] as const;
 const LAMBDA_GRID = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5]  as const;
 
 // LOO-CV isolado tende a escolher o menor gamma do grid porque minimiza erro
@@ -41,7 +41,7 @@ const LAMBDA_GRID = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5]  as const;
 // com ELA, onde um disparo de cursor é um erro de interação real). GAMMA_SAFE_MIN
 // é o piso abaixo do qual o kernel RBF não decai suficientemente no probe
 // out-of-hull canônico deste fixture — determinado empiricamente, não pelo LOO.
-const GAMMA_SAFE_MIN = 0.1;
+const GAMMA_SAFE_MIN = 0.001;
 
 // ─── Kernel RBF ───────────────────────────────────────────────────────────────
 
