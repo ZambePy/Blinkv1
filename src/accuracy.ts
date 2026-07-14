@@ -7,7 +7,7 @@
 //   • Erro em pixels ao lado de cada par
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
-import { mapGaze, mapGazeWithConfig, hasDevConfigs, startPreCalibration } from './calibration';
+import { mapGaze, mapGazeWithConfig, hasDevConfigs, startPreCalibration, setGazeCorrections } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 
 export interface AccuracyResult {
@@ -284,6 +284,16 @@ function finishTest(
     console.log('[accuracy] Config C: não disponível');
   }
   console.log(`[accuracy] === FIM ===`);
+
+  // Gera mapa de correção a partir dos erros sistemáticos medidos.
+  // Durante o tracking ao vivo, a predição bruta do SVR será deslocada
+  // pela interpolação IDW destes vetores de correção.
+  setGazeCorrections(diagnostics.map(d => ({
+    refX:    d.predX,
+    refY:    d.predY,
+    offsetX: d.groundX - d.predX,
+    offsetY: d.groundY - d.predY,
+  })));
 
   // Mostra o diagnóstico visual antes de chamar onComplete
   showDiagnosticOverlay(diagnostics, result, onComplete);

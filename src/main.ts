@@ -208,8 +208,13 @@ async function predictWebcam() {
       );
       calibration.feedFaceMetrics(true, rawIod);
 
+      // Extrai a matriz de transformação facial 4×4 (column-major) do MediaPipe
+      // para ângulos de Euler (yaw/pitch/roll) mais precisos via decomposição direta.
+      const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
+      const faceMatrix = rawMatrix ? new Float32Array(rawMatrix) : undefined;
+
       // Passa o embedding do frame anterior (buffer de 1 frame, assíncrono)
-      const extractorResult = extractFeatures(landmarks, undefined, _lastEmbedding);
+      const extractorResult = extractFeatures(landmarks, faceMatrix, _lastEmbedding);
       if (extractorResult.blinkDetected || extractorResult.featuresLeft.length === 0) {
         // Ignora piscar e erros
         window.requestAnimationFrame(predictWebcam);
@@ -239,6 +244,7 @@ async function predictWebcam() {
             if (ipcMs < _ipcMinMs) _ipcMinMs = ipcMs;
             if (ipcMs > _ipcMaxMs) _ipcMaxMs = ipcMs;
             _ipcSamples.push(ipcMs);
+            if (_ipcSamples.length > 100) _ipcSamples.shift();
             if (_ipcCallCount % 20 === 0) {
               const avg = _ipcTotalMs / _ipcCallCount;
               const recent = _ipcSamples.slice(-20);

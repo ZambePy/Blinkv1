@@ -4,7 +4,7 @@ Sistema de rastreamento ocular assistivo via webcam comum, projetado para comuni
 
 ## Arquitetura atual
 
-O pipeline combina detecção facial por MediaPipe, extração de features geométricas, inferência de um encoder CNN treinado no MPIIFaceGaze, fusão via PCA, e um regressor Ridge personalizado por calibração.
+O pipeline combina detecção facial por MediaPipe, extração de features geométricas, inferência de um encoder CNN treinado no MPIIFaceGaze, fusão via PCA, e um regressor SVR personalizado por calibração.
 
 ```
 Webcam (1280×720)
@@ -19,14 +19,14 @@ Webcam (1280×720)
     │     └── encoder CNN (gaze_encoder.onnx, onnxruntime-node no processo main do Electron)
     │           └── embedding: 256 floats  →  PCA (18 componentes)  →  fusão: 276 dims (não ativo)
     │
-    ├── calibration.ts  →  9 pts estáticos + fase dinâmica  →  StandardScaler + Ridge
+    ├── calibration.ts  →  9 pts estáticos  →  StandardScaler + SVR
     │
-    ├── KalmanEMASmoother + rolling buffer 6 frames + Lerp
+    ├── OneEuroFilter2D + rolling buffer 6 frames + Lerp
     │
     └── cursor (div#laser) + teclado virtual (dwell 500ms)
 ```
 
-**Modo de produção atual:** `FEATURE_MODE='geometry_only'` / `REGRESSOR_MODE='ridge'` — o pipeline geométrico puro (258 dims → Ridge) está ativo. O encoder CNN e a fusão PCA (276 dims) estão implementados e inferindo em paralelo mas ainda não conectados ao regressor de produção.
+**Modo de produção atual:** `FEATURE_MODE='geometry_only'` / `REGRESSOR_MODE='svr'` — o pipeline geométrico puro (258 dims → SVR) está ativo. O encoder CNN e a fusão PCA (276 dims) estão implementados e rodando em paralelo, mas ainda não conectados ao regressor de produção.
 
 Para documentação técnica detalhada do pipeline, veja [IRISFLOW_PIPELINE_TECNICO.md](./IRISFLOW_PIPELINE_TECNICO.md).
 
@@ -45,7 +45,7 @@ npm install
 npm run dev
 ```
 
-Abre em `http://localhost:5173`. A câmera, o MediaPipe, a calibração e o cursor funcionam normalmente. O encoder CNN não fica disponível neste modo (requer Electron) — o pipeline de geometria + Ridge opera como fallback.
+Abre em `http://localhost:5173`. A câmera, o MediaPipe, a calibração e o cursor funcionam normalmente. O encoder CNN não fica disponível neste modo (requer Electron) — o pipeline de geometria + SVR opera normalmente.
 
 ## Rodar como app Electron (com encoder CNN)
 
@@ -75,7 +75,7 @@ Após treinar e exportar o encoder CNN (veja seção abaixo), copie o arquivo ON
 resources/models/gaze_encoder.onnx
 ```
 
-Este caminho é empacotado via `extraResources` do electron-builder. Se o arquivo não existir, o `encoderRunner` loga um aviso e o pipeline de geometria + Ridge continua funcionando sem o encoder.
+Este caminho é empacotado via `extraResources` do electron-builder. Se o arquivo não existir, o `encoderRunner` loga um aviso e o pipeline de geometria + SVR continua funcionando sem o encoder.
 
 ## Pipeline de treino Python (encoder CNN)
 
@@ -114,7 +114,6 @@ Os testes cobrem: paridade geométrica de `eyeCrop.ts` vs `preprocess.py`, parid
 
 Veja a seção ["Issues conhecidas e pendências"](./IRISFLOW_PIPELINE_TECNICO.md#11-issues-conhecidas-e-pendências) no documento técnico. As principais:
 
-- **Pesos de calibração dinâmica não propagados:** `DynamicSample.weight` (3.0 para fixações) é descartado ao treinar o Ridge — contribui para erro de validação acima da meta.
-- **Fonte Inter via Google Fonts:** `style.css` faz chamada de rede para `fonts.googleapis.com`. Em ambiente offline, a UI usa fallback do browser mas funciona normalmente.
-- **`REGRESSOR_MODE` e `FEATURE_MODE` são constantes em código:** mudar de modo requer rebuild.
-- **KernelRidge não persiste no `localStorage`:** se `REGRESSOR_MODE='kernel_ridge'` fosse ativado, a calibração seria perdida a cada reload.
+- **Fonte Inter via Google Fonts:** `style.css:1` faz chamada de rede para `fonts.googleapis.com`. Em ambiente offline, a UI usa fallback do browser mas funciona normalmente.
+- **`REGRESSOR_MODE` e `FEATURE_MODE` são constantes de compilação:** mudar de modo requer editar o código-fonte e fazer rebuild — não existe configuração em runtime.
+- **Modo `fused` requer preparação:** ativar `FEATURE_MODE='fused'` exige re-fit do StandardScaler para vetores de 276 dims e possivelmente re-treino do regressor.

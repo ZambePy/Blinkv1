@@ -19,7 +19,7 @@ export const FEATURE_MODE: FeatureMode = 'geometry_only';
 
 // Habilita a execução da extração de embeddings CNN mesmo se FEATURE_MODE for geometry_only
 // Útil para diagnosticar a fusão via Config C sob demanda sem ativar o modo de produção fusionado.
-export const ENABLE_CNN_EXTRACTION: boolean = false;
+export const ENABLE_CNN_EXTRACTION: boolean = true;
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 

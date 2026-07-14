@@ -6,11 +6,9 @@
 //   Predição: yhat(x) = mean(y) + sum_i alpha_i * K(x, xi)
 //
 // A centralização pelos alvos faz a predição convergir para mean(y) conforme
-// o vetor de entrada se afasta de todos os pontos de suporte, eliminando o
-// salto para as bordas da tela documentado em ridge.convexhull.test.ts.
+// o vetor de entrada se afasta de todos os pontos de suporte.
 //
-// Hiperparâmetros (gamma, lambda) selecionados por LOO-CV sobre os próprios
-// pontos de calibração; grid pequeno — O(|grid| * n²) ops, trivial para n≤25.
+// Hiperparâmetros (gamma, lambda) selecionados por leave-one-POINT-out CV.
 
 import type { GazeRegressor } from './gazeRegressor';
 import { solveLinear } from './ridge';
@@ -30,18 +28,8 @@ export interface KernelRidgeModel {
 
 // ─── Grid de hiperparâmetros ───────────────────────────────────────────────────
 
-const GAMMA_GRID  = [0.001, 0.005, 0.01, 0.03, 0.1, 0.3, 0.5] as const;
-const LAMBDA_GRID = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5]  as const;
-
-// LOO-CV isolado tende a escolher o menor gamma do grid porque minimiza erro
-// in-hull sem jamais "ver" pontos fora da região de calibração — a métrica
-// tem um ponto cego estrutural para comportamento de extrapolação. Gammas muito
-// pequenos produzem kernels quasi-planos que extrapolam como Ridge linear e
-// saturam nas bordas da tela (comportamento inaceitável em sessões com pacientes
-// com ELA, onde um disparo de cursor é um erro de interação real). GAMMA_SAFE_MIN
-// é o piso abaixo do qual o kernel RBF não decai suficientemente no probe
-// out-of-hull canônico deste fixture — determinado empiricamente, não pelo LOO.
-const GAMMA_SAFE_MIN = 0.001;
+const GAMMA_GRID  = [0.01, 0.05, 0.1, 0.5, 1.0, 5.0] as const;
+const LAMBDA_GRID = [0.001, 0.01, 0.1, 0.5] as const;
 
 // ─── Kernel RBF ───────────────────────────────────────────────────────────────
 
@@ -93,7 +81,21 @@ function dotBias(alpha: number[], bias: number, kv: number[]): number {
   return s;
 }
 
-// ─── LOO-CV ───────────────────────────────────────────────────────────────────
+// ─── LOO-CV (Leave-One-Point-Out) ─────────────────────────────────────────────
+
+interface KRGroup {
+  indices: number[];
+}
+
+function getPointGroups(tgtsX: number[], tgtsY: number[]): KRGroup[] {
+  const map = new Map<string, KRGroup>();
+  for (let i = 0; i < tgtsX.length; i++) {
+    const key = `${tgtsX[i].toFixed(4)},${tgtsY[i].toFixed(4)}`;
+    if (!map.has(key)) map.set(key, { indices: [] });
+    map.get(key)!.indices.push(i);
+  }
+  return Array.from(map.values());
+}
 
 export function looError(
   K:        number[][],
@@ -101,20 +103,30 @@ export function looError(
   tgtsY:    number[],
   lambda:   number,
 ): number {
-  const n   = tgtsX.length;
-  const idx = Array.from({ length: n }, (_, i) => i);
+  const groups = getPointGroups(tgtsX, tgtsY);
+  if (groups.length < 2) return Infinity;
+
   let total = 0;
 
-  for (let lo = 0; lo < n; lo++) {
-    const tr = idx.filter(i => i !== lo);
-    const Ktr = tr.map(i => tr.map(j => K[i][j]));
-    const kv  = tr.map(i => K[lo][i]);
+  for (let lo = 0; lo < groups.length; lo++) {
+    const testIdx = groups[lo].indices;
+    const trIdx: number[] = [];
+    for (let i = 0; i < groups.length; i++) {
+      if (i !== lo) trIdx.push(...groups[i].indices);
+    }
 
-    const { alpha: aX, bias: bX } = trainAxis(Ktr, tr.map(i => tgtsX[i]), lambda);
-    const { alpha: aY, bias: bY } = trainAxis(Ktr, tr.map(i => tgtsY[i]), lambda);
+    const Ktr = trIdx.map(i => trIdx.map(j => K[i][j]));
+    const trTgtsX = trIdx.map(i => tgtsX[i]);
+    const trTgtsY = trIdx.map(i => tgtsY[i]);
 
-    total += (dotBias(aX, bX, kv) - tgtsX[lo]) ** 2
-           + (dotBias(aY, bY, kv) - tgtsY[lo]) ** 2;
+    const { alpha: aX, bias: bX } = trainAxis(Ktr, trTgtsX, lambda);
+    const { alpha: aY, bias: bY } = trainAxis(Ktr, trTgtsY, lambda);
+
+    for (const testI of testIdx) {
+      const kv = trIdx.map(i => K[testI][i]);
+      total += (dotBias(aX, bX, kv) - tgtsX[testI]) ** 2
+             + (dotBias(aY, bY, kv) - tgtsY[testI]) ** 2;
+    }
   }
   return total;
 }
@@ -134,7 +146,7 @@ export class KernelRidgeRegressor implements GazeRegressor {
 
     const t0 = performance.now();
 
-    let bestGamma: number  = GAMMA_SAFE_MIN;
+    let bestGamma: number  = GAMMA_GRID[0];
     let bestLambda: number = LAMBDA_GRID[0];
     let bestErr            = Infinity;
 
@@ -142,7 +154,6 @@ export class KernelRidgeRegressor implements GazeRegressor {
       const K = buildKernelMatrix(features, gamma);
       for (const lambda of LAMBDA_GRID) {
         const err = looError(K, targetsX, targetsY, lambda);
-        if (gamma < GAMMA_SAFE_MIN) continue; // piso de segurança — ver comentário acima
         if (err < bestErr) {
           bestErr    = err;
           bestGamma  = gamma;

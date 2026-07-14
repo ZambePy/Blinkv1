@@ -72,7 +72,7 @@ async function loadSession(modelPath: string): Promise<ort.InferenceSession | nu
 /**
  * Carrega (ou retorna cacheada) a sessao ONNX.
  * Retorna null sem lancar se o modelo nao existir — o pipeline de
- * geometria + Ridge continua funcionando normalmente nesse caso.
+ * geometria + SVR continua funcionando normalmente nesse caso.
  */
 export async function ensureSession(): Promise<ort.InferenceSession | null> {
   if (cachedSession && cachedSessionPath === configuredModelPath) {

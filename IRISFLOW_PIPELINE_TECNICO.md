@@ -1,7 +1,7 @@
 # IrisFlow — Pipeline Técnico (estado real do código)
 
-**Versão:** 3.0 — arquitetura alinhada ao GazeFollower (SVR + OneEuro)  
-**Data:** 2026-07-12  
+**Versão:** 3.1 — correções de parâmetros SVR, remoção de referências à fase dinâmica, atualização de issues  
+**Data:** 2026-07-13  
 **Classificação:** Documento interno de engenharia  
 **Contexto:** Tecnologia assistiva — rastreamento ocular via webcam para comunicação alternativa (AAC) para pacientes com ELA e outras condições motoras
 
@@ -291,7 +291,7 @@ embedding CNN (256 dims)
 A calibração é composta por duas fases sequenciais, seguidas de treino dos scalers e regressores:
 
 ```
-Pré-calibração (checklist) → Fase 1 (estática) → Fase 2 (dinâmica) → Treino → Teste de validação
+Pré-calibração (checklist) → Calibração estática (9 pontos) → Treino → Teste de validação
 ```
 
 ### Calibração estática (9 pontos)
@@ -355,7 +355,7 @@ interface GazeRegressor {
 
 Inspirado diretamente na arquitetura do GazeFollower:
 - Implementado via biblioteca `libsvm-js` (SVR nativo no JavaScript).
-- **Kernel RBF:** `C = 1.0`, `gamma = 0.005`.
+- **Kernel RBF:** `C = 100.0`, `gamma = 0.005`, `epsilon = 0.001` (confirmado em `svr.ts:11`).
 - Dois modelos SVR independentes treinados por sessão: `svmX` e `svmY`, predizendo os eixos separadamente a partir das features fundidas ou geométricas da CNN.
 - Extremamente resistente a outliers em comparação com o Ridge Regression anterior.
 - **Serialização:** Suportada nativamente. Os vetores de suporte são exportados pela biblioteca e salvos via JSON.
@@ -390,7 +390,7 @@ Disparada automaticamente ao final de cada calibração (`runAccuracyTest`, cali
 
 | Config | Regressor | Features |
 |---|---|---|
-| A (produção) | Ridge | geometry (258 dims) |
+| A (produção) | SVR (`REGRESSOR_MODE='svr'`) | geometry (258 dims) |
 | B (dev) | KernelRidge | geometry (258 dims) |
 | C (dev) | KernelRidge | fused (276 dims) |
 
@@ -408,7 +408,7 @@ Disparada automaticamente ao final de cada calibração (`runAccuracyTest`, cali
 
 ## 10. Output final — suavização e cursor
 
-**Arquivo:** `src/main.ts` (bloco após `calibration.mapGaze`, linha 280–354); `src/kalman.ts`
+**Arquivo:** `src/main.ts` (bloco após `calibration.mapGaze`, linha 280–354); `src/oneEuroFilter.ts` (filtro ativo — `src/kalman.ts` existe mas não é usado)
 
 ### Pipeline de suavização (em ordem de aplicação)
 
@@ -435,7 +435,7 @@ O elemento `<div id="laser">` é posicionado via `style.left` / `style.top` em p
 
 ### Dwell time e piscada
 
-O módulo `dwell.ts` e o `DwellManager` do teclado virtual recebem a posição corrente do cursor. O `dwellManager.update(currentX, currentY)` verifica colisões com teclas e dispara seleções após 500ms de fixação. Atualizado apenas quando `!calibration.isCalibrating`.
+O módulo `dwell.ts` e o `DwellManager` do teclado virtual recebem a posição corrente do cursor. O `dwellManager.update(currentX, currentY)` verifica colisões com teclas e dispara seleções após 800ms de fixação. Atualizado apenas quando `!calibration.isCalibrating`.
 
 ### Teclado virtual
 
@@ -445,15 +445,49 @@ O módulo `dwell.ts` e o `DwellManager` do teclado virtual recebem a posição c
 
 ## 11. Issues conhecidas e pendências
 
-### Issues Resolvidas na Versão 3.0
+### Issue 1 — Dependência de rede: Google Fonts
 
-- **(Resolvida) Issue 1 — Ponderação de amostras dinâmicas**: O código referente à calibração dinâmica foi completamente removido, eliminando esta inconsistência de pesos do pipeline.
-- **(Resolvida) Issue 4 — Serialização de Modelos**: O sistema `saveProfile()` agora é agnóstico ao regressor e serializa perfeitamente o `SVRRegressor` persistindo a calibração entre reloads de página.
+**Arquivo:** `src/style.css:1`
 
-### Issue 5 — README.md desatualizado (corrigido neste commit)
+```css
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+```
 
-O README anterior descrevia o pipeline antigo de `ratioX/dy` + regressão bilinear e afirmava que "a integração do resultado do encoder com `fusion.ts` é uma tarefa futura" — ambas as afirmações eram incorretas para o estado atual do código. O README foi atualizado como parte desta tarefa de documentação.
+A fonte Inter é carregada de `fonts.googleapis.com` a cada carregamento da aplicação. Em ambientes offline ou com bloqueio de rede, a UI cai para a fonte de fallback do sistema (sans-serif genérica) mas funciona normalmente. Para operação 100% offline é necessário servir a fonte localmente ou remover o import.
+
+### Issue 2 — FEATURE_MODE e REGRESSOR_MODE são constantes de compilação
+
+**Arquivos:** `src/featurePipeline.ts:18`, `src/gazeRegressor.ts:15`
+
+```typescript
+export const FEATURE_MODE: FeatureMode = 'geometry_only';  // featurePipeline.ts:18
+export const REGRESSOR_MODE: RegressorMode = 'svr';         // gazeRegressor.ts:15
+```
+
+Não existe caminho de configuração em runtime (UI de configurações, variável de ambiente, arquivo externo de config). Mudar o modo de operação exige editar o código-fonte e fazer rebuild. Isso vale tanto para trocar o regressor quanto para ativar o modo `fused`.
+
+### Issue 3 — Modo `fused` não pode ser ativado sem preparação adicional
+
+**Arquivos:** `src/featurePipeline.ts:6–16` (comentários inline), `src/fusion.ts`
+
+O vetor fundido (276 dims = 18 PCA + 258 geo) é computado internamente mas não propagado ao regressor enquanto `FEATURE_MODE='geometry_only'`. Os comentários em `featurePipeline.ts:14` listam os pré-requisitos para ativação:
+
+1. Re-fit do `featureScalerLeft/Right` sobre vetores de 276 dims (o scaler atual foi ajustado sobre 258 dims durante a calibração estática).
+2. Troca ou re-treino do regressor sobre o espaço de 276 dims.
+
+Ativar `FEATURE_MODE='fused'` sem esses pré-requisitos produzirá predições incorretas sem lançar erro explícito.
+
+### Nota: status verificado da issue de calibração dinâmica
+
+Documentação anterior e o README referenciavam uma issue de "DynamicSample.weight calculado mas não propagado ao treino". Após leitura direta do código em 2026-07-13:
+
+- O tipo `DynamicSample` e qualquer campo `weight` **não existem** em nenhum arquivo de `src/` (verificado por grep em todo o diretório).
+- A fase de calibração dinâmica foi removida no commit `b9b1ff4` ("remoção da calibração dinâmica pra fins de teste").
+- `currentGazePhase()` em `calibration.ts:91–94` nunca retorna `'dynamic'`; o literal existe no union type `GazeLogPhase` (linha 79) por completude formal, mas o próprio comentário da linha 75 documenta que esse valor nunca ocorre na prática.
+- `CalibrationPoint` (calibration.ts:7–15) não possui campo `weight`.
+
+**Conclusão:** esta issue não é uma pendência ativa no código atual. O README.md foi atualizado como parte desta revisão para remover a referência ao código removido.
 
 ---
 
-*Documento elaborado com base em leitura direta dos arquivos-fonte em 2026-07-12. Todos os números de dimensões, contagens de pontos e valores de hiperparâmetros foram verificados no código, não inferidos de conversas anteriores.*
+*Documento atualizado com base em leitura direta dos arquivos-fonte em 2026-07-13. Todos os números de dimensões, contagens de pontos e valores de hiperparâmetros foram verificados no código, não inferidos de conversas anteriores.*

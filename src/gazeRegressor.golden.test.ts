@@ -77,7 +77,25 @@ describe('GazeRegressor golden snapshot', () => {
     expect(got.y).toBe(golden.y);
   });
 
-  it('createRegressor throws for unsupported mode', () => {
-    expect(() => createRegressor('svr' as never)).toThrow(/Unsupported regressor mode/);
+  it('createRegressor throws for truly unsupported mode', () => {
+    expect(() => createRegressor('foo' as never)).toThrow(/Unsupported regressor mode/);
   });
+
+  it('createRegressor("svr") returns a trainable SVRRegressor', () => {
+    const { features, targets } = buildSyntheticProfile();
+    const scaler = new StandardScaler();
+    scaler.fit(features);
+    const scaled = scaler.transform(features);
+
+    const reg = createRegressor('svr');
+    // Should not throw during train
+    expect(() => reg.train(scaled, targets.map(t => t.screenX), targets.map(t => t.screenY))).not.toThrow();
+    // Should return pixel coordinates within viewport bounds
+    const probe = scaler.transformSingle([0, 0, 0.1, 0.05]);
+    const pred  = reg.predict(probe);
+    expect(pred.x).toBeGreaterThanOrEqual(0);
+    expect(pred.x).toBeLessThanOrEqual(SCREEN_WIDTH);
+    expect(pred.y).toBeGreaterThanOrEqual(0);
+    expect(pred.y).toBeLessThanOrEqual(SCREEN_HEIGHT);
+  }, 30_000);
 });

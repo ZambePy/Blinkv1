@@ -102,6 +102,48 @@ const distanceLog: GazeDistanceLogEntry[] = [];
 let scaledProfileLeft: number[][] = [];
 let scaledProfileRight: number[][] = [];
 
+// ── Mapa de correção de olhar (gerado após teste de precisão) ────────────────
+// Armazena os offsets de correção dos 9 pontos de validação. Durante o tracking
+// ao vivo, a correção mais próxima (IDW) é aplicada à predição bruta do SVR,
+// eliminando o erro sistemático medido no teste de validação.
+export interface GazeCorrection {
+  refX: number;    // posição X onde o modelo previu (referência no espaço de pixels)
+  refY: number;
+  offsetX: number; // correção necessária: groundTruth - prediction
+  offsetY: number;
+}
+
+let _gazeCorrections: GazeCorrection[] = [];
+
+export function setGazeCorrections(corrections: GazeCorrection[]): void {
+  _gazeCorrections = corrections;
+  console.log(`[calib] mapa de correção: ${corrections.length} pontos de referência aplicados`);
+}
+
+function applyGazeCorrection(x: number, y: number): { x: number; y: number } {
+  if (_gazeCorrections.length < 3) return { x, y };
+
+  let sumW = 0, cx = 0, cy = 0;
+  for (const c of _gazeCorrections) {
+    const dx = x - c.refX;
+    const dy = y - c.refY;
+    // IDW com decaimento 1/d² — pontos mais próximos têm influência maior
+    const w = 1.0 / (dx * dx + dy * dy + 1.0);
+    cx    += c.offsetX * w;
+    cy    += c.offsetY * w;
+    sumW  += w;
+  }
+  cx /= sumW;
+  cy /= sumW;
+
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  return {
+    x: Math.max(0, Math.min(vw, x + cx)),
+    y: Math.max(0, Math.min(vh, y + cy)),
+  };
+}
+
 function nearestDistance(vec: number[], pool: number[][]): number {
   if (pool.length === 0) return NaN;
   let best = Infinity;
@@ -178,12 +220,24 @@ export function feedFaceMetrics(detected: boolean, iod: number): void {
   }
 }
 
+// Versão atual do vetor de features (258 geo + 2 iris-offset por olho = 260).
+// Incrementar aqui sempre que o número de features mudar, para invalidar
+// modelos salvos com dimensões incompatíveis e forçar recalibração.
+const CURRENT_FEATURE_DIMS = 260;
+
 export function loadProfile(): boolean {
   try {
     const saved = localStorage.getItem("calibrationProfile");
     if (saved) {
       const parsed = JSON.parse(saved);
       if (parsed.modelLeft && parsed.modelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
+        // Rejeita modelos salvos com dimensão diferente da atual
+        const savedDims = parsed.featureDims ?? parsed.scalerParamsLeft.means?.length;
+        if (savedDims !== CURRENT_FEATURE_DIMS) {
+          console.warn(`[calib] modelo salvo com ${savedDims} features (atual: ${CURRENT_FEATURE_DIMS}) — recalibração necessária`);
+          localStorage.removeItem("calibrationProfile");
+          return false;
+        }
         if (parsed.regressorMode === 'svr') {
           regressorLeft = svrRegressorFromModel(parsed.modelLeft);
           regressorRight = svrRegressorFromModel(parsed.modelRight);
@@ -194,13 +248,6 @@ export function loadProfile(): boolean {
           regressorLeft = ridgeRegressorFromModel(parsed.modelLeft);
           regressorRight = ridgeRegressorFromModel(parsed.modelRight);
         }
-        featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
-        featureScalerRight.setParams(parsed.scalerParamsRight.means, parsed.scalerParamsRight.stds);
-        return true;
-      } else if (parsed.ridgeModelLeft && parsed.ridgeModelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
-        // Fallback for old saved profiles
-        regressorLeft = ridgeRegressorFromModel(parsed.ridgeModelLeft);
-        regressorRight = ridgeRegressorFromModel(parsed.ridgeModelRight);
         featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
         featureScalerRight.setParams(parsed.scalerParamsRight.means, parsed.scalerParamsRight.stds);
         return true;
@@ -229,11 +276,13 @@ function saveProfile() {
     }
 
     if (modelLeft && modelRight) {
+      const scalerParamsLeft = featureScalerLeft.getParams();
       localStorage.setItem("calibrationProfile", JSON.stringify({
         regressorMode: REGRESSOR_MODE,
+        featureDims: scalerParamsLeft.means.length,
         modelLeft: modelLeft,
         modelRight: modelRight,
-        scalerParamsLeft: featureScalerLeft.getParams(),
+        scalerParamsLeft,
         scalerParamsRight: featureScalerRight.getParams()
       }));
     }
@@ -248,6 +297,7 @@ export function clearCalibration() {
   devConfigC = null;
   devConfigCReason = null;
   _configCPredLogCount = 0;
+  _gazeCorrections = [];
   localStorage.removeItem("calibrationProfile");
   localStorage.removeItem("accuracyResult");
   updateStatusUI();
@@ -776,8 +826,10 @@ export function runCalibrationTraining(testProfile: CalibrationPoint[]): void {
 }
 
 function completeCalibration() {
+  // Invalida correções da sessão anterior — a nova calibração gera novo modelo
+  // e o teste de precisão subsequente produzirá correções atualizadas.
+  _gazeCorrections = [];
 
-  
   // Treina scalers e regressores; retorna features geométricas escaladas (usadas por Config B)
   const { scaledFeaturesLeft, scaledFeaturesRight, targetsX, targetsY } =
     trainScalersAndRegressors(profile);
@@ -1103,6 +1155,12 @@ export function mapGaze(
     nearestDistRight,
     nearestDistAvg: (nearestDistLeft + nearestDistRight) / 2,
   });
+
+  // Aplica mapa de correção IDW gerado pelo teste de validação.
+  // Pulado durante o próprio teste para reportar o erro real do modelo.
+  if (!isAccuracyTesting && _gazeCorrections.length >= 3) {
+    return applyGazeCorrection(result.x, result.y);
+  }
 
   return result;
 }

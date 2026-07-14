@@ -33,8 +33,8 @@ export class StandardScaler {
     // Desvio padrão
     for (let j = 0; j < numFeatures; j++) {
       this.stds[j] = Math.sqrt(this.stds[j] / numSamples);
-      // Evita divisão por zero se a feature for constante
-      if (this.stds[j] < 1e-8) {
+      // Evita divisão por zero (feature constante) ou NaN/Infinity herdado de amostras ruins
+      if (!isFinite(this.stds[j]) || this.stds[j] < 1e-8) {
         this.stds[j] = 1.0;
       }
     }

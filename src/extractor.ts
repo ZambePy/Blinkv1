@@ -179,7 +179,11 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
     const r10 = faceMatrix[1], r11 = faceMatrix[5], r12 = faceMatrix[9];
     const r22 = faceMatrix[10];
 
-    pitch = Math.asin(-r12);
+    // Clamp para [-1,1] antes do asin — erros de ponto flutuante na matriz do
+    // MediaPipe podem produzir |r12| ligeiramente > 1, fazendo Math.asin retornar NaN.
+    // NaN corromperia o StandardScaler (mean/std=NaN) e degeneraria o SVR para
+    // prever ~centro constante, causando cursor estático após calibração.
+    pitch = Math.asin(Math.max(-1, Math.min(1, -r12)));
     yaw = Math.atan2(r02, r22);
     roll = Math.atan2(r10, r11);
 
@@ -188,6 +192,28 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
 
   featuresLeft.push(yaw, pitch, roll);
   featuresRight.push(yaw, pitch, roll);
+
+  // ── Offset explícito da íris (feature de alta sinalização) ──────────────
+  // O SVR linear precisa desta feature explícita porque o mapeamento
+  // iris_coord_raw → gaze é mais linear quando expresso como deslocamento
+  // relativo ao centro do olho (canto nasal + temporal) do que em coordenadas
+  // brutas que incluem variação de pose da cabeça.
+
+  const midXL = (rotatedPoints[33].x + rotatedPoints[133].x) * 0.5;
+  const midYL = (rotatedPoints[33].y + rotatedPoints[133].y) * 0.5;
+  const irisL = rotatedPoints[468];
+  featuresLeft.push(
+    irisL.x - midXL,  // offset horizontal da íris em relação ao centro do olho
+    irisL.y - midYL,  // offset vertical
+  );
+
+  const midXR = (rotatedPoints[263].x + rotatedPoints[362].x) * 0.5;
+  const midYR = (rotatedPoints[263].y + rotatedPoints[362].y) * 0.5;
+  const irisR = rotatedPoints[473];
+  featuresRight.push(
+    irisR.x - midXR,
+    irisR.y - midYR,
+  );
 
   // 2. Blink Detection & Dimensions
   const lInner = landmarks[133], lOuter = landmarks[33], lTop = landmarks[159], lBottom = landmarks[145];
