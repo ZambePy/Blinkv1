@@ -11,8 +11,8 @@ export interface GazeRegressor {
 
 export type RegressorMode = 'ridge' | 'kernel_ridge' | 'svr';
 
-// Active production mode set to 'svr' as requested.
-export const REGRESSOR_MODE: RegressorMode = 'svr';
+// kernel_ridge ativo: único regressor com GAMMA_SAFE_MIN confirmado (não satura out-of-hull).
+export const REGRESSOR_MODE: RegressorMode = 'kernel_ridge';
 
 export function createRegressor(mode: RegressorMode): GazeRegressor {
   if (mode === 'ridge')        return new RidgeRegressor();

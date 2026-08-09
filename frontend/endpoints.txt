@@ -1,0 +1,50 @@
+# Endpoints Necessários - Backend Python (IrisFlow)
+
+Para garantir a comunicação 100% livre de conflitos entre o Frontend (React) e o Backend (Python), as seguintes rotas e conexões de WebSocket precisam ser implementadas no seu backend.
+
+## 1. Conexão Primária de Telemetria (WebSocket)
+
+**Rota:** `ws://localhost:PORTA/ws/tracker`
+**Descrição:** Canal bidirecional de comunicação em tempo real para rastreamento ocular e calibração.
+
+### Mensagens Recebidas (Backend envia para Frontend):
+- `{"type": "gaze_data", "x": <float>, "y": <float>}`: Envia as coordenadas X e Y relativas à tela. O Frontend usará para simular o "olhar".
+- `{"type": "calibration_status", "status": "ok" | "failed", "accuracy": <float>}`: Informa a qualidade da calibração.
+- `{"type": "blink", "duration": <float>}`: Detecta quando o usuário pisca (opcional, mas bom ter para ações extras).
+
+### Mensagens Enviadas (Frontend envia para Backend):
+- `{"action": "start_calibration"}`: Solicita que o backend inicie o processo de calibração.
+- `{"action": "telemetry_game_data", "target_x": <int>, "target_y": <int>, "error_margin": <float>}`: Dados colhidos nos mini-jogos para alimentar a precisão do tracking no backend.
+
+---
+
+## 2. API REST (Chamadas HTTP Convencionais)
+
+Estas rotas são assíncronas e executadas via chamadas `fetch` padrão.
+
+### 2.1 Gerenciamento de Voz (Clonagem)
+**Endpoint:** `POST /api/voice/clone`
+- **Descrição:** Recebe um arquivo de áudio curto para gerar a clonagem da voz do paciente.
+- **Payload:** Formulário multipart com o arquivo `.wav`/`.mp3` e o `user_id`.
+- **Resposta:** `{"status": "processing", "task_id": "..."}`
+
+**Endpoint:** `GET /api/voice/status/{task_id}`
+- **Descrição:** Retorna o status do processamento da clonagem.
+
+**Endpoint:** `POST /api/voice/synthesize`
+- **Descrição:** Caso não seja usada a API nativa do navegador para a voz clonada, o frontend enviará o texto e receberá um buffer de áudio.
+- **Payload:** `{"text": "Preciso de ajuda", "voice_profile_id": "..."}`
+- **Resposta:** Arquivo de Áudio em base64 ou URL de stream.
+
+### 2.2 Notificações e Ajuda (Alerta Cuidador)
+**Endpoint:** `POST /api/alerts/help`
+- **Descrição:** Disparado quando o botão "Preciso de ajuda" é ativado. Pode acionar envio de SMS, notificação push, ou alerta sonoro na máquina do cuidador.
+- **Payload:** `{"user_id": "...", "timestamp": "...", "priority": "high"}`
+
+### 2.3 Integração Casa Inteligente (Autonomus Casa)
+**Endpoint:** `POST /api/smart-home/action`
+- **Descrição:** Endpoint para acionar TV, luzes, etc., caso aplicável.
+- **Payload:** `{"device": "tv", "action": "turn_on"}`
+
+---
+**Recomendação de Stack Backend:** Utilize **FastAPI** com `websockets`. Ele tem tipagem forte nativa, o que facilita validar esses payloads json, é performático para gerenciar múltiplas janelas, e rodará o tracking da webcam (via OpenCV/MediaPipe/etc) em processos assíncronos separados sem travar a interface.

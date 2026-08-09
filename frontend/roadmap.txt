@@ -1,0 +1,153 @@
+IRISFLOW
+Especificação de Interface e Fluxo de Telas
+Análise de protótipo de referência e proposta de novas funcionalidades
+Plataforma assistiva de comunicação por rastreamento ocular
+Documento de referência — Módulo de Interface (Frontend)
+Julho de 2026
+ 
+Sumário
+
+
+ 
+ 
+1. Introdução
+A IrisFlow é uma plataforma de tecnologia assistiva que utiliza o rastreamento ocular (eye tracking) via webcam como principal metrica de interação, permitindo que pessoas com ELA (Esclerose Lateral Amiotrófica) e outras condições que limitam o movimento controlem um computador e se comuniquem apenas com o olhar. O projeto adota, desde sua concepção, dois perfis de uso distintos: o usuário com ELA, que opera o sistema exclusivamente por fixação ocular (dwell) e piscar intencional, e o cuidador/familiar, que configura e supervisiona o sistema por mouse e teclado.
+Durante a pesquisa de referências de interface, foi identificado um protótipo funcional — o aplicativo “Autonomus”, desenvolvido pelo LAIS/UFRN — cuja estrutura de telas e padrões de interação por fixação ocular estão muito próximos do que se busca para a IrisFlow. Este documento tem dois objetivos:
+•	Descrever, tela a tela, como cada aba do protótipo de referência funciona e qual problema ela resolve dentro de uma sessão de uso por rastreamento ocular; e
+•	Propor novas telas e funcionalidades para a IrisFlow, com destaque para uma área de mini-jogos com eye tracking, um recurso de clonagem de voz do paciente, uma tela de boas-vindas/login estruturada, e sugestões adicionais de abas.
+Nota de autoria e escopo
+As capturas de tela analisadas pertencem ao protótipo “Autonomus App” (LAIS/UFRN) e são usadas aqui exclusivamente como referência de padrão de interação (UX) — não como código ou identidade visual a ser copiada.
+A identidade visual definitiva da IrisFlow (cor de marca #1B54A8, tipografia Boldonse, logotipo próprio) deve prevalecer sobre a paleta observada neste protótipo (azul, verde-água e laranja) no momento da implementação real das telas.
+2. Fluxo de Navegação Geral
+O protótipo segue um fluxo linear e previsível — uma característica desejável para usuários com fadiga visual e sem capacidade de correção rápida de erro por mouse. A sequência observada é:
+Carregamento (splash) → Boas-vindas → Menu Principal → [Preciso de ajuda | Frases rápidas | Minhas opções | Quero escrever] → Configuração (acessível a qualquer momento a partir do Menu Principal).
+Dois princípios de navegação se repetem em todas as telas internas e devem ser preservados na IrisFlow: (1) a opção “Voltar” ocupa sempre a primeira posição de leitura (canto superior esquerdo ou primeiro item da grade), reduzindo a carga de busca visual; e (2) uma barra de progresso (breadcrumb) no topo informa em qual etapa da tarefa o usuário está, o que é especialmente importante porque o usuário não pode simplesmente “olhar para trás” na barra de navegação do sistema operacional.
+2.1 Resumo das telas do protótipo
+Tela	Ativação principal	Função
+Carregamento	Automática (splash)	Exibe a marca do produto durante a inicialização do backend de rastreamento ocular.
+Boas-vindas	Automática, transição temporizada	Mensagem de acolhimento antes de liberar o menu principal; dá tempo do usuário se posicionar diante da câmera.
+Menu Principal	Fixação (dwell) nos 4 ícones ou em Configuração	Ponto de partida de toda sessão; distribui o usuário para Ajuda, Frases, Opções ou Escrita.
+Quero Escrever	Fixação célula a célula do teclado	Composição livre de texto, letra por letra, com leitura em voz alta do resultado.
+Frases Rápidas	Fixação em cartão de frase	Comunicação imediata por frases pré-definidas, sem custo de digitação.
+Configurações	Fixação em opções + botão Salvar	Ajuste de velocidade de resposta, layout de teclado, áudio e integrações — tela de perfil, tipicamente operada pelo cuidador.
+ 
+3. Detalhamento das Telas do Protótipo
+3.1 Tela de Carregamento (Splash)
+ 
+Figura 1 — Tela de carregamento, exibida durante a inicialização do sistema.
+Objetivo: dar feedback imediato de que o aplicativo está iniciando, enquanto o backend carrega o modelo de rastreamento ocular, a câmera e os módulos de voz. Para o usuário com ELA, esse tempo de espera não pode ser silencioso — a ausência de qualquer resposta visual pode ser confundida com falha do sistema.
+Elementos	Logotipo centralizado, nome do produto
+Interação	Nenhuma — tela não interativa, apenas informativa
+Observação de acessibilidade	Recomenda-se adicionar um indicador de progresso (ex.: barra ou percentual) e uma mensagem textual do que está sendo carregado (“Calibrando câmera”, “Carregando perfil”), para reduzir a ansiedade de espera
+3.2 Tela de Boas-vindas
+ 
+Figura 2 — Tela de boas-vindas, transição entre o carregamento e o menu principal.
+Objetivo: dar uma pausa curta e acolhedora entre o carregamento técnico e a exposição do menu de comandos, e dar tempo para o usuário se posicionar corretamente em frente à câmera antes que opções sensíveis à fixação ocular apareçam na tela (evita ativação acidental por fixação involuntária durante o reposicionamento).
+Elementos	Mensagem “Bem vindo!” em destaque
+Interação	Transição automática por tempo (não é uma tela de escolha)
+Observação de acessibilidade	Esta é a etapa natural para inserir verificação de calibração e login de perfil — ver seção 5.1
+3.3 Menu Principal
+ 
+Figura 3 — Menu principal com os quatro módulos centrais e acesso à Configuração.
+Objetivo: ser o hub central de onde toda ação parte. É a tela em que o usuário passa mais tempo entre uma tarefa e outra, portanto sua legibilidade é crítica.
+Elementos	Botão “Configuração” (canto superior esquerdo), logotipo do produto (topo central), quatro círculos de ação grandes e coloridos — Preciso de ajuda (vermelho), Frases rápidas (verde-água), Minhas opções (azul) e Quero escrever (laranja) — e o crédito institucional no rodapé
+Interação	Fixação ocular (dwell) sobre um dos quatro círculos ou sobre o botão de Configuração
+Observação de acessibilidade	O uso de apenas quatro alvos grandes, bem espaçados e com cores distintas por categoria segue a boa prática de manter entre 4 e 16 alvos por tela em interfaces de fixação ocular — número baixo o suficiente para reduzir erro de seleção por tremor ocular ou fadiga
+Cada círculo direciona para um submódulo com propósito comunicativo diferente:
+•	Preciso de ajuda — aciona um pedido de assistência imediato ao cuidador (idealmente com prioridade máxima de resposta e, futuramente, integração com notificação sonora/push no dispositivo do cuidador).
+•	Frases rápidas — acesso a comunicação pré-definida de baixo custo cognitivo e motor (detalhado em 3.5).
+•	Minhas opções — espaço reservado a atalhos e preferências pessoais do usuário (frases favoritas, contatos, rotina) — ver também as sugestões de expansão na seção 5.4.
+•	Quero escrever — abre o teclado virtual para composição livre de texto (detalhado em 3.4).
+3.4 Quero Escrever — Teclado Virtual
+ 
+Figura 4 — Teclado virtual com destaque visual do alvo em fixação (retângulo e barra de progresso vermelhos sobre “Espaço”).
+Objetivo: permitir a composição de qualquer mensagem, letra por letra, quando nenhuma frase pré-definida atende à necessidade do momento. É a funcionalidade de maior custo de tempo e atenção do sistema, por isso concentra o maior número de recursos de apoio visual.
+Elementos	Campo de texto com botão “FALAR” (leitura em voz alta do que foi escrito), grade de teclas ordenadas por frequência de uso do português (A, E, O, S, R... em vez de QWERTY), linha de números e pontuação, e barra de ações — Voltar, Apagar, Apaga Tudo, alternância de símbolos (#!@), Enter e Ajuda
+Interação	Fixação célula a célula; a captura destaca o padrão de feedback em três estágios: contorno destacado ao redor da tecla em fixação, mudança de cor (vermelho) indicando seleção em andamento, e uma barra de progresso que se enche conforme o tempo de fixação avança até confirmar a tecla
+Observação de acessibilidade	O layout por frequência de letras (não QWERTY) reduz a distância média percorrida pelo olhar entre teclas consecutivas — decisão de design já validada na literatura de teclados por varredura/fixação e coerente com a opção de “Layout do teclado” oferecida nas Configurações (seção 3.6)
+O botão “FALAR” é o ponto de saída da composição: dispara a síntese de voz (texto-para-fala) do conteúdo digitado. Esse é exatamente o ponto de integração natural para a funcionalidade de voz clonada do paciente, proposta na seção 5.3.
+3.5 Frases Rápidas
+ 
+Figura 5 — Seleção de frase pré-definida, com item em fixação (Voltar) destacado por moldura e barra de progresso.
+Objetivo: comunicação de necessidades recorrentes (ir ao banheiro, dor, ajuda, passeio) sem o custo motor e cognitivo de compor a frase letra por letra — é o caminho mais rápido entre a necessidade e a fala sintetizada.
+Elementos	Barra de progresso da tarefa no topo (“Frases rápidas → Escolha uma frase”), grade de cartões com ícone + rótulo textual (Voltar, Preciso ir ao banheiro, Quero ligar a TV, Estou com dor, Quero passear, Preciso de ajuda)
+Interação	Fixação sobre um cartão; o mesmo padrão de contorno + barra de progresso do teclado é reaproveitado aqui, reforçando consistência de feedback em todo o sistema
+Observação de acessibilidade	O cartão “Voltar” ocupa a primeira posição da grade (canto superior esquerdo) — mesma convenção espacial adotada em todas as telas do protótipo, o que evita que o usuário precise reaprender onde procurar a saída em cada tela nova
+Esta tela é o candidato natural para receber frases dinâmicas geradas a partir de “Minhas opções” (favoritas, mais usadas, sugeridas por rotina/horário) — ver seção 5.4.
+3.6 Configurações
+ 
+Figura 6 — Configurações (parte superior): temporizador de fixação, layout do teclado e áudio.
+ 
+Figura 7 — Configurações (parte inferior): integração Autonomus Casa e ações de salvar/restaurar padrão.
+Objetivo: ajustar o comportamento do sistema às necessidades específicas de cada usuário. Diferente das demais telas, esta é predominantemente operada pelo cuidador/familiar (persona de configuração por mouse), embora nada impeça o próprio usuário de navegá-la por fixação em sessões mais longas.
+Temporizador	Três velocidades de dwell (Devagar, Normal, Rápido) com barra visual comparativa — ajusta o tempo de fixação necessário para confirmar uma seleção em todas as telas do sistema, parâmetro crítico porque a fadiga muscular ocular e a progressão da ELA variam por pessoa e ao longo do tempo
+Layout do teclado	Alternância entre ordenação por frequência, alfabética ou QWERTY — atende tanto o usuário que já tinha familiaridade prévia com teclado físico quanto o que se beneficia da otimização por frequência de letras
+Áudio — Sons	Liga/desliga efeitos sonoros de feedback do sistema (ex.: som de confirmação de seleção)
+Áudio — Vozes	Seleção entre voz sintética feminina ou masculina para leitura de frases e texto composto — ponto de extensão direto para a voz clonada do paciente (seção 5.3)
+Autonomus Casa	Ativa/desativa a integração com automação residencial (luzes, TV, ar-condicionado, câmeras) — mesmo conceito que a IrisFlow pode adotar para controle de ambiente, tema recorrente em tecnologia assistiva
+Ações finais	“Voltar para padrão inicial” (reset de fábrica das preferências) e “Salvar”, que confirma e persiste as alterações
+ 
+4. Princípios de Acessibilidade Identificados no Protótipo
+Independentemente da funcionalidade, quatro padrões se repetem de forma consistente em todas as telas do protótipo analisado e devem ser tratados como requisitos não funcionais transversais na IrisFlow:
+•	Feedback de fixação em três estágios — contorno de destaque ao entrar em fixação, mudança de cor indicando que a seleção está em progresso, e barra de progresso temporal até a confirmação. Esse padrão evita ativações acidentais (um simples “olhar de passagem” não basta) e dá ao usuário uma janela de tempo para “desistir” da seleção olhando para outro ponto antes da barra completar.
+•	Posição fixa de elementos de escape — “Voltar” sempre no mesmo canto/posição relativa. Isso é coerente com a diretriz já adotada no projeto de manter uma posição fixa para a célula de emergência em todas as telas do usuário com ELA.
+•	Poucos alvos, grandes e bem espaçados — o menu principal usa 4 alvos; a tela de frases usa 6. Nenhuma tela do protótipo ultrapassa a faixa recomendada de alvos simultâneos para seleção por fixação ocular.
+•	Trilha de contexto (breadcrumb) — presente em Frases Rápidas, orienta o usuário sobre em qual etapa da tarefa ele está sem exigir memória de curto prazo sobre cliques anteriores.
+Recomenda-se que esses quatro padrões sejam formalizados como componentes de interface reutilizáveis (design system) da IrisFlow, em vez de reimplementados tela a tela — o que também simplifica a manutenção do parâmetro de Temporizador global descrito na seção 3.6.
+5. Sugestões de Novas Telas e Funcionalidades
+5.1 Tela de Boas-vindas, Login e Perfis
+O protótipo de referência trata “Bem-vindo” como uma transição decorativa. Para a IrisFlow, esse momento deveria assumir três responsabilidades adicionais, aproveitando exatamente a pausa que já existe entre o carregamento e o menu principal:
+•	Seleção de perfil — se o dispositivo for compartilhado entre mais de um usuário (ex.: uma instituição de cuidado, ou reuso do equipamento entre pacientes), a tela de boas-vindas lista perfis salvos por foto/nome grande, selecionáveis por fixação. Cada perfil carrega seu próprio checkpoint de calibração, temporizador, layout de teclado e voz.
+•	Verificação rápida de calibração — antes de liberar o menu principal, o sistema pode exibir 3 a 5 pontos de checagem (não uma calibração completa) para confirmar que o rastreamento está preciso o suficiente para a sessão; se o erro estiver acima do aceitável, oferece recalibração rápida em vez de deixar o usuário lutar contra um menu impreciso.
+•	Login do cuidador — acesso a Configurações, Painel do Cuidador (seção 5.4) e dados clínicos deve exigir autenticação leve (PIN numérico ou padrão, inserido por mouse/teclado), para que o usuário com ELA não altere acidentalmente parâmetros sensíveis por fixação prolongada em um elemento.
+Fluxo sugerido: Carregamento → Boas-vindas com seleção de perfil → Checagem de calibração (pula automaticamente se recente) → Menu Principal. O login do cuidador não entra nesse fluxo principal — fica atrás do botão “Configuração” já existente no protótipo, protegido por PIN.
+5.2 Área de Mini-jogos com Eye Tracking
+Uma área de jogos simples controlados por rastreamento ocular atende três objetivos que se reforçam mutuamente: engajamento e qualidade de vida do usuário, treino motor-ocular contínuo, e — do ponto de vista técnico do backend — geração de dados adicionais de fixação que podem alimentar tanto a validação da calibração quanto, futuramente, o retreinamento do modelo de gaze estimation com exemplos reais de uso.
+Objetivo funcional
+•	Oferecer atividades recreativas e de estimulação cognitiva acessíveis inteiramente por fixação ocular, sem exigir qualquer outro dispositivo de entrada.
+•	Servir como “calibração disfarçada” — cada jogo pode registrar, de forma transparente, a diferença entre o ponto de fixação esperado e o predito pelo sistema, alimentando um indicador de qualidade de calibração ao longo do tempo sem exigir uma sessão formal de calibração repetida.
+•	Ser configurável por dificuldade, reaproveitando o parâmetro de Temporizador já existente nas Configurações (dwell mais longo = jogo mais lento e acessível).
+Exemplos de mini-jogos propostos
+•	Siga o alvo — um objeto se move pela tela e o usuário deve mantê-lo no centro do olhar pelo maior tempo possível; métrica simples de precisão e estabilidade de fixação.
+•	Estoura bolhas — bolhas aparecem em posições aleatórias e “estouram” após um tempo de fixação (dwell); reforça o mesmo gesto de seleção usado no restante do sistema, mas de forma lúdica.
+•	Jogo da memória por fixação — pares de cartas viradas para baixo, reveladas por fixação e combinadas em sequência; trabalha memória de curto prazo além da precisão de fixação.
+•	Labirinto guiado pelo olhar — um personagem se move na direção do olhar (não por fixação pontual, mas por direção contínua), útil como variação de interação complementar ao dwell.
+•	Leitura cronometrada — destaca palavras de um texto conforme o olhar percorre a linha, com leitura em voz alta sincronizada; combina estimulação cognitiva com verificação indireta da suavização (One Euro Filter) em uso real de leitura.
+Ponto de integração com o backend
+Cada mini-jogo pode reutilizar diretamente o WebSocket de predição de olhar já definido para o restante do sistema (mesmo contrato de mensagens “pred”), sem exigir um protocolo separado.
+Os dados de erro de fixação coletados durante o jogo podem ser reportados a um endpoint de telemetria (opt-in, com consentimento do cuidador) para acompanhar a qualidade de calibração ao longo do tempo — ideia a detalhar em conjunto com o roadmap de calibração do backend, sem se confundir com a coleta formal usada para treinar o modelo.
+5.3 IA de Clonagem de Voz do Paciente
+Muitos usuários de tecnologia assistiva por comunicação alternativa perdem, ao longo da progressão da doença, a própria voz — e a leitura de suas frases por uma voz sintética genérica (as opções “Feminina/Masculina” observadas no protótipo) é uma perda adicional de identidade, além de funcional. A proposta é permitir que o cuidador ou familiar grave uma amostra curta da voz do paciente (por exemplo, os 10 segundos mencionados) e o sistema passe a usar essa voz clonada como saída de fala em todo o aplicativo — no botão “FALAR” do teclado, nas Frases Rápidas e nos alertas.
+Fluxo proposto
+•	1. Consentimento — antes de qualquer gravação, uma tela explica de forma simples o que será feito com o áudio, quem terá acesso a ele e como excluí-lo depois; a ação é confirmada pelo cuidador (fora do fluxo de fixação ocular, mesma lógica de proteção do login).
+•	2. Captura do áudio — interface de gravação com roteiro guiado (frases sugeridas para leitura, ~10 segundos de fala limpa, sem ruído de fundo) ou upload de um áudio já existente do paciente (mensagens de voz antigas, vídeos caseiros).
+•	3. Processamento — o áudio é enviado a um serviço de clonagem de voz (voice cloning / few-shot TTS) que gera um modelo de voz personalizado; o processamento pode ocorrer em nuvem ou localmente, decisão que impacta diretamente o compromisso de privacidade do produto e deve ser tomada em conjunto com a equipe técnica.
+•	4. Disponibilização — a nova opção de voz aparece nas Configurações, na mesma seção “Áudio → Vozes” do protótipo, como uma terceira opção (“Voz do(a) [nome do usuário]”) ao lado de Feminina/Masculina, preservando as vozes genéricas como alternativa padrão e como fallback caso o serviço de clonagem esteja indisponível.
+Cuidados obrigatórios
+•	Consentimento explícito e revogável — o cuidador deve poder excluir a amostra de voz e o modelo derivado a qualquer momento, com confirmação de que a exclusão foi efetivada.
+•	Dado sensível sob a LGPD — voz é dado biométrico; a amostra de áudio e o modelo gerado precisam de armazenamento seguro, escopo de acesso restrito ao perfil do próprio usuário, e política clara de retenção.
+•	Transparência de uso indevido — o documento de consentimento deve deixar explícito que a tecnologia de clonagem de voz não deve ser usada para gerar frases que o paciente não escreveu ou selecionou no sistema; a voz clonada só deve narrar conteúdo produzido pelo próprio fluxo de comunicação da IrisFlow (Frases Rápidas e Teclado), nunca texto arbitrário fora desse contexto.
+•	Qualidade mínima aceitável — a interface deve validar a amostra de áudio antes de aceitar (duração mínima, nível de ruído) e informar claramente se a amostra não é suficiente para gerar um modelo de voz confiável, evitando frustração após a espera do processamento.
+5.4 Outras Abas Sugeridas
+Além dos itens explicitamente solicitados, a análise do protótipo e da estrutura geral de produtos assistivos sugere as seguintes adições, priorizadas por proximidade com o que já existe:
+Painel do Cuidador (Dashboard)
+Visão consolidada, fora do fluxo de fixação ocular, com o status do dia do usuário: bateria de comunicação usada, últimos pedidos de ajuda, qualidade da última calibração e alertas pendentes. É a extensão natural do botão “Preciso de ajuda” do menu principal — hoje um alerta isolado, e não um histórico.
+Rotina e Lembretes
+Lembretes recorrentes (medicação, hidratação, troca de posição, fisioterapia) configurados pelo cuidador e exibidos como notificação discreta na tela do usuário, com opção de confirmar “já feito” por fixação simples — reduz a carga do cuidador em relembrar tarefas manualmente.
+Modo Pictogramas (CAA visual)
+Uma variação da tela de Frases Rápidas voltada a estágios mais avançados da doença ou a perfis com menor familiaridade com leitura: comunicação inteiramente por ícones/pictogramas (sistema de Comunicação Aumentativa e Alternativa), sem depender de texto. Reaproveita a mesma grade de cartões já usada em Frases Rápidas, apenas com prioridade visual sobre a textual.
+Histórico e Estatísticas de Uso
+Tela voltada ao cuidador e, potencialmente, à equipe clínica, com gráficos simples de frequência de uso, frases mais utilizadas, tempo médio de resposta por seleção e evolução do erro de calibração ao longo do tempo — dado clinicamente relevante para acompanhar a progressão da doença e ajustar o Temporizador com base em evidência, não apenas em percepção subjetiva.
+Modo Descanso / Standby
+Tela neutra, de baixo estímulo visual, para períodos em que o usuário não está ativamente se comunicando (descanso, sono, TV ligada) — evita que o sistema continue tentando interpretar fixações involuntárias como comandos, e pode ser reativada por um gesto simples e deliberado (ex.: piscar duas vezes seguidas ou fixação longa em ponto único).
+Chamada de Emergência com Contato Automático
+Extensão do já existente “Preciso de ajuda”: ao ser acionado e não haver resposta do cuidador em um tempo configurável, o sistema escala automaticamente — notificação por SMS/app a um contato de emergência previamente cadastrado, com opção de incluir a última localização do dispositivo, quando aplicável.
+Central de Ajuda / Tutorial Interativo
+Já existe o atalho “Ajuda” na barra de ações do teclado do protótipo; sugere-se expandi-lo em uma tela dedicada com tutoriais curtos, guiados por fixação, ensinando o próprio usuário (ou um novo cuidador) a operar cada módulo do sistema pela primeira vez.
+ 
+6. Próximos Passos
+•	Validar esta especificação com cuidadores, familiares e, se possível, profissionais de saúde envolvidos no cuidado de pacientes com ELA, antes de qualquer investimento em telas de alta fidelidade.
+•	Definir a identidade visual definitiva das telas (cor de marca #1B54A8, tipografia Boldonse) aplicada sobre os padrões de interação validados neste documento.
+•	Priorizar o backlog de novas funcionalidades — recomenda-se iniciar pela tela de Boas-vindas/Login (baixo custo, alto impacto na experiência multiusuário) antes dos mini-jogos e da clonagem de voz, que exigem integrações técnicas mais complexas.
+•	Prototipar as novas telas (ex.: Figma) reaproveitando os componentes de interface já identificados na seção 4 (feedback de fixação em três estágios, posição fixa de “Voltar”/emergência, breadcrumb de contexto).
+•	Alinhar com a equipe de backend os pontos de integração já mapeados neste documento (WebSocket de predição para os mini-jogos; endpoint de processamento de voz clonada; telemetria opcional de qualidade de calibração).

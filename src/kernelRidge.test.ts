@@ -1,6 +1,6 @@
 import { beforeAll, describe, expect, it } from 'vitest';
 import { trainRidgeModel, predictRidge } from './ridge';
-import { KernelRidgeRegressor, buildKernelMatrix, looError } from './kernelRidge';
+import { KernelRidgeRegressor, buildKernelMatrix, looError, GAMMA_GRID, LAMBDA_GRID, GAMMA_SAFE_MIN } from './kernelRidge';
 import { StandardScaler } from './scaler';
 
 // Gate de validação para src/kernelRidge.ts.
@@ -65,7 +65,7 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     const krSaturates = krPred.x === 0 || krPred.x === SCREEN_WIDTH;
 
     // ── Relatório lado a lado ─────────────────────────────────────────────────
-    console.log('[gate1] treino KernelRidge (n=9, LOO-CV 5×4 grid): %s ms', elapsed.toFixed(1));
+    console.log('[gate1] treino KernelRidge (n=9, LOO-CV 7×6 grid): %s ms', elapsed.toFixed(1));
     console.log('[gate1] Ridge  out-of-hull → x=%s  y=%s  | satura=%s',
       ridgePred.x.toFixed(1), ridgePred.y.toFixed(1), ridgeSaturates ? 'SIM' : 'NÃO');
     console.log('[gate1] KR     out-of-hull → x=%s  y=%s  | satura=%s',
@@ -91,26 +91,19 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     const tgtsX  = targets.map(t => t.screenX);
     const tgtsY  = targets.map(t => t.screenY);
 
-    // Grid espelha exatamente as constantes internas de kernelRidge.ts
-    const GAMMA_GRID_TEST  = [0.01, 0.03, 0.1, 0.3, 0.5, 1.0, 2.0];
-    const LAMBDA_GRID_TEST = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5];
-
+    // Grid e piso de segurança importados de kernelRidge.ts — fonte única.
     let bestErr    = Infinity;
     let bestGamma  = 0;
     let bestLambda = 0;
 
-    // Piso de segurança: espelha GAMMA_SAFE_MIN de kernelRidge.ts.
-    // Gammas abaixo saturam out-of-hull (kernel quasi-plano → extrapolação como Ridge).
-    const GAMMA_SAFE_MIN_TEST = 0.1;
-
     const header = 'gamma \\ lambda' +
-      LAMBDA_GRID_TEST.map(l => String(l).padStart(8)).join('') + '  (safe?)';
+      LAMBDA_GRID.map(l => String(l).padStart(8)).join('') + '  (safe?)';
     console.log('[gate1-grid] ' + header);
 
-    for (const gamma of GAMMA_GRID_TEST) {
+    for (const gamma of GAMMA_GRID) {
       const K    = buildKernelMatrix(scaled, gamma);
-      const safe = gamma >= GAMMA_SAFE_MIN_TEST;
-      const row  = LAMBDA_GRID_TEST.map(lambda => {
+      const safe = gamma >= GAMMA_SAFE_MIN;
+      const row  = LAMBDA_GRID.map(lambda => {
         const err = looError(K, tgtsX, tgtsY, lambda);
         if (safe && err < bestErr) { bestErr = err; bestGamma = gamma; bestLambda = lambda; }
         return err.toFixed(4).padStart(8);

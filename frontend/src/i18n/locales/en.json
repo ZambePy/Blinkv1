@@ -1,0 +1,100 @@
+{
+  "common": {
+    "back": "Back",
+    "cancel": "Cancel",
+    "confirm": "Confirm",
+    "save": "Save",
+    "loading": "Loading…",
+    "close": "Close",
+    "menu": "Menu"
+  },
+  "menu": {
+    "tabs": {
+      "communication": "Communication",
+      "care": "Care",
+      "leisure": "Leisure",
+      "system": "System"
+    },
+    "items": {
+      "emergency": "Medical\nEmergency",
+      "pictograms": "Pictograms\n(AAC)",
+      "phrases": "Quick\nPhrases",
+      "keyboard": "Virtual\nKeyboard",
+      "chatbot": "AI\nAssistant",
+      "options": "My\nOptions",
+      "caregiver": "Caregiver\nDashboard",
+      "meditation": "Guided\nMeditation",
+      "iamok": "Alert:\nI'm OK",
+      "games": "Mini Games",
+      "drawing": "Free\nDrawing",
+      "gallery": "Photo\nGallery",
+      "news": "Daily\nNews",
+      "settings": "General\nSettings",
+      "virtualMouse": "Virtual\nMouse (PC)"
+    },
+    "openItem": "Open {{item}}",
+    "skipToContent": "Skip to main content",
+    "tabsAriaLabel": "Menu categories"
+  },
+  "settings": {
+    "title": "Settings",
+    "auth": {
+      "title": "Caregiver Access",
+      "hint": "Enter the PIN to access system settings.",
+      "pinLabel": "Caregiver PIN",
+      "pinError": "Incorrect PIN. Please check with the responsible caregiver.",
+      "submit": "Enter"
+    },
+    "dwell": {
+      "title": "Dwell Timer",
+      "slow": "Slow",
+      "normal": "Normal",
+      "fast": "Fast"
+    },
+    "layout": {
+      "title": "Keyboard Layout",
+      "frequency": "Frequency PT-BR",
+      "alphabetical": "Alphabetical",
+      "qwerty": "QWERTY"
+    },
+    "sound": {
+      "title": "System Audio",
+      "on": "Sound On",
+      "off": "Sound Off"
+    },
+    "voice": {
+      "title": "Custom Voice Cloning",
+      "description": "Upload an audio file (.wav) of the patient to create a personalized synthesized voice.",
+      "upload": "Upload Audio (.wav)",
+      "uploading": "Uploading audio…",
+      "processing": "Processing…",
+      "ready": "✓ Custom voice enabled",
+      "lgpd": "GDPR/LGPD: Voice is sensitive biometric data. The model will be stored exclusively for local assistive use by the patient."
+    },
+    "backup": {
+      "title": "Settings Backup",
+      "export": "Export Backup (JSON)"
+    },
+    "logout": "Sign out",
+    "returnToMenu": "Back to Menu",
+    "language": {
+      "title": "Language",
+      "pt-BR": "Português (Brasil)",
+      "en": "English"
+    }
+  },
+  "emergency": {
+    "title": "MEDICAL EMERGENCY",
+    "alertSent": "ALERT SENT!",
+    "waiting": "Signal for {{label}} triggered. Please wait.",
+    "cancelAndReturn": "Cancel Alert and Return",
+    "chooseType": "Select the type of emergency",
+    "items": {
+      "pain": "SEVERE PAIN",
+      "breath": "SHORTNESS OF BREATH",
+      "cold": "COLD / FEVER",
+      "other": "OTHER EMERGENCY"
+    },
+    "triggerAria": "Trigger emergency alert: {{label}}"
+  }
+}

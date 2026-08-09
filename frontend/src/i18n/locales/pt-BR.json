@@ -1,0 +1,100 @@
+{
+  "common": {
+    "back": "Voltar",
+    "cancel": "Cancelar",
+    "confirm": "Confirmar",
+    "save": "Salvar",
+    "loading": "Carregando…",
+    "close": "Fechar",
+    "menu": "Menu"
+  },
+  "menu": {
+    "tabs": {
+      "communication": "Comunicação",
+      "care": "Cuidados",
+      "leisure": "Lazer",
+      "system": "Sistema"
+    },
+    "items": {
+      "emergency": "Urgência\nMédica",
+      "pictograms": "Pictogramas\n(CAA)",
+      "phrases": "Frases\nRápidas",
+      "keyboard": "Teclado\nVirtual",
+      "chatbot": "Assistente\nde IA",
+      "options": "Minhas\nOpções",
+      "caregiver": "Painel do\nCuidador",
+      "meditation": "Meditação\nGuiada",
+      "iamok": "Aviso:\nEstou Bem",
+      "games": "Mini-Jogos",
+      "drawing": "Desenho\nLivre",
+      "gallery": "Galeria\nde Fotos",
+      "news": "Jornal\ndo Dia",
+      "settings": "Configuração\nGeral",
+      "virtualMouse": "Mouse\nVirtual (PC)"
+    },
+    "openItem": "Abrir {{item}}",
+    "skipToContent": "Pular para o conteúdo principal",
+    "tabsAriaLabel": "Categorias do menu"
+  },
+  "settings": {
+    "title": "Configurações",
+    "auth": {
+      "title": "Acesso do Cuidador",
+      "hint": "Insira o PIN para acessar as configurações do sistema.",
+      "pinLabel": "PIN do cuidador",
+      "pinError": "PIN incorreto. Verifique com o cuidador responsável.",
+      "submit": "Entrar"
+    },
+    "dwell": {
+      "title": "Temporizador de Fixação (Dwell)",
+      "slow": "Devagar",
+      "normal": "Normal",
+      "fast": "Rápido"
+    },
+    "layout": {
+      "title": "Layout do Teclado",
+      "frequency": "Frequência PT-BR",
+      "alphabetical": "Alfabético",
+      "qwerty": "QWERTY"
+    },
+    "sound": {
+      "title": "Áudio do Sistema",
+      "on": "Som Ativado",
+      "off": "Som Desativado"
+    },
+    "voice": {
+      "title": "Clonagem de Voz Personalizada",
+      "description": "Faça upload de um arquivo de áudio (.wav) do paciente para criar uma voz sintetizada personalizada.",
+      "upload": "Upload de Áudio (.wav)",
+      "uploading": "Enviando áudio…",
+      "processing": "Processando…",
+      "ready": "✓ Voz personalizada ativada",
+      "lgpd": "LGPD: A voz é dado biométrico sensível. O modelo será armazenado exclusivamente para uso assistivo local do paciente."
+    },
+    "backup": {
+      "title": "Backup de Configurações",
+      "export": "Exportar Backup (JSON)"
+    },
+    "logout": "Sair",
+    "returnToMenu": "Voltar ao Menu",
+    "language": {
+      "title": "Idioma",
+      "pt-BR": "Português (Brasil)",
+      "en": "English"
+    }
+  },
+  "emergency": {
+    "title": "URGÊNCIA MÉDICA",
+    "alertSent": "ALERTA ENVIADO!",
+    "waiting": "Sinal de {{label}} disparado. Aguarde.",
+    "cancelAndReturn": "Cancelar Alerta e Voltar",
+    "chooseType": "Selecione o tipo de urgência",
+    "items": {
+      "pain": "DOR MUITO FORTE",
+      "breath": "FALTA DE AR",
+      "cold": "MUITO FRIO / FEBRE",
+      "other": "OUTRA URGÊNCIA"
+    },
+    "triggerAria": "Disparar alerta de urgência: {{label}}"
+  }
+}

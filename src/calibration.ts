@@ -829,113 +829,121 @@ function completeCalibration() {
   // Invalida correções da sessão anterior — a nova calibração gera novo modelo
   // e o teste de precisão subsequente produzirá correções atualizadas.
   _gazeCorrections = [];
+  let trainingOk = false;
 
-  // Treina scalers e regressores; retorna features geométricas escaladas (usadas por Config B)
-  const { scaledFeaturesLeft, scaledFeaturesRight, targetsX, targetsY } =
-    trainScalersAndRegressors(profile);
-
-  // ── Dev: Config B (KernelRidge + geo, mesmo scaler de A) ────────────────────
   try {
-    const idxB  = subsampleIndices(scaledFeaturesLeft.length, MAX_KR_SAMPLES);
-    const sfBL  = idxB.map((i: number) => scaledFeaturesLeft[i]);
-    const sfBR  = idxB.map((i: number) => scaledFeaturesRight[i]);
-    const tBX   = idxB.map((i: number) => targetsX[i]);
-    const tBY   = idxB.map((i: number) => targetsY[i]);
-    const krLeft  = createRegressor('kernel_ridge');
-    const krRight = createRegressor('kernel_ridge');
-    krLeft.train(sfBL,  tBX, tBY);
-    krRight.train(sfBR, tBX, tBY);
-    devConfigB = { left: krLeft, right: krRight };
-    console.log('[comparison] Config B (KR+geo) treinada — %d/%d amostras',
-      idxB.length, scaledFeaturesLeft.length);
-  } catch (e) {
-    console.warn('[comparison] Config B falhou:', e);
-    devConfigB = null;
-  }
+    // Treina scalers e regressores; retorna features geométricas escaladas (usadas por Config B)
+    const { scaledFeaturesLeft, scaledFeaturesRight, targetsX, targetsY } =
+      trainScalersAndRegressors(profile);
 
-  // ── Dev: Config C (KernelRidge + fused, scaler separado 276 dims) ───────────
-  const fusedRowsLeft:  number[][] = [];
-  const fusedRowsRight: number[][] = [];
-  const fusedTgtsX: number[] = [];
-  const fusedTgtsY: number[] = [];
-  for (let i = 0; i < profile.length; i++) {
-    const fl = profile[i].fusedLeft;
-    const fr = profile[i].fusedRight;
-    if (fl && fr) {
-      fusedRowsLeft.push(fl);
-      fusedRowsRight.push(fr);
-      fusedTgtsX.push(profile[i].screenX);
-      fusedTgtsY.push(profile[i].screenY);
-    }
-  }
-  if (fusedRowsLeft.length >= 9) {
+    // ── Dev: Config B (KernelRidge + geo, mesmo scaler de A) ────────────────────
     try {
-      // Fit scaler no conjunto completo (para estatísticas de normalização corretas),
-      // depois subsampla para o treino do KR que é O(n⁴).
-      fusedScalerLeft.fit(fusedRowsLeft);
-      fusedScalerRight.fit(fusedRowsRight);
-      const scaledFLAll = fusedScalerLeft.transform(fusedRowsLeft);
-      const scaledFRAll = fusedScalerRight.transform(fusedRowsRight);
-      const idxC   = subsampleIndices(scaledFLAll.length, MAX_KR_SAMPLES);
-      const scaledFL = idxC.map((i: number) => scaledFLAll[i]);
-      const scaledFR = idxC.map((i: number) => scaledFRAll[i]);
-      const cTgtsX   = idxC.map((i: number) => fusedTgtsX[i]);
-      const cTgtsY   = idxC.map((i: number) => fusedTgtsY[i]);
-      const krFL = createRegressor('kernel_ridge');
-      const krFR = createRegressor('kernel_ridge');
-      krFL.train(scaledFL, cTgtsX, cTgtsY);
-      krFR.train(scaledFR, cTgtsX, cTgtsY);
-      devConfigC = { left: krFL, right: krFR };
-      devConfigCReason = null;
-      console.log('[comparison] Config C (KR+fused %d dims) treinada — %d/%d amostras',
-        fusedRowsLeft[0].length, idxC.length, fusedRowsLeft.length);
-
-      // Diagnóstico temporário: verifica se o embedding CNN varia entre frames de calibração.
-      // Se pcaVarianceMean ≈ 0, o encoder gera embeddings constantes independente do gaze →
-      // Config C degenera para comportamento igual a Config B (só geometria).
-      const pcaDimsC = fusedRowsLeft[0].length - scaledFeaturesLeft[0].length;
-      let pcaVarAccum = 0;
-      for (let d = 0; d < pcaDimsC; d++) {
-        let s = 0;
-        for (let r = 0; r < fusedRowsLeft.length; r++) s += fusedRowsLeft[r][d];
-        const m = s / fusedRowsLeft.length;
-        let sq = 0;
-        for (let r = 0; r < fusedRowsLeft.length; r++) {
-          const diff = fusedRowsLeft[r][d] - m;
-          sq += diff * diff;
-        }
-        pcaVarAccum += sq / fusedRowsLeft.length;
-      }
-      const pcaVarianceMean = pcaVarAccum / pcaDimsC;
-      const embStatus = pcaVarianceMean < 1e-8
-        ? 'CONSTANTE (bug: CNN não variando — C degenerará para B)'
-        : pcaVarianceMean < 0.001
-          ? 'quase constante (suspeito — verificar eyeCrop/encoder)'
-          : 'variando (OK)';
-      console.log(`[comparison] Config C diagnóstico treino: dims=${fusedRowsLeft[0].length} (pca=${pcaDimsC} + geo=${scaledFeaturesLeft[0].length}) | pcaVarianceMean=${pcaVarianceMean.toFixed(8)} | embedding: ${embStatus}`);
-      const midIdx = Math.floor(fusedRowsLeft.length / 2);
-      console.log('[comparison] Config C PCA[0..2]: row[0]=%s | row[mid]=%s | row[-1]=%s',
-        JSON.stringify(fusedRowsLeft[0].slice(0, 3).map((v: number) => +v.toFixed(4))),
-        JSON.stringify(fusedRowsLeft[midIdx].slice(0, 3).map((v: number) => +v.toFixed(4))),
-        JSON.stringify(fusedRowsLeft[fusedRowsLeft.length - 1].slice(0, 3).map((v: number) => +v.toFixed(4))));
-      _configCPredLogCount = 0;
+      const idxB  = subsampleIndices(scaledFeaturesLeft.length, MAX_KR_SAMPLES);
+      const sfBL  = idxB.map((i: number) => scaledFeaturesLeft[i]);
+      const sfBR  = idxB.map((i: number) => scaledFeaturesRight[i]);
+      const tBX   = idxB.map((i: number) => targetsX[i]);
+      const tBY   = idxB.map((i: number) => targetsY[i]);
+      const krLeft  = createRegressor('kernel_ridge');
+      const krRight = createRegressor('kernel_ridge');
+      krLeft.train(sfBL,  tBX, tBY);
+      krRight.train(sfBR, tBX, tBY);
+      devConfigB = { left: krLeft, right: krRight };
+      console.log('[comparison] Config B (KR+geo) treinada — %d/%d amostras',
+        idxB.length, scaledFeaturesLeft.length);
     } catch (e) {
-      console.warn('[comparison] Config C falhou:', e);
-      devConfigC = null;
-      devConfigCReason = 'erro durante treinamento do KR+fused';
+      console.warn('[comparison] Config B falhou:', e);
+      devConfigB = null;
     }
-  } else {
-    console.warn('[comparison] Config C ignorada: %d/%d amostras com fused features',
-      fusedRowsLeft.length, profile.length);
-    devConfigC = null;
-    devConfigCReason = `embedding insuficiente: ${fusedRowsLeft.length}/${profile.length} amostras com fused disponíveis (mínimo 9)`;
+
+    // ── Dev: Config C (KernelRidge + fused, scaler separado 276 dims) ───────────
+    const fusedRowsLeft:  number[][] = [];
+    const fusedRowsRight: number[][] = [];
+    const fusedTgtsX: number[] = [];
+    const fusedTgtsY: number[] = [];
+    for (let i = 0; i < profile.length; i++) {
+      const fl = profile[i].fusedLeft;
+      const fr = profile[i].fusedRight;
+      if (fl && fr) {
+        fusedRowsLeft.push(fl);
+        fusedRowsRight.push(fr);
+        fusedTgtsX.push(profile[i].screenX);
+        fusedTgtsY.push(profile[i].screenY);
+      }
+    }
+    if (fusedRowsLeft.length >= 9) {
+      try {
+        // Fit scaler no conjunto completo (para estatísticas de normalização corretas),
+        // depois subsampla para o treino do KR que é O(n⁴).
+        fusedScalerLeft.fit(fusedRowsLeft);
+        fusedScalerRight.fit(fusedRowsRight);
+        const scaledFLAll = fusedScalerLeft.transform(fusedRowsLeft);
+        const scaledFRAll = fusedScalerRight.transform(fusedRowsRight);
+        const idxC   = subsampleIndices(scaledFLAll.length, MAX_KR_SAMPLES);
+        const scaledFL = idxC.map((i: number) => scaledFLAll[i]);
+        const scaledFR = idxC.map((i: number) => scaledFRAll[i]);
+        const cTgtsX   = idxC.map((i: number) => fusedTgtsX[i]);
+        const cTgtsY   = idxC.map((i: number) => fusedTgtsY[i]);
+        const krFL = createRegressor('kernel_ridge');
+        const krFR = createRegressor('kernel_ridge');
+        krFL.train(scaledFL, cTgtsX, cTgtsY);
+        krFR.train(scaledFR, cTgtsX, cTgtsY);
+        devConfigC = { left: krFL, right: krFR };
+        devConfigCReason = null;
+        console.log('[comparison] Config C (KR+fused %d dims) treinada — %d/%d amostras',
+          fusedRowsLeft[0].length, idxC.length, fusedRowsLeft.length);
+
+        // Diagnóstico temporário: verifica se o embedding CNN varia entre frames de calibração.
+        // Se pcaVarianceMean ≈ 0, o encoder gera embeddings constantes independente do gaze →
+        // Config C degenera para comportamento igual a Config B (só geometria).
+        const pcaDimsC = fusedRowsLeft[0].length - scaledFeaturesLeft[0].length;
+        let pcaVarAccum = 0;
+        for (let d = 0; d < pcaDimsC; d++) {
+          let s = 0;
+          for (let r = 0; r < fusedRowsLeft.length; r++) s += fusedRowsLeft[r][d];
+          const m = s / fusedRowsLeft.length;
+          let sq = 0;
+          for (let r = 0; r < fusedRowsLeft.length; r++) {
+            const diff = fusedRowsLeft[r][d] - m;
+            sq += diff * diff;
+          }
+          pcaVarAccum += sq / fusedRowsLeft.length;
+        }
+        const pcaVarianceMean = pcaVarAccum / pcaDimsC;
+        const embStatus = pcaVarianceMean < 1e-8
+          ? 'CONSTANTE (bug: CNN não variando — C degenerará para B)'
+          : pcaVarianceMean < 0.001
+            ? 'quase constante (suspeito — verificar eyeCrop/encoder)'
+            : 'variando (OK)';
+        console.log(`[comparison] Config C diagnóstico treino: dims=${fusedRowsLeft[0].length} (pca=${pcaDimsC} + geo=${scaledFeaturesLeft[0].length}) | pcaVarianceMean=${pcaVarianceMean.toFixed(8)} | embedding: ${embStatus}`);
+        const midIdx = Math.floor(fusedRowsLeft.length / 2);
+        console.log('[comparison] Config C PCA[0..2]: row[0]=%s | row[mid]=%s | row[-1]=%s',
+          JSON.stringify(fusedRowsLeft[0].slice(0, 3).map((v: number) => +v.toFixed(4))),
+          JSON.stringify(fusedRowsLeft[midIdx].slice(0, 3).map((v: number) => +v.toFixed(4))),
+          JSON.stringify(fusedRowsLeft[fusedRowsLeft.length - 1].slice(0, 3).map((v: number) => +v.toFixed(4))));
+        _configCPredLogCount = 0;
+      } catch (e) {
+        console.warn('[comparison] Config C falhou:', e);
+        devConfigC = null;
+        devConfigCReason = 'erro durante treinamento do KR+fused';
+      }
+    } else {
+      console.warn('[comparison] Config C ignorada: %d/%d amostras com fused features',
+        fusedRowsLeft.length, profile.length);
+      devConfigC = null;
+      devConfigCReason = `embedding insuficiente: ${fusedRowsLeft.length}/${profile.length} amostras com fused disponíveis (mínimo 9)`;
+    }
+
+    saveProfile();
+    trainingOk = true;
+  } catch (e) {
+    console.error('[calibration] Erro fatal na finalização da calibração — UI será desbloqueada:', e);
+  } finally {
+    cleanupOverlay();
+    isCalibrating = false;
+    window.removeEventListener("keydown", handleGlobalKeyDown);
   }
 
-  saveProfile();
-  cleanupOverlay();
-  isCalibrating = false;
-  window.removeEventListener("keydown", handleGlobalKeyDown);
-  runAccuracyTest();
+  if (trainingOk) runAccuracyTest();
 }
 
 // ── Painel de Controle ───────────────────────────────────────────────────────

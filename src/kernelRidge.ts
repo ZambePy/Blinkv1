@@ -28,8 +28,15 @@ export interface KernelRidgeModel {
 
 // ─── Grid de hiperparâmetros ───────────────────────────────────────────────────
 
-const GAMMA_GRID  = [0.01, 0.05, 0.1, 0.5, 1.0, 5.0] as const;
-const LAMBDA_GRID = [0.001, 0.01, 0.1, 0.5] as const;
+export const GAMMA_GRID     = [0.01, 0.03, 0.1, 0.3, 0.5, 1.0, 2.0] as const;
+export const LAMBDA_GRID    = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5] as const;
+
+// LOO-CV puro é cego a extrapolação out-of-hull: tende a escolher o menor
+// gamma disponível, que com kernel RBF produz K≈1 para todos os pares
+// → hiperplano quasi-linear que satura na borda da tela (confirmado em
+// svr.convexhull.test.ts e kernelRidge.test.ts Gate 1). Piso obrigatório
+// para uso com pacientes ELA onde o cursor não pode saltar para a borda.
+export const GAMMA_SAFE_MIN = 0.1;
 
 // ─── Kernel RBF ───────────────────────────────────────────────────────────────
 
@@ -146,11 +153,12 @@ export class KernelRidgeRegressor implements GazeRegressor {
 
     const t0 = performance.now();
 
-    let bestGamma: number  = GAMMA_GRID[0];
+    let bestGamma: number  = GAMMA_SAFE_MIN;
     let bestLambda: number = LAMBDA_GRID[0];
     let bestErr            = Infinity;
 
     for (const gamma of GAMMA_GRID) {
+      if (gamma < GAMMA_SAFE_MIN) continue;
       const K = buildKernelMatrix(features, gamma);
       for (const lambda of LAMBDA_GRID) {
         const err = looError(K, targetsX, targetsY, lambda);

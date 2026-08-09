@@ -1,0 +1,47 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: '06:00'
+      timezone: America/Sao_Paulo
+    open-pull-requests-limit: 10
+    labels:
+      - dependencies
+    groups:
+      react-ecosystem:
+        patterns:
+          - react
+          - react-dom
+          - react-router*
+          - react-i18next
+          - i18next*
+      testing:
+        patterns:
+          - vitest
+          - '@vitest/*'
+          - '@testing-library/*'
+          - jsdom
+      types:
+        patterns:
+          - '@types/*'
+      dev-tools:
+        patterns:
+          - vite
+          - '@vitejs/*'
+          - oxlint
+          - prettier
+          - typescript
+          - tailwindcss
+          - '@tailwindcss/*'
+          - postcss
+          - autoprefixer
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    labels:
+      - ci
