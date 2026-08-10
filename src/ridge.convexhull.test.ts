@@ -89,19 +89,21 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     // centro da grade para o ponto in-hull, e o ponto de borda direita
     // (gx=0.95) para o vetor out-of-hull, já que f0 alto deveria significar
     // "olhando para a direita".
+    // Sprint 4: predictRidge agora retorna coordenadas normalizadas [0,1].
+    // Erros aqui também são normalizados; multiplique por SCREEN_* na UI.
     const errInHull = Math.hypot(
-      inHullPred.x - 0.5 * SCREEN_WIDTH,
-      inHullPred.y - 0.5 * SCREEN_HEIGHT
+      inHullPred.x - 0.5,
+      inHullPred.y - 0.5
     );
     const errOutOfHull = Math.hypot(
-      outOfHullPred.x - 0.95 * SCREEN_WIDTH,
-      outOfHullPred.y - 0.5 * SCREEN_HEIGHT
+      outOfHullPred.x - 0.95,
+      outOfHullPred.y - 0.5
     );
 
     console.log('[diagnóstico] inHull:  distNearest=%s pred=(%s, %s) err=%s',
-      distInHull.toFixed(3), inHullPred.x.toFixed(1), inHullPred.y.toFixed(1), errInHull.toFixed(1));
+      distInHull.toFixed(3), inHullPred.x.toFixed(4), inHullPred.y.toFixed(4), errInHull.toFixed(4));
     console.log('[diagnóstico] outOfHull: distNearest=%s pred=(%s, %s) err=%s',
-      distOutOfHull.toFixed(3), outOfHullPred.x.toFixed(1), outOfHullPred.y.toFixed(1), errOutOfHull.toFixed(1));
+      distOutOfHull.toFixed(3), outOfHullPred.x.toFixed(4), outOfHullPred.y.toFixed(4), errOutOfHull.toFixed(4));
     console.log('[diagnóstico] razão distância (outOfHull/inHull)=%s razão erro (outOfHull/inHull)=%s',
       (distOutOfHull / (distInHull || 1e-9)).toFixed(2),
       (errOutOfHull / (errInHull || 1e-9)).toFixed(2));
@@ -110,13 +112,14 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     //    mais próximo do que o ponto de referência in-hull.
     expect(distOutOfHull).toBeGreaterThan(distInHull);
 
-    // 2) Comportamento ATUAL documentado (bug): o predictRidge SATURA
-    //    exatamente na borda da tela (clmp em ridge.ts) em vez de produzir
-    //    uma posição graduada — ou seja, a extrapolação linear ultrapassa a
-    //    faixa [0,1] normalizada e é cortada abruptamente no limite físico.
+    // 2) Comportamento ATUAL documentado: o predictRidge SATURA nos limites
+    //    normalizados (0 ou 1) — a extrapolação linear ultrapassa a faixa
+    //    [0,1] e é cortada abruptamente pelo clmp em ridge.ts.
     //    Isso não é "seguro": o cursor salta para a borda ao invés de
     //    refletir proporcionalmente a distância percorrida.
-    expect(outOfHullPred.x === 0 || outOfHullPred.x === SCREEN_WIDTH).toBe(true);
+    //    (Sprint 4 movimentou a conversão para pixels da camada do modelo
+    //    para a UI — o clamp continua em unidades normalizadas.)
+    expect(outOfHullPred.x === 0 || outOfHullPred.x === 1).toBe(true);
 
     // 3) O erro fora do fecho convexo é desproporcional ao erro dentro dele.
     //    Se esta asserção falhar no futuro, é porque o comportamento de

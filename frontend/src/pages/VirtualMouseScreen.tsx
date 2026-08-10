@@ -2,17 +2,17 @@ import React, { useState } from 'react';
 import { MousePointer2, Power, Info, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
 import { SystemStatusHeader } from '../components/ui/SystemStatusHeader';
-import { useWebSocket } from '../context/WebSocketContext';
+import { useGaze } from '../context/GazeContext';
 import { PrimaryButton } from '../components/ui/PrimaryButton';
 
 export const VirtualMouseScreen: React.FC = () => {
-  const { sendAction, isConnected } = useWebSocket();
+  const { state } = useGaze();
   const [active, setActive] = useState(false);
+  // Motor considerado disponível para acionar o mouse virtual quando não está ocioso/carregando.
+  const isConnected = state !== 'idle' && state !== 'loading';
 
   const toggle = () => {
-    const next = !active;
-    setActive(next);
-    sendAction(next ? 'virtual_mouse_start' : 'virtual_mouse_stop');
+    setActive((prev) => !prev);
   };
 
   return (

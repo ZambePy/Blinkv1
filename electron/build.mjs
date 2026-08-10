@@ -5,8 +5,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Compila o processo main + preload do Electron (TypeScript -> CJS).
-// onnxruntime-node e electron ficam de fora do bundle: são nativos/fornecidos
-// em runtime pelo node_modules empacotado (ver asarUnpack no electron-builder).
 const options = {
   entryPoints: [path.join(__dirname, 'main.ts'), path.join(__dirname, 'preload.ts')],
   outdir: path.join(__dirname, '..', 'dist-electron'),
@@ -15,7 +13,7 @@ const options = {
   platform: 'node',
   format: 'cjs',
   target: 'node20',
-  external: ['electron', 'onnxruntime-node'],
+  external: ['electron'],
   sourcemap: true,
   logLevel: 'info',
 };

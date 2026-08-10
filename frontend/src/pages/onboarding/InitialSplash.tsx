@@ -65,7 +65,7 @@ export const InitialSplash: React.FC = () => {
             }}
           >
             <Eye size={36} color="white" />
-            <span style={{ fontSize: '2.5rem', fontWeight: 900, tracking: '0.02em' }}>
+            <span style={{ fontSize: '2.5rem', fontWeight: 900, letterSpacing: '0.02em' }}>
               IrisFlow
             </span>
           </div>

@@ -1,6 +1,6 @@
 import React, { Suspense, lazy } from 'react';
 import { BrowserRouter, Routes, Route } from 'react-router-dom';
-import { WebSocketProvider } from './context/WebSocketContext';
+import { GazeProvider } from './context/GazeContext';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
@@ -92,7 +92,7 @@ function App() {
     <AuthProvider>
       <SettingsProvider>
         <ToastProvider>
-          <WebSocketProvider>
+          <GazeProvider>
             <BrowserRouter>
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
@@ -282,7 +282,7 @@ function App() {
                 </Routes>
               </Suspense>
             </BrowserRouter>
-          </WebSocketProvider>
+          </GazeProvider>
         </ToastProvider>
       </SettingsProvider>
     </AuthProvider>

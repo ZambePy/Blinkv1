@@ -52,11 +52,13 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     const probeScaled = scaler.transformSingle(probeRaw);
 
     // Ridge baseline (comportamento documentado em ridge.convexhull.test.ts)
+    // Sprint 4: predictRidge retorna coordenadas normalizadas [0,1]; a saturação
+    // acontece nesses limites (não mais em pixels de tela).
     const ridgeModel = trainRidgeModel(scaled, targets);
     const ridgePred  = predictRidge(ridgeModel, probeScaled);
-    const ridgeSaturates = ridgePred.x === 0 || ridgePred.x === SCREEN_WIDTH;
+    const ridgeSaturates = ridgePred.x === 0 || ridgePred.x === 1;
 
-    // Kernel Ridge
+    // Kernel Ridge (ainda retorna pixels — não passou pela mudança da Sprint 4).
     const t0 = performance.now();
     const kr  = new KernelRidgeRegressor();
     kr.train(scaled, tgtsX, tgtsY);
@@ -66,11 +68,11 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
 
     // ── Relatório lado a lado ─────────────────────────────────────────────────
     console.log('[gate1] treino KernelRidge (n=9, LOO-CV 7×6 grid): %s ms', elapsed.toFixed(1));
-    console.log('[gate1] Ridge  out-of-hull → x=%s  y=%s  | satura=%s',
-      ridgePred.x.toFixed(1), ridgePred.y.toFixed(1), ridgeSaturates ? 'SIM' : 'NÃO');
-    console.log('[gate1] KR     out-of-hull → x=%s  y=%s  | satura=%s',
+    console.log('[gate1] Ridge  out-of-hull → x=%s  y=%s  (normalizado) | satura=%s',
+      ridgePred.x.toFixed(4), ridgePred.y.toFixed(4), ridgeSaturates ? 'SIM' : 'NÃO');
+    console.log('[gate1] KR     out-of-hull → x=%s  y=%s  (px)          | satura=%s',
       krPred.x.toFixed(1), krPred.y.toFixed(1), krSaturates ? 'SIM' : 'NÃO');
-    console.log('[gate1] ref (ponto de borda mais próximo): x=%s  y=%s',
+    console.log('[gate1] ref (ponto de borda mais próximo, px): x=%s  y=%s',
       (0.95 * SCREEN_WIDTH).toFixed(0), (0.5 * SCREEN_HEIGHT).toFixed(0));
 
     // Ridge satura — comportamento antigo documentado, não alterado
@@ -188,8 +190,12 @@ describe('KernelRidgeRegressor — Gate 2: precisão in-hull vs Ridge', () => {
     for (const { label, rawFeat, targetX, targetY } of interpolatedProbes) {
       const probeScaled = scaler.transformSingle(rawFeat);
 
+      // Sprint 4: predictRidge retorna [0,1]. Multiplica por SCREEN_* para
+      // comparar com KR (que retorna pixels) sob o mesmo threshold em px.
       const ridgePred = predictRidge(ridgeModel, probeScaled);
-      const ridgeErr  = Math.hypot(ridgePred.x - targetX, ridgePred.y - targetY);
+      const ridgePxX  = ridgePred.x * SCREEN_WIDTH;
+      const ridgePxY  = ridgePred.y * SCREEN_HEIGHT;
+      const ridgeErr  = Math.hypot(ridgePxX - targetX, ridgePxY - targetY);
 
       const krPred = kr.predict(probeScaled);
       const krErr  = Math.hypot(krPred.x - targetX, krPred.y - targetY);

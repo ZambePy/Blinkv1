@@ -1,15 +1,27 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
   envPrefix: 'VITE_',
+  resolve: {
+    alias: {
+      '@tracker': path.resolve(__dirname, '../src'),
+    },
+  },
   server: {
     // Só aceita conexões de localhost por padrão — evita expor dev server na rede
     host: '127.0.0.1',
     port: 5173,
     strictPort: false,
+    fs: {
+      allow: [path.resolve(__dirname, '..')],
+    },
   },
   preview: {
     host: '127.0.0.1',

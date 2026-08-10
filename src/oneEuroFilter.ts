@@ -82,7 +82,7 @@ export class OneEuroFilter2D {
   private filterX: OneEuroFilter;
   private filterY: OneEuroFilter;
 
-  constructor(freq: number = 60, mincutoff: number = 0.05, beta_: number = 0.5, dcutoff: number = 1.0) {
+  constructor(freq: number = 60, mincutoff: number = 0.005, beta_: number = 1.5, dcutoff: number = 1.0) {
     this.filterX = new OneEuroFilter(freq, mincutoff, beta_, dcutoff);
     this.filterY = new OneEuroFilter(freq, mincutoff, beta_, dcutoff);
   }

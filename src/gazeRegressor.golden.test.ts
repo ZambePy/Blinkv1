@@ -1,10 +1,14 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createRegressor } from './gazeRegressor';
+import { createRegressor, ridgeRegressorFromModel } from './gazeRegressor';
 import { trainRidgeModel, predictRidge } from './ridge';
 import { StandardScaler } from './scaler';
 
-// Golden snapshot: verifies that GazeRegressor.predict() produces bit-identical
-// output to predictRidge() for the same inputs after the interface refactor.
+// Golden snapshot: verifies that RidgeRegressor.predict() produces bit-identical
+// output to predictRidge() when given the SAME pre-trained model.
+// (Sprint 4 introduced CV λ-selection in RidgeRegressor.train(), so training via
+// the wrapper vs the raw function no longer produces identical models — but the
+// prediction path itself must remain a thin, lossless wrapper. That's the contract
+// tested here.)
 // Uses the same 3×3 synthetic fixture as ridge.convexhull.test.ts.
 
 const SCREEN_WIDTH  = 1920;
@@ -43,14 +47,13 @@ describe('GazeRegressor golden snapshot', () => {
     scaler.fit(features);
     const scaled = scaler.transform(features);
 
-    // Golden value via the original functions
+    // Train once via the raw function, then wrap the SAME model in the interface.
+    // This isolates the wrapper from CV λ-selection to test only the predict path.
     const model = trainRidgeModel(scaled, targets);
     const probe = scaler.transformSingle([0, 0, 0.1, 0.05]);
     const golden = predictRidge(model, probe);
 
-    // Same computation via GazeRegressor interface
-    const reg = createRegressor('ridge');
-    reg.train(scaled, targets.map(t => t.screenX), targets.map(t => t.screenY));
+    const reg = ridgeRegressorFromModel(model);
     const got = reg.predict(probe);
 
     expect(got.x).toBe(golden.x);
@@ -69,8 +72,7 @@ describe('GazeRegressor golden snapshot', () => {
     const probe = scaler.transformSingle([maxF0 * 2, 0, 0.1, 0.05]);
     const golden = predictRidge(model, probe);
 
-    const reg = createRegressor('ridge');
-    reg.train(scaled, targets.map(t => t.screenX), targets.map(t => t.screenY));
+    const reg = ridgeRegressorFromModel(model);
     const got = reg.predict(probe);
 
     expect(got.x).toBe(golden.x);
@@ -80,22 +82,4 @@ describe('GazeRegressor golden snapshot', () => {
   it('createRegressor throws for truly unsupported mode', () => {
     expect(() => createRegressor('foo' as never)).toThrow(/Unsupported regressor mode/);
   });
-
-  it('createRegressor("svr") returns a trainable SVRRegressor', () => {
-    const { features, targets } = buildSyntheticProfile();
-    const scaler = new StandardScaler();
-    scaler.fit(features);
-    const scaled = scaler.transform(features);
-
-    const reg = createRegressor('svr');
-    // Should not throw during train
-    expect(() => reg.train(scaled, targets.map(t => t.screenX), targets.map(t => t.screenY))).not.toThrow();
-    // Should return pixel coordinates within viewport bounds
-    const probe = scaler.transformSingle([0, 0, 0.1, 0.05]);
-    const pred  = reg.predict(probe);
-    expect(pred.x).toBeGreaterThanOrEqual(0);
-    expect(pred.x).toBeLessThanOrEqual(SCREEN_WIDTH);
-    expect(pred.y).toBeGreaterThanOrEqual(0);
-    expect(pred.y).toBeLessThanOrEqual(SCREEN_HEIGHT);
-  }, 30_000);
 });

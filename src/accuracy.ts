@@ -7,11 +7,15 @@
 //   • Erro em pixels ao lado de cada par
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
-import { mapGaze, mapGazeWithConfig, hasDevConfigs, startPreCalibration, setGazeCorrections } from './calibration';
+import { mapGaze, setGazeCorrections } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
+  medianError: number;    // Erro mediano em pixels
+  p90Error: number;       // Erro P90 em pixels
+  meanErrorX: number;     // Erro médio no eixo X
+  meanErrorY: number;     // Erro médio no eixo Y
   maxError: number;       // Pior erro em pixels
   errorPct: number;       // Erro médio como % da diagonal da tela
   meanErrorDeg: number;   // Erro médio em graus angulares
@@ -26,22 +30,26 @@ interface PointDiagnostic {
   predX: number;
   predY: number;
   error: number;
+  errorX: number;
+  errorY: number;
   name: string;
-  errorB: number | null;
-  errorC: number | null;
 }
 
-// 9 pontos de validação em grade 3×3
+// 13 pontos de validação independentes da grade de calibração (0.05, 0.50, 0.95)
 const VALIDATION_POINTS = [
-  { name: "Superior Esq", screenX: 0.10, screenY: 0.10 },
-  { name: "Superior Centro", screenX: 0.50, screenY: 0.10 },
-  { name: "Superior Dir", screenX: 0.90, screenY: 0.10 },
-  { name: "Médio Esq", screenX: 0.10, screenY: 0.50 },
-  { name: "Centro", screenX: 0.50, screenY: 0.50 },
-  { name: "Médio Dir", screenX: 0.90, screenY: 0.50 },
-  { name: "Inferior Esq", screenX: 0.10, screenY: 0.90 },
-  { name: "Inferior Centro", screenX: 0.50, screenY: 0.90 },
-  { name: "Inferior Dir", screenX: 0.90, screenY: 0.90 },
+  { name: "P1", screenX: 0.15, screenY: 0.15 },
+  { name: "P2", screenX: 0.50, screenY: 0.15 },
+  { name: "P3", screenX: 0.85, screenY: 0.15 },
+  { name: "P4", screenX: 0.15, screenY: 0.40 },
+  { name: "P5", screenX: 0.85, screenY: 0.40 },
+  { name: "P6", screenX: 0.15, screenY: 0.60 },
+  { name: "P7", screenX: 0.85, screenY: 0.60 },
+  { name: "P8", screenX: 0.15, screenY: 0.85 },
+  { name: "P9", screenX: 0.50, screenY: 0.85 },
+  { name: "P10", screenX: 0.85, screenY: 0.85 },
+  { name: "P11", screenX: 0.35, screenY: 0.35 },
+  { name: "P12", screenX: 0.65, screenY: 0.35 },
+  { name: "P13", screenX: 0.50, screenY: 0.65 },
 ];
 
 const COLLECTION_MS = 1000;
@@ -52,8 +60,6 @@ const ASSUMED_DIST_PX = 2268;
 
 let currentFeaturesLeft: number[] = [];
 let currentFeaturesRight: number[] = [];
-let currentFusedLeft: number[] | null = null;
-let currentFusedRight: number[] | null = null;
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
@@ -63,17 +69,13 @@ export let isAccuracyTesting = false;
 export function feedAccuracyRaw(
   featuresLeft: number[],
   featuresRight: number[],
-  fusedLeft?: number[] | null,
-  fusedRight?: number[] | null,
 ) {
   currentFeaturesLeft = featuresLeft;
   currentFeaturesRight = featuresRight;
-  currentFusedLeft  = fusedLeft  ?? null;
-  currentFusedRight = fusedRight ?? null;
 }
 
 // Inicia o teste de validação de precisão pós-calibração
-export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) {
+export function startAccuracyTest(onComplete?: (result: AccuracyResult) => void) {
   isAccuracyTesting = true;
   const overlay = createAccuracyOverlay();
   let pointIndex = 0;
@@ -96,10 +98,6 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
     const startTime = performance.now();
     const predictedX: number[] = [];
     const predictedY: number[] = [];
-    const predictedBX: number[] = [];
-    const predictedBY: number[] = [];
-    const predictedCX: number[] = [];
-    const predictedCY: number[] = [];
 
     const targetScreenX = vp.screenX * vw;
     const targetScreenY = vp.screenY * vh;
@@ -113,18 +111,14 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
         predictedY.push(gaze.y);
       }
 
-      const gazeB = mapGazeWithConfig('B', currentFeaturesLeft, currentFeaturesRight);
-      if (gazeB) { predictedBX.push(gazeB.x); predictedBY.push(gazeB.y); }
-      const gazeC = mapGazeWithConfig('C', currentFeaturesLeft, currentFeaturesRight, currentFusedLeft, currentFusedRight);
-      if (gazeC) { predictedCX.push(gazeC.x); predictedCY.push(gazeC.y); }
-
       if (elapsed < COLLECTION_MS) {
         requestAnimationFrame(collect);
         return;
       }
 
-      // Calcula erro Euclidiano médio para este ponto
       let error = 0;
+      let errorX = 0;
+      let errorY = 0;
       let meanPX = targetScreenX;
       let meanPY = targetScreenY;
       if (predictedX.length > 0) {
@@ -132,20 +126,9 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
         meanPY = predictedY.reduce((s, v) => s + v, 0) / predictedY.length;
         const dx = meanPX - targetScreenX;
         const dy2 = meanPY - targetScreenY;
+        errorX = Math.abs(dx);
+        errorY = Math.abs(dy2);
         error = Math.sqrt(dx * dx + dy2 * dy2);
-      }
-
-      let errorB: number | null = null;
-      if (predictedBX.length > 0) {
-        const bx = predictedBX.reduce((s, v) => s + v, 0) / predictedBX.length;
-        const by = predictedBY.reduce((s, v) => s + v, 0) / predictedBY.length;
-        errorB = Math.sqrt((bx - targetScreenX) ** 2 + (by - targetScreenY) ** 2);
-      }
-      let errorC: number | null = null;
-      if (predictedCX.length > 0) {
-        const cx = predictedCX.reduce((s, v) => s + v, 0) / predictedCX.length;
-        const cy = predictedCY.reduce((s, v) => s + v, 0) / predictedCY.length;
-        errorC = Math.sqrt((cx - targetScreenX) ** 2 + (cy - targetScreenY) ** 2);
       }
 
       pointErrors.push(error);
@@ -155,9 +138,9 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
         predX: meanPX,
         predY: meanPY,
         error,
+        errorX,
+        errorY,
         name: vp.name,
-        errorB,
-        errorC,
       });
 
       pointIndex++;
@@ -167,7 +150,6 @@ export function startAccuracyTest(onComplete: (result: AccuracyResult) => void) 
     requestAnimationFrame(collect);
   }
 
-  // Pequena pausa inicial para o usuário se preparar
   setTimeout(runNextPoint, 500);
 }
 
@@ -211,20 +193,25 @@ function finishTest(
   overlay: HTMLDivElement,
   pointErrors: number[],
   diagnostics: PointDiagnostic[],
-  onComplete: (result: AccuracyResult) => void
+  onComplete?: (result: AccuracyResult) => void
 ) {
-  // Remove o overlay de coleta
   overlay.remove();
 
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
   const meanError = pointErrors.reduce((s, v) => s + v, 0) / pointErrors.length;
+  const sortedErrors = [...pointErrors].sort((a, b) => a - b);
+  const medianError = sortedErrors[Math.floor(sortedErrors.length / 2)] || 0;
+  const p90Error = sortedErrors[Math.floor(sortedErrors.length * 0.9)] || 0;
+  
+  const meanErrorX = diagnostics.reduce((s, d) => s + d.errorX, 0) / diagnostics.length || 0;
+  const meanErrorY = diagnostics.reduce((s, d) => s + d.errorY, 0) / diagnostics.length || 0;
+
   const maxError = Math.max(...pointErrors);
   const diagonal = Math.sqrt(vw ** 2 + vh ** 2);
   const errorPct = (meanError / diagonal) * 100;
 
-  // Converte erro médio para graus angulares
   const meanErrorDeg = (Math.atan(meanError / ASSUMED_DIST_PX) * 180) / Math.PI;
 
   let score: string;
@@ -244,50 +231,42 @@ function finishTest(
   }
 
   const result: AccuracyResult = {
-    meanError, maxError, errorPct, meanErrorDeg,
+    meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
     score, colorClass, pointErrors,
   };
 
-  // Persiste resultado para exibir após reload
   try {
     localStorage.setItem("accuracyResult", JSON.stringify({
-      meanError, maxError, errorPct, meanErrorDeg, score, colorClass
+      meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg, score, colorClass
     }));
   } catch (_) { }
 
-  // Loga resultados no terminal para captura em arquivo de sessão
+  // Exportar relatório em JSON versionável (Sprint 3)
+  const jsonReport = JSON.stringify({
+    timestamp: new Date().toISOString(),
+    resolution: `${vw}x${vh}`,
+    result,
+    diagnostics
+  }, null, 2);
+  const blob = new Blob([jsonReport], { type: "application/json" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = `accuracy-report-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+
   console.log(`[accuracy] === RESULTADO FINAL ===`);
   console.log(`[accuracy] Resolução: ${vw}×${vh}px | distância estimada: ${ASSUMED_DIST_PX}px`);
-  console.log(`[accuracy] Config A (${REGRESSOR_MODE}+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | ${score}`);
+  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | ${score}`);
   for (const d of diagnostics) {
-    const bStr = d.errorB !== null ? `B=${Math.round(d.errorB)}px` : 'B=N/A';
-    const cStr = d.errorC !== null ? `C=${Math.round(d.errorC)}px` : 'C=N/A';
-    const flag = (e: number | null) => e !== null && e > 45 ? ' ✗' : '';
-    console.log(`[accuracy]   ${d.name.padEnd(18)}: A=${Math.round(d.error)}px${flag(d.error)} | ${bStr}${d.errorB !== null ? flag(d.errorB) : ''} | ${cStr}${d.errorC !== null ? flag(d.errorC) : ''}`);
-  }
-  const validB = diagnostics.map(d => d.errorB).filter((e): e is number => e !== null);
-  if (validB.length) {
-    const meanB = validB.reduce((s, v) => s + v, 0) / validB.length;
-    const maxB  = Math.max(...validB);
-    const degB  = (Math.atan(meanB / ASSUMED_DIST_PX) * 180) / Math.PI;
-    console.log(`[accuracy] Config B (KR+geo):   mean=${Math.round(meanB)}px / ${degB.toFixed(2)}° | max=${Math.round(maxB)}px`);
-  } else {
-    console.log('[accuracy] Config B: não disponível');
-  }
-  const validC = diagnostics.map(d => d.errorC).filter((e): e is number => e !== null);
-  if (validC.length) {
-    const meanC = validC.reduce((s, v) => s + v, 0) / validC.length;
-    const maxC  = Math.max(...validC);
-    const degC  = (Math.atan(meanC / ASSUMED_DIST_PX) * 180) / Math.PI;
-    console.log(`[accuracy] Config C (KR+fused): mean=${Math.round(meanC)}px / ${degC.toFixed(2)}° | max=${Math.round(maxC)}px`);
-  } else {
-    console.log('[accuracy] Config C: não disponível');
+    const flag = d.error > 45 ? ' ✗' : '';
+    console.log(`[accuracy]   ${d.name.padEnd(18)}: ${Math.round(d.error)}px${flag}`);
   }
   console.log(`[accuracy] === FIM ===`);
 
-  // Gera mapa de correção a partir dos erros sistemáticos medidos.
-  // Durante o tracking ao vivo, a predição bruta do SVR será deslocada
-  // pela interpolação IDW destes vetores de correção.
   setGazeCorrections(diagnostics.map(d => ({
     refX:    d.predX,
     refY:    d.predY,
@@ -295,14 +274,13 @@ function finishTest(
     offsetY: d.groundY - d.predY,
   })));
 
-  // Mostra o diagnóstico visual antes de chamar onComplete
   showDiagnosticOverlay(diagnostics, result, onComplete);
 }
 
 function showDiagnosticOverlay(
   diagnostics: PointDiagnostic[],
   result: AccuracyResult,
-  onComplete: (result: AccuracyResult) => void
+  onComplete?: (result: AccuracyResult) => void
 ) {
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
@@ -311,7 +289,6 @@ function showDiagnosticOverlay(
   overlay.id = "diagnostic-overlay";
   overlay.className = "diagnostic-overlay";
 
-  // SVG para desenhar linhas, pontos e labels
   const svgNS = "http://www.w3.org/2000/svg";
   const svg = document.createElementNS(svgNS, "svg");
   svg.setAttribute("width", String(vw));
@@ -320,7 +297,6 @@ function showDiagnosticOverlay(
   svg.classList.add("diagnostic-svg");
 
   for (const d of diagnostics) {
-    // Linha conectando ground truth → predição
     const line = document.createElementNS(svgNS, "line");
     line.setAttribute("x1", String(d.groundX));
     line.setAttribute("y1", String(d.groundY));
@@ -331,7 +307,6 @@ function showDiagnosticOverlay(
     line.setAttribute("stroke-opacity", "0.8");
     svg.appendChild(line);
 
-    // Ponto vermelho — ground truth
     const redDot = document.createElementNS(svgNS, "circle");
     redDot.setAttribute("cx", String(d.groundX));
     redDot.setAttribute("cy", String(d.groundY));
@@ -341,7 +316,6 @@ function showDiagnosticOverlay(
     redDot.setAttribute("stroke-width", "1.5");
     svg.appendChild(redDot);
 
-    // Ponto verde — predição
     const greenDot = document.createElementNS(svgNS, "circle");
     greenDot.setAttribute("cx", String(d.predX));
     greenDot.setAttribute("cy", String(d.predY));
@@ -351,11 +325,9 @@ function showDiagnosticOverlay(
     greenDot.setAttribute("stroke-width", "1.5");
     svg.appendChild(greenDot);
 
-    // Label com erro em pixels
     const labelX = d.groundX + 14;
     const labelY = d.groundY - 14;
 
-    // Background do label
     const labelBg = document.createElementNS(svgNS, "rect");
     const labelText = `${Math.round(d.error)}px`;
     labelBg.setAttribute("x", String(labelX - 2));
@@ -376,7 +348,6 @@ function showDiagnosticOverlay(
     text.textContent = labelText;
     svg.appendChild(text);
 
-    // Nome do ponto
     const nameText = document.createElementNS(svgNS, "text");
     nameText.setAttribute("x", String(d.groundX));
     nameText.setAttribute("y", String(d.groundY + 22));
@@ -390,7 +361,6 @@ function showDiagnosticOverlay(
 
   overlay.appendChild(svg);
 
-  // Footer com informações e controles
   const footer = document.createElement("div");
   footer.className = "diagnostic-footer";
 
@@ -398,74 +368,6 @@ function showDiagnosticOverlay(
     : result.colorClass === 'accuracy-good' ? '#00fff0'
       : result.colorClass === 'accuracy-regular' ? '#ffcc00'
         : '#ef4444';
-
-  const { B: hasB, C: hasC, cReason } = hasDevConfigs();
-  let comparisonHtml = '';
-  if (hasB || hasC) {
-    const errorsB = diagnostics.map(d => d.errorB);
-    const errorsC = diagnostics.map(d => d.errorC);
-
-    const meanA = result.meanError;
-    const maxA  = result.maxError;
-    const degA  = result.meanErrorDeg;
-
-    const validB = errorsB.filter((e): e is number => e !== null);
-    const meanB  = validB.length ? validB.reduce((s, v) => s + v, 0) / validB.length : null;
-    const maxB   = validB.length ? Math.max(...validB) : null;
-    const degB   = meanB !== null ? (Math.atan(meanB / ASSUMED_DIST_PX) * 180) / Math.PI : null;
-
-    const validC = errorsC.filter((e): e is number => e !== null);
-    const meanC  = validC.length ? validC.reduce((s, v) => s + v, 0) / validC.length : null;
-    const maxC   = validC.length ? Math.max(...validC) : null;
-    const degC   = meanC !== null ? (Math.atan(meanC / ASSUMED_DIST_PX) * 180) / Math.PI : null;
-
-    const THRESH_PX  = 45;
-    const THRESH_DEG = 1.5;
-    const flag = (err: number | null) => err !== null && err > THRESH_PX ? ' ✗' : '';
-    const fmtErr = (e: number | null) => e !== null ? `${Math.round(e)}px${flag(e)}` : 'N/A';
-    const fmtMean = (m: number | null, d: number | null) =>
-      m !== null ? `${Math.round(m)}px / ${d!.toFixed(2)}°${(m > THRESH_PX || d! > THRESH_DEG) ? ' ✗' : ''}` : 'N/A';
-
-    const rows = diagnostics.map(d => `
-      <tr style="border-top:1px solid #222">
-        <td style="padding:3px 6px;color:#aaa">${d.name}</td>
-        <td style="text-align:right;padding:3px 6px;color:${d.error > THRESH_PX ? '#ef4444' : '#22c55e'}">${Math.round(d.error)}px${flag(d.error)}</td>
-        ${hasB ? `<td style="text-align:right;padding:3px 6px;color:${d.errorB !== null && d.errorB > THRESH_PX ? '#ef4444' : '#22c55e'}">${fmtErr(d.errorB)}</td>` : ''}
-        ${hasC ? `<td style="text-align:right;padding:3px 6px;color:${d.errorC !== null && d.errorC > THRESH_PX ? '#ef4444' : '#22c55e'}">${fmtErr(d.errorC)}</td>` : ''}
-      </tr>
-    `).join('');
-
-    comparisonHtml = `
-      <div style="margin-top:16px;border-top:1px solid #333;padding-top:12px">
-        <div style="font-size:11px;font-weight:600;color:#00fff0;margin-bottom:8px;letter-spacing:.05em">
-          COMPARAÇÃO DEV — A vs B${hasC ? ' vs C' : ''} (não é produção)
-        </div>
-        <table style="width:100%;border-collapse:collapse;font-size:11px">
-          <tr style="color:#666">
-            <th style="text-align:left;padding:3px 6px">Ponto</th>
-            <th style="text-align:right;padding:3px 6px">A ${REGRESSOR_MODE}+geo</th>
-            ${hasB ? '<th style="text-align:right;padding:3px 6px">B KR+geo</th>' : ''}
-            ${hasC ? '<th style="text-align:right;padding:3px 6px">C KR+fused</th>' : ''}
-          </tr>
-          ${rows}
-          <tr style="border-top:2px solid #444;font-weight:600">
-            <td style="padding:4px 6px;color:#ccc">Média / graus</td>
-            <td style="text-align:right;padding:4px 6px;color:${meanA > THRESH_PX || degA > THRESH_DEG ? '#ef4444' : '#22c55e'}">${fmtMean(meanA, degA)}</td>
-            ${hasB ? `<td style="text-align:right;padding:4px 6px;color:${meanB !== null && (meanB > THRESH_PX || (degB ?? 0) > THRESH_DEG) ? '#ef4444' : '#22c55e'}">${fmtMean(meanB, degB)}</td>` : ''}
-            ${hasC ? `<td style="text-align:right;padding:4px 6px;color:${meanC !== null && (meanC > THRESH_PX || (degC ?? 0) > THRESH_DEG) ? '#ef4444' : '#22c55e'}">${fmtMean(meanC, degC)}</td>` : ''}
-          </tr>
-          <tr>
-            <td style="padding:2px 6px;color:#666">Máximo</td>
-            <td style="text-align:right;padding:2px 6px;color:#888">${Math.round(maxA)}px</td>
-            ${hasB ? `<td style="text-align:right;padding:2px 6px;color:#888">${maxB !== null ? Math.round(maxB)+'px' : 'N/A'}</td>` : ''}
-            ${hasC ? `<td style="text-align:right;padding:2px 6px;color:#888">${maxC !== null ? Math.round(maxC)+'px' : 'N/A'}</td>` : ''}
-          </tr>
-        </table>
-        <div style="font-size:10px;color:#555;margin-top:6px">✗ = acima do limiar de produção (≤45px / ≤1.5°)</div>
-        ${hasB && !hasC && cReason ? `<div style="font-size:10px;color:#888;margin-top:6px">Config C não disponível: ${cReason}</div>` : ''}
-      </div>
-    `;
-  }
 
   footer.innerHTML = `
     <div class="diagnostic-card">
@@ -513,8 +415,6 @@ function showDiagnosticOverlay(
         `).join('')}
       </div>
 
-      ${comparisonHtml}
-
       <div class="diagnostic-actions">
         Pressione <kbd>Espaço</kbd> para continuar ou <kbd>R</kbd> para recalibrar
       </div>
@@ -524,10 +424,8 @@ function showDiagnosticOverlay(
 
   document.body.appendChild(overlay);
 
-  // Animação de entrada
   requestAnimationFrame(() => overlay.classList.add("visible"));
 
-  // Handle keyboard
   function handleKey(e: KeyboardEvent) {
     if (e.code === 'Space') {
       e.preventDefault();
@@ -535,15 +433,13 @@ function showDiagnosticOverlay(
       setTimeout(() => {
         overlay.remove();
         document.removeEventListener('keydown', handleKey);
-        onComplete(result);
+        onComplete?.(result);
       }, 300);
     } else if (e.code === 'KeyR') {
       e.preventDefault();
       overlay.remove();
       document.removeEventListener('keydown', handleKey);
-      onComplete(result);
-      // Trigger recalibração
-      startPreCalibration();
+      onComplete?.(result);
     }
   }
 
@@ -551,7 +447,7 @@ function showDiagnosticOverlay(
 }
 
 function getErrorColor(error: number): string {
-  if (error < 50) return '#22c55e';    // Verde - excelente
-  if (error < 100) return '#ffcc00';   // Amarelo - regular
-  return '#ef4444';                     // Vermelho - ruim
+  if (error < 50) return '#22c55e';
+  if (error < 100) return '#ffcc00';
+  return '#ef4444';
 }

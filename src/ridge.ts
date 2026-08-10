@@ -21,7 +21,9 @@ export function solveLinear(A: number[][], b: number[]): number[] {
     [M[col], M[pivot]] = [M[pivot], M[col]];
 
     const d = M[col][col];
-    if (Math.abs(d) < 1e-12) continue; // Singularity
+    if (Math.abs(d) < 1e-12) {
+      throw new Error(`Matriz singular na coluna ${col}. O sistema não pode ser resolvido.`);
+    }
     for (let j = col; j <= n; j++) M[col][j] /= d;
 
     for (let r = 0; r < n; r++) {
@@ -95,10 +97,11 @@ export function predictRidge(
     normY += model.betaY[i] * f[i];
   }
 
-  // Usa clientWidth/Height para considerar a viewport real do CSS
+  // Retorna coordenadas normalizadas (0 a 1).
+  // A camada de UI deve multiplicar por vw/vh para obter pixels.
   return {
-    x: clmp(normX) * document.documentElement.clientWidth,
-    y: clmp(normY) * document.documentElement.clientHeight,
+    x: clmp(normX),
+    y: clmp(normY),
   };
 }
 
@@ -111,7 +114,73 @@ export class RidgeRegressor {
 
   train(features: number[][], targetsX: number[], targetsY: number[]): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
-    this.model = trainRidgeModel(features, targets);
+    const lambdas = [1e-4, 1e-3, 1e-2, 0.1, 1, 10, 100, 1000];
+    const bestLambda = this.selectLambdaCV(features, targets, lambdas);
+    this.model = trainRidgeModel(features, targets, bestLambda);
+  }
+
+  private selectLambdaCV(
+    features: number[][],
+    targets: { screenX: number; screenY: number }[],
+    lambdas: number[]
+  ): number {
+    const targetsUnique: string[] = [];
+    const groups: { [key: string]: number[] } = {};
+    
+    for (let i = 0; i < targets.length; i++) {
+      const key = `${targets[i].screenX.toFixed(4)},${targets[i].screenY.toFixed(4)}`;
+      if (!groups[key]) {
+        groups[key] = [];
+        targetsUnique.push(key);
+      }
+      groups[key].push(i);
+    }
+
+    if (targetsUnique.length < 2) return 1.0;
+
+    let bestLambda = lambdas[0];
+    let minError = Infinity;
+
+    for (const lambda of lambdas) {
+      let totalError = 0;
+      for (const key of targetsUnique) {
+        const trainFeatures: number[][] = [];
+        const trainTargets: { screenX: number; screenY: number }[] = [];
+        const testFeatures: number[][] = [];
+        const testTargets: { screenX: number; screenY: number }[] = [];
+
+        for (let i = 0; i < features.length; i++) {
+          const k = `${targets[i].screenX.toFixed(4)},${targets[i].screenY.toFixed(4)}`;
+          if (k === key) {
+            testFeatures.push(features[i]);
+            testTargets.push(targets[i]);
+          } else {
+            trainFeatures.push(features[i]);
+            trainTargets.push(targets[i]);
+          }
+        }
+
+        try {
+          const model = trainRidgeModel(trainFeatures, trainTargets, lambda);
+          for (let i = 0; i < testFeatures.length; i++) {
+            const pred = predictRidge(model, testFeatures[i]);
+            const dx = pred.x - testTargets[i].screenX;
+            const dy = pred.y - testTargets[i].screenY;
+            totalError += dx * dx + dy * dy;
+          }
+        } catch (e) {
+          totalError += Infinity;
+        }
+      }
+
+      if (totalError < minError) {
+        minError = totalError;
+        bestLambda = lambda;
+      }
+    }
+
+    console.log(`[ridge] CV Lambda selecionado: ${bestLambda} (erro: ${minError.toFixed(4)})`);
+    return bestLambda;
   }
 
   predict(features: number[]): { x: number; y: number } {
@@ -123,3 +192,4 @@ export class RidgeRegressor {
     return this.model;
   }
 }
+

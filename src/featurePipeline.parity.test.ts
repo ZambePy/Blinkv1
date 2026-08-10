@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { extractEyeFeatures } from './extractor';
-import { extractFeatures } from './featurePipeline';
+import { extractEyeFeatures, extractCompactFeatures } from './extractor';
+import { extractFeatures, USE_COMPACT_FEATURES } from './featurePipeline';
 import type { Point3D } from './extractor';
 
 // Deterministic synthetic MediaPipe frame: 478 landmarks with unique non-degenerate
@@ -14,13 +14,18 @@ function makeSyntheticLandmarks(): Point3D[] {
   }));
 }
 
-describe('featurePipeline: parity with extractEyeFeatures', () => {
-  it('extractFeatures returns featuresLeft and featuresRight with identical length, order, and values to extractEyeFeatures', () => {
+describe('featurePipeline: parity with the active extractor', () => {
+  it('extractFeatures returns featuresLeft and featuresRight with identical length, order, and values to the underlying extractor', () => {
     const landmarks = makeSyntheticLandmarks();
 
-    // Direct call to the original function (the baseline)
-    const direct = extractEyeFeatures(landmarks);
-    // Call through the pipeline (the new entry-point used by main.ts)
+    // Sprint 5 introduced USE_COMPACT_FEATURES: the pipeline routes to
+    // extractCompactFeatures (~31 dims) when the flag is on, and to
+    // extractEyeFeatures (~260 dims) otherwise. Parity is checked against
+    // whichever path is currently active — a silent divergence between the
+    // pipeline and its underlying extractor would break stored profiles.
+    const direct = USE_COMPACT_FEATURES
+      ? extractCompactFeatures(landmarks)
+      : extractEyeFeatures(landmarks);
     const piped = extractFeatures(landmarks);
 
     // Length must match — a silent truncation or extension would break stored profiles

@@ -34,8 +34,8 @@ export const LAMBDA_GRID    = [0.001, 0.005, 0.01, 0.05, 0.1, 0.5] as const;
 // LOO-CV puro é cego a extrapolação out-of-hull: tende a escolher o menor
 // gamma disponível, que com kernel RBF produz K≈1 para todos os pares
 // → hiperplano quasi-linear que satura na borda da tela (confirmado em
-// svr.convexhull.test.ts e kernelRidge.test.ts Gate 1). Piso obrigatório
-// para uso com pacientes ELA onde o cursor não pode saltar para a borda.
+// kernelRidge.test.ts Gate 1). Piso obrigatório para uso com pacientes ELA
+// onde o cursor não pode saltar para a borda.
 export const GAMMA_SAFE_MIN = 0.1;
 
 // ─── Kernel RBF ───────────────────────────────────────────────────────────────

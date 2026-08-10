@@ -15,6 +15,9 @@
     "moduleDetection": "force",
     "noEmit": true,
     "jsx": "react-jsx",
+    "paths": {
+      "@tracker/*": ["../src/*"]
+    },
 
     /* Linting */
     "noUnusedLocals": true,
@@ -22,12 +25,13 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src"],
+  "include": ["src", "../src/tracker", "../src/calibration.ts", "../src/extractor.ts", "../src/featurePipeline.ts", "../src/oneEuroFilter.ts", "../src/ridge.ts", "../src/scaler.ts", "../src/gazeRegressor.ts", "../src/irisflow-api.d.ts"],
   "exclude": [
     "src/**/*.test.ts",
     "src/**/*.test.tsx",
     "src/**/*.spec.ts",
     "src/**/*.spec.tsx",
-    "src/test"
+    "src/test",
+    "../src/**/*.test.ts"
   ]
 }

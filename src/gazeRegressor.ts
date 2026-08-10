@@ -2,22 +2,21 @@ import type { RidgeModel } from './ridge';
 import { RidgeRegressor } from './ridge';
 import type { KernelRidgeModel } from './kernelRidge';
 import { KernelRidgeRegressor } from './kernelRidge';
-import { SVRRegressor, svrModelFromRegressor, svrRegressorFromModel } from './svr';
 
 export interface GazeRegressor {
-  train(features: number[][], targetsX: number[], targetsY: number[]): void;
+  // Modelos clássicos são síncronos, Redes Neurais (CNN/ONNX) podem ser assíncronas.
+  load?(): Promise<void>;
+  train(features: number[][], targetsX: number[], targetsY: number[]): void | Promise<void>;
   predict(features: number[]): { x: number; y: number };
 }
 
-export type RegressorMode = 'ridge' | 'kernel_ridge' | 'svr';
+export type RegressorMode = 'ridge' | 'kernel_ridge' | 'cnn';
 
-// kernel_ridge ativo: único regressor com GAMMA_SAFE_MIN confirmado (não satura out-of-hull).
-export const REGRESSOR_MODE: RegressorMode = 'kernel_ridge';
+export const REGRESSOR_MODE: RegressorMode = 'ridge';
 
 export function createRegressor(mode: RegressorMode): GazeRegressor {
   if (mode === 'ridge')        return new RidgeRegressor();
   if (mode === 'kernel_ridge') return new KernelRidgeRegressor();
-  if (mode === 'svr')          return new SVRRegressor();
   throw new Error(`Unsupported regressor mode: "${mode as string}".`);
 }
 
@@ -32,7 +31,7 @@ export function ridgeModelFromRegressor(r: GazeRegressor): RidgeModel | null {
   return null;
 }
 
-// ─── Serialização KernelRidge ─────────────────────────────────────────────────
+// ─── Serialização KernelRidge (mantido como referência; não é o regressor ativo) ──
 
 export function kernelRidgeRegressorFromModel(model: KernelRidgeModel): GazeRegressor {
   return new KernelRidgeRegressor(model);
@@ -42,7 +41,3 @@ export function kernelRidgeModelFromRegressor(r: GazeRegressor): KernelRidgeMode
   if (r instanceof KernelRidgeRegressor) return r.getModel();
   return null;
 }
-
-// ─── Serialização SVR ─────────────────────────────────────────────────────────
-
-export { svrModelFromRegressor, svrRegressorFromModel };

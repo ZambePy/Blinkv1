@@ -5,9 +5,9 @@
   "type": "module",
   "main": "dist-electron/main.cjs",
   "scripts": {
-    "dev": "vite",
-    "build": "tsc && vite build",
-    "preview": "vite preview",
+    "dev": "npm --prefix frontend run dev",
+    "build": "npm --prefix frontend run build",
+    "preview": "npm --prefix frontend run preview",
     "test": "vitest run",
     "electron:compile": "node electron/build.mjs",
     "electron:dev": "node electron/dev.mjs",
@@ -25,9 +25,7 @@
     "vitest": "^4.1.10"
   },
   "dependencies": {
-    "@mediapipe/tasks-vision": "^0.10.35",
-    "libsvm-js": "^0.2.1",
-    "onnxruntime-node": "^1.20.0"
+    "@mediapipe/tasks-vision": "^0.10.35"
   },
   "build": {
     "appId": "com.irisflow.app",
@@ -36,21 +34,11 @@
       "output": "release"
     },
     "files": [
-      "dist/**/*",
+      "frontend/dist/**/*",
       "dist-electron/**/*"
     ],
-    "extraResources": [
-      {
-        "from": "resources/models",
-        "to": "models",
-        "filter": [
-          "**/*.onnx"
-        ]
-      }
-    ],
     "asarUnpack": [
-      "**/node_modules/onnxruntime-node/**",
-      "dist/mediapipe/**"
+      "frontend/dist/mediapipe/**"
     ],
     "win": {
       "target": "nsis"

@@ -181,7 +181,7 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
 
     // Clamp para [-1,1] antes do asin — erros de ponto flutuante na matriz do
     // MediaPipe podem produzir |r12| ligeiramente > 1, fazendo Math.asin retornar NaN.
-    // NaN corromperia o StandardScaler (mean/std=NaN) e degeneraria o SVR para
+    // NaN corromperia o StandardScaler (mean/std=NaN) e degeneraria o regressor para
     // prever ~centro constante, causando cursor estático após calibração.
     pitch = Math.asin(Math.max(-1, Math.min(1, -r12)));
     yaw = Math.atan2(r02, r22);
@@ -194,7 +194,7 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
   featuresRight.push(yaw, pitch, roll);
 
   // ── Offset explícito da íris (feature de alta sinalização) ──────────────
-  // O SVR linear precisa desta feature explícita porque o mapeamento
+  // O regressor linear precisa desta feature explícita porque o mapeamento
   // iris_coord_raw → gaze é mais linear quando expresso como deslocamento
   // relativo ao centro do olho (canto nasal + temporal) do que em coordenadas
   // brutas que incluem variação de pose da cabeça.
@@ -291,4 +291,88 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
   };
 
   return { featuresLeft, featuresRight, blinkDetected, advancedFeatures };
+}
+
+export function extractCompactFeatures(landmarks: Point3D[], faceMatrix?: Float32Array): ExtractorResult {
+  const baseResult = extractEyeFeatures(landmarks, faceMatrix);
+  if (baseResult.featuresLeft.length === 0) return baseResult;
+
+  const leftCorner = landmarks[33];
+  const rightCorner = landmarks[263];
+  const topOfHead = landmarks[10];
+
+  const eyeCenter = scale(add(leftCorner, rightCorner), 0.5);
+  let xAxis = normalize(sub(rightCorner, leftCorner));
+  let yApprox = normalize(sub(topOfHead, eyeCenter));
+  let yAxis = normalize(sub(yApprox, scale(xAxis, dot(yApprox, xAxis))));
+  let zAxis = normalize(cross(xAxis, yAxis));
+
+  const rot = (p: Point3D) => mulRT(xAxis, yAxis, zAxis, sub(p, eyeCenter));
+  const interEyeDistRaw = norm(sub(rot(rightCorner), rot(leftCorner))) || 1;
+
+  const rotS = (idx: number) => {
+    const p = rot(landmarks[idx]);
+    return { x: p.x / interEyeDistRaw, y: p.y / interEyeDistRaw };
+  };
+
+  const getEyeCompact = (
+    irisCenter: number, irisP: number[],
+    cInner: number, cOuter: number, cTop: number, cBot: number,
+    pose: { yaw: number; pitch: number; roll: number; scale: number }
+  ) => {
+    const cI = rotS(cInner), cO = rotS(cOuter), cT = rotS(cTop), cB = rotS(cBot);
+    const iC = rotS(irisCenter);
+
+    const midX = (cI.x + cO.x) * 0.5;
+    const midY = (cI.y + cO.y) * 0.5;
+    const offsetX = iC.x - midX;
+    const offsetY = iC.y - midY;
+
+    const width = Math.sqrt((cO.x - cI.x)**2 + (cO.y - cI.y)**2) || 1e-9;
+    const height = Math.sqrt((cT.x - cB.x)**2 + (cT.y - cB.y)**2) || 1e-9;
+    const relX = offsetX / width;
+    const relY = offsetY / height;
+
+    const irisContour = irisP.flatMap(idx => {
+      const p = rotS(idx);
+      return [p.x, p.y];
+    });
+
+    const corners = [cI.x, cI.y, cO.x, cO.y, cT.x, cT.y, cB.x, cB.y];
+    
+    const ear = height / width;
+    const irisRadius = Math.sqrt((rotS(irisP[0]).x - rotS(irisP[2]).x)**2 + (rotS(irisP[0]).y - rotS(irisP[2]).y)**2) / 2;
+
+    const interactions = [
+      offsetX * pose.yaw,
+      offsetY * pose.pitch,
+      offsetX * pose.scale,
+      offsetY * pose.scale,
+      offsetX * pose.roll,
+      offsetY * pose.roll
+    ];
+
+    return [
+      offsetX, offsetY,
+      relX, relY,
+      ...irisContour,
+      ...corners,
+      ear, irisRadius,
+      pose.yaw, pose.pitch, pose.roll,
+      ...interactions
+    ];
+  };
+
+  const face = baseResult.advancedFeatures!.face;
+  const pose = { yaw: face.yaw, pitch: face.pitch, roll: face.roll, scale: face.scale };
+
+  const compLeft = getEyeCompact(468, [469, 470, 471, 472], 133, 33, 159, 145, pose);
+  const compRight = getEyeCompact(473, [474, 475, 476, 477], 362, 263, 386, 374, pose);
+
+  return {
+    featuresLeft: compLeft,
+    featuresRight: compRight,
+    blinkDetected: baseResult.blinkDetected,
+    advancedFeatures: baseResult.advancedFeatures
+  };
 }

@@ -1,7 +1,11 @@
 import { spawn } from 'node:child_process';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { runBuild } from './build.mjs';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const FRONTEND_DIR = path.join(__dirname, '..', 'frontend');
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 
 async function waitForDevServer(url, timeoutMs = 30000) {
@@ -21,8 +25,8 @@ async function main() {
   console.log('[electron:dev] compilando electron main/preload (modo watch)...');
   await runBuild({ watch: true });
 
-  console.log('[electron:dev] iniciando servidor Vite...');
-  const vite = spawn('npx', ['vite'], { stdio: 'inherit', shell: true });
+  console.log(`[electron:dev] iniciando servidor Vite em ${FRONTEND_DIR}...`);
+  const vite = spawn('npx', ['vite'], { stdio: 'inherit', shell: true, cwd: FRONTEND_DIR });
 
   await waitForDevServer(DEV_SERVER_URL);
   console.log(`[electron:dev] servidor Vite pronto em ${DEV_SERVER_URL}, abrindo Electron...`);
