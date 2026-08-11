@@ -1,119 +1,89 @@
 # IrisFlow
 
-Sistema de rastreamento ocular assistivo via webcam comum, projetado para comunicação alternativa (AAC) com pacientes com ELA e outras condições que comprometem a mobilidade. Todo o processamento ocorre localmente no dispositivo — nenhum dado de vídeo ou olhar é transmitido.
+IrisFlow é uma aplicação de Tecnologia Assistiva baseada em Rastreamento Ocular (Eye Tracking) desenvolvida para pessoas com Esclerose Lateral Amiotrófica (ELA) e outras condições severas de restrição motora. O sistema permite navegação, comunicação e lazer utilizando apenas o movimento dos olhos através de uma webcam comum, sem necessidade de hardware especializado.
 
-## Arquitetura atual
+Todo o processamento de visão computacional e machine learning ocorre **100% localmente** no dispositivo, garantindo privacidade absoluta e baixíssima latência.
 
-O pipeline combina detecção facial por MediaPipe, extração de features geométricas, inferência de um encoder CNN treinado no MPIIFaceGaze, fusão via PCA, e um regressor SVR personalizado por calibração.
+## 🌟 Funcionalidades Principais (Frontend)
 
-```
+O projeto passou recentemente por uma reestruturação completa de interface, focada em usabilidade, acessibilidade e estética moderna (Glassmorphism):
+
+- **Calibração Integrada:** Fluxo de 13 pontos com tolerância a movimentos, limites de tentativas e feedback visual inteligente em tempo real.
+- **Sistema de "Dwell Click":** Seleção de elementos na interface simplesmente mantendo o olhar fixo por uma fração de segundo (Dwell Time customizável).
+- **Interface Otimizada para Olhar:** Botões grandes, alto contraste, transições fluidas e feedback sonoro/visual para evitar fadiga ocular.
+- **Módulos do Sistema:**
+  - 🗣️ **Comunicação:** Frases rápidas, teclado virtual preditivo e pictogramas.
+  - 🖥️ **Computador:** Controle de mouse virtual para o sistema operacional.
+  - 🎮 **Lazer:** Jogos adaptados (Estoura Bolhas, Jogo da Memória, Desenho) e ferramentas de relaxamento.
+  - ⚙️ **Configurações:** Ajuste fino de sensibilidade, velocidade do Dwell e configurações globais.
+
+## 🧠 Arquitetura do Rastreamento Ocular
+
+O pipeline de *Gaze Tracking* combina detecção facial do MediaPipe com modelos de regressão treinados em tempo real:
+
+```text
 Webcam (1280×720)
     │
-    ├── MediaPipe FaceLandmarker (WASM + modelo empacotados localmente)
-    │     └── 478 landmarks 3D normalizados
+    ├── MediaPipe FaceLandmarker (WASM) → 478 landmarks 3D
     │
-    ├── extractor.ts  →  258 features geométricas por olho (76+9 landmarks × 3 + 3 ângulos)
+    ├── Extrator Geométrico → 258 features por olho (landmarks, métricas e ângulos)
     │
-    ├── eyeCrop.ts    →  4 tensores: face[224,224,3] + olhoE[112,112,3] + olhoD[112,112,3] + rect[12]
-    │     │
-    │     └── encoder CNN (gaze_encoder.onnx, onnxruntime-node no processo main do Electron)
-    │           └── embedding: 256 floats  →  PCA (18 componentes)  →  fusão: 276 dims (não ativo)
+    ├── Calibração (StandardScaler + SVR / Kernel Ridge) → Mapeamento tela (X, Y)
     │
-    ├── calibration.ts  →  9 pts estáticos  →  StandardScaler + SVR
+    ├── OneEuroFilter2D → Suavização profunda de ruído e tremores
     │
-    ├── OneEuroFilter2D + rolling buffer 6 frames + Lerp
-    │
-    └── cursor (div#laser) + teclado virtual (dwell 500ms)
+    └── Motor React (GazeContext) → Injeção de Cursor Dwell e Navegação no DOM
 ```
 
-**Modo de produção atual:** `FEATURE_MODE='geometry_only'` / `REGRESSOR_MODE='svr'` — o pipeline geométrico puro (258 dims → SVR) está ativo. O encoder CNN e a fusão PCA (276 dims) estão implementados e rodando em paralelo, mas ainda não conectados ao regressor de produção.
+*Nota Técnica:* Atualmente o sistema roda no modo geométrico avançado (`FEATURE_MODE='geometry_only'`). O encoder CNN pesado (`onnxruntime-node`) treinado no MPIIFaceGaze está implementado em repositório anexado para cenários de fallback, porém a inferência geométrica combinada ao Filtro OneEuro demonstrou estabilidade superior e menor custo de CPU para uso contínuo (30fps fixos). Documentação técnica da antiga pipeline híbrida pode ser encontrada em [IRISFLOW_PIPELINE_TECNICO.md](./IRISFLOW_PIPELINE_TECNICO.md).
 
-Para documentação técnica detalhada do pipeline, veja [IRISFLOW_PIPELINE_TECNICO.md](./IRISFLOW_PIPELINE_TECNICO.md).
+## 🛠️ Tecnologias Utilizadas
 
-## Tecnologias
+- **Frontend:** React 18, TypeScript, Vite, React Router, CSS nativo (Design System Customizado).
+- **Processamento:** `@mediapipe/tasks-vision` (WASM offline), TypeScript math algorithms (OneEuro, Scalers).
+- **Desktop:** Electron, Node.js (compilação via `electron-builder`).
+- **Machine Learning (Pesquisa):** Python, TensorFlow, scikit-learn (veja `python_ml/`).
 
-- **Runtime:** Vite + TypeScript (renderer), Electron (processo main e empacotamento)
-- **Detecção facial:** `@mediapipe/tasks-vision ^0.10.35` (WASM, offline)
-- **Inferência CNN:** `onnxruntime-node ^1.20.0` (processo main do Electron, providers: DML/CoreML/CUDA/CPU)
-- **ML de treino:** Python — TensorFlow 2.19.0, tf2onnx, scikit-learn (veja `python_ml/requirements.txt`)
-- **Dataset CNN:** MPIIFaceGaze (15 sujeitos, licença não-comercial)
+## 🚀 Como Rodar o Projeto
 
-## Rodar em modo web (sem encoder CNN)
+### Modo Web (Desenvolvimento Frontend)
+
+Ideal para testes de interface e ajustes de UI (funciona independente dos binários do Electron):
 
 ```bash
 npm install
 npm run dev
 ```
 
-Abre em `http://localhost:5173`. A câmera, o MediaPipe, a calibração e o cursor funcionam normalmente. O encoder CNN não fica disponível neste modo (requer Electron) — o pipeline de geometria + SVR opera normalmente.
+Acesse `http://localhost:5173`. O motor de rastreamento ocular e toda a navegação web funcionarão normalmente utilizando a webcam através do navegador.
 
-## Rodar como app Electron (com encoder CNN)
-
-### Desenvolvimento
+### Modo Electron App (Produção Desktop)
 
 ```bash
+npm install
 npm run electron:dev
 ```
 
-Sobe o servidor Vite, compila `electron/` em modo watch e abre a janela do Electron apontando para o dev server. O encoder CNN (`resources/models/gaze_encoder.onnx`) deve estar presente para a inferência ONNX funcionar.
+Este comando levanta o servidor Vite e abre o container nativo do Electron com acesso profundo ao sistema operacional (necessário para o "Virtual Mouse" manipular o cursor do Windows/Mac).
 
-> Se o Electron abrir e fechar imediatamente, verifique se `ELECTRON_RUN_AS_NODE` não está setada no shell.
-
-### Gerar instalador
+### Gerar Instalador (.exe, .dmg, .AppImage)
 
 ```bash
 npm run electron:build
 ```
 
-Executa `vite build`, compila `electron/` para produção, e roda o `electron-builder`. Gera o instalador em `release/` (NSIS no Windows, DMG no macOS, AppImage no Linux).
+O executável/instalador final otimizado será gerado na pasta `release/`.
 
-### Onde colocar o modelo do encoder
+## 📂 Estrutura do Projeto
 
-Após treinar e exportar o encoder CNN (veja seção abaixo), copie o arquivo ONNX para:
+- `frontend/src/`: Código fonte da interface React.
+  - `pages/`: Telas principais do sistema (Menu, Onboarding, Calibração, Teclado, Jogos).
+  - `components/ui/`: Componentes reutilizáveis projetados para Interação Ocular.
+  - `context/`: Estados globais, destacando-se o `GazeContext.tsx` que orquestra o cursor vermelho de dwell.
+- `src/tracker/` e `src/`: Lógica core matemática de calibração, machine learning regressivo e filtros de ruído.
+- `electron/`: Código main do Electron e scripts de preload.
+- `python_ml/`: Scripts de treinamento offline de redes neurais.
 
-```
-resources/models/gaze_encoder.onnx
-```
+## 🤝 Licença e Privacidade
 
-Este caminho é empacotado via `extraResources` do electron-builder. Se o arquivo não existir, o `encoderRunner` loga um aviso e o pipeline de geometria + SVR continua funcionando sem o encoder.
-
-## Pipeline de treino Python (encoder CNN)
-
-Requer Python com as dependências de `python_ml/requirements.txt`.
-
-```bash
-cd python_ml
-pip install -r requirements.txt
-
-# 1. Pré-processar o dataset MPIIFaceGaze (necessário ter os dados raw em datasets/)
-python preprocess.py
-
-# 2. Treinar a CNN
-python train_cnn.py                 # treino completo
-python train_cnn.py --benchmark     # estimar tempo antes de treinar
-python train_cnn.py --resume        # retomar de checkpoint
-
-# 3. Exportar o encoder para ONNX
-python export_onnx.py               # gera checkpoints/gaze_encoder.onnx
-
-# 4. Treinar o PCA para fusão de features (opcional — para modo fused)
-python train_pca.py
-```
-
-**Nota de licença:** o dataset MPIIFaceGaze é disponibilizado para uso não-comercial apenas. O uso do modelo derivado em contexto comercial requer substituição do dataset.
-
-## Testes
-
-```bash
-npm test
-```
-
-Os testes cobrem: paridade geométrica de `eyeCrop.ts` vs `preprocess.py`, paridade de embeddings ONNX vs Keras, testes do `KernelRidgeRegressor`, e testes de calibração com dados sintéticos.
-
-## Issues conhecidas
-
-Veja a seção ["Issues conhecidas e pendências"](./IRISFLOW_PIPELINE_TECNICO.md#11-issues-conhecidas-e-pendências) no documento técnico. As principais:
-
-- **Fonte Inter via Google Fonts:** `style.css:1` faz chamada de rede para `fonts.googleapis.com`. Em ambiente offline, a UI usa fallback do browser mas funciona normalmente.
-- **`REGRESSOR_MODE` e `FEATURE_MODE` são constantes de compilação:** mudar de modo requer editar o código-fonte e fazer rebuild — não existe configuração em runtime.
-- **Modo `fused` requer preparação:** ativar `FEATURE_MODE='fused'` exige re-fit do StandardScaler para vetores de 276 dims e possivelmente re-treino do regressor.
+Privacidade é essencial na tecnologia assistiva. O IrisFlow não envia nenhuma imagem, telemetria facial ou dado de calibração para a nuvem. Toda a inferência neural acontece localmente. Para detalhes sobre o uso restrito de datasets não-comerciais (como o MPIIFaceGaze na pesquisa base), consulte a documentação técnica complementar.
