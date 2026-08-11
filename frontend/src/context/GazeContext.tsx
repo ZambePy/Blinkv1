@@ -105,7 +105,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       'transform:translate3d(-9999px,-9999px,0)',
       'transform-origin:center center',
       'will-change:transform, background',
-      'transition:opacity 120ms ease, background 120ms ease',
+      'transition:opacity 600ms ease 300ms, background 120ms ease',
       'opacity:0',
     ].join(';');
     document.body.appendChild(cursor);
@@ -126,7 +126,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // React's synthetic click handlers respond just like a mouse click.
       let dwellPct = 0;
       let hitTarget: HTMLElement | null = null;
-      if (sample.hasFace && now >= refractoryUntilRef.current) {
+      // Dwell dispatcher is entirely disabled during calibration — we don't want
+      // accidental gaze clicks on calibration UI elements.
+      const engineIsCalibrating = engineRef.current?.getState() === 'calibrating';
+      if (!engineIsCalibrating && sample.hasFace && now >= refractoryUntilRef.current) {
         const el = document.elementFromPoint(sample.x, sample.y);
         const t = el?.closest(DWELL_SELECTOR) as HTMLElement | null;
         const isDisabled =
@@ -137,13 +140,18 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (t && !isDisabled) {
           hitTarget = t;
           if (t !== dwellTargetRef.current) {
+            if (dwellTargetRef.current) {
+              dwellTargetRef.current.classList.remove('gaze-hover');
+            }
             dwellTargetRef.current = t;
             dwellStartMsRef.current = now;
+            t.classList.add('gaze-hover');
           } else {
             const elapsed = now - dwellStartMsRef.current;
             dwellPct = Math.min(1, elapsed / dwellMsRef.current);
             if (elapsed >= dwellMsRef.current) {
               t.click();
+              t.classList.remove('gaze-hover');
               refractoryUntilRef.current = now + REFRACTORY_MS;
               dwellTargetRef.current = null;
               dwellStartMsRef.current = 0;
@@ -152,25 +160,42 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           }
         } else {
+          if (dwellTargetRef.current) {
+            dwellTargetRef.current.classList.remove('gaze-hover');
+          }
           dwellTargetRef.current = null;
           dwellStartMsRef.current = 0;
         }
       } else if (!sample.hasFace) {
         // Face lost — freeze dwell, reset target so re-entry restarts fresh.
+        if (dwellTargetRef.current) {
+          dwellTargetRef.current.classList.remove('gaze-hover');
+        }
         dwellTargetRef.current = null;
         dwellStartMsRef.current = 0;
       }
 
       // Move cursor via transform (no layout / no React re-render).
       // Visual feedback: green + growing while dwell fills; red otherwise.
+      // The cursor is completely hidden during calibration to avoid distracting
+      // the user while they are fixating on calibration targets.
       if (cursorRef.current) {
-        const scale = hitTarget ? 1 + dwellPct * 0.3 : 1;
-        cursorRef.current.style.transform =
-          `translate3d(${sample.x - 24}px, ${sample.y - 24}px, 0) scale(${scale})`;
-        cursorRef.current.style.opacity = sample.hasFace ? '1' : '0.35';
-        cursorRef.current.style.background = hitTarget
-          ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
-          : 'rgba(239,68,68,0.6)';
+        const isInCalibration = engineRef.current?.getState() === 'calibrating';
+        const isCalibrated = engineRef.current?.calibration.isCalibrated() ?? false;
+        
+        if (isInCalibration || !isCalibrated) {
+          // Hard-hide: move offscreen + opacity 0
+          cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
+          cursorRef.current.style.opacity = '0';
+        } else {
+          const scale = hitTarget ? 1 + dwellPct * 0.3 : 1;
+          cursorRef.current.style.transform =
+            `translate3d(${sample.x - 24}px, ${sample.y - 24}px, 0) scale(${scale})`;
+          cursorRef.current.style.opacity = sample.hasFace ? '1' : '0.35';
+          cursorRef.current.style.background = hitTarget
+            ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
+            : 'rgba(239,68,68,0.6)';
+        }
       } else if (cbInvocations === 0) {
         console.warn('[IrisFlow] gaze subscribe callback disparou mas cursorRef.current é null');
       }
@@ -260,19 +285,24 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     };
   }, []);
 
-  const value = useMemo<GazeContextValue>(
+  // calibration must have STABLE identity across renders — consumers put it in
+  // useEffect deps and any change here would fire their cleanup mid-flow.
+  // The functions read engineRef.current lazily, so the ref stays fresh even
+  // though the object identity never changes.
+  const calibration = useMemo<CalibrationApi>(
     () => ({
-      subscribe,
-      state,
-      calibration: {
-        startCalibrationMode: () => engineRef.current?.calibration.startCalibrationMode(),
-        startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
-        completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
-        clear: () => engineRef.current?.calibration.clear(),
-        isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,
-      },
+      startCalibrationMode: () => engineRef.current?.calibration.startCalibrationMode(),
+      startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
+      completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
+      clear: () => engineRef.current?.calibration.clear(),
+      isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,
     }),
-    [subscribe, state],
+    [],
+  );
+
+  const value = useMemo<GazeContextValue>(
+    () => ({ subscribe, state, calibration }),
+    [subscribe, state, calibration],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

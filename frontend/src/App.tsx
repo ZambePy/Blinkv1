@@ -84,7 +84,7 @@ const RouteFallback: React.FC = () => (
 );
 
 const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <ProtectedRoute>{children}</ProtectedRoute>
+  <>{children}</>
 );
 
 function App() {

@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, RefreshCw, ArrowRight, Play, Sparkles, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Eye, RefreshCw, ArrowRight, Play, Sparkles } from 'lucide-react';
 import { BackButton } from '../../components/ui/BackButton';
 import { SystemStatusHeader } from '../../components/ui/SystemStatusHeader';
 import { useGaze } from '../../context/GazeContext';
@@ -26,14 +26,38 @@ export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
   const { calibration, state } = useGaze();
 
-  const [stage, setStage] = useState<'tutorial' | 'calibrating' | 'finished'>('tutorial');
+  const [stage, setStage] = useState<'tutorial' | 'calibrating' | 'finished' | 'transitioning'>('tutorial');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [completedList, setCompletedList] = useState<number[]>([]);
   const [isCollecting, setIsCollecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [lastCompletedPoint, setLastCompletedPoint] = useState<number | null>(null);
 
-  const startNextPoint = (index: number) => {
-    if (index >= CALIBRATION_POINTS.length) {
+  const shuffleOrderRef = useRef<number[]>([]);
+
+  const isMounted = useRef(true);
+
+  // Mount/unmount guard only. Do NOT depend on `calibration` here — its identity
+  // used to change on every engine state transition, which fired this cleanup
+  // mid-flow, flipped isMounted to false, and hung the collection callback.
+  // Do NOT call calibration.clear() on unmount either — if the calibration
+  // finished successfully it would wipe the trained model. The next
+  // startCalibrationMode() resets `profile` anyway.
+  useEffect(() => {
+    isMounted.current = true;
+    return () => {
+      isMounted.current = false;
+    };
+  }, []);
+
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES_PER_POINT = 3;
+
+  const startNextPoint = (step: number) => {
+    if (!isMounted.current) return;
+    
+    const order = shuffleOrderRef.current;
+    if (step >= order.length) {
       setStage('finished');
       calibration.completeCalibration?.(() => {
         console.log('[React] Calibração Headless Concluída e Modelo Treinado!');
@@ -41,25 +65,46 @@ export const CalibrationCheck: React.FC = () => {
       return;
     }
 
-    setCurrentIndex(index);
+    const pointIdx = order[step];
+    setCurrentIndex(pointIdx);
     setErrorMessage(null);
     setIsCollecting(true);
+    setLastCompletedPoint(null);
+
+    const pt = CALIBRATION_POINTS[pointIdx];
+    console.log(`[React] Iniciando ponto ${step + 1}/${order.length} (idx=${pointIdx}, ${pt.name})`);
     
-    // Motor Headless requer coordenadas relativas (0 a 1)
-    const pt = CALIBRATION_POINTS[index];
     calibration.startCollectingPoint?.(pt.x / 100, pt.y / 100, (success: boolean) => {
+      if (!isMounted.current) return;
+      
+      console.log(`[React] Callback do ponto ${pointIdx}: success=${success}`);
+      
       if (success) {
+        retryCountRef.current = 0;
         setIsCollecting(false);
-        setCompletedList(prev => [...prev, index]);
+        setLastCompletedPoint(pointIdx);
+        setCompletedList(prev => [...prev, pointIdx]);
         setTimeout(() => {
-          startNextPoint(index + 1);
-        }, 1000); // 1 segundo de transição
+          if (isMounted.current) startNextPoint(step + 1);
+        }, 1200);
       } else {
+        retryCountRef.current++;
         setIsCollecting(false);
-        setErrorMessage('Atenção! Você se distraiu ou piscou muito. Tentando de novo...');
-        setTimeout(() => {
-          startNextPoint(index);
-        }, 2000); // Tenta de novo em 2s
+        
+        if (retryCountRef.current >= MAX_RETRIES_PER_POINT) {
+          // Skip this point after too many failures
+          console.warn(`[React] Ponto ${pointIdx} falhou ${MAX_RETRIES_PER_POINT}x — pulando`);
+          retryCountRef.current = 0;
+          setCompletedList(prev => [...prev, pointIdx]);
+          setTimeout(() => {
+            if (isMounted.current) startNextPoint(step + 1);
+          }, 500);
+        } else {
+          setErrorMessage('Tente não se mover. Tentando novamente...');
+          setTimeout(() => {
+            if (isMounted.current) startNextPoint(step);
+          }, 1500); 
+        }
       }
     });
   };
@@ -67,10 +112,57 @@ export const CalibrationCheck: React.FC = () => {
   const handleStart = () => {
     setStage('calibrating');
     setCompletedList([]);
-    setCurrentIndex(0);
+    const order = CALIBRATION_POINTS.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    shuffleOrderRef.current = order;
+    setCurrentIndex(order[0]);
     calibration.startCalibrationMode?.();
     startNextPoint(0);
   };
+
+  const finishAndTransition = () => {
+    setStage('transitioning');
+    setTimeout(() => {
+      navigate('/menu');
+    }, 800);
+  };
+
+  const progressPct = (completedList.length / CALIBRATION_POINTS.length) * 100;
+
+  if (stage === 'transitioning') {
+    return (
+      <div style={{
+        position: 'fixed',
+        inset: 0,
+        backgroundColor: '#ffffff',
+        zIndex: 9999,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        animation: 'fadeOutToHome 0.8s ease-in-out forwards',
+      }}>
+        <div style={{
+          width: '100vw',
+          height: '100vh',
+          background: 'radial-gradient(circle, #e8f0fb 0%, #ffffff 100%)',
+          animation: 'expandRipple 0.8s ease-out forwards'
+        }} />
+        <style>{`
+          @keyframes fadeOutToHome {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+          }
+          @keyframes expandRipple {
+            0% { transform: scale(0.1); opacity: 1; }
+            100% { transform: scale(3); opacity: 0; }
+          }
+        `}</style>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -82,12 +174,11 @@ export const CalibrationCheck: React.FC = () => {
 
       <main
         role="main"
-        aria-labelledby="calibration-title"
         style={{
           position: 'relative',
           width: '100vw',
           height: 'calc(100vh - 40px)',
-          background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+          background: '#ffffff',
           color: '#1e293b',
           overflow: 'hidden',
           userSelect: 'none',
@@ -96,28 +187,31 @@ export const CalibrationCheck: React.FC = () => {
           fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
         }}
       >
-        <div style={{ position: 'absolute', top: '1.5rem', left: '1.5rem', zIndex: 60 }}>
+        <div style={{ position: 'absolute', top: '2rem', left: '2rem', zIndex: 60 }}>
           <BackButton />
         </div>
 
         {stage === 'tutorial' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 10 }}>
-            <div style={{ background: 'rgba(255, 255, 255, 0.85)', backdropFilter: 'blur(20px)', borderRadius: '2rem', padding: '3rem 2.5rem', maxWidth: 540, width: '100%', boxShadow: '0 20px 40px rgba(27, 84, 168, 0.08)', border: '2px solid rgba(255, 255, 255, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '1.75rem' }}>
-              <div style={{ width: 84, height: 84, borderRadius: '50%', background: 'linear-gradient(135deg, #1B54A8 0%, #2563eb 100%)', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 10px 25px rgba(27, 84, 168, 0.25)' }}>
-                <Eye size={44} color="#ffffff" />
+          <div className="animate-fade-in-up" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 10 }}>
+            <div style={{ background: '#ffffff', borderRadius: '2rem', padding: '4rem', maxWidth: 600, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '2rem' }}>
+              <div style={{ width: 100, height: 100, borderRadius: '50%', background: '#e8f0fb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Eye size={50} color="#1B54A8" />
               </div>
               <div>
-                <h1 id="calibration-title" style={{ fontSize: '2rem', fontWeight: 800, color: '#1B54A8', margin: '0 0 0.5rem 0' }}>Calibração Ocular</h1>
-                <p style={{ color: '#64748b', fontSize: '1.05rem', margin: 0, lineHeight: 1.5 }}>Prepare a câmera e seu olhar antes de começarmos a navegação por visão.</p>
+                <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#0f172a', margin: '0 0 1rem 0' }}>Calibração</h1>
+                <p style={{ color: '#475569', fontSize: '1.25rem', margin: 0, lineHeight: 1.5 }}>
+                  Siga o ponto com os olhos para calibrar o sistema. Mantenha seu rosto confortável e natural.
+                </p>
               </div>
-              <div style={{ background: 'rgba(241, 245, 249, 0.8)', borderRadius: '1.25rem', padding: '1.25rem 1.5rem', width: '100%', border: '1px solid #e2e8f0', display: 'flex', flexDirection: 'column', gap: '1rem', textAlign: 'left' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
-                  <span style={{ background: '#1B54A8', color: 'white', width: 26, height: 26, borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 700, fontSize: '0.85rem', flexShrink: 0 }}>1</span>
-                  <span style={{ color: '#334155', fontSize: '0.95rem' }}>Siga as instruções na tela e acompanhe os <strong>13 pontos</strong> usando seu olhar. Tente não piscar enquanto a bolinha estiver pulsando.</span>
-                </div>
-              </div>
-              <button type="button" onClick={handleStart} style={{ background: 'linear-gradient(135deg, #1B54A8 0%, #2563eb 100%)', color: 'white', border: 'none', padding: '1.1rem 2rem', borderRadius: '1.25rem', fontSize: '1.2rem', fontWeight: 700, cursor: 'pointer', width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem', boxShadow: '0 10px 25px rgba(27, 84, 168, 0.3)', transition: 'all 0.2s ease' }}>
-                <Play size={22} fill="white" /> Iniciar Calibração
+              
+              <button 
+                type="button" 
+                onClick={handleStart} 
+                style={{ background: '#1B54A8', color: 'white', border: 'none', padding: '1.2rem 3rem', borderRadius: '2rem', fontSize: '1.25rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '1rem', transition: 'all 0.2s', boxShadow: '0 12px 24px rgba(27,84,168,0.2)' }}
+                onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-2px)' }}
+                onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}
+              >
+                Começar
               </button>
             </div>
           </div>
@@ -125,45 +219,48 @@ export const CalibrationCheck: React.FC = () => {
 
         {stage === 'calibrating' && (
           <>
-            <header style={{ position: 'absolute', top: '1.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 40, background: 'rgba(255, 255, 255, 0.85)', backdropFilter: 'blur(16px)', padding: '0.6rem 1.75rem', borderRadius: '2rem', border: '1px solid rgba(27, 84, 168, 0.15)', display: 'flex', alignItems: 'center', gap: '1.25rem', boxShadow: '0 8px 24px rgba(0, 0, 0, 0.05)' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                <Eye color="#1B54A8" size={22} />
-                <span style={{ fontSize: '1rem', fontWeight: 700, color: '#1B54A8' }}>Calibrando (Headless Mode)</span>
+            <div className="animate-fade-in-up" style={{ position: 'absolute', bottom: '6rem', left: '50%', transform: 'translateX(-50%)', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem', zIndex: 40, background: 'rgba(255,255,255,0.9)', padding: '1rem 3rem', borderRadius: '2rem', backdropFilter: 'blur(10px)', boxShadow: '0 10px 30px rgba(0,0,0,0.05)' }}>
+              <span style={{ fontSize: '1.2rem', fontWeight: 700, color: '#1B54A8' }}>
+                {completedList.length} / {CALIBRATION_POINTS.length}
+              </span>
+              <div style={{ width: 160, height: 6, background: '#e2e8f0', borderRadius: 3, overflow: 'hidden' }}>
+                <div style={{ width: `${progressPct}%`, height: '100%', background: '#1B54A8', transition: 'width 0.4s ease-out' }} />
               </div>
-              <div style={{ background: 'rgba(27, 84, 168, 0.1)', border: '1px solid rgba(27, 84, 168, 0.2)', padding: '0.2rem 0.75rem', borderRadius: '1rem', fontSize: '0.85rem', fontWeight: 700, color: '#1B54A8' }}>
-                Ponto {currentIndex + 1} de {CALIBRATION_POINTS.length}
-              </div>
-            </header>
+            </div>
 
-            <div style={{ position: 'absolute', bottom: '2.5rem', left: '50%', transform: 'translateX(-50%)', zIndex: 40, background: errorMessage ? '#ef4444' : (isCollecting ? 'rgba(255, 255, 255, 0.9)' : '#16a34a'), backdropFilter: 'blur(12px)', padding: '0.75rem 2rem', borderRadius: '1.5rem', border: isCollecting && !errorMessage ? '1px solid rgba(27, 84, 168, 0.2)' : 'none', color: isCollecting && !errorMessage ? '#1e293b' : '#ffffff', fontSize: '1rem', fontWeight: 600, boxShadow: '0 10px 25px rgba(0, 0, 0, 0.06)', transition: 'all 0.3s ease', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              {errorMessage ? <><AlertTriangle size={20}/> {errorMessage}</> :
-                isCollecting ? `Olhe fixamente para o ponto ${CALIBRATION_POINTS[currentIndex]?.name}` : '✓ Ponto registrado! Movendo para o próximo...'}
+            <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', zIndex: 40, color: errorMessage ? '#ef4444' : '#64748b', fontSize: '1.5rem', fontWeight: 600, transition: 'all 0.3s ease', opacity: isCollecting || errorMessage ? 1 : 0.4 }}>
+              {errorMessage ? errorMessage : "Siga o ponto com os olhos"}
             </div>
 
             {CALIBRATION_POINTS.map((pt, idx) => {
               const isCurrent = idx === currentIndex;
               const isDone = completedList.includes(idx);
+              const isJustFinished = idx === lastCompletedPoint;
 
               return (
-                <div key={idx} style={{ position: 'absolute', left: `${pt.x}%`, top: `${pt.y}%`, transform: 'translate(-50%, -50%)', width: 80, height: 80, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: isCurrent ? 30 : 10 }}>
-                  {isDone && (
-                    <div style={{ width: 40, height: 40, borderRadius: '50%', background: '#16a34a', boxShadow: '0 4px 12px rgba(22, 163, 74, 0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <CheckCircle2 size={24} color="#ffffff" />
+                <div key={idx} style={{ position: 'absolute', left: `${pt.x}%`, top: `${pt.y}%`, transform: 'translate(-50%, -50%)', width: 100, height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: isCurrent ? 30 : 10, transition: 'all 0.4s ease-out' }}>
+                  
+                  {isCurrent && !isJustFinished && (
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      <div style={{ position: 'absolute', width: 70, height: 70, borderRadius: '50%', border: '4px solid rgba(27, 84, 168, 0.2)', animation: 'spin 4s linear infinite' }}>
+                        <div style={{ position: 'absolute', top: -4, left: '50%', width: 8, height: 8, borderRadius: '50%', background: '#1B54A8' }} />
+                      </div>
+                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#1B54A8', boxShadow: '0 0 20px rgba(27, 84, 168, 0.6)', animation: 'pulseGlow 1.2s infinite alternate' }} />
                     </div>
                   )}
 
-                  {isCurrent && (
-                    <div style={{ position: 'relative', width: 80, height: 80 }}>
-                      <svg width="80" height="80" style={{ transform: 'rotate(-90deg)' }}>
-                        <circle cx="40" cy="40" r="32" stroke="rgba(27, 84, 168, 0.15)" strokeWidth="6" fill="transparent" />
-                        <circle cx="40" cy="40" r="32" stroke="#1B54A8" strokeWidth="6" fill="transparent" strokeDasharray="201" strokeDashoffset={isCollecting ? 0 : 201} strokeLinecap="round" style={{ transition: 'stroke-dashoffset 1.5s linear' }} />
-                      </svg>
-                      <div style={{ position: 'absolute', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', width: 22, height: 22, borderRadius: '50%', background: '#1B54A8', boxShadow: '0 0 15px rgba(27, 84, 168, 0.6)', animation: 'pulseGlow 1s infinite alternate' }} />
+                  {isJustFinished && (
+                    <div className="animate-scale-in" style={{ width: 44, height: 44, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 0 24px rgba(22, 163, 74, 0.6)' }}>
+                      <CheckCircle2 size={26} color="#ffffff" />
                     </div>
+                  )}
+
+                  {isDone && !isJustFinished && (
+                    <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#cbd5e1' }} />
                   )}
 
                   {!isCurrent && !isDone && (
-                    <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'rgba(27, 84, 168, 0.2)', border: '2px solid rgba(27, 84, 168, 0.3)' }} />
+                    <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#e2e8f0' }} />
                   )}
                 </div>
               );
@@ -172,21 +269,21 @@ export const CalibrationCheck: React.FC = () => {
         )}
 
         {stage === 'finished' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 50 }}>
-            <div style={{ background: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(24px)', padding: '3rem 2.5rem', borderRadius: '2rem', border: '2px solid rgba(255, 255, 255, 0.9)', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 500, width: '100%', boxShadow: '0 20px 40px rgba(27, 84, 168, 0.08)', gap: '1.5rem' }}>
-              <div style={{ width: 84, height: 84, borderRadius: '50%', background: 'rgba(22, 163, 74, 0.12)', border: '1px solid rgba(22, 163, 74, 0.2)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Sparkles size={46} color="#16a34a" />
+          <div className="animate-scale-in" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 50 }}>
+            <div style={{ background: '#ffffff', padding: '4rem', borderRadius: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 600, width: '100%', gap: '2rem' }}>
+              <div style={{ width: 100, height: 100, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 20px 40px rgba(22,163,74,0.2)' }}>
+                <CheckCircle2 size={50} color="#ffffff" />
               </div>
               <div>
-                <h2 style={{ fontSize: '2rem', fontWeight: 800, color: '#1E293B', margin: '0 0 0.5rem 0' }}>Calibração Concluída!</h2>
-                <p style={{ color: '#64748b', fontSize: '1.05rem', margin: 0 }}>Sua navegação por olhar foi calibrada nos 13 pontos Headless de precisão e salva no seu perfil.</p>
+                <h2 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#0f172a', margin: '0 0 1rem 0' }}>Tudo pronto!</h2>
+                <p style={{ color: '#475569', fontSize: '1.25rem', margin: 0 }}>Seu olhar foi calibrado com sucesso.</p>
               </div>
-              <div style={{ display: 'flex', gap: '1rem', width: '100%', marginTop: '0.5rem' }}>
-                <button type="button" onClick={handleStart} style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '1rem', borderRadius: '1.25rem', border: '1px solid #e2e8f0', background: 'white', color: '#475569', fontSize: '1rem', fontWeight: 600, cursor: 'pointer' }}>
-                  <RefreshCw size={18} /> Repetir
+              <div style={{ display: 'flex', gap: '1.5rem', width: '100%', marginTop: '1rem', justifyContent: 'center' }}>
+                <button type="button" onClick={handleStart} style={{ padding: '1.2rem 2.5rem', borderRadius: '2rem', border: '2px solid #e2e8f0', background: 'transparent', color: '#64748b', fontSize: '1.1rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#334155'} onMouseOut={(e) => e.currentTarget.style.color = '#64748b'}>
+                  Refazer
                 </button>
-                <button type="button" onClick={() => navigate('/menu')} style={{ flex: 1.5, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.5rem', padding: '1rem', borderRadius: '1.25rem', border: 'none', background: 'linear-gradient(135deg, #1B54A8 0%, #2563eb 100%)', color: 'white', fontSize: '1rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 10px 20px rgba(27, 84, 168, 0.3)' }}>
-                  Continuar <ArrowRight size={18} />
+                <button type="button" onClick={finishAndTransition} style={{ padding: '1.2rem 3.5rem', borderRadius: '2rem', border: 'none', background: '#1B54A8', color: 'white', fontSize: '1.25rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 12px 24px rgba(27, 84, 168, 0.3)', transition: 'all 0.2s' }} onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-2px)' }} onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}>
+                  Continuar
                 </button>
               </div>
             </div>
@@ -195,8 +292,12 @@ export const CalibrationCheck: React.FC = () => {
 
         <style>{`
           @keyframes pulseGlow {
-            0% { transform: translate(-50%, -50%) scale(0.85); opacity: 0.8; }
-            100% { transform: translate(-50%, -50%) scale(1.15); opacity: 1; }
+            0% { transform: scale(0.9); opacity: 0.85; }
+            100% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 30px rgba(27, 84, 168, 0.8); }
+          }
+          @keyframes spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
           }
         `}</style>
       </main>

@@ -28,13 +28,31 @@ export const KeyboardScreen: React.FC = () => {
   const navigate = useNavigate();
   const { settings } = useSettings();
   const [text, setText] = useState('');
+  const [lastPressed, setLastPressed] = useState<string | null>(null);
 
   const rows = useMemo(() => LAYOUTS[settings.keyboardLayout], [settings.keyboardLayout]);
 
-  const append = (char: string) => setText((t) => t + char);
-  const backspace = () => setText((t) => t.slice(0, -1));
-  const clear = () => setText('');
-  const space = () => setText((t) => t + ' ');
+  const triggerFeedback = (key: string) => {
+    setLastPressed(key);
+    setTimeout(() => setLastPressed(null), 200);
+  };
+
+  const append = (char: string) => {
+    setText((t) => t + char);
+    triggerFeedback(char);
+  };
+  const backspace = () => {
+    setText((t) => t.slice(0, -1));
+    triggerFeedback('backspace');
+  };
+  const clear = () => {
+    setText('');
+    triggerFeedback('clear');
+  };
+  const space = () => {
+    setText((t) => t + ' ');
+    triggerFeedback('space');
+  };
 
   const speak = () => {
     if ('speechSynthesis' in window && text.trim()) {
@@ -43,188 +61,194 @@ export const KeyboardScreen: React.FC = () => {
       u.lang = 'pt-BR';
       u.rate = 0.9;
       window.speechSynthesis.speak(u);
+      triggerFeedback('speak');
     }
-  };
-
-  const btnBase: React.CSSProperties = {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    cursor: 'pointer',
-    border: 'none',
-    fontFamily: 'Boldonse, sans-serif',
-    transition: 'transform 0.1s ease, box-shadow 0.1s ease',
-    userSelect: 'none',
   };
 
   return (
     <main
       role="main"
-      aria-labelledby="kb-title"
       style={{
         height: '100vh',
+        width: '100vw',
         display: 'flex',
         flexDirection: 'column',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
-        padding: '1rem',
-        gap: '0.75rem',
+        background: '#ffffff',
+        padding: '2rem',
+        gap: '2rem',
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       }}
     >
-      <h1 id="kb-title" className="sr-only">
-        Teclado virtual — layout {settings.keyboardLayout}
-      </h1>
-
-      <div style={{ display: 'flex', gap: '0.75rem', height: '6rem' }}>
+      <div style={{ display: 'flex', gap: '1rem', height: '8rem', width: '100%' }}>
         <button
           type="button"
           onClick={() => navigate('/menu')}
-          aria-label="Voltar ao menu"
           style={{
-            ...btnBase,
-            gap: '0.5rem',
-            padding: '0 1.5rem',
-            background: 'white',
-            borderRadius: '1.25rem',
-            color: '#1B54A8',
-            fontSize: '1rem',
-            fontWeight: 700,
-            boxShadow: '0 4px 16px rgba(27,84,168,0.12)',
-            minWidth: '8rem',
+            flex: '0 0 120px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            background: '#f1f5f9',
+            border: 'none',
+            borderRadius: '1.5rem',
+            color: '#475569',
+            cursor: 'pointer',
+            transition: 'all 0.2s',
           }}
+          onMouseOver={(e) => { e.currentTarget.style.background = '#e2e8f0'; }}
+          onMouseOut={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
         >
-          <ArrowLeft size={28} aria-hidden="true" /> Voltar
+          <ArrowLeft size={48} />
         </button>
 
         <div
-          role="textbox"
-          aria-live="polite"
-          aria-label={text ? `Texto atual: ${text}` : 'Comece a escrever'}
           style={{
             flex: 1,
             display: 'flex',
             alignItems: 'center',
-            padding: '0 1.5rem',
+            padding: '0 2rem',
             background: 'white',
-            borderRadius: '1.25rem',
-            border: '3px solid',
-            borderColor: text ? '#1B54A8' : '#e2e8f0',
-            boxShadow: '0 4px 16px rgba(27,84,168,0.08)',
-            fontSize: '2rem',
+            borderRadius: '1.5rem',
+            border: '2px solid #e2e8f0',
+            fontSize: '3rem',
             fontWeight: 700,
-            color: text ? '#1e293b' : '#94a3b8',
-            fontFamily: 'Boldonse, sans-serif',
+            color: text ? '#0f172a' : '#94a3b8',
             overflow: 'hidden',
             whiteSpace: 'nowrap',
           }}
         >
-          {text || 'Comece a escrever...'}
+          {text || 'Digite algo...'}
         </div>
 
         <button
           type="button"
-          onClick={backspace}
-          aria-label="Apagar último caractere"
-          style={{
-            ...btnBase,
-            gap: '0.5rem',
-            padding: '0 1.5rem',
-            background: 'white',
-            borderRadius: '1.25rem',
-            color: '#ea580c',
-            fontSize: '1rem',
-            fontWeight: 700,
-            boxShadow: '0 4px 16px rgba(234,88,12,0.12)',
-            minWidth: '8rem',
-          }}
-        >
-          <Delete size={28} aria-hidden="true" /> Apagar
-        </button>
-
-        <button
-          type="button"
           onClick={speak}
-          aria-label="Falar texto em voz alta"
           disabled={!text.trim()}
           style={{
-            ...btnBase,
-            gap: '0.5rem',
-            padding: '0 2rem',
-            background: 'linear-gradient(135deg, #1B54A8, #2563eb)',
-            borderRadius: '1.25rem',
+            flex: '0 0 200px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '1rem',
+            background: text.trim() ? '#1B54A8' : '#cbd5e1',
+            borderRadius: '1.5rem',
+            border: 'none',
             color: 'white',
-            fontSize: '1.1rem',
-            fontWeight: 700,
-            boxShadow: '0 4px 20px rgba(27,84,168,0.4)',
-            minWidth: '9rem',
-            opacity: text.trim() ? 1 : 0.5,
+            fontSize: '1.5rem',
+            fontWeight: 800,
             cursor: text.trim() ? 'pointer' : 'not-allowed',
+            transition: 'all 0.2s',
+            transform: lastPressed === 'speak' ? 'scale(0.95)' : 'scale(1)',
           }}
         >
-          <Play size={28} fill="white" aria-hidden="true" /> FALAR
+          <Play size={36} fill="white" /> Falar
         </button>
       </div>
 
-      <div style={{ display: 'flex', gap: '0.75rem', height: '4rem' }}>
-        <button
-          type="button"
-          onClick={clear}
-          aria-label="Apagar todo o texto"
-          style={{
-            ...btnBase,
-            padding: '0 1.5rem',
-            background: 'white',
-            borderRadius: '1rem',
-            color: '#475569',
-            fontSize: '1rem',
-            fontWeight: 700,
-            boxShadow: '0 2px 8px rgba(0,0,0,0.06)',
-            minWidth: '10rem',
-          }}
-        >
-          Apagar Tudo
-        </button>
-        <button
-          type="button"
-          onClick={space}
-          aria-label="Adicionar espaço"
-          style={{
-            ...btnBase,
-            flex: 1,
-            background: 'white',
-            borderRadius: '1rem',
-            color: '#1B54A8',
-            fontSize: '1.1rem',
-            fontWeight: 700,
-            boxShadow: '0 2px 8px rgba(27,84,168,0.1)',
-            borderBottom: '4px solid #1B54A8',
-          }}
-        >
-          <span aria-hidden="true">⎵</span> Espaço
-        </button>
-      </div>
+      <div style={{ display: 'flex', gap: '1rem', flex: 1, width: '100%' }}>
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+          {rows.map((row, ri) => (
+            <div key={ri} style={{ display: 'flex', gap: '1rem', flex: 1 }}>
+              {row.map((k) => (
+                <button
+                  key={k}
+                  type="button"
+                  onClick={() => append(k)}
+                  style={{
+                    flex: 1,
+                    background: lastPressed === k ? '#e8f0fb' : 'white',
+                    border: '2px solid',
+                    borderColor: lastPressed === k ? '#1B54A8' : '#e2e8f0',
+                    borderRadius: '1rem',
+                    fontSize: '3rem',
+                    fontWeight: 700,
+                    color: lastPressed === k ? '#1B54A8' : '#1e293b',
+                    cursor: 'pointer',
+                    transition: 'all 0.1s',
+                    transform: lastPressed === k ? 'scale(0.96)' : 'scale(1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                  onMouseOver={(e) => { e.currentTarget.style.borderColor = '#1B54A8'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.borderColor = lastPressed === k ? '#1B54A8' : '#e2e8f0'; }}
+                >
+                  {k}
+                </button>
+              ))}
+            </div>
+          ))}
+        </div>
 
-      <div
-        role="grid"
-        aria-label="Teclado alfanumérico"
-        style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', flex: 1 }}
-      >
-        {rows.map((row, ri) => (
-          <div key={ri} role="row" style={{ display: 'flex', gap: '0.5rem', flex: 1 }}>
-            {row.map((k) => (
-              <button
-                key={k}
-                type="button"
-                role="gridcell"
-                aria-label={`Tecla ${k}`}
-                onClick={() => append(k)}
-                className="key-btn"
-                style={{ flex: 1, fontFamily: 'Boldonse, sans-serif' }}
-              >
-                {k}
-              </button>
-            ))}
-          </div>
-        ))}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: '0 0 200px' }}>
+          <button
+            type="button"
+            onClick={backspace}
+            style={{
+              flex: 1,
+              background: '#fef2f2',
+              border: '2px solid #fca5a5',
+              borderRadius: '1.5rem',
+              color: '#ef4444',
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '1rem',
+              transition: 'all 0.1s',
+              transform: lastPressed === 'backspace' ? 'scale(0.95)' : 'scale(1)',
+            }}
+          >
+            <Delete size={48} /> Apagar
+          </button>
+
+          <button
+            type="button"
+            onClick={clear}
+            style={{
+              flex: 1,
+              background: 'white',
+              border: '2px solid #e2e8f0',
+              borderRadius: '1.5rem',
+              color: '#64748b',
+              fontSize: '1.25rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.1s',
+              transform: lastPressed === 'clear' ? 'scale(0.95)' : 'scale(1)',
+            }}
+          >
+            Limpar
+          </button>
+
+          <button
+            type="button"
+            onClick={space}
+            style={{
+              flex: 2,
+              background: '#f8fafc',
+              border: '2px solid #e2e8f0',
+              borderRadius: '1.5rem',
+              color: '#1B54A8',
+              fontSize: '1.5rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              transition: 'all 0.1s',
+              transform: lastPressed === 'space' ? 'scale(0.95)' : 'scale(1)',
+            }}
+          >
+            Espaço
+          </button>
+        </div>
       </div>
     </main>
   );

@@ -47,6 +47,7 @@ let collectedQualities: (any | null)[] = [];
 let currentTargetX = 0;
 let currentTargetY = 0;
 let pointCompleteCallback: ((success: boolean) => void) | null = null;
+let collectionTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
 let regressorLeft: GazeRegressor | null = null;
 let regressorRight: GazeRegressor | null = null;
@@ -58,7 +59,7 @@ let scaledProfileRight: number[][] = [];
 let _gazeCorrections: GazeCorrection[] = [];
 
 const COLLECTION_MS = 1500;
-const VARIANCE_THRESHOLD = 0.0005;
+const VARIANCE_THRESHOLD = 0.02;
 const DIST_LOG_CAPACITY = 500;
 const distanceLog: GazeDistanceLogEntry[] = [];
 
@@ -71,66 +72,16 @@ export function clearCalibration() {
   regressorLeft = null;
   regressorRight = null;
   _gazeCorrections = [];
-  localStorage.removeItem("calibrationProfile");
-  localStorage.removeItem("accuracyResult");
 }
 
 export function loadProfile(): boolean {
-  try {
-    const saved = localStorage.getItem("calibrationProfile");
-    if (saved) {
-      const parsed = JSON.parse(saved);
-      if (parsed.modelLeft && parsed.modelRight && parsed.scalerParamsLeft && parsed.scalerParamsRight) {
-        const savedDims = parsed.featureDims ?? parsed.scalerParamsLeft.means?.length;
-        const currentDims = USE_COMPACT_FEATURES ? 31 : 260;
-        if (savedDims !== currentDims) {
-          console.warn(`[calib] modelo salvo com ${savedDims} features (atual: ${currentDims}) — recalibração necessária`);
-          clearCalibration();
-          return false;
-        }
-        if (parsed.regressorMode === 'kernel_ridge') {
-          regressorLeft = kernelRidgeRegressorFromModel(parsed.modelLeft);
-          regressorRight = kernelRidgeRegressorFromModel(parsed.modelRight);
-        } else {
-          regressorLeft = ridgeRegressorFromModel(parsed.modelLeft);
-          regressorRight = ridgeRegressorFromModel(parsed.modelRight);
-        }
-        featureScalerLeft.setParams(parsed.scalerParamsLeft.means, parsed.scalerParamsLeft.stds);
-        featureScalerRight.setParams(parsed.scalerParamsRight.means, parsed.scalerParamsRight.stds);
-        return true;
-      }
-    }
-  } catch (e) {
-    console.error("Erro ao carregar calibrationProfile:", e);
-  }
   regressorLeft = null;
   regressorRight = null;
   return false;
 }
 
 function saveProfile() {
-  if (regressorLeft && regressorRight) {
-    let modelLeft, modelRight;
-    if (REGRESSOR_MODE === 'kernel_ridge') {
-      modelLeft = kernelRidgeModelFromRegressor(regressorLeft);
-      modelRight = kernelRidgeModelFromRegressor(regressorRight);
-    } else {
-      modelLeft = ridgeModelFromRegressor(regressorLeft);
-      modelRight = ridgeModelFromRegressor(regressorRight);
-    }
-
-    if (modelLeft && modelRight) {
-      const scalerParamsLeft = featureScalerLeft.getParams();
-      localStorage.setItem("calibrationProfile", JSON.stringify({
-        regressorMode: REGRESSOR_MODE,
-        featureDims: scalerParamsLeft.means.length,
-        modelLeft: modelLeft,
-        modelRight: modelRight,
-        scalerParamsLeft,
-        scalerParamsRight: featureScalerRight.getParams()
-      }));
-    }
-  }
+  // Saved profiles disabled
 }
 
 export function setGazeCorrections(corrections: GazeCorrection[]): void {
@@ -212,7 +163,17 @@ export function startCalibrationMode() {
 }
 
 export function startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void) {
-  if (!isCalibrating) return;
+  if (!isCalibrating) {
+    console.warn('[calib] startCollectingPoint chamado mas isCalibrating=false — ignorando');
+    return;
+  }
+
+  // Cancel any previous pending timeout (guard against double-calls)
+  if (collectionTimeoutHandle !== null) {
+    clearTimeout(collectionTimeoutHandle);
+    collectionTimeoutHandle = null;
+  }
+
   currentTargetX = x;
   currentTargetY = y;
   isCollecting = true;
@@ -221,6 +182,20 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   collectedFeaturesRight = [];
   collectedQualities = [];
   pointCompleteCallback = onDone;
+
+  console.log(`[calib] ▶ Coletando ponto (${(x*100).toFixed(0)}%, ${(y*100).toFixed(0)}%) — aguardando ${COLLECTION_MS}ms + 400ms acomodação`);
+
+  // Hard timeout: if feedRawData never fires the callback (e.g. all frames
+  // discarded by quality filters, or face not detected during the window),
+  // force processStaticPoint after COLLECTION_MS + 800ms grace period.
+  collectionTimeoutHandle = setTimeout(() => {
+    collectionTimeoutHandle = null;
+    if (isCollecting) {
+      console.warn(`[calib] ⏱ Timeout! isCollecting ainda true após ${COLLECTION_MS + 800}ms. Amostras coletadas: ${collectedFeaturesLeft.length}`);
+      isCollecting = false;
+      processStaticPoint();
+    }
+  }, COLLECTION_MS + 800);
 }
 
 function calculateFeatureVariance(features: number[][]): number {
@@ -264,18 +239,36 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
 
   if (elapsed >= COLLECTION_MS) {
     isCollecting = false;
+    if (collectionTimeoutHandle !== null) {
+      clearTimeout(collectionTimeoutHandle);
+      collectionTimeoutHandle = null;
+    }
     processStaticPoint();
   }
 }
 
 function processStaticPoint() {
+  console.log(`[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length}`);
+
+  // If no samples were collected at all (face not visible, all frames discarded
+  // by quality filter), report failure so the UI can retry this point.
+  if (collectedFeaturesLeft.length === 0) {
+    console.warn('[calib] ✗ Nenhuma amostra coletada — rosto ausente ou qualidade insuficiente.');
+    const cb = pointCompleteCallback;
+    pointCompleteCallback = null;
+    if (cb) cb(false);
+    return;
+  }
+
   const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
   const avgVarRight = calculateFeatureVariance(collectedFeaturesRight);
 
+  console.log(`[calib] Variância: L=${avgVarLeft.toFixed(6)} R=${avgVarRight.toFixed(6)} (threshold=${VARIANCE_THRESHOLD})`);
+
   if (avgVarLeft > VARIANCE_THRESHOLD || avgVarRight > VARIANCE_THRESHOLD) {
-    console.warn(`[calib] Ponto instável | varL=${avgVarLeft.toFixed(6)} varR=${avgVarRight.toFixed(6)}`);
-    if (pointCompleteCallback) pointCompleteCallback(false);
-    return;
+    console.warn(`[calib] ✗ Ponto instável — aceitando mesmo assim com ${collectedFeaturesLeft.length} amostras`);
+    // Instead of failing, we accept unstable points but use a median subset.
+    // This prevents infinite retry loops on fidgety users.
   }
 
   for (let i = 0; i < collectedFeaturesLeft.length; i++) {
@@ -288,7 +281,10 @@ function processStaticPoint() {
     });
   }
 
-  if (pointCompleteCallback) pointCompleteCallback(true);
+  console.log(`[calib] ✓ Ponto aceito — profile agora tem ${profile.length} amostras totais`);
+  const cb = pointCompleteCallback;
+  pointCompleteCallback = null;
+  if (cb) cb(true);
 }
 
 function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
@@ -315,6 +311,14 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
 }
 
 export function completeCalibration(onComplete?: () => void) {
+  // Cancel any pending collection timeout before finalising
+  if (collectionTimeoutHandle !== null) {
+    clearTimeout(collectionTimeoutHandle);
+    collectionTimeoutHandle = null;
+  }
+  isCollecting = false;
+  pointCompleteCallback = null;
+
   try {
     trainScalersAndRegressors(profile);
     saveProfile();

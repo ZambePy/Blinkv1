@@ -1,6 +1,11 @@
 // Regressão Ridge Múltipla Linear (sem expansão polinomial)
-// Recebe o vetor denso de features (53 dimensões) + Bias
+// Recebe o vetor de features por olho (~31 dims com USE_COMPACT_FEATURES=true,
+// ou 260 dims com o extractor completo) + Bias implícito no índice 0.
 // Sistema normal regularizado: (ΦᵀΦ + λI) β = Φᵀy
+// A regularização não penaliza o termo de bias (linha/coluna 0 excluída da
+// diagonal), e λ é escolhido por CV leave-one-target-out em RidgeRegressor.train.
+// predictRidge retorna coordenadas normalizadas [0,1]; a conversão para pixels
+// é responsabilidade da camada de UI.
 
 export interface RidgeModel {
   betaX: number[];  // coeficientes para predizer screenX

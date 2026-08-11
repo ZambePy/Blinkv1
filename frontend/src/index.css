@@ -362,3 +362,13 @@ select:focus-visible,
   pointer-events: none;
 }
 
+/* Gaze feedback - aplicado dinamicamente pelo GazeContext ao hitTarget */
+.gaze-hover {
+  transform: scale(1.04) !important;
+  box-shadow: 0 12px 32px rgba(27, 84, 168, 0.25) !important;
+  border-color: #1B54A8 !important;
+  z-index: 50;
+  position: relative;
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+

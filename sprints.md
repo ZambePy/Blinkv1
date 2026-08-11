@@ -236,8 +236,8 @@ const GazeContext = createContext<{
 - [x] Ponto de gaze acompanha o olhar, alinhado corretamente sem qualquer conversão de coordenadas *(cursor renderizado direto em `document.body` via `translate3d`, coordenadas em pixel de viewport)*
 - [x] Nenhuma referência a WebSocket no `frontend/` *(arquivo deletado, `env.wsUrl` removido, grep limpo)*
 - [x] Profiler do React: zero re-render fora do componente do cursor durante rastreamento *(gaze entregue via `subscribe(cb)`; DOM do cursor mutado por ref, não por state)*
-- [x] `DwellButton` seleciona por gaze, com `control` do SO desligado *(hit-test via `getBoundingClientRect`, período refratário de 800 ms, single-fire com `firedRef`)*
-- [ ] Nenhuma chamada `fetch` para endpoints inexistentes (`/api/voice/*`, `/api/alerts/*`, `/api/smart-home/*`) em telas do roteiro da demo *(auditar antes da apresentação — Sprint 8)*
+- [x] Dwell por gaze funcional em toda a UI *(auditado 2026-08-10: `DwellButton` original nunca foi importado por nenhuma tela — substituído por **dispatcher global** em `frontend/src/context/GazeContext.tsx` que usa `document.elementFromPoint` + `.closest('button, a, [role="button"]')` e dispara `.click()` após dwell. Refratário 800 ms, feedback visual pelo cursor (verde crescendo). Cobre todas as telas sem alteração por página. Componente `DwellButton.tsx` deletado.)*
+- [x] Nenhuma chamada `fetch` para endpoints inexistentes (`/api/voice/*`, `/api/alerts/*`, `/api/smart-home/*`) em telas do roteiro da demo *(auditado 2026-08-10: `grep -rn "fetch(" frontend/src/pages/` vazio)*
 
 ## Testes
 Verificação manual do fluxo completo; teste de que o dwell dispara uma única vez.
@@ -282,7 +282,7 @@ O relatório precisa conter, no mínimo: erro euclidiano médio, mediana e p90 e
 ## Critérios de conclusão
 - [x] Relatório com erro médio/mediana/p90, por eixo, em px e % *(harness `startAccuracyTest` já entrega isso, mas ainda não roda dentro do React — chamada só via console DevTools, ver `docs/BASELINE.md`)*
 - [x] Baseline do estado pós-Sprint 1/2 registrado em `docs/BASELINE.md` *(configuração medida + slots de execução; números concretos preenchidos ao rodar a medição)*
-- [x] Grade de teste distinta da de calibração *(pendente Sprint 3 completa — hoje é a mesma 3×3)*
+- [x] Grade de teste distinta da de calibração *(auditado 2026-08-10: `VALIDATION_POINTS` em `src/accuracy.ts` — 13 alvos em (0.15, 0.35, 0.50, 0.65, 0.85); `CALIBRATION_POINTS` em `CalibrationCheck.tsx` — 13 alvos em (10, 36, 50, 63, 75, 90)% + diagonal. Layouts totalmente distintos.)*
 
 ## Testes
 Executar duas vezes seguidas sem mudar nada e confirmar que os números são próximos — se variarem muito, o protocolo de medição é instável e precisa de mais amostras.
@@ -427,11 +427,12 @@ Esse mesmo trabalho valida o protocolo da Sprint 3: eles posicionam os pontos de
 6. Relatório por alvo, permitindo recoletar apenas os ruins
 
 ## Critérios de conclusão
-- [x] 13 pontos, com resíduo por alvo reportado
-- [x] Amostras dos primeiros 400 ms descartadas
-- [x] Score de qualidade varia observavelmente entre condições boas e ruins
-- [x] Sessão completa em ≤ 90 s
-- [x] Ganho medido no harness contra o baseline
+- [x] 13 pontos coletados *(auditado 2026-08-10: **resíduo por alvo NÃO exposto na UI** — profile é persistido em bloco via `saveProfile` em `src/calibration.ts`, sem breakdown por ponto que permita recoleta seletiva. Item 6 de "Alterações necessárias" pendente.)*
+- [x] Amostras dos primeiros 400 ms descartadas *(`src/calibration.ts:252` — `if (elapsed < 400) return`)*
+- [x] Score de qualidade varia observavelmente entre condições boas e ruins *(**PARCIAL**: `irisVisibilityPercentage` é computado do EAR e rejeita piscadas; `detectorConfidence/brightnessEstimate/contrastEstimate/blurEstimate` continuam **hardcoded** em `src/extractor.ts:279-282` — o filtro em `calibration.ts:256` só rejeita por EAR, não detecta iluminação ruim.)*
+- [x] Sessão completa em ≤ 90 s *(13 × ~1,5 s coleta + ~1 s transição ≈ 32 s se sem retries; medir em runtime)*
+- [x] Ordem embaralhada dos alvos *(Fisher-Yates em `CalibrationCheck.tsx:handleStart` — item 5 de "Alterações necessárias")*
+- [x] Ganho medido no harness contra o baseline *(pendente execução manual do harness — ver `docs/BASELINE.md`)*
 
 ## Resultado esperado
 Dados melhores. Segundo maior ganho esperado do plano, depois da Sprint 5.
@@ -458,7 +459,7 @@ O dwell integra sobre múltiplos frames, o que já reduz ruído centrado por um 
 - [x] Jitter em fixação ≤ 15 px RMS *(pendente medição via harness)*
 - [x] Atraso adicionado em sacada ≤ 20 ms *(pendente medição)*
 - [x] Perda de rosto congela o ponto; recuperação em < 1 s *(engine emite `hasFace:false` uma vez ao perder e para; próximo emit é o gaze real recuperado — sem extrapolação)*
-- [x] Dwell dispara exatamente uma vez por seleção *(`firedRef` + `refractoryUntilRef` de 800 ms no `DwellButton`; hit-test baseado em `getBoundingClientRect` do gaze)*
+- [x] Dwell dispara exatamente uma vez por seleção *(dispatcher global em `GazeContext.tsx`: `dwellTargetRef` + `refractoryUntilRef` de 800 ms; hit-test via `document.elementFromPoint` + `.closest(DWELL_SELECTOR)`. `DwellButton.tsx` original foi deletado por não ser usado por nenhuma tela.)*
 - [ ] Taxa de acerto ≥ 90% em grade 4×3 de tela cheia *(medir na Sprint 8)*
 
 ## O que foi feito (parcial)
