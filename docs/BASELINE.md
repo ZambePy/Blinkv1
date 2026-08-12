@@ -1,73 +1,115 @@
-# BASELINE — pós-Sprint 1/2 (10/08/2026)
+# BASELINE — Sprint 0
 
-Referência inicial de precisão do IrisFlow imediatamente após:
-
-- **Sprint 1** — limpeza (CNN/SVR/fusão removidas, Ridge como único regressor).
-- **Sprint 2** — integração do React ao tracker no mesmo processo (fim do WebSocket).
-
-Este documento é o ponto de comparação para as Sprints 4, 5 e 6. Toda mudança
-posterior no regressor, no vetor de features ou na calibração deve reportar o
-delta contra esta linha de base — não contra a versão anterior.
+> **Instruções para quem for medir.** Este documento é o ponto de comparação
+> para todas as sprints seguintes. Cada mudança compara-se contra os números
+> aqui, **nunca contra a sprint anterior**. Ganhos ≤ 10% são ruído do
+> protocolo — não conclua nada a partir deles.
+>
+> Todas as métricas devem ser preenchidas rodando o botão **"Testar precisão"**
+> na tela de Configurações (Sprint 0 entregou este botão). O botão coleta
+> `meanError`, `medianError`, `p90Error`, `meanErrorX/Y`, `meanErrorDeg` e o
+> novo `jitterRMS`, e exporta um JSON contendo esses valores + a `RunMeta`
+> preenchida antes do teste. Cole o resumo aqui após cada execução; anexe o JSON
+> à pasta `docs/historico/` se quiser preservar o detalhamento por ponto.
 
 ## Configuração medida
 
 | Item | Valor |
 |---|---|
 | Regressor | Ridge (`REGRESSOR_MODE = 'ridge'` em `src/gazeRegressor.ts`) |
-| λ do Ridge | 1.0 (hardcoded — alvo da Sprint 4) |
-| Dimensões por olho | 260 (76 landmarks + 9 mutuais + pose + iris offset) |
-| Pontos de calibração | 9 (grade 3×3, `TARGET_POINTS` em `calibration.ts`) |
-| Janela de coleta por ponto | 1500 ms, sem descarte inicial |
-| Suavização | rolling buffer 6 frames + OneEuro (min_cutoff/beta padrão) |
+| λ do Ridge | seleção por CV leave-one-target-out em `RidgeRegressor.train` |
+| Dimensões por olho | ~31 (`USE_COMPACT_FEATURES = true` em `src/featurePipeline.ts`) |
+| Pontos de calibração | 13 (`CALIBRATION_POINTS` em `frontend/src/pages/onboarding/CalibrationCheck.tsx`) |
+| Pontos de validação | 13 (`VALIDATION_POINTS` em `src/accuracy.ts`, independentes da calibração) |
+| Janela de coleta por ponto (calibração) | 1500 ms + 400 ms de acomodação inicial |
+| Janela de coleta por ponto (validação) | 1000 ms |
+| Suavização | rolling buffer 6 frames (pesos 1..6) + OneEuro (`mincutoff=0.005`, `beta=1.5`) |
 | Câmera | 1280×720 @ ~30 FPS via `getUserMedia` |
 | Distância assumida usuário↔tela | 60 cm (`ASSUMED_DIST_PX ≈ 2268`) |
 
 ## Como reproduzir a medição
 
-O harness (`src/accuracy.ts`, `startAccuracyTest`) sobrepõe 9 pontos em grade
-3×3 e coleta ~1 s por ponto usando `mapGaze` sobre as features cruas alimentadas
-por `feedAccuracyRaw` — hoje chamado dentro de `src/tracker/engine.ts` a cada
-frame com face detectada.
+1. `npm run electron:dev` — sobe o Electron carregando o app React.
+2. Complete a calibração de 13 pontos pela UI (`CalibrationCheck`).
+3. Vá em **Configurações → Teste de precisão**, preencha:
+   - Iluminação (boa / ruim)
+   - Movimento da cabeça (parada / livre)
+   - Óculos (sim / não)
+   - Minutos de sessão (0 / 20 / 40) — mede a curva de deriva
+4. Aperte **Testar precisão**. Um JSON é baixado com todas as métricas + `meta`.
+5. Cole o resumo no bloco correspondente abaixo.
 
-Para rodar dentro do app React:
+## Matriz de condições
 
-1. `npm run electron:dev` — sobe o Electron carregando o app React (Vite em
-   `frontend/`).
-2. Complete a calibração de 9 pontos pela UI.
-3. Invoque `startAccuracyTest(cb)` no console DevTools:
-   ```js
-   const { startAccuracyTest } = await import('/@fs/…/src/accuracy.ts');
-   startAccuracyTest((r) => console.log('[accuracy]', r));
-   ```
-4. Registre o `AccuracyResult` retornado (JSON) nesta seção abaixo.
+Para cada condição, rodar a curva de deriva **sem recalibrar** aos 0, 20 e 40 min.
+
+| ID | Iluminação | Cabeça | Óculos |
+|----|------------|--------|--------|
+| C1 | boa        | parada | não    |
+| C2 | boa        | livre  | não    |
+| C3 | ruim       | parada | não    |
+| C4 | boa        | parada | sim (se aplicável) |
 
 ## Métricas registradas
 
-> Preencher após rodar o harness. **Não editar em retrospectiva** — se a
-> configuração mudar, criar uma nova entrada. Cada linha é um snapshot.
+> **Não editar em retrospectiva.** Se a configuração mudar (código, hardware,
+> distância à tela), criar uma nova entrada de histórico em vez de sobrescrever.
 
-### Execução #1 — a preencher
+### C1 — boa iluminação, cabeça parada, sem óculos
 
-- Data / hora:
-- Usuário / condições de iluminação:
-- Erro euclidiano médio (px):
-- Mediana (px):
-- p90 (px):
-- Erro por eixo — X (px):
-- Erro por eixo — Y (px):
-- Jitter em fixação (RMS, px):
-- Ângulo visual médio (°, `error_px / ASSUMED_DIST_PX × 180/π`):
-- Observações (Y saturado? algum ponto muito ruim?):
+| Sessão | mean (px) | median (px) | p90 (px) | errX (px) | errY (px) | ° | jitter RMS (px) |
+|--------|-----------|-------------|----------|-----------|-----------|---|-----------------|
+| 0 min  |           |             |          |           |           |   |                 |
+| 20 min |           |             |          |           |           |   |                 |
+| 40 min |           |             |          |           |           |   |                 |
+
+Observações:
+
+### C2 — boa iluminação, cabeça livre, sem óculos
+
+| Sessão | mean (px) | median (px) | p90 (px) | errX (px) | errY (px) | ° | jitter RMS (px) |
+|--------|-----------|-------------|----------|-----------|-----------|---|-----------------|
+| 0 min  |           |             |          |           |           |   |                 |
+| 20 min |           |             |          |           |           |   |                 |
+| 40 min |           |             |          |           |           |   |                 |
+
+Observações:
+
+### C3 — iluminação ruim, cabeça parada, sem óculos
+
+| Sessão | mean (px) | median (px) | p90 (px) | errX (px) | errY (px) | ° | jitter RMS (px) |
+|--------|-----------|-------------|----------|-----------|-----------|---|-----------------|
+| 0 min  |           |             |          |           |           |   |                 |
+| 20 min |           |             |          |           |           |   |                 |
+| 40 min |           |             |          |           |           |   |                 |
+
+Observações:
+
+### C4 — boa iluminação, cabeça parada, com óculos
+
+| Sessão | mean (px) | median (px) | p90 (px) | errX (px) | errY (px) | ° | jitter RMS (px) |
+|--------|-----------|-------------|----------|-----------|-----------|---|-----------------|
+| 0 min  |           |             |          |           |           |   |                 |
+| 20 min |           |             |          |           |           |   |                 |
+| 40 min |           |             |          |           |           |   |                 |
+
+Observações:
+
+## Critério de aceite (Sprint 0)
+
+- Nenhuma célula das quatro tabelas em branco.
+- Curva de deriva registrada para pelo menos C1 (mínimo indispensável).
+- Divergências de documentação corrigidas: README, este arquivo e o código
+  concordam em **~31 dims por olho** e **13 pontos de calibração**.
 
 ## Limitações desta baseline
 
-- **A grade de teste é igual à de calibração** — o harness reusa o mesmo grid
-  3×3. A Sprint 3 completa exige grade independente (13 pontos ≠ 9); os números
-  aqui **subestimam** o erro fora dos pontos calibrados.
-- **λ não foi selecionado por CV** — está em 1.0 fixo. A Sprint 4 fará a busca.
-- **`QualityFeatures` retorna constantes** — não há rejeição de amostra ruim.
-- **9 pontos.** A Sprint 6 sobe para 13.
+- **`QualityFeatures` retorna constantes** — o filtro `detectorConfidence < 0.5`
+  em `feedRawData` nunca dispara. Sprint 1.1 conserta.
+- **Clamp `[0,1]` aplicado por olho antes da média binocular** — enviesa a
+  média para o centro quando um olho satura. Sprint 1.2 conserta.
+- **Grade de calibração assimétrica** (4-5-3 + 1 diagonal em `CalibrationCheck`)
+  — borda inferior sub-amostrada. Sprint 1.3 troca por grade simétrica.
 
-Estes três itens juntos significam que qualquer melhora medida contra este
-baseline deve ser conservadora: um ganho ≤ 10% pode ser ruído do protocolo. A
-Sprint 3 completa arruma isso.
+Cada um desses três itens contamina o número da baseline. Um ganho ≤ 10%
+observado nas sprints seguintes pode simplesmente estar corrigindo esse ruído.

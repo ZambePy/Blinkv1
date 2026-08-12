@@ -343,13 +343,23 @@ export function extractCompactFeatures(landmarks: Point3D[], faceMatrix?: Float3
     const ear = height / width;
     const irisRadius = Math.sqrt((rotS(irisP[0]).x - rotS(irisP[2]).x)**2 + (rotS(irisP[0]).y - rotS(irisP[2]).y)**2) / 2;
 
+    // Sprint 3 — 6 termos originais (1ª ordem) + 6 termos de 2ª ordem.
+    // Compensação de pose linear vs quadrática dentro de um modelo Ridge:
+    // como todas as variáveis já estão calculadas, o custo é zero e o λ
+    // por CV cuida do overfitting. Vetor por olho: ~31 → ~37 dims.
     const interactions = [
       offsetX * pose.yaw,
       offsetY * pose.pitch,
       offsetX * pose.scale,
       offsetY * pose.scale,
       offsetX * pose.roll,
-      offsetY * pose.roll
+      offsetY * pose.roll,
+      offsetX * pose.yaw * pose.yaw,
+      offsetY * pose.pitch * pose.pitch,
+      offsetX * pose.yaw * pose.scale,
+      offsetY * pose.pitch * pose.scale,
+      pose.yaw * pose.scale,
+      pose.pitch * pose.scale,
     ];
 
     return [

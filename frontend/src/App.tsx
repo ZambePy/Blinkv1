@@ -4,7 +4,6 @@ import { GazeProvider } from './context/GazeContext';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
-import { ProtectedRoute } from './components/ui/ProtectedRoute';
 
 // Ondas de onboarding carregadas cedo — poucas telas, alta chance de uso imediato
 import { InitialSplash } from './pages/onboarding/InitialSplash';

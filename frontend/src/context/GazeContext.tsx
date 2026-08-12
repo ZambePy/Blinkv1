@@ -10,6 +10,7 @@ import React, {
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi } from '@tracker/tracker/engine';
+import type { FilterPreset } from '@tracker/oneEuroFilter';
 import { useSettings } from './SettingsContext';
 
 export type { GazeSample, EngineState } from '@tracker/tracker/engine';
@@ -31,6 +32,7 @@ interface GazeContextValue {
   subscribe: (cb: (sample: GazeSample) => void) => () => void;
   state: EngineState;
   calibration: CalibrationApi;
+  setFilterPreset: (preset: FilterPreset) => void;
 }
 
 const GazeContext = createContext<GazeContextValue | null>(null);
@@ -151,6 +153,20 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             dwellPct = Math.min(1, elapsed / dwellMsRef.current);
             if (elapsed >= dwellMsRef.current) {
               t.click();
+              // Sprint 4 — recalibração implícita: o centro do botão que
+              // acabou de ser clicado é um alvo supervisionado. Alimenta o
+              // regressor online (RLS) com as features do frame atual.
+              // O calibrator faz rejeição de outlier internamente, então
+              // dwell acidental (usuário olhando para outro lugar) é
+              // descartado antes de degradar o modelo.
+              try {
+                const rect = t.getBoundingClientRect();
+                const centerX = rect.left + rect.width / 2;
+                const centerY = rect.top + rect.height / 2;
+                engineRef.current?.calibration.feedOnlineSample(centerX, centerY);
+              } catch (e) {
+                // Falha silenciosa — recalibração online é otimização, não requisito.
+              }
               t.classList.remove('gaze-hover');
               refractoryUntilRef.current = now + REFRACTORY_MS;
               dwellTargetRef.current = null;
@@ -296,13 +312,21 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,
+      feedOnlineSample: (x, y) => engineRef.current?.calibration.feedOnlineSample(x, y) ?? false,
+      setOnlineCalibrationEnabled: (enabled) =>
+        engineRef.current?.calibration.setOnlineCalibrationEnabled(enabled),
+      onlineSampleCount: () => engineRef.current?.calibration.onlineSampleCount() ?? 0,
     }),
     [],
   );
 
+  const setFilterPreset = useCallback((preset: FilterPreset) => {
+    engineRef.current?.setFilterPreset(preset);
+  }, []);
+
   const value = useMemo<GazeContextValue>(
-    () => ({ subscribe, state, calibration }),
-    [subscribe, state, calibration],
+    () => ({ subscribe, state, calibration, setFilterPreset }),
+    [subscribe, state, calibration, setFilterPreset],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

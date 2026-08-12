@@ -51,12 +51,14 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     const probeRaw   = [maxF0Raw * 2, 0, 0.1, 0.05];
     const probeScaled = scaler.transformSingle(probeRaw);
 
-    // Ridge baseline (comportamento documentado em ridge.convexhull.test.ts)
-    // Sprint 4: predictRidge retorna coordenadas normalizadas [0,1]; a saturação
-    // acontece nesses limites (não mais em pixels de tela).
+    // Ridge baseline (comportamento documentado em ridge.convexhull.test.ts).
+    // Sprint 1.2 removeu o clamp de predictRidge — o modelo agora extrapola
+    // livremente para fora de [0,1]. O clamp downstream em `mapGaze` é que
+    // "satura" o valor final. Aqui checamos a extrapolação bruta, que revela
+    // o mesmo problema de saturação da UI.
     const ridgeModel = trainRidgeModel(scaled, targets);
     const ridgePred  = predictRidge(ridgeModel, probeScaled);
-    const ridgeSaturates = ridgePred.x === 0 || ridgePred.x === 1;
+    const ridgeSaturates = ridgePred.x < 0 || ridgePred.x > 1;
 
     // Kernel Ridge (ainda retorna pixels — não passou pela mudança da Sprint 4).
     const t0 = performance.now();

@@ -11,6 +11,7 @@ import {
   VolumeX,
   Download,
   LogOut,
+  Target,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -18,6 +19,10 @@ import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { api, ApiError } from '../utils/api';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
+import { useGaze } from '../context/GazeContext';
+import { startAccuracyTest } from '@tracker/accuracy';
+import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
+import type { FilterPreset } from '@tracker/oneEuroFilter';
 
 const cardStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.75)',
@@ -44,6 +49,45 @@ export const SettingsScreen: React.FC = () => {
   >('idle');
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const { calibration, setFilterPreset } = useGaze();
+  const [filterPreset, setFilterPresetState] = useState<FilterPreset>('balanceado');
+
+  const chooseFilterPreset = (preset: FilterPreset) => {
+    setFilterPresetState(preset);
+    setFilterPreset(preset);
+  };
+  const [accuracyRunning, setAccuracyRunning] = useState(false);
+  const [lastAccuracy, setLastAccuracy] = useState<AccuracyResult | null>(null);
+  const [accuracyMeta, setAccuracyMeta] = useState<RunMeta>({
+    data: new Date().toISOString().slice(0, 10),
+    iluminacao: 'boa',
+    oculos: false,
+    movimentoCabeca: 'parada',
+    minutosDeSessao: 0,
+  });
+  const [onlineCalibration, setOnlineCalibration] = useState(false);
+
+  const toggleOnlineCalibration = () => {
+    const next = !onlineCalibration;
+    setOnlineCalibration(next);
+    calibration.setOnlineCalibrationEnabled(next);
+  };
+
+  const handleAccuracyTest = () => {
+    if (!calibration.isCalibrated()) {
+      toast.error('Calibre primeiro para rodar o teste de precisão.');
+      return;
+    }
+    setAccuracyRunning(true);
+    startAccuracyTest((r) => {
+      setAccuracyRunning(false);
+      setLastAccuracy(r);
+      toast.success(
+        `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
+      );
+    }, accuracyMeta);
+  };
 
   const handleLogin = (e: React.FormEvent) => {
     e.preventDefault();
@@ -575,6 +619,298 @@ export const SettingsScreen: React.FC = () => {
             }}
           >
             {t('settings.voice.lgpd')}
+          </div>
+        </section>
+
+        {/* Suavização (Sprint 5) */}
+        <section aria-labelledby="filter-title" style={cardStyle}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.25rem',
+            }}
+          >
+            <Clock size={28} color="#1B54A8" aria-hidden="true" />
+            <h2
+              id="filter-title"
+              style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}
+            >
+              Suavização do cursor
+            </h2>
+          </div>
+          <p
+            style={{
+              color: '#475569',
+              marginBottom: '1.25rem',
+              fontFamily: 'system-ui, sans-serif',
+              lineHeight: 1.6,
+            }}
+          >
+            Preset do filtro temporal. <strong>Estável</strong>: jitter baixo,
+            ideal para leitura. <strong>Responsivo</strong>: lag baixo, ideal
+            para teclado virtual e jogos.
+          </p>
+          <div role="radiogroup" aria-labelledby="filter-title" style={{ display: 'flex', gap: '1rem' }}>
+            {(['estavel', 'balanceado', 'responsivo'] as FilterPreset[]).map((preset) => {
+              const active = filterPreset === preset;
+              const label = preset === 'estavel' ? 'Estável' : preset === 'balanceado' ? 'Balanceado' : 'Responsivo';
+              return (
+                <button
+                  key={preset}
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => chooseFilterPreset(preset)}
+                  style={{
+                    flex: 1,
+                    padding: '1rem',
+                    borderRadius: '1rem',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    border: '2px solid',
+                    background: active ? 'linear-gradient(135deg, #1B54A8, #2563eb)' : 'white',
+                    color: active ? 'white' : '#475569',
+                    borderColor: active ? '#1B54A8' : '#e2e8f0',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        </section>
+
+        {/* Teste de Precisão (Sprint 0 — coleta de baseline) */}
+        <section aria-labelledby="accuracy-title" style={cardStyle}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.25rem',
+            }}
+          >
+            <Target size={28} color="#1B54A8" aria-hidden="true" />
+            <h2
+              id="accuracy-title"
+              style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}
+            >
+              Teste de precisão
+            </h2>
+          </div>
+          <p
+            style={{
+              color: '#475569',
+              marginBottom: '1.25rem',
+              fontFamily: 'system-ui, sans-serif',
+              lineHeight: 1.6,
+            }}
+          >
+            Roda a matriz de 13 pontos de validação e exporta o JSON com métricas
+            (mean/median/p90/jitter) + metadados. Preencha a condição abaixo antes
+            de iniciar — ela vira parte do relatório.
+          </p>
+
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))',
+              gap: '1rem',
+              marginBottom: '1.25rem',
+            }}
+          >
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                Iluminação
+              </span>
+              <select
+                value={accuracyMeta.iluminacao}
+                onChange={(e) =>
+                  setAccuracyMeta({
+                    ...accuracyMeta,
+                    iluminacao: e.target.value as 'boa' | 'ruim',
+                  })
+                }
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid #e2e8f0',
+                  fontSize: '0.95rem',
+                }}
+              >
+                <option value="boa">Boa</option>
+                <option value="ruim">Ruim</option>
+              </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                Movimento da cabeça
+              </span>
+              <select
+                value={accuracyMeta.movimentoCabeca}
+                onChange={(e) =>
+                  setAccuracyMeta({
+                    ...accuracyMeta,
+                    movimentoCabeca: e.target.value as 'parada' | 'livre',
+                  })
+                }
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid #e2e8f0',
+                  fontSize: '0.95rem',
+                }}
+              >
+                <option value="parada">Parada</option>
+                <option value="livre">Livre</option>
+              </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                Óculos
+              </span>
+              <select
+                value={accuracyMeta.oculos ? 'sim' : 'nao'}
+                onChange={(e) =>
+                  setAccuracyMeta({ ...accuracyMeta, oculos: e.target.value === 'sim' })
+                }
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid #e2e8f0',
+                  fontSize: '0.95rem',
+                }}
+              >
+                <option value="nao">Não</option>
+                <option value="sim">Sim</option>
+              </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+                Sessão (min)
+              </span>
+              <select
+                value={String(accuracyMeta.minutosDeSessao)}
+                onChange={(e) =>
+                  setAccuracyMeta({
+                    ...accuracyMeta,
+                    minutosDeSessao: Number(e.target.value),
+                  })
+                }
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid #e2e8f0',
+                  fontSize: '0.95rem',
+                }}
+              >
+                <option value="0">0 (recém calibrado)</option>
+                <option value="20">20</option>
+                <option value="40">40</option>
+              </select>
+            </label>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleAccuracyTest}
+            disabled={accuracyRunning}
+            aria-label="Testar precisão"
+            style={{
+              padding: '1rem 1.5rem',
+              borderRadius: '1rem',
+              border: 'none',
+              background: accuracyRunning
+                ? '#94a3b8'
+                : 'linear-gradient(135deg, #1B54A8, #2563eb)',
+              color: 'white',
+              fontWeight: 700,
+              cursor: accuracyRunning ? 'not-allowed' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+            }}
+          >
+            <Target size={20} aria-hidden="true" />{' '}
+            {accuracyRunning ? 'Rodando…' : 'Testar precisão'}
+          </button>
+
+          {lastAccuracy && (
+            <div
+              style={{
+                marginTop: '1.25rem',
+                padding: '1rem 1.25rem',
+                background: '#f0f9ff',
+                border: '1px solid #bae6fd',
+                borderRadius: '1rem',
+                color: '#0c4a6e',
+                fontSize: '0.9rem',
+                fontFamily: 'system-ui, sans-serif',
+              }}
+            >
+              <div style={{ fontWeight: 700, marginBottom: '0.35rem' }}>
+                Último resultado — {lastAccuracy.score}
+              </div>
+              <div>
+                mean = {Math.round(lastAccuracy.meanError)}px ·{' '}
+                median = {Math.round(lastAccuracy.medianError)}px ·{' '}
+                p90 = {Math.round(lastAccuracy.p90Error)}px ·{' '}
+                jitter = {lastAccuracy.jitterRMS.toFixed(1)}px ·{' '}
+                {lastAccuracy.meanErrorDeg.toFixed(2)}°
+              </div>
+            </div>
+          )}
+
+          {/* Sprint 4 — feature flag da recalibração online */}
+          <div
+            style={{
+              marginTop: '1.25rem',
+              padding: '1rem 1.25rem',
+              background: 'rgba(255,255,255,0.6)',
+              border: '1px solid #e2e8f0',
+              borderRadius: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700, color: '#334155' }}>
+                Recalibração implícita
+              </div>
+              <div
+                style={{
+                  fontSize: '0.85rem',
+                  color: '#64748b',
+                  fontFamily: 'system-ui, sans-serif',
+                }}
+              >
+                Ajusta continuamente o modelo com base nos dwell clicks
+                confirmados. Experimental — desligado por padrão.
+              </div>
+            </div>
+            <button
+              role="switch"
+              aria-checked={onlineCalibration}
+              onClick={toggleOnlineCalibration}
+              style={{
+                padding: '0.75rem 1.25rem',
+                borderRadius: '999px',
+                border: '2px solid',
+                borderColor: onlineCalibration ? '#1B54A8' : '#e2e8f0',
+                background: onlineCalibration ? '#1B54A8' : 'white',
+                color: onlineCalibration ? 'white' : '#475569',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              {onlineCalibration ? 'Ligado' : 'Desligado'}
+            </button>
           </div>
         </section>
 

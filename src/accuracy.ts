@@ -19,9 +19,24 @@ export interface AccuracyResult {
   maxError: number;       // Pior erro em pixels
   errorPct: number;       // Erro médio como % da diagonal da tela
   meanErrorDeg: number;   // Erro médio em graus angulares
+  jitterRMS: number;      // RMS da dispersão de predições em torno da própria média por ponto (px)
   score: string;          // Rótulo qualitativo
   colorClass: string;     // Classe CSS para colorir o painel
   pointErrors: number[];  // Erro por ponto de validação
+  pointJitters: number[]; // Jitter RMS por ponto (px)
+}
+
+// Metadata sobre a condição em que o teste foi rodado. Preenchida pela UI
+// (SettingsScreen) e escrita junto ao AccuracyResult no relatório JSON, para
+// tornar o histórico de medições em `docs/BASELINE.md` rastreável.
+export interface RunMeta {
+  data: string;               // ISO date (yyyy-mm-dd) ou timestamp livre
+  iluminacao: 'boa' | 'ruim'; // Iluminação ambiente
+  oculos: boolean;            // Uso de óculos
+  movimentoCabeca: 'parada' | 'livre';
+  minutosDeSessao: number;    // 0, 20, 40 para curva de deriva
+  usuario?: string;           // Identificador opcional do participante
+  observacoes?: string;
 }
 
 interface PointDiagnostic {
@@ -32,6 +47,7 @@ interface PointDiagnostic {
   error: number;
   errorX: number;
   errorY: number;
+  jitterRMS: number;
   name: string;
 }
 
@@ -74,13 +90,19 @@ export function feedAccuracyRaw(
   currentFeaturesRight = featuresRight;
 }
 
-// Inicia o teste de validação de precisão pós-calibração
-export function startAccuracyTest(onComplete?: (result: AccuracyResult) => void) {
+// Inicia o teste de validação de precisão pós-calibração.
+// `meta` é opcional: quando fornecido, é serializado junto do relatório JSON
+// para que o histórico em BASELINE.md/RESULTADOS.md preserve a condição de teste.
+export function startAccuracyTest(
+  onComplete?: (result: AccuracyResult) => void,
+  meta?: RunMeta,
+) {
   isAccuracyTesting = true;
   const overlay = createAccuracyOverlay();
   let pointIndex = 0;
   const pointErrors: number[] = [];
   const diagnostics: PointDiagnostic[] = [];
+  const runMeta: RunMeta | undefined = meta;
 
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
@@ -88,7 +110,7 @@ export function startAccuracyTest(onComplete?: (result: AccuracyResult) => void)
   function runNextPoint() {
     if (pointIndex >= VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
-      finishTest(overlay, pointErrors, diagnostics, onComplete);
+      finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta);
       return;
     }
 
@@ -121,6 +143,7 @@ export function startAccuracyTest(onComplete?: (result: AccuracyResult) => void)
       let errorY = 0;
       let meanPX = targetScreenX;
       let meanPY = targetScreenY;
+      let jitterRMS = 0;
       if (predictedX.length > 0) {
         meanPX = predictedX.reduce((s, v) => s + v, 0) / predictedX.length;
         meanPY = predictedY.reduce((s, v) => s + v, 0) / predictedY.length;
@@ -129,6 +152,17 @@ export function startAccuracyTest(onComplete?: (result: AccuracyResult) => void)
         errorX = Math.abs(dx);
         errorY = Math.abs(dy2);
         error = Math.sqrt(dx * dx + dy2 * dy2);
+
+        // Jitter RMS = raiz da média das distâncias² de cada amostra à média do
+        // ponto. Isola o ruído do filtro/regressor do erro de calibração:
+        // um alvo pode ter bias alto mas jitter baixo (ou vice-versa).
+        let sumSq = 0;
+        for (let i = 0; i < predictedX.length; i++) {
+          const jx = predictedX[i] - meanPX;
+          const jy = predictedY[i] - meanPY;
+          sumSq += jx * jx + jy * jy;
+        }
+        jitterRMS = Math.sqrt(sumSq / predictedX.length);
       }
 
       pointErrors.push(error);
@@ -140,6 +174,7 @@ export function startAccuracyTest(onComplete?: (result: AccuracyResult) => void)
         error,
         errorX,
         errorY,
+        jitterRMS,
         name: vp.name,
       });
 
@@ -193,7 +228,8 @@ function finishTest(
   overlay: HTMLDivElement,
   pointErrors: number[],
   diagnostics: PointDiagnostic[],
-  onComplete?: (result: AccuracyResult) => void
+  onComplete?: (result: AccuracyResult) => void,
+  meta?: RunMeta,
 ) {
   overlay.remove();
 
@@ -214,6 +250,11 @@ function finishTest(
 
   const meanErrorDeg = (Math.atan(meanError / ASSUMED_DIST_PX) * 180) / Math.PI;
 
+  const pointJitters = diagnostics.map(d => d.jitterRMS);
+  const jitterRMS = pointJitters.length
+    ? pointJitters.reduce((s, v) => s + v, 0) / pointJitters.length
+    : 0;
+
   let score: string;
   let colorClass: string;
   if (meanError < 30) {
@@ -232,21 +273,25 @@ function finishTest(
 
   const result: AccuracyResult = {
     meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
-    score, colorClass, pointErrors,
+    jitterRMS, score, colorClass, pointErrors, pointJitters,
   };
 
   try {
     localStorage.setItem("accuracyResult", JSON.stringify({
-      meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg, score, colorClass
+      meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
+      jitterRMS, score, colorClass
     }));
   } catch (_) { }
 
-  // Exportar relatório em JSON versionável (Sprint 3)
+  // Exportar relatório em JSON versionável (Sprint 0). `meta` carrega a condição
+  // do teste (iluminação, óculos, cabeça, minutos de sessão) para que a entrada
+  // no BASELINE.md seja auto-descritiva.
   const jsonReport = JSON.stringify({
     timestamp: new Date().toISOString(),
     resolution: `${vw}x${vh}`,
+    meta: meta ?? null,
     result,
-    diagnostics
+    diagnostics,
   }, null, 2);
   const blob = new Blob([jsonReport], { type: "application/json" });
   const url = URL.createObjectURL(blob);
@@ -260,10 +305,13 @@ function finishTest(
 
   console.log(`[accuracy] === RESULTADO FINAL ===`);
   console.log(`[accuracy] Resolução: ${vw}×${vh}px | distância estimada: ${ASSUMED_DIST_PX}px`);
-  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | ${score}`);
+  if (meta) {
+    console.log(`[accuracy] Condição: ${meta.iluminacao} | cabeça=${meta.movimentoCabeca} | óculos=${meta.oculos ? 'sim' : 'não'} | ${meta.minutosDeSessao} min`);
+  }
+  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | p90=${Math.round(p90Error)}px | jitter=${jitterRMS.toFixed(1)}px | ${score}`);
   for (const d of diagnostics) {
     const flag = d.error > 45 ? ' ✗' : '';
-    console.log(`[accuracy]   ${d.name.padEnd(18)}: ${Math.round(d.error)}px${flag}`);
+    console.log(`[accuracy]   ${d.name.padEnd(18)}: err=${Math.round(d.error)}px jitter=${d.jitterRMS.toFixed(1)}px${flag}`);
   }
   console.log(`[accuracy] === FIM ===`);
 

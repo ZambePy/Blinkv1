@@ -4,9 +4,11 @@
 
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import * as calibration from '../calibration';
-import { OneEuroFilter2D } from '../oneEuroFilter';
+import { OneEuroFilter2D, FILTER_PRESETS } from '../oneEuroFilter';
+import type { FilterPreset } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
 import { feedAccuracyRaw } from '../accuracy';
+import { EyeQualityAnalyzer } from '../qualityAnalyzer';
 
 export interface GazeSample {
   x: number;
@@ -23,6 +25,12 @@ export interface CalibrationApi {
   completeCalibration(onComplete?: () => void): void;
   clear(): void;
   isCalibrated(): boolean;
+  // Sprint 4 — recalibração implícita a partir de dwell clicks confirmados.
+  // O consumidor (GazeContext) chama isso ao completar um dwell, passando o
+  // centro do elemento como alvo supervisionado.
+  feedOnlineSample(targetXpx: number, targetYpx: number): boolean;
+  setOnlineCalibrationEnabled(enabled: boolean): void;
+  onlineSampleCount(): number;
 }
 
 export interface GazeEngine {
@@ -31,6 +39,10 @@ export interface GazeEngine {
   subscribe(cb: (sample: GazeSample) => void): () => void;
   onStateChange(cb: (state: EngineState) => void): () => void;
   getState(): EngineState;
+  // Sprint 5 — troca em tempo real do preset do filtro temporal.
+  // `estavel`/`balanceado`/`responsivo` alteram mincutoff, beta e o buffer
+  // ponderado. Ver FILTER_PRESETS em oneEuroFilter.ts.
+  setFilterPreset(preset: FilterPreset): void;
   calibration: CalibrationApi;
 }
 
@@ -60,9 +72,21 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let lastVideoTime = -1;
   let running = false;
 
-  const oneEuro = new OneEuroFilter2D();
+  // Sprint 5 — inicia no preset balanceado (equivalente aos parâmetros
+  // pré-Sprint 5, para não regredir a percepção de suavidade em quem já
+  // conhecia o app). Trocável em tempo real via setFilterPreset.
+  let activePreset: FilterPreset = 'balanceado';
+  let activeConfig = FILTER_PRESETS[activePreset];
+  const oneEuro = new OneEuroFilter2D(60, activeConfig.mincutoff, activeConfig.beta);
+  const qualityAnalyzer = new EyeQualityAnalyzer();
   const bufferX: number[] = [];
   const bufferY: number[] = [];
+
+  // Sprint 4 — cache das últimas features extraídas. `feedOnlineSample` no
+  // dwell click precisa das features do último frame válido; assim evitamos
+  // rebuildar do zero (extractFeatures não é barato).
+  let latestFeaturesLeft: number[] = [];
+  let latestFeaturesRight: number[] = [];
   let targetX = 0;
   let targetY = 0;
   let lastEmittedX = 0;
@@ -154,8 +178,20 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           const featuresLeft = extractorResult.featuresLeft;
           const featuresRight = extractorResult.featuresRight;
 
-          calibration.feedRawData(featuresLeft, featuresRight, extractorResult.advancedFeatures?.quality);
+          // Sprint 1.1 — sobrescreve brightness/contrast/blur/confidence
+          // com valores reais medidos no crop dos olhos. Mantém o
+          // irisVisibilityPercentage (EAR) que continua sendo calculado
+          // no extractor.
+          const cropQuality = qualityAnalyzer.analyze(videoEl, landmarks);
+          const quality = {
+            ...(extractorResult.advancedFeatures?.quality ?? {}),
+            ...cropQuality,
+          };
+
+          calibration.feedRawData(featuresLeft, featuresRight, quality);
           feedAccuracyRaw(featuresLeft, featuresRight);
+          latestFeaturesLeft = featuresLeft;
+          latestFeaturesRight = featuresRight;
 
           const calibrated = calibration.mapGaze(featuresLeft, featuresRight);
           if (calibrated) {
@@ -168,12 +204,21 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             targetY = landmarks[1].y * vh;
           }
 
-          bufferX.push(targetX);
-          bufferY.push(targetY);
-          while (bufferX.length > BUFFER_SIZE) bufferX.shift();
-          while (bufferY.length > BUFFER_SIZE) bufferY.shift();
-          targetX = weightedBufferAvg(bufferX);
-          targetY = weightedBufferAvg(bufferY);
+          // Sprint 5 — o buffer rolling adicionava lag e (em teste) não
+          // aumentava a estabilidade em cima do One Euro. Só permanece quando
+          // o preset ativo pede — no preset "estavel" é útil combinar com
+          // mincutoff baixo para reduzir jitter de baixa amplitude.
+          if (activeConfig.useRollingBuffer) {
+            bufferX.push(targetX);
+            bufferY.push(targetY);
+            while (bufferX.length > BUFFER_SIZE) bufferX.shift();
+            while (bufferY.length > BUFFER_SIZE) bufferY.shift();
+            targetX = weightedBufferAvg(bufferX);
+            targetY = weightedBufferAvg(bufferY);
+          } else if (bufferX.length > 0) {
+            bufferX.length = 0;
+            bufferY.length = 0;
+          }
 
           const now = performance.now() / 1000.0;
           const smoothed = oneEuro.filter(targetX, targetY, now);
@@ -236,6 +281,19 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       return state;
     },
 
+    setFilterPreset(preset: FilterPreset): void {
+      activePreset = preset;
+      activeConfig = FILTER_PRESETS[preset];
+      oneEuro.setParams(activeConfig.mincutoff, activeConfig.beta);
+      // Purga o buffer se acabou de desligar — evita mescla estranha entre
+      // o histórico buffered antigo e as amostras filtradas pelo One Euro puro.
+      if (!activeConfig.useRollingBuffer) {
+        bufferX.length = 0;
+        bufferY.length = 0;
+      }
+      console.log(`[IrisFlow] filtro → ${preset} (mincutoff=${activeConfig.mincutoff}, beta=${activeConfig.beta}, buffer=${activeConfig.useRollingBuffer})`);
+    },
+
     calibration: {
       startCalibrationMode(): void {
         calibration.startCalibrationMode();
@@ -251,6 +309,23 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       isCalibrated(): boolean {
         return calibration.isCalibrated();
+      },
+      feedOnlineSample(targetXpx: number, targetYpx: number): boolean {
+        if (latestFeaturesLeft.length === 0 || latestFeaturesRight.length === 0) {
+          return false;
+        }
+        return calibration.feedOnlineSample(
+          latestFeaturesLeft,
+          latestFeaturesRight,
+          targetXpx,
+          targetYpx,
+        );
+      },
+      setOnlineCalibrationEnabled(enabled: boolean): void {
+        calibration.setOnlineCalibrationEnabled(enabled);
+      },
+      onlineSampleCount(): number {
+        return calibration.onlineSampleCount();
       },
     },
   };

@@ -1,25 +1,27 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, RefreshCw, ArrowRight, Play, Sparkles } from 'lucide-react';
+import { CheckCircle2, Eye } from 'lucide-react';
 import { BackButton } from '../../components/ui/BackButton';
 import { SystemStatusHeader } from '../../components/ui/SystemStatusHeader';
 import { useGaze } from '../../context/GazeContext';
 
-// Os 13 pontos em porcentagem
+// Grade simétrica de 13 pontos (Sprint 1.3). Quatro em cada linha (10, 37, 63,
+// 90) mais o centro (50, 50). Substitui a grade antiga 4-5-3 + diagonal, que
+// subamostrava a borda inferior e enviesava o erro na periferia.
 const CALIBRATION_POINTS = [
   { x: 10, y: 10, name: "Superior Esquerdo" },
-  { x: 36, y: 10, name: "Superior Meio-Esquerdo" },
+  { x: 37, y: 10, name: "Superior Meio-Esquerdo" },
   { x: 63, y: 10, name: "Superior Meio-Direito" },
   { x: 90, y: 10, name: "Superior Direito" },
-  { x: 10, y: 50, name: "Centro Esquerdo" },
-  { x: 36, y: 50, name: "Centro Meio-Esquerdo" },
-  { x: 50, y: 50, name: "Centro" },
-  { x: 63, y: 50, name: "Centro Meio-Direito" },
-  { x: 90, y: 50, name: "Centro Direito" },
+  { x: 10, y: 50, name: "Meio Esquerdo" },
+  { x: 37, y: 50, name: "Meio Esquerdo-Central" },
+  { x: 63, y: 50, name: "Meio Direito-Central" },
+  { x: 90, y: 50, name: "Meio Direito" },
   { x: 10, y: 90, name: "Inferior Esquerdo" },
-  { x: 50, y: 90, name: "Inferior Centro" },
+  { x: 37, y: 90, name: "Inferior Meio-Esquerdo" },
+  { x: 63, y: 90, name: "Inferior Meio-Direito" },
   { x: 90, y: 90, name: "Inferior Direito" },
-  { x: 75, y: 75, name: "Diagonal Inferior-Direita" },
+  { x: 50, y: 50, name: "Centro" },
 ];
 
 export const CalibrationCheck: React.FC = () => {

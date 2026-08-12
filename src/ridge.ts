@@ -93,7 +93,6 @@ export function predictRidge(
     return { x: 0, y: 0 };
   }
   const f = [1.0, ...features];
-  const clmp = (v: number) => Math.min(Math.max(v, 0), 1);
 
   let normX = 0;
   let normY = 0;
@@ -102,11 +101,15 @@ export function predictRidge(
     normY += model.betaY[i] * f[i];
   }
 
-  // Retorna coordenadas normalizadas (0 a 1).
-  // A camada de UI deve multiplicar por vw/vh para obter pixels.
+  // Retorna coordenadas normalizadas SEM clamp.
+  // O clamp é aplicado APÓS a média binocular em `mapGaze` (Sprint 1.2). Fazer
+  // clamp aqui, por olho, distorce a média binocular quando um olho satura na
+  // borda: se o olho direito prevê x=1.05 e o esquerdo prevê x=0.9, a média
+  // correta seria ~0.975; com clamp por olho vira (1.0+0.9)/2 = 0.95, puxando
+  // o cursor para dentro da tela.
   return {
-    x: clmp(normX),
-    y: clmp(normY),
+    x: normX,
+    y: normY,
   };
 }
 

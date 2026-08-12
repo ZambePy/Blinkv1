@@ -1,15 +1,31 @@
 import type { GazeRegressor } from './gazeRegressor';
 import {
   createRegressor,
-  ridgeRegressorFromModel,
   ridgeModelFromRegressor,
-  kernelRidgeRegressorFromModel,
-  kernelRidgeModelFromRegressor,
   REGRESSOR_MODE
 } from './gazeRegressor';
 import { StandardScaler } from './scaler';
-import { USE_COMPACT_FEATURES } from './featurePipeline';
 import { isAccuracyTesting } from './accuracy';
+import { RecursiveRidgeRegressor } from './recursiveRidge';
+import type { RidgeModel } from './ridge';
+
+// Sprint 4 — recalibração implícita. `false` = comportamento antigo (só modelo
+// offline). Ligar via `setOnlineCalibrationEnabled(true)` a partir da UI/settings.
+export let USE_ONLINE_CALIBRATION = false;
+
+export function setOnlineCalibrationEnabled(enabled: boolean): void {
+  USE_ONLINE_CALIBRATION = enabled;
+}
+
+// Rampa de mistura base ↔ online. Peso online sobe linearmente até 1.0 após
+// ~50 amostras confirmadas — evita que um dwell acidental degrade o modelo
+// antes de acumular evidência suficiente.
+const ONLINE_RAMP_SAMPLES = 50;
+
+// Rejeição de outlier: se a predição base estiver a mais de N unidades
+// normalizadas do alvo do dwell, provavelmente o usuário não estava olhando
+// para o botão que disparou. Threshold em fração da tela (0.15 = 15%).
+const ONLINE_OUTLIER_THRESHOLD = 0.15;
 
 export interface CalibrationPoint {
   screenX: number;
@@ -36,6 +52,29 @@ export interface GazeDistanceLogEntry {
   nearestDistAvg: number;
 }
 
+// Sprint 2 — amostragem ponderada na periferia. `COLLECTION_MS_BASE` é a
+// duração para o ponto central; pontos de canto coletam `+ COLLECTION_MS_RANGE`
+// ms adicionais. A justificativa vem de literatura + prática: usuários fixam
+// pior nas bordas, e o Ridge extrapola pior perto do limite do fecho convexo.
+// Mais amostras nesses pontos reduz variância do fit local.
+//
+// CUIDADO: se o total ultrapassar ~40s (13 pontos × ~3s + acomodação), a fadiga
+// do usuário-alvo (ELA) piora as fixações finais e anula o ganho. Este budget
+// atual: 13 pontos ~ 1200..2000ms + 400ms acomodação = 20.8..31.2s. Ok.
+const COLLECTION_MS_BASE = 1200;
+const COLLECTION_MS_RANGE = 800;
+const COLLECTION_MS_FALLBACK = COLLECTION_MS_BASE + COLLECTION_MS_RANGE;
+
+export function getCollectionMsForPoint(x: number, y: number): number {
+  // Distância euclidiana normalizada do centro (0..1). Centro = 0, cantos = 1.
+  const d = Math.hypot(x - 0.5, y - 0.5) / Math.hypot(0.5, 0.5);
+  return Math.round(COLLECTION_MS_BASE + d * COLLECTION_MS_RANGE);
+}
+
+const VARIANCE_THRESHOLD = 0.02;
+const DIST_LOG_CAPACITY = 500;
+const distanceLog: GazeDistanceLogEntry[] = [];
+
 let profile: CalibrationPoint[] = [];
 export let isCalibrating = false;
 let isCollecting = false;
@@ -46,6 +85,7 @@ let collectedQualities: (any | null)[] = [];
 
 let currentTargetX = 0;
 let currentTargetY = 0;
+let currentCollectionMs = COLLECTION_MS_FALLBACK;
 let pointCompleteCallback: ((success: boolean) => void) | null = null;
 let collectionTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
 
@@ -58,10 +98,8 @@ let scaledProfileLeft: number[][] = [];
 let scaledProfileRight: number[][] = [];
 let _gazeCorrections: GazeCorrection[] = [];
 
-const COLLECTION_MS = 1500;
-const VARIANCE_THRESHOLD = 0.02;
-const DIST_LOG_CAPACITY = 500;
-const distanceLog: GazeDistanceLogEntry[] = [];
+let onlineLeft: RecursiveRidgeRegressor | null = null;
+let onlineRight: RecursiveRidgeRegressor | null = null;
 
 export function isCalibrated(): boolean {
   return regressorLeft !== null && regressorRight !== null;
@@ -176,6 +214,7 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
 
   currentTargetX = x;
   currentTargetY = y;
+  currentCollectionMs = getCollectionMsForPoint(x, y);
   isCollecting = true;
   collectionStartTime = performance.now();
   collectedFeaturesLeft = [];
@@ -183,19 +222,19 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   collectedQualities = [];
   pointCompleteCallback = onDone;
 
-  console.log(`[calib] ▶ Coletando ponto (${(x*100).toFixed(0)}%, ${(y*100).toFixed(0)}%) — aguardando ${COLLECTION_MS}ms + 400ms acomodação`);
+  console.log(`[calib] ▶ Coletando ponto (${(x*100).toFixed(0)}%, ${(y*100).toFixed(0)}%) — aguardando ${currentCollectionMs}ms + 400ms acomodação`);
 
   // Hard timeout: if feedRawData never fires the callback (e.g. all frames
   // discarded by quality filters, or face not detected during the window),
-  // force processStaticPoint after COLLECTION_MS + 800ms grace period.
+  // force processStaticPoint after currentCollectionMs + 800ms grace period.
   collectionTimeoutHandle = setTimeout(() => {
     collectionTimeoutHandle = null;
     if (isCollecting) {
-      console.warn(`[calib] ⏱ Timeout! isCollecting ainda true após ${COLLECTION_MS + 800}ms. Amostras coletadas: ${collectedFeaturesLeft.length}`);
+      console.warn(`[calib] ⏱ Timeout! isCollecting ainda true após ${currentCollectionMs + 800}ms. Amostras coletadas: ${collectedFeaturesLeft.length}`);
       isCollecting = false;
       processStaticPoint();
     }
-  }, COLLECTION_MS + 800);
+  }, currentCollectionMs + 800);
 }
 
 function calculateFeatureVariance(features: number[][]): number {
@@ -222,13 +261,30 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   if (!isCalibrating || !isCollecting) return;
 
   const elapsed = performance.now() - collectionStartTime;
-  
+
   // Descartar os primeiros 400ms (fase de sacada / acomodação)
   if (elapsed < 400) return;
 
-  // Descartar amostras de baixa qualidade / piscadas
+  // Sprint 1.1 — filtros de qualidade agora usam valores reais medidos no
+  // crop dos olhos por `EyeQualityAnalyzer` (não mais constantes hardcoded).
+  //
+  // Thresholds iniciais, conservadores. Precisam ser refinados com base nos
+  // valores observados durante a coleta de baseline:
+  //   - detectorConfidence < 0.4 → landmarks muito instáveis (movimento brusco)
+  //   - brightness  < 0.08       → região do olho quase preta (câmera obstruída
+  //                                ou usuário no escuro total)
+  //   - brightness  > 0.92       → over-exposto (contraluz forte)
+  //   - contrast    < 0.02       → imagem sem estrutura (borrão total)
+  //   - blur        > 0.85       → foco perdido / rosto muito distante
+  //   - irisVisibilityPercentage < 0.3 → pálpebra semi-fechada / piscada
   if (quality) {
-    if (quality.irisVisibilityPercentage < 0.3 || quality.detectorConfidence < 0.5) {
+    if (
+      quality.irisVisibilityPercentage < 0.3 ||
+      quality.detectorConfidence < 0.4 ||
+      (typeof quality.brightnessEstimate === 'number' && (quality.brightnessEstimate < 0.08 || quality.brightnessEstimate > 0.92)) ||
+      (typeof quality.contrastEstimate === 'number' && quality.contrastEstimate < 0.02) ||
+      (typeof quality.blurEstimate === 'number' && quality.blurEstimate > 0.85)
+    ) {
       return; // Ignora frame ruim
     }
   }
@@ -237,7 +293,7 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   collectedFeaturesRight.push(featuresRight);
   collectedQualities.push(quality ?? null);
 
-  if (elapsed >= COLLECTION_MS) {
+  if (elapsed >= currentCollectionMs) {
     isCollecting = false;
     if (collectionTimeoutHandle !== null) {
       clearTimeout(collectionTimeoutHandle);
@@ -305,9 +361,24 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
   regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY);
   regressorRight = createRegressor(REGRESSOR_MODE);
   regressorRight.train(scaledFeaturesRight, targetsX, targetsY);
-  
+
   scaledProfileLeft  = scaledFeaturesLeft;
   scaledProfileRight = scaledFeaturesRight;
+
+  // Sprint 4 — inicializa os regressores online a partir do modelo Ridge
+  // recém-treinado. Só suportado quando o modo ativo é 'ridge' — outros
+  // regressores (kernel) não expõem β_x/β_y diretamente.
+  onlineLeft = null;
+  onlineRight = null;
+  if (REGRESSOR_MODE === 'ridge') {
+    const modelL = ridgeModelFromRegressor(regressorLeft) as RidgeModel | null;
+    const modelR = ridgeModelFromRegressor(regressorRight) as RidgeModel | null;
+    if (modelL && modelR) {
+      onlineLeft = new RecursiveRidgeRegressor(modelL.betaX, modelL.betaY);
+      onlineRight = new RecursiveRidgeRegressor(modelR.betaX, modelR.betaY);
+      console.log('[calib] Regressor online (RLS) inicializado a partir do Ridge offline.');
+    }
+  }
 }
 
 export function completeCalibration(onComplete?: () => void) {
@@ -346,6 +417,59 @@ export function feedFaceMetrics(_detected: boolean, _iod: number): void {
   // O React agora consome isso diretamente via engine e Context
 }
 
+// Sprint 4 — hook de recalibração implícita. Chamado quando um dwell click é
+// confirmado sobre um botão da UI; alvo em pixels de tela (o centro do botão).
+//
+// Rejeita a amostra se:
+//   - Flag `USE_ONLINE_CALIBRATION` está desligada
+//   - Modelo offline não treinado
+//   - Predição atual está a mais de ONLINE_OUTLIER_THRESHOLD (em unidades
+//     normalizadas de tela) do alvo — provável falso positivo (o usuário
+//     estava olhando para outro elemento quando o dwell disparou).
+//
+// Retorna `true` se a amostra foi aceita e usada.
+export function feedOnlineSample(
+  featuresLeft: number[],
+  featuresRight: number[],
+  targetXpx: number,
+  targetYpx: number,
+): boolean {
+  if (!USE_ONLINE_CALIBRATION) return false;
+  if (!onlineLeft || !onlineRight) return false;
+  if (!regressorLeft || !regressorRight) return false;
+
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  const targetX = targetXpx / vw;
+  const targetY = targetYpx / vh;
+
+  const scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
+  const scaledRight = featureScalerRight.transformSingle(featuresRight);
+
+  // Rejeição de outlier via predição do modelo BASE — o online ainda está
+  // aprendendo e não deve ser usado para julgar seus próprios inputs.
+  const baseLeft  = regressorLeft.predict(scaledLeft);
+  const baseRight = regressorRight.predict(scaledRight);
+  const basePredX = (baseLeft.x + baseRight.x) / 2;
+  const basePredY = (baseLeft.y + baseRight.y) / 2;
+  const distToTarget = Math.hypot(basePredX - targetX, basePredY - targetY);
+  if (distToTarget > ONLINE_OUTLIER_THRESHOLD) {
+    console.log(
+      `[calib] Online sample rejeitada — pred=(${basePredX.toFixed(3)},${basePredY.toFixed(3)}) alvo=(${targetX.toFixed(3)},${targetY.toFixed(3)}) dist=${distToTarget.toFixed(3)} > ${ONLINE_OUTLIER_THRESHOLD}`,
+    );
+    return false;
+  }
+
+  onlineLeft.update(scaledLeft, targetX, targetY);
+  onlineRight.update(scaledRight, targetX, targetY);
+  return true;
+}
+
+export function onlineSampleCount(): number {
+  if (!onlineLeft || !onlineRight) return 0;
+  return Math.min(onlineLeft.n, onlineRight.n);
+}
+
 export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
@@ -358,11 +482,36 @@ export function mapGaze(
   const predLeft = regressorLeft.predict(scaledLeft);
   const predRight = regressorRight.predict(scaledRight);
 
+  let baseX = (predLeft.x + predRight.x) / 2;
+  let baseY = (predLeft.y + predRight.y) / 2;
+
+  // Sprint 4 — mistura com o modelo online (RLS) quando habilitado e após
+  // acumular amostras suficientes. Rampa linear em [0,1] evita degradar o
+  // baseline antes de acumular evidência.
+  if (USE_ONLINE_CALIBRATION && onlineLeft && onlineRight) {
+    const nOnline = Math.min(onlineLeft.n, onlineRight.n);
+    if (nOnline > 0) {
+      const onlinePredLeft = onlineLeft.predict(scaledLeft);
+      const onlinePredRight = onlineRight.predict(scaledRight);
+      const onlineX = (onlinePredLeft.x + onlinePredRight.x) / 2;
+      const onlineY = (onlinePredLeft.y + onlinePredRight.y) / 2;
+      const w = Math.min(1, nOnline / ONLINE_RAMP_SAMPLES);
+      baseX = (1 - w) * baseX + w * onlineX;
+      baseY = (1 - w) * baseY + w * onlineY;
+    }
+  }
+
+  // Clamp em unidades normalizadas [0,1] APÓS a média binocular (Sprint 1.2).
+  // Fazer o clamp aqui, e não em `predictRidge`, evita o viés de borda descrito
+  // no comentário de ridge.ts.
+  const avgNormX = Math.min(1, Math.max(0, baseX));
+  const avgNormY = Math.min(1, Math.max(0, baseY));
+
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
   const result = {
-    x: ((predLeft.x + predRight.x) / 2) * vw,
-    y: ((predLeft.y + predRight.y) / 2) * vh
+    x: avgNormX * vw,
+    y: avgNormY * vh,
   };
 
   const nearestDistLeft  = nearestDistance(scaledLeft, scaledProfileLeft);

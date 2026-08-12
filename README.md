@@ -8,7 +8,7 @@ Todo o processamento de visão computacional e machine learning ocorre **100% lo
 
 O projeto passou recentemente por uma reestruturação completa de interface, focada em usabilidade, acessibilidade e estética moderna (Glassmorphism):
 
-- **Calibração Integrada:** Fluxo de 13 pontos com tolerância a movimentos, limites de tentativas e feedback visual inteligente em tempo real.
+- **Calibração Integrada:** Fluxo de 13 pontos (grade 4-5-3 + 1 diagonal — grade simétrica será entregue na Sprint 1) com tolerância a movimentos, limites de tentativas e feedback visual inteligente em tempo real.
 - **Sistema de "Dwell Click":** Seleção de elementos na interface simplesmente mantendo o olhar fixo por uma fração de segundo (Dwell Time customizável).
 - **Interface Otimizada para Olhar:** Botões grandes, alto contraste, transições fluidas e feedback sonoro/visual para evitar fadiga ocular.
 - **Módulos do Sistema:**
@@ -26,16 +26,25 @@ Webcam (1280×720)
     │
     ├── MediaPipe FaceLandmarker (WASM) → 478 landmarks 3D
     │
-    ├── Extrator Geométrico → 258 features por olho (landmarks, métricas e ângulos)
+    ├── Extrator Geométrico compacto → ~31 features por olho
+    │   (offsets de íris, cantos, EAR, ângulos de pose, interações pose×offset)
     │
-    ├── Calibração (StandardScaler + SVR / Kernel Ridge) → Mapeamento tela (X, Y)
+    ├── Calibração (StandardScaler + Ridge com λ por CV leave-one-target-out)
+    │   → Mapeamento tela (X, Y), 2 regressores (L/R) → média binocular
     │
     ├── OneEuroFilter2D → Suavização profunda de ruído e tremores
     │
     └── Motor React (GazeContext) → Injeção de Cursor Dwell e Navegação no DOM
 ```
 
-*Nota Técnica:* Atualmente o sistema roda no modo geométrico avançado (`FEATURE_MODE='geometry_only'`). O encoder CNN pesado (`onnxruntime-node`) treinado no MPIIFaceGaze está implementado em repositório anexado para cenários de fallback, porém a inferência geométrica combinada ao Filtro OneEuro demonstrou estabilidade superior e menor custo de CPU para uso contínuo (30fps fixos). Documentação técnica da antiga pipeline híbrida pode ser encontrada em [IRISFLOW_PIPELINE_TECNICO.md](./IRISFLOW_PIPELINE_TECNICO.md).
+*Nota Técnica:* Atualmente o sistema roda no modo geométrico compacto
+(`USE_COMPACT_FEATURES = true` em `src/featurePipeline.ts`), com ~31 dimensões
+por olho e regressão Ridge selecionando λ por validação cruzada leave-one-target-out.
+O encoder CNN pesado (`onnxruntime-node`) treinado no MPIIFaceGaze está implementado
+em repositório anexado para cenários de fallback, porém a inferência geométrica
+combinada ao Filtro OneEuro demonstrou estabilidade superior e menor custo de CPU
+para uso contínuo (30fps fixos). Documentação técnica da antiga pipeline híbrida
+pode ser encontrada em [IRISFLOW_PIPELINE_TECNICO.md](./IRISFLOW_PIPELINE_TECNICO.md).
 
 ## 🛠️ Tecnologias Utilizadas
 

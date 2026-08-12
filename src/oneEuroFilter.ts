@@ -78,11 +78,36 @@ export class OneEuroFilter {
   }
 }
 
+// Sprint 5 — presets do filtro temporal, expostos ao usuário via
+// SettingsScreen. Trade-off jitter × lag:
+//   • estavel     → mincutoff baixo + beta baixo → alto smoothing,
+//                    ideal para leitura e navegação em botões grandes.
+//   • balanceado  → valores atuais (backward-compatible), padrão.
+//   • responsivo  → mincutoff alto + beta alto → baixo lag,
+//                    ideal para teclado virtual e jogos com alvo em movimento.
+export type FilterPreset = 'estavel' | 'balanceado' | 'responsivo';
+
+export interface FilterConfig {
+  mincutoff: number;
+  beta: number;
+  useRollingBuffer: boolean; // Sprint 5 — testar se o buffer de 6 frames adiciona lag sem ganho
+}
+
+export const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
+  estavel:    { mincutoff: 0.005, beta: 0.5, useRollingBuffer: true },
+  balanceado: { mincutoff: 0.020, beta: 1.5, useRollingBuffer: false },
+  responsivo: { mincutoff: 0.100, beta: 5.0, useRollingBuffer: false },
+};
+
 export class OneEuroFilter2D {
   private filterX: OneEuroFilter;
   private filterY: OneEuroFilter;
+  private dcutoff: number;
+  private freq: number;
 
-  constructor(freq: number = 60, mincutoff: number = 0.005, beta_: number = 1.5, dcutoff: number = 1.0) {
+  constructor(freq: number = 60, mincutoff: number = 0.02, beta_: number = 1.5, dcutoff: number = 1.0) {
+    this.freq = freq;
+    this.dcutoff = dcutoff;
     this.filterX = new OneEuroFilter(freq, mincutoff, beta_, dcutoff);
     this.filterY = new OneEuroFilter(freq, mincutoff, beta_, dcutoff);
   }
@@ -92,5 +117,12 @@ export class OneEuroFilter2D {
       x: this.filterX.filter(x, timestamp),
       y: this.filterY.filter(y, timestamp)
     };
+  }
+
+  // Reconfigura sem descartar o estado interno filtrado — a próxima chamada
+  // de `filter` já usa os novos parâmetros mas continua da última posição.
+  public setParams(mincutoff: number, beta_: number): void {
+    this.filterX = new OneEuroFilter(this.freq, mincutoff, beta_, this.dcutoff);
+    this.filterY = new OneEuroFilter(this.freq, mincutoff, beta_, this.dcutoff);
   }
 }

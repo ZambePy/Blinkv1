@@ -112,14 +112,13 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     //    mais próximo do que o ponto de referência in-hull.
     expect(distOutOfHull).toBeGreaterThan(distInHull);
 
-    // 2) Comportamento ATUAL documentado: o predictRidge SATURA nos limites
-    //    normalizados (0 ou 1) — a extrapolação linear ultrapassa a faixa
-    //    [0,1] e é cortada abruptamente pelo clmp em ridge.ts.
-    //    Isso não é "seguro": o cursor salta para a borda ao invés de
-    //    refletir proporcionalmente a distância percorrida.
-    //    (Sprint 4 movimentou a conversão para pixels da camada do modelo
-    //    para a UI — o clamp continua em unidades normalizadas.)
-    expect(outOfHullPred.x === 0 || outOfHullPred.x === 1).toBe(true);
+    // 2) Comportamento ATUAL documentado (Sprint 1.2): predictRidge NÃO
+    //    aplica mais clamp. A extrapolação linear ultrapassa a faixa [0,1]
+    //    livremente; o clamp é feito APÓS a média binocular em
+    //    `calibration.mapGaze`. Esta asserção verifica que o valor extrapolado
+    //    saiu fora do intervalo [0,1] — se cair dentro, o vetor não é
+    //    verdadeiramente "out of hull" ou a semântica do modelo mudou.
+    expect(outOfHullPred.x < 0 || outOfHullPred.x > 1).toBe(true);
 
     // 3) O erro fora do fecho convexo é desproporcional ao erro dentro dele.
     //    Se esta asserção falhar no futuro, é porque o comportamento de
