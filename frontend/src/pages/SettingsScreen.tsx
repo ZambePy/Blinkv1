@@ -12,6 +12,8 @@ import {
   Download,
   LogOut,
   Target,
+  Moon,
+  Sun,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -25,13 +27,14 @@ import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
 
 const cardStyle: React.CSSProperties = {
-  background: 'rgba(255,255,255,0.75)',
+  background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
   backdropFilter: 'blur(16px)',
   WebkitBackdropFilter: 'blur(16px)',
-  border: '1px solid rgba(255,255,255,0.7)',
+  border: '1px solid var(--color-card-border, rgba(255,255,255,0.7))',
   borderRadius: '1.5rem',
   padding: '2rem',
-  boxShadow: '0 8px 32px rgba(27,84,168,0.08)',
+  boxShadow: '0 8px 32px var(--color-card-shadow, rgba(27,84,168,0.08))',
+  transition: 'background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease',
 };
 
 export const SettingsScreen: React.FC = () => {
@@ -149,7 +152,8 @@ export const SettingsScreen: React.FC = () => {
         aria-labelledby="settings-auth-title"
         style={{
           minHeight: '100vh',
-          background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+          background: 'var(--settings-bg, linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%))',
+          transition: 'background 0.4s ease',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -288,7 +292,8 @@ export const SettingsScreen: React.FC = () => {
       role="main"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+        background: 'var(--settings-bg, linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%))',
+        transition: 'background 0.4s ease',
         display: 'flex',
         flexDirection: 'column',
         padding: '2rem',
@@ -502,6 +507,60 @@ export const SettingsScreen: React.FC = () => {
           >
             {t(settings.soundEnabled ? 'settings.sound.on' : 'settings.sound.off')}
           </button>
+        </section>
+
+        {/* Tema */}
+        <section aria-labelledby="theme-title" style={cardStyle}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.25rem',
+            }}
+          >
+            {settings.theme === 'dark' ? (
+              <Moon size={28} color="#1B54A8" aria-hidden="true" />
+            ) : (
+              <Sun size={28} color="#1B54A8" aria-hidden="true" />
+            )}
+            <h2 id="theme-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-base, #1e293b)' }}>
+              Tema Visual
+            </h2>
+          </div>
+          <div role="radiogroup" aria-labelledby="theme-title" style={{ display: 'flex', gap: '1rem' }}>
+            {[
+              { key: 'light', label: 'Modo Claro', icon: <Sun size={20} /> },
+              { key: 'dark', label: 'Modo Escuro', icon: <Moon size={20} /> }
+            ].map(({ key, label, icon }) => {
+              const active = settings.theme === key;
+              return (
+                <button
+                  key={key}
+                  role="radio"
+                  aria-checked={active}
+                  onClick={() => updateSettings({ theme: key as 'light' | 'dark' })}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '0.5rem',
+                    padding: '1rem',
+                    borderRadius: '1rem',
+                    cursor: 'pointer',
+                    fontWeight: 700,
+                    border: '2px solid',
+                    background: active ? '#1B54A8' : 'transparent',
+                    color: active ? 'white' : 'var(--color-text-base, #475569)',
+                    borderColor: active ? '#1B54A8' : '#e2e8f0',
+                  }}
+                >
+                  {icon} {label}
+                </button>
+              );
+            })}
+          </div>
         </section>
 
         {/* Idioma */}

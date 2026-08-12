@@ -75,6 +75,22 @@ const VARIANCE_THRESHOLD = 0.02;
 const DIST_LOG_CAPACITY = 500;
 const distanceLog: GazeDistanceLogEntry[] = [];
 
+// Hotfix — rejeição por deriva de pose dentro do ponto de calibração.
+// Motivação: no primeiro teste real, a coluna X esquerda colapsou para o
+// centro. Assinatura clássica de colinearidade yaw↔offsetX na calibração:
+// o usuário move a cabeça sem perceber ao virar o olhar, e o Ridge não
+// consegue separar as duas contribuições. Filtramos aqui para forçar que
+// as amostras de cada ponto tenham pose homogênea.
+//
+// Threshold em radianos. 0.087 rad ≈ 5°. Baseline é a pose observada no
+// primeiro frame ACEITO do ponto (já pós-acomodação).
+const POSE_DRIFT_YAW_MAX   = 0.087;
+const POSE_DRIFT_PITCH_MAX = 0.087;
+const POSE_DRIFT_ROLL_MAX  = 0.087;
+
+let currentPointBaselinePose: { yaw: number; pitch: number; roll: number } | null = null;
+let poseDriftRejects = 0;
+
 let profile: CalibrationPoint[] = [];
 export let isCalibrating = false;
 let isCollecting = false;
@@ -221,6 +237,8 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   collectedFeaturesRight = [];
   collectedQualities = [];
   pointCompleteCallback = onDone;
+  currentPointBaselinePose = null;
+  poseDriftRejects = 0;
 
   console.log(`[calib] ▶ Coletando ponto (${(x*100).toFixed(0)}%, ${(y*100).toFixed(0)}%) — aguardando ${currentCollectionMs}ms + 400ms acomodação`);
 
@@ -287,6 +305,34 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
     ) {
       return; // Ignora frame ruim
     }
+
+    // Hotfix — deriva de pose dentro do ponto. `currentPointBaselinePose` é
+    // fixado no primeiro frame que sobrevive aos filtros de qualidade.
+    // Se a cabeça se afastar dessa referência dentro da janela, o ponto
+    // encerra virando amostras com pose inconsistente — Ridge não separa
+    // yaw da cabeça de yaw do olhar.
+    if (
+      typeof quality.yaw === 'number' &&
+      typeof quality.pitch === 'number' &&
+      typeof quality.roll === 'number'
+    ) {
+      if (!currentPointBaselinePose) {
+        currentPointBaselinePose = {
+          yaw: quality.yaw,
+          pitch: quality.pitch,
+          roll: quality.roll,
+        };
+      } else {
+        if (
+          Math.abs(quality.yaw   - currentPointBaselinePose.yaw)   > POSE_DRIFT_YAW_MAX ||
+          Math.abs(quality.pitch - currentPointBaselinePose.pitch) > POSE_DRIFT_PITCH_MAX ||
+          Math.abs(quality.roll  - currentPointBaselinePose.roll)  > POSE_DRIFT_ROLL_MAX
+        ) {
+          poseDriftRejects++;
+          return;
+        }
+      }
+    }
   }
 
   collectedFeaturesLeft.push(featuresLeft);
@@ -304,7 +350,9 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
 }
 
 function processStaticPoint() {
-  console.log(`[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length}`);
+  console.log(
+    `[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length} | poseDriftRejects=${poseDriftRejects}`,
+  );
 
   // If no samples were collected at all (face not visible, all frames discarded
   // by quality filter), report failure so the UI can retry this point.

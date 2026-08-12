@@ -6,6 +6,13 @@
   --color-primary-dark: #143e80;
   --color-primary-light: #e8f0fb;
 
+  /* Modo Escuro */
+  --color-bg-base: #f8fafc;
+  --color-text-base: #0f172a;
+  --color-card-bg: rgba(255, 255, 255, 0.82);
+  --color-card-border: rgba(255, 255, 255, 0.9);
+  --color-card-shadow: rgba(27, 84, 168, 0.08);
+
   /* Fonte */
   --font-family-sans: 'Boldonse', system-ui, -apple-system, sans-serif;
 
@@ -77,32 +84,58 @@ body,
   height: 100%;
   width: 100%;
   font-family: 'Boldonse', system-ui, -apple-system, sans-serif;
-  background-color: #f8fafc;
-  color: #0f172a;
+  background-color: var(--color-bg-base);
+  color: var(--color-text-base);
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.4s ease, color 0.4s ease;
+}
+
+/* Variáveis base (light mode) — disponíveis como CSS custom properties normais */
+:root {
+  --color-bg-base: #f8fafc;
+  --color-text-base: #0f172a;
+  --color-card-bg: rgba(255, 255, 255, 0.82);
+  --color-card-border: rgba(255, 255, 255, 0.9);
+  --color-card-shadow: rgba(27, 84, 168, 0.08);
+  --color-primary: #1b54a8;
+  --color-primary-light: #e8f0fb;
+  --settings-bg: linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%);
+}
+
+/* Modo escuro (via classe no html) */
+html.dark {
+  --color-bg-base: #0f172a;
+  --color-text-base: #f8fafc;
+  --color-card-bg: rgba(30, 41, 59, 0.90);
+  --color-card-border: rgba(255, 255, 255, 0.12);
+  --color-card-shadow: rgba(0, 0, 0, 0.4);
+  --color-primary-light: #1e293b;
+  --color-primary: #3b82f6;
+  --settings-bg: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
 }
 
 /* Glassmorphism utilitário refinado */
 .glass {
-  background: rgba(255, 255, 255, 0.82);
+  background: var(--color-card-bg);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10px 30px -10px rgba(27, 84, 168, 0.08);
+  border: 1px solid var(--color-card-border);
+  box-shadow: 0 10px 30px -10px var(--color-card-shadow);
+  transition: background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
 }
 
 .glass-card {
-  background: rgba(255, 255, 255, 0.9);
+  background: var(--color-card-bg);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.03);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  border: 1px solid var(--color-card-border);
+  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.4s ease, border-color 0.4s ease;
 }
 
 .glass-card:hover {
-  border-color: rgba(27, 84, 168, 0.3);
-  box-shadow: 0 12px 32px -8px rgba(27, 84, 168, 0.12);
+  border-color: rgba(27, 84, 168, 0.5);
+  box-shadow: 0 12px 32px -8px rgba(27, 84, 168, 0.2);
   transform: translateY(-3px);
 }
 
@@ -371,4 +404,206 @@ select:focus-visible,
   position: relative;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * Teste de precisão (src/accuracy.ts)
+ *
+ * Sem esse bloco o overlay era criado invisível: os divs recebiam classe mas
+ * nenhuma regra existia, o teste rodava 17 s sem feedback visual e o JSON
+ * gerado era lixo (o usuário estava olhando para a UI, não para os pontos).
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+.accuracy-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: radial-gradient(circle at center, #0f172a 0%, #020617 100%);
+  color: #ffffff;
+  overflow: hidden;
+  animation: fadeIn 0.3s ease-out both;
+}
+
+.accuracy-instruction {
+  position: absolute;
+  top: 2rem;
+  left: 50%;
+  transform: translateX(-50%);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 0.75rem 1.5rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 999px;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  white-space: nowrap;
+}
+.accuracy-instruction .highlight {
+  color: #38bdf8;
+  font-weight: 700;
+}
+
+.accuracy-dot {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  width: 80px;
+  height: 80px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+.accuracy-dot::before {
+  content: '';
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  border: 2px solid rgba(56, 189, 248, 0.4);
+  animation: accuracyRingPulse 1.6s ease-in-out infinite;
+}
+.accuracy-dot .dot-inner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: #38bdf8;
+  box-shadow:
+    0 0 24px rgba(56, 189, 248, 0.9),
+    0 0 60px rgba(56, 189, 248, 0.5);
+  animation: accuracyDotPulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes accuracyRingPulse {
+  0%, 100% { transform: scale(0.85); opacity: 0.9; }
+  50%      { transform: scale(1.15); opacity: 0.35; }
+}
+@keyframes accuracyDotPulse {
+  from { transform: scale(0.9); }
+  to   { transform: scale(1.15); }
+}
+
+/* ── Diagnostic overlay (resumo pós-teste) ─────────────────────────────────── */
+
+.diagnostic-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(2, 6, 23, 0.92);
+  color: #e2e8f0;
+  overflow: hidden;
+  opacity: 0;
+  transition: opacity 0.3s ease-out;
+}
+.diagnostic-overlay.visible { opacity: 1; }
+
+.diagnostic-svg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+.diagnostic-footer {
+  position: absolute;
+  left: 50%;
+  bottom: 2rem;
+  transform: translateX(-50%);
+  max-width: min(1100px, 92vw);
+  width: 92vw;
+  pointer-events: auto;
+}
+
+.diagnostic-card {
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 1.5rem;
+  padding: 1.75rem 2rem;
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+  font-family: 'Inter', system-ui, sans-serif;
+}
+
+.diagnostic-title {
+  font-size: 1.5rem;
+  font-weight: 800;
+  color: #ffffff;
+  margin-bottom: 1rem;
+}
+
+.diagnostic-legend {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1.25rem;
+  font-size: 0.9rem;
+  color: #cbd5e1;
+}
+.legend-item { display: inline-flex; align-items: center; gap: 0.5rem; }
+.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+
+.diagnostic-metrics {
+  display: flex;
+  align-items: stretch;
+  gap: 1rem;
+  padding: 1rem 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  margin-bottom: 1.25rem;
+}
+.metric-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+}
+.metric-value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
+.metric-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
+.metric-divider { width: 1px; background: rgba(255, 255, 255, 0.08); }
+
+.diagnostic-point-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 0.5rem;
+  margin-bottom: 1.25rem;
+}
+.diag-point-card {
+  padding: 0.5rem 0.4rem;
+  border-radius: 0.6rem;
+  border: 1px solid transparent;
+  text-align: center;
+  background: rgba(255, 255, 255, 0.04);
+}
+.diag-point-card.diag-ok   { border-color: rgba(34, 197, 94, 0.45); }
+.diag-point-card.diag-warn { border-color: rgba(255, 204, 0, 0.45); }
+.diag-point-card.diag-bad  { border-color: rgba(239, 68, 68, 0.45); }
+.diag-point-name  { font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.2rem; }
+.diag-point-error { font-size: 0.95rem; font-weight: 700; color: #ffffff; }
+
+.diagnostic-actions {
+  font-size: 0.9rem;
+  color: #94a3b8;
+  text-align: center;
+}
+.diagnostic-actions kbd {
+  display: inline-block;
+  padding: 0.15rem 0.5rem;
+  margin: 0 0.2rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 0.35rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #ffffff;
+}
+
+/* Cores qualitativas do score (usadas no bloco de resumo persistido) */
+.accuracy-excellent { color: #22c55e; }
+.accuracy-good      { color: #00fff0; }
+.accuracy-regular   { color: #ffcc00; }
+.accuracy-poor      { color: #ef4444; }
 

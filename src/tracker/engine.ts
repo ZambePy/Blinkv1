@@ -183,9 +183,17 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // irisVisibilityPercentage (EAR) que continua sendo calculado
           // no extractor.
           const cropQuality = qualityAnalyzer.analyze(videoEl, landmarks);
+          // Hotfix — pose viaja no `quality` para que `feedRawData` possa
+          // rejeitar amostras de calibração cuja cabeça se afastou do
+          // baseline do ponto (fonte principal do colapso da coluna
+          // esquerda observado no primeiro teste real).
+          const face = extractorResult.advancedFeatures?.face;
           const quality = {
             ...(extractorResult.advancedFeatures?.quality ?? {}),
             ...cropQuality,
+            yaw:   face?.yaw,
+            pitch: face?.pitch,
+            roll:  face?.roll,
           };
 
           calibration.feedRawData(featuresLeft, featuresRight, quality);

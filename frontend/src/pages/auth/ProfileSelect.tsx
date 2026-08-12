@@ -2,7 +2,6 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth, type Profile } from '../../context/AuthContext';
 import { Users, UserCircle, ArrowRight } from 'lucide-react';
-import { SystemStatusHeader } from '../../components/ui/SystemStatusHeader';
 
 export const ProfileSelect: React.FC = () => {
   const { profiles, selectProfile } = useAuth();
@@ -15,11 +14,9 @@ export const ProfileSelect: React.FC = () => {
 
   return (
     <>
-      <SystemStatusHeader cameraActive={true} trackingActive={false} calibrationDone={false} />
-
       <div
         style={{
-          minHeight: 'calc(100vh - 40px)',
+          minHeight: '100vh',
           background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
           display: 'flex',
           flexDirection: 'column',

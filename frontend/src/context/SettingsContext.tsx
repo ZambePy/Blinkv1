@@ -1,7 +1,8 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
 
 type DwellSpeed = 'slow' | 'normal' | 'fast';
 type KeyboardLayout = 'frequency' | 'alphabetical' | 'qwerty';
+type Theme = 'light' | 'dark';
 
 interface Settings {
   dwellSpeed: DwellSpeed;
@@ -10,6 +11,7 @@ interface Settings {
   voiceGender: 'female' | 'male' | 'cloned';
   voiceProfileId?: string;
   eyeDominance: 'left' | 'right' | 'both';
+  theme: Theme;
 }
 
 const defaultSettings: Settings = {
@@ -18,6 +20,7 @@ const defaultSettings: Settings = {
   soundEnabled: true,
   voiceGender: 'female',
   eyeDominance: 'both',
+  theme: 'light',
 };
 
 const SettingsContext = createContext<{
@@ -30,6 +33,14 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     const saved = localStorage.getItem('irisflow_settings');
     return saved ? { ...defaultSettings, ...JSON.parse(saved) } : defaultSettings;
   });
+
+  useEffect(() => {
+    if (settings.theme === 'dark') {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [settings.theme]);
 
   const updateSettings = (partial: Partial<Settings>) => {
     const next = { ...settings, ...partial };
@@ -45,3 +56,4 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 };
 
 export const useSettings = () => useContext(SettingsContext);
+

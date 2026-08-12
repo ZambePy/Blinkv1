@@ -68,7 +68,12 @@ const VALIDATION_POINTS = [
   { name: "P13", screenX: 0.50, screenY: 0.65 },
 ];
 
-const COLLECTION_MS = 1000;
+// Hotfix pós-Sprint 0 — paridade com o protocolo de calibração: descartar os
+// primeiros ACCLIMATION_MS de cada ponto (fase de sacada + acomodação). Sem
+// isso, o jitter reportado mistura movimento sacádico com fixação real.
+// COLLECTION_MS engloba acomodação + janela útil (400 + 1000 = 1400 ms/ponto).
+const ACCLIMATION_MS = 400;
+const COLLECTION_MS = 1400;
 
 // Distância estimada usuário–tela para conversão px → graus
 // Assume 60 cm a 96 CSS DPI: 60 × 96 / 2.54 ≈ 2268 px
@@ -127,10 +132,14 @@ export function startAccuracyTest(
     function collect() {
       const elapsed = performance.now() - startTime;
 
-      const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
-      if (gaze) {
-        predictedX.push(gaze.x);
-        predictedY.push(gaze.y);
+      // Só contabiliza amostras após a fase de acomodação — assim o jitter
+      // reportado reflete a fixação, não a sacada de entrada no ponto.
+      if (elapsed >= ACCLIMATION_MS) {
+        const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
+        if (gaze) {
+          predictedX.push(gaze.x);
+          predictedY.push(gaze.y);
+        }
       }
 
       if (elapsed < COLLECTION_MS) {

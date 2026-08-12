@@ -1,7 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageSquare, Keyboard, Monitor, Settings, Heart, LogOut } from 'lucide-react';
-import { SystemStatusHeader } from '../components/ui/SystemStatusHeader';
 
 interface AppModule {
   id: string;
@@ -60,11 +59,10 @@ export const MainMenu: React.FC = () => {
 
   return (
     <>
-      <SystemStatusHeader />
       <main
         style={{
           width: '100vw',
-          height: 'calc(100vh - 40px)',
+          height: '100vh',
           background: '#f8fafc',
           display: 'flex',
           flexDirection: 'column',

@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { MousePointer2, Power, Info, CheckCircle2, ShieldAlert } from 'lucide-react';
 import { PageHeader } from '../components/ui/PageHeader';
-import { SystemStatusHeader } from '../components/ui/SystemStatusHeader';
 import { useGaze } from '../context/GazeContext';
 import { PrimaryButton } from '../components/ui/PrimaryButton';
 
@@ -17,16 +16,10 @@ export const VirtualMouseScreen: React.FC = () => {
 
   return (
     <>
-      <SystemStatusHeader
-        cameraActive={true}
-        trackingActive={active}
-        calibrationDone={true}
-      />
-
       <main
         role="main"
         style={{
-          minHeight: 'calc(100vh - 40px)',
+          minHeight: '100vh',
           background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
           padding: '2rem 2.5rem',
         }}

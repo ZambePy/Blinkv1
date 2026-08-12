@@ -1,8 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye } from 'lucide-react';
-import { BackButton } from '../../components/ui/BackButton';
-import { SystemStatusHeader } from '../../components/ui/SystemStatusHeader';
+import { CheckCircle2, Eye, Sun, Ruler, Lightbulb, Activity } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 
 // Grade simétrica de 13 pontos (Sprint 1.3). Quatro em cada linha (10, 37, 63,
@@ -28,7 +26,7 @@ export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
   const { calibration, state } = useGaze();
 
-  const [stage, setStage] = useState<'tutorial' | 'calibrating' | 'finished' | 'transitioning'>('tutorial');
+  const [stage, setStage] = useState<'pre-calibration' | 'tutorial' | 'calibrating' | 'finished' | 'transitioning'>('pre-calibration');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [completedList, setCompletedList] = useState<number[]>([]);
   const [isCollecting, setIsCollecting] = useState(false);
@@ -168,20 +166,14 @@ export const CalibrationCheck: React.FC = () => {
 
   return (
     <>
-      <SystemStatusHeader
-        cameraActive={state !== 'idle' && state !== 'loading'}
-        trackingActive={stage === 'calibrating'}
-        calibrationDone={stage === 'finished'}
-      />
-
       <main
         role="main"
         style={{
           position: 'relative',
           width: '100vw',
-          height: 'calc(100vh - 40px)',
-          background: '#ffffff',
-          color: '#1e293b',
+          height: '100vh',
+          background: 'var(--color-bg-base, #ffffff)',
+          color: 'var(--color-text-base, #1e293b)',
           overflow: 'hidden',
           userSelect: 'none',
           display: 'flex',
@@ -193,15 +185,65 @@ export const CalibrationCheck: React.FC = () => {
           <BackButton />
         </div>
 
+        {stage === 'pre-calibration' && (
+          <div className="animate-fade-in-up" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 10 }}>
+            <div className="glass-card" style={{ borderRadius: '2rem', padding: '3rem', maxWidth: 680, width: '100%', display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+              
+              <div style={{ textAlign: 'center' }}>
+                <h1 style={{ fontSize: '2.5rem', fontWeight: 800, margin: '0 0 0.5rem 0' }}>Preparação</h1>
+                <p style={{ color: 'var(--color-text-base, #475569)', opacity: 0.8, fontSize: '1.25rem', margin: 0 }}>
+                  Antes de calibrar, verifique estas condições ideais para maior precisão.
+                </p>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', marginTop: '1rem' }}>
+                
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', background: 'rgba(27, 84, 168, 0.05)', padding: '1.5rem', borderRadius: '1.5rem' }}>
+                  <div style={{ width: 64, height: 64, borderRadius: '1rem', background: 'var(--color-primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-primary)' }}>
+                    <Ruler size={32} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.25rem 0' }}>Distância Ideal</h3>
+                    <p style={{ margin: 0, opacity: 0.8, lineHeight: 1.4 }}>Mantenha seu rosto entre 50cm e 60cm de distância da tela.</p>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', alignItems: 'center', gap: '1.5rem', background: 'rgba(27, 84, 168, 0.05)', padding: '1.5rem', borderRadius: '1.5rem' }}>
+                  <div style={{ width: 64, height: 64, borderRadius: '1rem', background: 'var(--color-primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--color-primary)' }}>
+                    <Lightbulb size={32} />
+                  </div>
+                  <div>
+                    <h3 style={{ fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.25rem 0' }}>Iluminação</h3>
+                    <p style={{ margin: 0, opacity: 0.8, lineHeight: 1.4 }}>Certifique-se de que seu rosto está bem iluminado, sem reflexos fortes nos óculos.</p>
+                  </div>
+                </div>
+
+              </div>
+              
+              <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
+                <button 
+                  type="button" 
+                  onClick={() => setStage('tutorial')} 
+                  style={{ background: 'var(--color-primary, #1B54A8)', color: 'white', border: 'none', padding: '1.2rem 4rem', borderRadius: '2rem', fontSize: '1.25rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', transition: 'all 0.2s', boxShadow: '0 12px 24px rgba(27,84,168,0.3)' }}
+                  onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-2px)' }}
+                  onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}
+                >
+                  Entendi
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
         {stage === 'tutorial' && (
           <div className="animate-fade-in-up" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 10 }}>
-            <div style={{ background: '#ffffff', borderRadius: '2rem', padding: '4rem', maxWidth: 600, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '2rem' }}>
-              <div style={{ width: 100, height: 100, borderRadius: '50%', background: '#e8f0fb', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <Eye size={50} color="#1B54A8" />
+            <div className="glass-card" style={{ borderRadius: '2rem', padding: '4rem', maxWidth: 600, width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', gap: '2rem' }}>
+              <div style={{ width: 100, height: 100, borderRadius: '50%', background: 'var(--color-primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <Eye size={50} color="var(--color-primary)" />
               </div>
               <div>
-                <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#0f172a', margin: '0 0 1rem 0' }}>Calibração</h1>
-                <p style={{ color: '#475569', fontSize: '1.25rem', margin: 0, lineHeight: 1.5 }}>
+                <h1 style={{ fontSize: '2.5rem', fontWeight: 800, margin: '0 0 1rem 0' }}>Calibração</h1>
+                <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0, lineHeight: 1.5 }}>
                   Siga o ponto com os olhos para calibrar o sistema. Mantenha seu rosto confortável e natural.
                 </p>
               </div>
@@ -244,10 +286,13 @@ export const CalibrationCheck: React.FC = () => {
                   
                   {isCurrent && !isJustFinished && (
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      <div style={{ position: 'absolute', width: 70, height: 70, borderRadius: '50%', border: '4px solid rgba(27, 84, 168, 0.2)', animation: 'spin 4s linear infinite' }}>
-                        <div style={{ position: 'absolute', top: -4, left: '50%', width: 8, height: 8, borderRadius: '50%', background: '#1B54A8' }} />
-                      </div>
-                      <div style={{ width: 32, height: 32, borderRadius: '50%', background: '#1B54A8', boxShadow: '0 0 20px rgba(27, 84, 168, 0.6)', animation: 'pulseGlow 1.2s infinite alternate' }} />
+                      {/* Efeito Radar Autêntico */}
+                      <div style={{ position: 'absolute', width: 90, height: 90, borderRadius: '50%', background: 'radial-gradient(circle, rgba(27,84,168,0.15) 0%, transparent 70%)', animation: 'radarPing 2s ease-out infinite' }} />
+                      <div style={{ position: 'absolute', width: 70, height: 70, borderRadius: '50%', border: '2px solid rgba(27, 84, 168, 0.4)', borderTopColor: 'rgba(27, 84, 168, 0.9)', animation: 'spin 2s linear infinite' }} />
+                      <div style={{ position: 'absolute', width: 50, height: 50, borderRadius: '50%', border: '1px dashed rgba(27, 84, 168, 0.6)', animation: 'spin 4s linear infinite reverse' }} />
+                      {/* Ponto Central Pulsante */}
+                      <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1B54A8', boxShadow: '0 0 25px rgba(27, 84, 168, 0.9), inset 0 0 8px rgba(255,255,255,0.5)', animation: 'pulseGlow 1s infinite alternate' }} />
+                      <div style={{ position: 'absolute', width: 8, height: 8, borderRadius: '50%', background: '#ffffff', opacity: 0.9 }} />
                     </div>
                   )}
 
@@ -258,11 +303,11 @@ export const CalibrationCheck: React.FC = () => {
                   )}
 
                   {isDone && !isJustFinished && (
-                    <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#cbd5e1' }} />
+                    <div style={{ width: 14, height: 14, borderRadius: '50%', background: 'var(--color-primary)', opacity: 0.5, boxShadow: '0 0 10px var(--color-primary)' }} />
                   )}
 
                   {!isCurrent && !isDone && (
-                    <div style={{ width: 12, height: 12, borderRadius: '50%', background: '#e2e8f0' }} />
+                    <div style={{ width: 12, height: 12, borderRadius: '50%', background: 'var(--color-text-base)', opacity: 0.15 }} />
                   )}
                 </div>
               );
@@ -272,13 +317,13 @@ export const CalibrationCheck: React.FC = () => {
 
         {stage === 'finished' && (
           <div className="animate-scale-in" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 50 }}>
-            <div style={{ background: '#ffffff', padding: '4rem', borderRadius: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 600, width: '100%', gap: '2rem' }}>
-              <div style={{ width: 100, height: 100, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 20px 40px rgba(22,163,74,0.2)' }}>
+            <div className="glass-card" style={{ padding: '4rem', borderRadius: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 600, width: '100%', gap: '2rem' }}>
+              <div style={{ width: 100, height: 100, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 20px 40px rgba(22,163,74,0.3)' }}>
                 <CheckCircle2 size={50} color="#ffffff" />
               </div>
               <div>
-                <h2 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#0f172a', margin: '0 0 1rem 0' }}>Tudo pronto!</h2>
-                <p style={{ color: '#475569', fontSize: '1.25rem', margin: 0 }}>Seu olhar foi calibrado com sucesso.</p>
+                <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: '0 0 1rem 0' }}>Tudo pronto!</h2>
+                <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0 }}>Seu olhar foi calibrado com sucesso.</p>
               </div>
               <div style={{ display: 'flex', gap: '1.5rem', width: '100%', marginTop: '1rem', justifyContent: 'center' }}>
                 <button type="button" onClick={handleStart} style={{ padding: '1.2rem 2.5rem', borderRadius: '2rem', border: '2px solid #e2e8f0', background: 'transparent', color: '#64748b', fontSize: '1.1rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#334155'} onMouseOut={(e) => e.currentTarget.style.color = '#64748b'}>
@@ -294,8 +339,12 @@ export const CalibrationCheck: React.FC = () => {
 
         <style>{`
           @keyframes pulseGlow {
-            0% { transform: scale(0.9); opacity: 0.85; }
-            100% { transform: scale(1.2); opacity: 1; box-shadow: 0 0 30px rgba(27, 84, 168, 0.8); }
+            0% { transform: scale(0.9); opacity: 0.85; box-shadow: 0 0 15px rgba(27, 84, 168, 0.6); }
+            100% { transform: scale(1.1); opacity: 1; box-shadow: 0 0 35px rgba(27, 84, 168, 1); }
+          }
+          @keyframes radarPing {
+            0% { transform: scale(0.1); opacity: 1; }
+            100% { transform: scale(2.5); opacity: 0; }
           }
           @keyframes spin {
             from { transform: rotate(0deg); }
