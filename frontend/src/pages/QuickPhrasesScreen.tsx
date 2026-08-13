@@ -80,7 +80,7 @@ export const QuickPhrasesScreen: React.FC = () => {
       aria-labelledby="phrases-title"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 40%, #f1f5f9 100%)',
+        background: 'var(--color-bg-base)',
         display: 'flex',
         flexDirection: 'column',
         padding: '2rem',
@@ -116,7 +116,7 @@ export const QuickPhrasesScreen: React.FC = () => {
         <MessageSquare size={28} color="#0d9488" aria-hidden="true" />
         <h1
           id="phrases-title"
-          style={{ fontSize: '1.5rem', fontWeight: 700, color: '#1e293b', margin: 0 }}
+          style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-base)', margin: 0 }}
         >
           Frases rápidas
         </h1>
@@ -124,7 +124,7 @@ export const QuickPhrasesScreen: React.FC = () => {
           /
         </span>
         <span
-          style={{ fontSize: '1.25rem', color: '#475569', fontFamily: 'system-ui, sans-serif' }}
+          style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.9, fontFamily: 'system-ui, sans-serif' }}
         >
           Escolha uma frase
         </span>
@@ -150,19 +150,19 @@ export const QuickPhrasesScreen: React.FC = () => {
           onClick={() => navigate('/menu')}
           className="action-card glass"
           aria-label="Voltar ao menu principal"
-          style={{ border: '2px solid rgba(255,255,255,0.7)' }}
+          style={{ border: '2px solid var(--color-card-border)', background: 'var(--color-card-bg)' }}
         >
           <div
             className="card-icon"
             aria-hidden="true"
             style={{
-              background: 'linear-gradient(135deg, #e2e8f0, #f8fafc)',
-              boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+              background: 'var(--color-bg-base)',
+              boxShadow: '0 8px 24px var(--color-card-shadow)',
             }}
           >
-            <ArrowLeft size={56} color="#334155" strokeWidth={2} />
+            <ArrowLeft size={56} color="var(--color-text-base)" strokeWidth={2} />
           </div>
-          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: '#1e293b' }}>Voltar</span>
+          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-base)' }}>Voltar</span>
         </button>
 
         {PHRASES.map(({ id, text, Icon, iconColor, bg }) => (
@@ -172,7 +172,7 @@ export const QuickPhrasesScreen: React.FC = () => {
             onClick={() => handleSpeak(text)}
             aria-label={`Falar a frase: ${text}`}
             className="action-card glass"
-            style={{ border: '2px solid rgba(255,255,255,0.7)' }}
+            style={{ border: '2px solid var(--color-card-border)', background: 'var(--color-card-bg)' }}
           >
             <div
               className="card-icon"
@@ -185,7 +185,7 @@ export const QuickPhrasesScreen: React.FC = () => {
               style={{
                 fontSize: '1.25rem',
                 fontWeight: 700,
-                color: '#1e293b',
+                color: 'var(--color-text-base)',
                 textAlign: 'center',
                 lineHeight: 1.3,
               }}

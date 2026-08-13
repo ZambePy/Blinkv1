@@ -192,7 +192,7 @@ export const SettingsScreen: React.FC = () => {
             {t('settings.auth.title')}
           </h2>
           <p
-            style={{ color: '#475569', marginBottom: '2rem', fontFamily: 'system-ui, sans-serif' }}
+            style={{ color: 'var(--color-text-base)', opacity: 0.9, marginBottom: '2rem', fontFamily: 'system-ui, sans-serif' }}
           >
             {t('settings.auth.hint')}
           </p>
@@ -246,7 +246,7 @@ export const SettingsScreen: React.FC = () => {
                   cursor: 'pointer',
                   fontSize: '1rem',
                   fontWeight: 700,
-                  color: '#475569',
+                  color: 'var(--color-text-base)', opacity: 0.9,
                 }}
               >
                 {t('common.cancel')}
@@ -498,7 +498,7 @@ export const SettingsScreen: React.FC = () => {
             style={{
               padding: '1rem 1.5rem',
               borderRadius: '1rem',
-              border: '2px solid #e2e8f0',
+              border: '2px solid var(--color-card-border)',
               background: settings.soundEnabled ? '#1B54A8' : 'white',
               color: settings.soundEnabled ? 'white' : '#475569',
               cursor: 'pointer',
@@ -600,7 +600,7 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p
             style={{
-              color: '#475569',
+              color: 'var(--color-text-base)', opacity: 0.9,
               marginBottom: '1.25rem',
               fontFamily: 'system-ui, sans-serif',
               lineHeight: 1.6,
@@ -642,12 +642,12 @@ export const SettingsScreen: React.FC = () => {
               <Mic size={20} aria-hidden="true" /> {t('settings.voice.upload')}
             </button>
             {voiceStatus === 'uploading' && (
-              <span role="status" style={{ alignSelf: 'center', color: '#475569' }}>
+              <span role="status" style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}>
                 {t('settings.voice.uploading')}
               </span>
             )}
             {voiceStatus === 'processing' && (
-              <span role="status" style={{ alignSelf: 'center', color: '#475569' }}>
+              <span role="status" style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}>
                 {t('settings.voice.processing')}
               </span>
             )}
@@ -701,7 +701,7 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p
             style={{
-              color: '#475569',
+              color: 'var(--color-text-base)', opacity: 0.9,
               marginBottom: '1.25rem',
               fontFamily: 'system-ui, sans-serif',
               lineHeight: 1.6,
@@ -760,7 +760,7 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p
             style={{
-              color: '#475569',
+              color: 'var(--color-text-base)', opacity: 0.9,
               marginBottom: '1.25rem',
               fontFamily: 'system-ui, sans-serif',
               lineHeight: 1.6,
@@ -780,7 +780,7 @@ export const SettingsScreen: React.FC = () => {
             }}
           >
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
                 Iluminação
               </span>
               <select
@@ -794,7 +794,7 @@ export const SettingsScreen: React.FC = () => {
                 style={{
                   padding: '0.75rem',
                   borderRadius: '0.75rem',
-                  border: '2px solid #e2e8f0',
+                  border: '2px solid var(--color-card-border)',
                   fontSize: '0.95rem',
                 }}
               >
@@ -804,7 +804,7 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
                 Movimento da cabeça
               </span>
               <select
@@ -818,7 +818,7 @@ export const SettingsScreen: React.FC = () => {
                 style={{
                   padding: '0.75rem',
                   borderRadius: '0.75rem',
-                  border: '2px solid #e2e8f0',
+                  border: '2px solid var(--color-card-border)',
                   fontSize: '0.95rem',
                 }}
               >
@@ -828,7 +828,7 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
                 Óculos
               </span>
               <select
@@ -839,7 +839,7 @@ export const SettingsScreen: React.FC = () => {
                 style={{
                   padding: '0.75rem',
                   borderRadius: '0.75rem',
-                  border: '2px solid #e2e8f0',
+                  border: '2px solid var(--color-card-border)',
                   fontSize: '0.95rem',
                 }}
               >
@@ -849,7 +849,7 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: '#334155' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
                 Sessão (min)
               </span>
               <select
@@ -863,7 +863,7 @@ export const SettingsScreen: React.FC = () => {
                 style={{
                   padding: '0.75rem',
                   borderRadius: '0.75rem',
-                  border: '2px solid #e2e8f0',
+                  border: '2px solid var(--color-card-border)',
                   fontSize: '0.95rem',
                 }}
               >
@@ -930,7 +930,7 @@ export const SettingsScreen: React.FC = () => {
               marginTop: '1.25rem',
               padding: '1rem 1.25rem',
               background: 'rgba(255,255,255,0.6)',
-              border: '1px solid #e2e8f0',
+              border: '1px solid var(--color-card-border)',
               borderRadius: '1rem',
               display: 'flex',
               alignItems: 'center',
@@ -939,13 +939,13 @@ export const SettingsScreen: React.FC = () => {
             }}
           >
             <div>
-              <div style={{ fontWeight: 700, color: '#334155' }}>
+              <div style={{ fontWeight: 700, color: 'var(--color-text-base)', opacity: 0.9 }}>
                 Recalibração implícita
               </div>
               <div
                 style={{
                   fontSize: '0.85rem',
-                  color: '#64748b',
+                  color: 'var(--color-text-base)', opacity: 0.8,
                   fontFamily: 'system-ui, sans-serif',
                 }}
               >
@@ -998,9 +998,9 @@ export const SettingsScreen: React.FC = () => {
             style={{
               padding: '1rem 1.5rem',
               borderRadius: '1rem',
-              border: '2px solid #e2e8f0',
-              background: 'white',
-              color: '#334155',
+              border: '2px solid var(--color-card-border)',
+              background: 'var(--color-card-bg)',
+              color: 'var(--color-text-base)', opacity: 0.9,
               fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',

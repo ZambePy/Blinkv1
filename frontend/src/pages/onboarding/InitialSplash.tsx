@@ -12,7 +12,7 @@ export const InitialSplash: React.FC = () => {
       aria-labelledby="splash-title"
       style={{
         minHeight: '100vh',
-        background: '#ffffff',
+        background: 'var(--color-bg-base)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -69,7 +69,7 @@ export const InitialSplash: React.FC = () => {
             id="splash-title"
             style={{
               fontSize: '2.2rem',
-              color: '#0f172a',
+              color: 'var(--color-text-base)',
               fontWeight: 800,
               margin: 0,
               lineHeight: 1.2,
@@ -77,7 +77,7 @@ export const InitialSplash: React.FC = () => {
           >
             Tecnologia assistiva pelo olhar
           </h1>
-          <p style={{ color: '#64748b', fontSize: '1.25rem', margin: 0, fontWeight: 500 }}>
+          <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0, fontWeight: 500 }}>
             Comunicação e autonomia sem barreiras.
           </p>
         </div>

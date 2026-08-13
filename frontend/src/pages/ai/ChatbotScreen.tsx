@@ -88,7 +88,7 @@ export const ChatbotScreen: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              background: 'white',
+              background: 'var(--color-card-bg)',
               padding: '0.5rem 1rem',
               borderRadius: '1rem',
               boxShadow: '0 4px 12px rgba(0,0,0,0.05)',
@@ -167,7 +167,7 @@ export const ChatbotScreen: React.FC = () => {
           {isLoading && (
             <div
               role="status"
-              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: '#475569' }}
+              style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-text-base)', opacity: 0.9 }}
             >
               <Bot size={20} aria-hidden="true" /> Digitando…
             </div>
@@ -191,7 +191,7 @@ export const ChatbotScreen: React.FC = () => {
               padding: '1.25rem',
               borderRadius: '1.5rem',
               border: '2px solid transparent',
-              background: 'white',
+              background: 'var(--color-card-bg)',
               fontSize: '1.1rem',
               outline: 'none',
               boxShadow: '0 4px 16px rgba(0,0,0,0.05)',

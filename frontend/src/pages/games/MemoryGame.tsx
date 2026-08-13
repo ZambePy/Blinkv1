@@ -88,7 +88,7 @@ export const MemoryGame: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             gap: '0.5rem',
-            background: 'white',
+            background: 'var(--color-card-bg)',
             padding: '0.5rem 1rem',
             borderRadius: '1rem',
             color: '#166534',

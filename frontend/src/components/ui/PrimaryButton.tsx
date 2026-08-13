@@ -13,10 +13,10 @@ const styles: Record<Required<PrimaryButtonProps>['variant'], React.CSSPropertie
     border: 'none',
   },
   secondary: {
-    background: 'rgba(255, 255, 255, 0.9)',
-    color: '#334155',
-    border: '1px solid #cbd5e1',
-    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+    background: 'var(--color-card-bg)',
+    color: 'var(--color-text-base)',
+    border: '1px solid var(--color-card-border)',
+    boxShadow: '0 2px 8px var(--color-card-shadow)',
   },
   danger: {
     background: 'linear-gradient(135deg, #dc2626 0%, #ef4444 100%)',

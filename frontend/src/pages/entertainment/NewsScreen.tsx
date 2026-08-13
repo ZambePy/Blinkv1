@@ -36,7 +36,7 @@ export const NewsScreen: React.FC = () => {
           id="news-title"
           style={{
             fontSize: '2rem',
-            color: '#0f172a',
+            color: 'var(--color-text-base)',
             margin: 0,
             fontWeight: 800,
             display: 'flex',
@@ -65,7 +65,7 @@ export const NewsScreen: React.FC = () => {
             <article
               aria-labelledby={`news-${item.id}-title`}
               style={{
-                background: 'white',
+                background: 'var(--color-card-bg)',
                 padding: '2rem',
                 borderRadius: '1.5rem',
                 boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
@@ -77,7 +77,7 @@ export const NewsScreen: React.FC = () => {
               >
                 {item.title}
               </h2>
-              <p style={{ fontSize: '1.25rem', color: '#334155', lineHeight: 1.6 }}>
+              <p style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.9, lineHeight: 1.6 }}>
                 {item.summary}
               </p>
               <div style={{ marginTop: '1.5rem', display: 'inline-block' }}>

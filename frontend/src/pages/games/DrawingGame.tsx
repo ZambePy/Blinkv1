@@ -88,7 +88,7 @@ export const DrawingGame: React.FC = () => {
         display: 'flex',
         flexDirection: 'column',
         height: '100vh',
-        backgroundColor: '#f8fafc',
+        backgroundColor: 'var(--color-bg-base)',
       }}
     >
       <div
@@ -97,7 +97,7 @@ export const DrawingGame: React.FC = () => {
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'space-between',
-          background: 'white',
+          background: 'var(--color-card-bg)',
           boxShadow: '0 2px 10px rgba(0,0,0,0.05)',
           zIndex: 10,
           gap: '1rem',
@@ -206,7 +206,7 @@ export const DrawingGame: React.FC = () => {
               background: 'rgba(255,255,255,0.85)',
               padding: '0.5rem 1rem',
               borderRadius: '1rem',
-              color: '#334155',
+              color: 'var(--color-text-base)', opacity: 0.9,
               fontWeight: 700,
             }}
           >

@@ -54,10 +54,10 @@ export const LoginScreen: React.FC = () => {
             style={{ width: 140, height: 'auto', marginBottom: '0.25rem' }}
             onError={(e) => (e.currentTarget.style.display = 'none')}
           />
-          <h1 id="login-title" style={{ fontSize: '1.85rem', color: '#0f172a', fontWeight: 800, margin: 0 }}>
+          <h1 id="login-title" style={{ fontSize: '1.85rem', color: 'var(--color-text-base)', fontWeight: 800, margin: 0 }}>
             Acessar Plataforma
           </h1>
-          <p style={{ color: '#64748b', fontSize: '1rem', margin: 0, lineHeight: 1.5 }}>
+          <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1rem', margin: 0, lineHeight: 1.5 }}>
             Identifique-se para carregar suas configurações e atuar com olhar
           </p>
         </div>
@@ -70,7 +70,7 @@ export const LoginScreen: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <label
               htmlFor="login-email"
-              style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155' }}
+              style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-base)', opacity: 0.9 }}
             >
               E-mail ou Usuário
             </label>
@@ -78,7 +78,7 @@ export const LoginScreen: React.FC = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                background: '#f8fafc',
+                background: 'var(--color-bg-base)',
                 border: '1px solid #cbd5e1',
                 borderRadius: '1rem',
                 padding: '0 1rem',
@@ -101,7 +101,7 @@ export const LoginScreen: React.FC = () => {
                   fontSize: '1.05rem',
                   width: '100%',
                   outline: 'none',
-                  color: '#0f172a',
+                  color: 'var(--color-text-base)',
                 }}
               />
             </div>
@@ -110,7 +110,7 @@ export const LoginScreen: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
             <label
               htmlFor="login-password"
-              style={{ fontSize: '0.95rem', fontWeight: 700, color: '#334155' }}
+              style={{ fontSize: '0.95rem', fontWeight: 700, color: 'var(--color-text-base)', opacity: 0.9 }}
             >
               Senha de Acesso
             </label>
@@ -118,7 +118,7 @@ export const LoginScreen: React.FC = () => {
               style={{
                 display: 'flex',
                 alignItems: 'center',
-                background: '#f8fafc',
+                background: 'var(--color-bg-base)',
                 border: '1px solid #cbd5e1',
                 borderRadius: '1rem',
                 padding: '0 1rem',
@@ -141,7 +141,7 @@ export const LoginScreen: React.FC = () => {
                   fontSize: '1.05rem',
                   width: '100%',
                   outline: 'none',
-                  color: '#0f172a',
+                  color: 'var(--color-text-base)',
                 }}
               />
             </div>

@@ -72,7 +72,7 @@ export const CaregiverDashboard: React.FC = () => {
     <main
       role="main"
       aria-labelledby="caregiver-title"
-      style={{ minHeight: '100vh', backgroundColor: '#f8fafc', padding: '2rem' }}
+      style={{ minHeight: '100vh', backgroundColor: 'var(--color-bg-base)', padding: '2rem' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2rem', gap: '1rem' }}>
         <BackButton />
@@ -94,7 +94,7 @@ export const CaregiverDashboard: React.FC = () => {
         <section
           aria-labelledby="tasks-title"
           style={{
-            background: 'white',
+            background: 'var(--color-card-bg)',
             padding: '2rem',
             borderRadius: '2rem',
             boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
@@ -107,7 +107,7 @@ export const CaregiverDashboard: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              color: '#334155',
+              color: 'var(--color-text-base)', opacity: 0.9,
               marginTop: 0,
             }}
           >
@@ -170,7 +170,7 @@ export const CaregiverDashboard: React.FC = () => {
         <section
           aria-labelledby="diary-title"
           style={{
-            background: 'white',
+            background: 'var(--color-card-bg)',
             padding: '2rem',
             borderRadius: '2rem',
             boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
@@ -183,7 +183,7 @@ export const CaregiverDashboard: React.FC = () => {
               display: 'flex',
               alignItems: 'center',
               gap: '0.5rem',
-              color: '#334155',
+              color: 'var(--color-text-base)', opacity: 0.9,
               marginTop: 0,
             }}
           >
@@ -193,7 +193,7 @@ export const CaregiverDashboard: React.FC = () => {
           <div style={{ marginTop: '2rem' }}>
             <label
               htmlFor="pain-slider"
-              style={{ fontSize: '1.15rem', fontWeight: 600, color: '#475569' }}
+              style={{ fontSize: '1.15rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}
             >
               Nível de Dor Atual: <strong>{painLevel}</strong>
             </label>
@@ -227,7 +227,7 @@ export const CaregiverDashboard: React.FC = () => {
               style={{
                 fontSize: '1.15rem',
                 fontWeight: 600,
-                color: '#475569',
+                color: 'var(--color-text-base)', opacity: 0.9,
                 marginBottom: '0.75rem',
               }}
             >
@@ -313,7 +313,7 @@ export const CaregiverDashboard: React.FC = () => {
           <section
             aria-labelledby="history-title"
             style={{
-              background: 'white',
+              background: 'var(--color-card-bg)',
               padding: '2rem',
               borderRadius: '2rem',
               boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
@@ -322,7 +322,7 @@ export const CaregiverDashboard: React.FC = () => {
           >
             <h2
               id="history-title"
-              style={{ fontSize: '1.35rem', color: '#334155', marginTop: 0, marginBottom: '1rem' }}
+              style={{ fontSize: '1.35rem', color: 'var(--color-text-base)', opacity: 0.9, marginTop: 0, marginBottom: '1rem' }}
             >
               Histórico recente ({entries.length})
             </h2>
@@ -340,10 +340,10 @@ export const CaregiverDashboard: React.FC = () => {
                   key={e.timestamp}
                   style={{
                     padding: '0.75rem 1rem',
-                    background: '#f8fafc',
+                    background: 'var(--color-bg-base)',
                     borderRadius: '0.75rem',
                     fontSize: '0.9rem',
-                    color: '#475569',
+                    color: 'var(--color-text-base)', opacity: 0.9,
                     fontFamily: 'system-ui, sans-serif',
                   }}
                 >

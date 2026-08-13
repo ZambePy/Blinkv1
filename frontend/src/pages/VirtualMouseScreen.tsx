@@ -20,7 +20,7 @@ export const VirtualMouseScreen: React.FC = () => {
         role="main"
         style={{
           minHeight: '100vh',
-          background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+          background: 'var(--color-bg-base)',
           padding: '2rem 2.5rem',
         }}
       >
@@ -43,7 +43,7 @@ export const VirtualMouseScreen: React.FC = () => {
             aria-labelledby="vm-status"
             className="glass-card animate-scale-in"
             style={{
-              background: 'rgba(255, 255, 255, 0.92)',
+              background: 'var(--color-card-bg)',
               padding: '2.5rem',
               borderRadius: '2rem',
               boxShadow: '0 12px 32px rgba(27, 84, 168, 0.08)',
@@ -56,11 +56,11 @@ export const VirtualMouseScreen: React.FC = () => {
               <div>
                 <h2
                   id="vm-status"
-                  style={{ fontSize: '1.35rem', color: '#0f172a', fontWeight: 800, margin: 0 }}
+                  style={{ fontSize: '1.35rem', color: 'var(--color-text-base)', fontWeight: 800, margin: 0 }}
                 >
                   Navegação no Sistema Operacional
                 </h2>
-                <p style={{ color: '#64748b', fontSize: '0.95rem', marginTop: '0.4rem', margin: 0, lineHeight: 1.5 }}>
+                <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '0.95rem', marginTop: '0.4rem', margin: 0, lineHeight: 1.5 }}>
                   Ao ativar, o cursor do computador responderá ao ponto de foco do seu olhar.
                 </p>
               </div>
@@ -87,8 +87,8 @@ export const VirtualMouseScreen: React.FC = () => {
 
             <div
               style={{
-                background: active ? 'rgba(22, 163, 74, 0.06)' : 'rgba(241, 245, 249, 0.7)',
-                border: active ? '1px solid rgba(22, 163, 74, 0.2)' : '1px solid #e2e8f0',
+                background: active ? 'rgba(22, 163, 74, 0.06)' : 'var(--color-bg-base)',
+                border: active ? '1px solid rgba(22, 163, 74, 0.2)' : '1px solid var(--color-card-border)',
                 padding: '1.25rem 1.5rem',
                 borderRadius: '1.25rem',
                 display: 'flex',
@@ -106,7 +106,7 @@ export const VirtualMouseScreen: React.FC = () => {
                     boxShadow: active ? '0 0 10px rgba(22, 163, 74, 0.8)' : 'none',
                   }}
                 />
-                <span style={{ fontWeight: 700, color: active ? '#15803d' : '#475569', fontSize: '1rem' }}>
+                <span style={{ fontWeight: 700, color: active ? '#15803d' : 'var(--color-text-base)', fontSize: '1rem' }}>
                   {active ? 'Mouse Virtual em Execução' : 'Mouse Virtual Desativado'}
                 </span>
               </div>
@@ -130,8 +130,8 @@ export const VirtualMouseScreen: React.FC = () => {
             style={{
               padding: '1.5rem 1.75rem',
               borderRadius: '1.5rem',
-              background: 'rgba(255, 255, 255, 0.8)',
-              border: '1px solid rgba(27, 84, 168, 0.15)',
+              background: 'var(--color-card-bg)',
+              border: '1px solid var(--color-card-border)',
               display: 'flex',
               flexDirection: 'column',
               gap: '0.5rem',
@@ -143,7 +143,7 @@ export const VirtualMouseScreen: React.FC = () => {
                 Orientações de Uso Assistivo
               </h3>
             </div>
-            <p style={{ color: '#475569', fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
+            <p style={{ color: 'var(--color-text-base)', opacity: 0.9, fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
               O rastreamento converte as coordenadas de seu olho diretamente no ponteiro do mouse do sistema Windows. Para pausar a qualquer momento, olhe para o topo da tela ou utilize o atalho de emergência.
             </p>
           </section>

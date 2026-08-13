@@ -54,7 +54,7 @@ export const PictogramScreen: React.FC = () => {
         aria-live="polite"
         aria-label="Pictograma selecionado"
         style={{
-          background: 'white',
+          background: 'var(--color-card-bg)',
           borderRadius: '1.5rem',
           padding: '1.5rem',
           marginBottom: '2rem',
@@ -88,7 +88,7 @@ export const PictogramScreen: React.FC = () => {
             aria-pressed={selectedText === pic.label}
             onClick={() => setSelectedText(pic.label)}
             style={{
-              background: 'white',
+              background: 'var(--color-card-bg)',
               border: `4px solid ${pic.color}40`,
               borderRadius: '2rem',
               display: 'flex',
@@ -120,7 +120,7 @@ export const PictogramScreen: React.FC = () => {
           >
             <pic.Icon size={64} aria-hidden="true" />
             <span
-              style={{ fontSize: '1.5rem', fontWeight: 800, color: '#334155', textAlign: 'center' }}
+              style={{ fontSize: '1.5rem', fontWeight: 800, color: 'var(--color-text-base)', opacity: 0.9, textAlign: 'center' }}
             >
               {pic.label}
             </span>

@@ -73,7 +73,7 @@ export const KeyboardScreen: React.FC = () => {
         width: '100vw',
         display: 'flex',
         flexDirection: 'column',
-        background: '#ffffff',
+        background: 'var(--color-bg-base)',
         padding: '2rem',
         gap: '2rem',
         fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
@@ -88,15 +88,15 @@ export const KeyboardScreen: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: '#f1f5f9',
-            border: 'none',
+            background: 'var(--color-card-bg)',
+            border: '2px solid var(--color-card-border)',
             borderRadius: '1.5rem',
-            color: '#475569',
+            color: 'var(--color-text-base)', opacity: 0.9,
             cursor: 'pointer',
             transition: 'all 0.2s',
           }}
-          onMouseOver={(e) => { e.currentTarget.style.background = '#e2e8f0'; }}
-          onMouseOut={(e) => { e.currentTarget.style.background = '#f1f5f9'; }}
+          onMouseOver={(e) => { e.currentTarget.style.background = 'var(--color-bg-base)'; }}
+          onMouseOut={(e) => { e.currentTarget.style.background = 'var(--color-card-bg)'; }}
         >
           <ArrowLeft size={48} />
         </button>
@@ -107,12 +107,12 @@ export const KeyboardScreen: React.FC = () => {
             display: 'flex',
             alignItems: 'center',
             padding: '0 2rem',
-            background: 'white',
+            background: 'var(--color-card-bg)',
             borderRadius: '1.5rem',
-            border: '2px solid #e2e8f0',
+            border: '2px solid var(--color-card-border)',
             fontSize: '3rem',
             fontWeight: 700,
-            color: text ? '#0f172a' : '#94a3b8',
+            color: text ? 'var(--color-text-base)' : 'var(--color-card-border)',
             overflow: 'hidden',
             whiteSpace: 'nowrap',
           }}
@@ -156,13 +156,13 @@ export const KeyboardScreen: React.FC = () => {
                   onClick={() => append(k)}
                   style={{
                     flex: 1,
-                    background: lastPressed === k ? '#e8f0fb' : 'white',
+                    background: lastPressed === k ? 'var(--color-primary-light)' : 'var(--color-card-bg)',
                     border: '2px solid',
-                    borderColor: lastPressed === k ? '#1B54A8' : '#e2e8f0',
+                    borderColor: lastPressed === k ? 'var(--color-primary)' : 'var(--color-card-border)',
                     borderRadius: '1rem',
                     fontSize: '3rem',
                     fontWeight: 700,
-                    color: lastPressed === k ? '#1B54A8' : '#1e293b',
+                    color: lastPressed === k ? 'var(--color-primary)' : 'var(--color-text-base)',
                     cursor: 'pointer',
                     transition: 'all 0.1s',
                     transform: lastPressed === k ? 'scale(0.96)' : 'scale(1)',
@@ -170,8 +170,8 @@ export const KeyboardScreen: React.FC = () => {
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
-                  onMouseOver={(e) => { e.currentTarget.style.borderColor = '#1B54A8'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.borderColor = lastPressed === k ? '#1B54A8' : '#e2e8f0'; }}
+                  onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
+                  onMouseOut={(e) => { e.currentTarget.style.borderColor = lastPressed === k ? 'var(--color-primary)' : 'var(--color-card-border)'; }}
                 >
                   {k}
                 </button>
@@ -186,10 +186,10 @@ export const KeyboardScreen: React.FC = () => {
             onClick={backspace}
             style={{
               flex: 1,
-              background: '#fef2f2',
-              border: '2px solid #fca5a5',
+              background: lastPressed === 'backspace' ? '#ef4444' : 'transparent',
+              border: '2px solid #ef4444',
               borderRadius: '1.5rem',
-              color: '#ef4444',
+              color: lastPressed === 'backspace' ? 'white' : '#ef4444',
               fontSize: '1.5rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -210,10 +210,10 @@ export const KeyboardScreen: React.FC = () => {
             onClick={clear}
             style={{
               flex: 1,
-              background: 'white',
-              border: '2px solid #e2e8f0',
+              background: 'var(--color-card-bg)',
+              border: '2px solid var(--color-card-border)',
               borderRadius: '1.5rem',
-              color: '#64748b',
+              color: 'var(--color-text-base)', opacity: 0.8,
               fontSize: '1.25rem',
               fontWeight: 700,
               cursor: 'pointer',
@@ -232,8 +232,8 @@ export const KeyboardScreen: React.FC = () => {
             onClick={space}
             style={{
               flex: 2,
-              background: '#f8fafc',
-              border: '2px solid #e2e8f0',
+              background: 'var(--color-bg-base)',
+              border: '2px solid var(--color-card-border)',
               borderRadius: '1.5rem',
               color: '#1B54A8',
               fontSize: '1.5rem',

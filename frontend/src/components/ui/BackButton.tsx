@@ -12,7 +12,7 @@ export const BackButton: React.FC = () => {
         alignItems: 'center',
         gap: '0.5rem',
         padding: '0.75rem 1.5rem',
-        background: 'white',
+        background: 'var(--color-card-bg)',
         borderRadius: '1rem',
         color: '#1B54A8',
         fontSize: '1rem',

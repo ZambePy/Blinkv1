@@ -56,7 +56,7 @@ export const IAmOkScreen: React.FC = () => {
 
       <div
         style={{
-          background: 'white',
+          background: 'var(--color-card-bg)',
           padding: '4rem',
           borderRadius: '2rem',
           boxShadow: '0 20px 40px rgba(0,0,0,0.05)',
@@ -86,7 +86,7 @@ export const IAmOkScreen: React.FC = () => {
           </div>
         ) : (
           <div style={{ marginTop: '2rem' }}>
-            <p style={{ fontSize: '1.5rem', color: '#475569' }}>
+            <p style={{ fontSize: '1.5rem', color: 'var(--color-text-base)', opacity: 0.9 }}>
               Enviando notificação automática em:
             </p>
             <div

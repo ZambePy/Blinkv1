@@ -31,7 +31,7 @@ export const GalleryScreen: React.FC = () => {
     <main
       role="main"
       aria-labelledby="gallery-title"
-      style={{ minHeight: '100vh', backgroundColor: '#f8fafc', padding: '2rem' }}
+      style={{ minHeight: '100vh', backgroundColor: 'var(--color-bg-base)', padding: '2rem' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2rem', gap: '1rem' }}>
         <BackButton />

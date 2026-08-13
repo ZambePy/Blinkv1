@@ -75,13 +75,13 @@ export const MyOptionsScreen: React.FC = () => {
         style={{
           maxWidth: 900,
           margin: '0 auto',
-          background: 'white',
+          background: 'var(--color-card-bg)',
           padding: '2rem',
           borderRadius: '1.5rem',
           boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
         }}
       >
-        <h2 id="add-fav" style={{ fontSize: '1.25rem', color: '#0f172a', margin: '0 0 1rem 0' }}>
+        <h2 id="add-fav" style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', margin: '0 0 1rem 0' }}>
           Adicionar frase favorita
         </h2>
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
@@ -101,7 +101,7 @@ export const MyOptionsScreen: React.FC = () => {
               minWidth: 200,
               padding: '1rem 1.25rem',
               borderRadius: '1rem',
-              border: '2px solid #e2e8f0',
+              border: '2px solid var(--color-card-border)',
               fontSize: '1.1rem',
               fontFamily: 'system-ui, sans-serif',
             }}
@@ -125,7 +125,7 @@ export const MyOptionsScreen: React.FC = () => {
       >
         <h2
           id="fav-list-title"
-          style={{ fontSize: '1.25rem', color: '#0f172a', margin: '0 0 1rem 0.5rem' }}
+          style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', margin: '0 0 1rem 0.5rem' }}
         >
           Meus favoritos ({favorites.length})
         </h2>
@@ -135,9 +135,9 @@ export const MyOptionsScreen: React.FC = () => {
             role="status"
             style={{
               padding: '2rem',
-              background: 'white',
+              background: 'var(--color-card-bg)',
               borderRadius: '1.5rem',
-              color: '#64748b',
+              color: 'var(--color-text-base)', opacity: 0.8,
               textAlign: 'center',
               fontFamily: 'system-ui, sans-serif',
             }}
@@ -158,7 +158,7 @@ export const MyOptionsScreen: React.FC = () => {
               <li
                 key={fav.id}
                 style={{
-                  background: 'white',
+                  background: 'var(--color-card-bg)',
                   padding: '1rem 1.25rem',
                   borderRadius: '1rem',
                   boxShadow: '0 4px 12px rgba(0,0,0,0.04)',

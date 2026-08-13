@@ -108,7 +108,7 @@ export const WelcomeScreen: React.FC = () => {
           <p
             style={{
               fontSize: '1.1rem',
-              color: '#475569',
+              color: 'var(--color-text-base)', opacity: 0.9,
               fontWeight: 500,
               fontFamily: 'system-ui, sans-serif',
             }}

@@ -1,7 +1,8 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, Sun, Ruler, Lightbulb, Activity } from 'lucide-react';
+import { CheckCircle2, Eye, Ruler, Lightbulb } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
+import { BackButton } from '../../components/ui/BackButton';
 
 // Grade simétrica de 13 pontos (Sprint 1.3). Quatro em cada linha (10, 37, 63,
 // 90) mais o centro (50, 50). Substitui a grade antiga 4-5-3 + diagonal, que
@@ -24,7 +25,7 @@ const CALIBRATION_POINTS = [
 
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
-  const { calibration, state } = useGaze();
+  const { calibration } = useGaze();
 
   const [stage, setStage] = useState<'pre-calibration' | 'tutorial' | 'calibrating' | 'finished' | 'transitioning'>('pre-calibration');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -137,7 +138,7 @@ export const CalibrationCheck: React.FC = () => {
       <div style={{
         position: 'fixed',
         inset: 0,
-        backgroundColor: '#ffffff',
+        backgroundColor: 'var(--color-bg-base)',
         zIndex: 9999,
         display: 'flex',
         alignItems: 'center',
@@ -147,7 +148,7 @@ export const CalibrationCheck: React.FC = () => {
         <div style={{
           width: '100vw',
           height: '100vh',
-          background: 'radial-gradient(circle, #e8f0fb 0%, #ffffff 100%)',
+          background: 'radial-gradient(circle, var(--color-primary-light) 0%, var(--color-bg-base) 100%)',
           animation: 'expandRipple 0.8s ease-out forwards'
         }} />
         <style>{`
@@ -292,7 +293,7 @@ export const CalibrationCheck: React.FC = () => {
                       <div style={{ position: 'absolute', width: 50, height: 50, borderRadius: '50%', border: '1px dashed rgba(27, 84, 168, 0.6)', animation: 'spin 4s linear infinite reverse' }} />
                       {/* Ponto Central Pulsante */}
                       <div style={{ width: 28, height: 28, borderRadius: '50%', background: '#1B54A8', boxShadow: '0 0 25px rgba(27, 84, 168, 0.9), inset 0 0 8px rgba(255,255,255,0.5)', animation: 'pulseGlow 1s infinite alternate' }} />
-                      <div style={{ position: 'absolute', width: 8, height: 8, borderRadius: '50%', background: '#ffffff', opacity: 0.9 }} />
+                      <div style={{ position: 'absolute', width: 8, height: 8, borderRadius: '50%', background: 'var(--color-bg-base)', opacity: 0.9 }} />
                     </div>
                   )}
 
@@ -326,7 +327,7 @@ export const CalibrationCheck: React.FC = () => {
                 <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0 }}>Seu olhar foi calibrado com sucesso.</p>
               </div>
               <div style={{ display: 'flex', gap: '1.5rem', width: '100%', marginTop: '1rem', justifyContent: 'center' }}>
-                <button type="button" onClick={handleStart} style={{ padding: '1.2rem 2.5rem', borderRadius: '2rem', border: '2px solid #e2e8f0', background: 'transparent', color: '#64748b', fontSize: '1.1rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#334155'} onMouseOut={(e) => e.currentTarget.style.color = '#64748b'}>
+                <button type="button" onClick={handleStart} style={{ padding: '1.2rem 2.5rem', borderRadius: '2rem', border: '2px solid var(--color-card-border)', background: 'transparent', color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.1rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#334155'} onMouseOut={(e) => e.currentTarget.style.color = '#64748b'}>
                   Refazer
                 </button>
                 <button type="button" onClick={finishAndTransition} style={{ padding: '1.2rem 3.5rem', borderRadius: '2rem', border: 'none', background: '#1B54A8', color: 'white', fontSize: '1.25rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 12px 24px rgba(27, 84, 168, 0.3)', transition: 'all 0.2s' }} onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-2px)' }} onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}>

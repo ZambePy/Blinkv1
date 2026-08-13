@@ -64,10 +64,10 @@ export const ProfileSelect: React.FC = () => {
               <Users size={18} color="#1B54A8" />
               <span>Selecione seu Perfil</span>
             </div>
-            <h1 style={{ fontSize: '2.2rem', color: '#0f172a', fontWeight: 800, margin: 0 }}>
+            <h1 style={{ fontSize: '2.2rem', color: 'var(--color-text-base)', fontWeight: 800, margin: 0 }}>
               Quem vai navegar com o olhar hoje?
             </h1>
-            <p style={{ color: '#64748b', fontSize: '1.05rem', margin: 0, maxWidth: 500 }}>
+            <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.05rem', margin: 0, maxWidth: 500 }}>
               Selecione o perfil do usuário para carregar suas calibrações e vocabulários salvos.
             </p>
           </div>
@@ -128,7 +128,7 @@ export const ProfileSelect: React.FC = () => {
                   </div>
                 )}
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                  <span style={{ fontSize: '1.25rem', fontWeight: 800, color: '#0f172a' }}>
+                  <span style={{ fontSize: '1.25rem', fontWeight: 800, color: 'var(--color-text-base)' }}>
                     {p.name}
                   </span>
                   <span

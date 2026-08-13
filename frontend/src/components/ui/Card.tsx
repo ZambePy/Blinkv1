@@ -23,8 +23,8 @@ export const Card: React.FC<CardProps> = ({
     disabled={disabled}
     className="action-card glass-card"
     style={{
-      background: 'rgba(255, 255, 255, 0.92)',
-      border: '1px solid rgba(226, 232, 240, 0.9)',
+      background: 'var(--color-card-bg)',
+      border: '1px solid var(--color-card-border)',
       borderRadius: '1.5rem',
       padding: '2rem 1.5rem',
       display: 'flex',
@@ -57,7 +57,7 @@ export const Card: React.FC<CardProps> = ({
         style={{
           fontSize: '1.1rem',
           fontWeight: 800,
-          color: '#0f172a',
+          color: 'var(--color-text-base)',
           textAlign: 'center',
           lineHeight: 1.3,
         }}
@@ -68,7 +68,8 @@ export const Card: React.FC<CardProps> = ({
         <span
           style={{
             fontSize: '0.85rem',
-            color: '#64748b',
+            color: 'var(--color-text-base)',
+            opacity: 0.8,
             fontWeight: 500,
             textAlign: 'center',
             lineHeight: 1.4,

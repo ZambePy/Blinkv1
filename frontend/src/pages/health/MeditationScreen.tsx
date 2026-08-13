@@ -148,7 +148,7 @@ export const MeditationScreen: React.FC = () => {
             marginTop: '4rem',
             padding: '1.5rem 4rem',
             fontSize: '1.5rem',
-            background: 'white',
+            background: 'var(--color-card-bg)',
             color: '#86198f',
             border: '2px solid #c026d3',
             borderRadius: '1.5rem',

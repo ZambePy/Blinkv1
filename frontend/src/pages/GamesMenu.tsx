@@ -51,7 +51,7 @@ export const GamesMenu: React.FC = () => {
       aria-labelledby="games-title"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #eef2ff 0%, #e0e7ff 50%, #ede9fe 100%)',
+        background: 'var(--color-bg-base)',
         display: 'flex',
         flexDirection: 'column',
         padding: '2rem',
@@ -87,7 +87,7 @@ export const GamesMenu: React.FC = () => {
         <Target size={32} color="#4f46e5" aria-hidden="true" />
         <h1
           id="games-title"
-          style={{ fontSize: '1.5rem', fontWeight: 700, color: '#312e81', margin: 0 }}
+          style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-base)', margin: 0 }}
         >
           Mini-Jogos com Eye Tracking
         </h1>
@@ -114,19 +114,19 @@ export const GamesMenu: React.FC = () => {
             onClick={() => navigate('/menu')}
             aria-label="Voltar ao menu principal"
             className="action-card glass"
-            style={{ border: '2px solid rgba(255,255,255,0.7)', width: '100%' }}
+            style={{ border: '2px solid var(--color-card-border)', width: '100%', background: 'var(--color-card-bg)' }}
           >
             <div
               className="card-icon"
               aria-hidden="true"
               style={{
-                background: 'linear-gradient(135deg, #e2e8f0, #f8fafc)',
-                boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+                background: 'var(--color-bg-base)',
+                boxShadow: '0 8px 24px var(--color-card-shadow)',
               }}
             >
-              <ArrowLeft size={56} color="#334155" strokeWidth={2} />
+              <ArrowLeft size={56} color="var(--color-text-base)" strokeWidth={2} />
             </div>
-            <span style={{ fontSize: '1.5rem', fontWeight: 700, color: '#1e293b' }}>Voltar</span>
+            <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-base)' }}>Voltar</span>
           </button>
         </li>
 

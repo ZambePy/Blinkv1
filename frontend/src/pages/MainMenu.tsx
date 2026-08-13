@@ -63,7 +63,7 @@ export const MainMenu: React.FC = () => {
         style={{
           width: '100vw',
           height: '100vh',
-          background: '#f8fafc',
+          background: 'var(--color-bg-base)',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -87,10 +87,10 @@ export const MainMenu: React.FC = () => {
         >
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', padding: '0 1rem' }}>
             <div>
-              <h1 style={{ fontSize: '3rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.5rem 0', letterSpacing: '-0.02em' }}>
+              <h1 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0', letterSpacing: '-0.02em' }}>
                 O que você deseja fazer?
               </h1>
-              <p style={{ fontSize: '1.4rem', color: '#64748b', margin: 0, fontWeight: 500 }}>
+              <p style={{ fontSize: '1.4rem', color: 'var(--color-text-base)', opacity: 0.8, margin: 0, fontWeight: 500 }}>
                 Olhe para o bloco desejado para selecioná-lo.
               </p>
             </div>
@@ -98,14 +98,15 @@ export const MainMenu: React.FC = () => {
             <button
               onClick={() => navigate('/login')}
               style={{
-                background: 'white',
-                border: '2px solid #e2e8f0',
+                background: 'var(--color-card-bg)',
+                border: '2px solid var(--color-card-border)',
                 borderRadius: '1.5rem',
                 padding: '1rem 1.5rem',
                 display: 'flex',
                 alignItems: 'center',
                 gap: '0.75rem',
-                color: '#64748b',
+                color: 'var(--color-text-base)',
+                opacity: 0.8,
                 fontWeight: 700,
                 fontSize: '1.1rem',
                 cursor: 'pointer',
@@ -117,9 +118,9 @@ export const MainMenu: React.FC = () => {
                 e.currentTarget.style.background = '#fef2f2';
               }}
               onMouseOut={(e) => {
-                e.currentTarget.style.color = '#64748b';
-                e.currentTarget.style.borderColor = '#e2e8f0';
-                e.currentTarget.style.background = 'white';
+                e.currentTarget.style.color = 'var(--color-text-base)';
+                e.currentTarget.style.borderColor = 'var(--color-card-border)';
+                e.currentTarget.style.background = 'var(--color-card-bg)';
               }}
             >
               <LogOut size={24} /> Sair
@@ -141,15 +142,15 @@ export const MainMenu: React.FC = () => {
                 className="animate-fade-in-up"
                 style={{
                   animationDelay: `${idx * 0.1}s`,
-                  background: 'white',
+                  background: 'var(--color-card-bg)',
                   borderRadius: '2.5rem',
                   padding: '2.5rem 2rem',
                   display: 'flex',
                   flexDirection: 'column',
                   alignItems: 'flex-start',
                   gap: '1.5rem',
-                  border: 'none',
-                  boxShadow: '0 10px 30px rgba(0,0,0,0.04)',
+                  border: '1px solid var(--color-card-border)',
+                  boxShadow: '0 10px 30px var(--color-card-shadow)',
                   cursor: 'pointer',
                   textAlign: 'left',
                   transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s',
@@ -170,10 +171,10 @@ export const MainMenu: React.FC = () => {
                 </div>
                 
                 <div>
-                  <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: '#0f172a', margin: '0 0 0.5rem 0' }}>
+                  <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0' }}>
                     {module.title}
                   </h2>
-                  <p style={{ fontSize: '1.25rem', color: '#64748b', margin: 0, fontWeight: 500 }}>
+                  <p style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.8, margin: 0, fontWeight: 500 }}>
                     {module.description}
                   </p>
                 </div>

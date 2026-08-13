@@ -81,7 +81,7 @@ export const TutorialScreen: React.FC = () => {
       role="main"
       style={{
         minHeight: '100vh',
-        backgroundColor: '#ffffff',
+        backgroundColor: 'var(--color-bg-base)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -108,11 +108,7 @@ export const TutorialScreen: React.FC = () => {
           key={`icon-${step.id}`}
           className="animate-fade-in-up"
           style={{
-            background: '#f8fafc',
-            padding: '3.5rem',
-            borderRadius: '2rem',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.03)',
-            border: '1px solid #f1f5f9',
+            padding: '2rem',
             animationDuration: '0.6s'
           }}
         >
@@ -122,13 +118,13 @@ export const TutorialScreen: React.FC = () => {
         <div key={`text-${step.id}`} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0 2rem' }}>
           <h1
             className="animate-fade-in-up"
-            style={{ fontSize: '2.8rem', color: '#0f172a', margin: 0, fontWeight: 800, animationDelay: '0.1s', animationFillMode: 'both' }}
+            style={{ fontSize: '2.8rem', color: 'var(--color-text-base)', margin: 0, fontWeight: 800, animationDelay: '0.1s', animationFillMode: 'both' }}
           >
             {step.title}
           </h1>
           <p 
             className="animate-fade-in-up"
-            style={{ fontSize: '1.4rem', color: '#475569', lineHeight: 1.6, margin: 0, animationDelay: '0.2s', animationFillMode: 'both', maxWidth: 600 }}
+            style={{ fontSize: '1.4rem', color: 'var(--color-text-base)', opacity: 0.8, lineHeight: 1.6, margin: 0, animationDelay: '0.2s', animationFillMode: 'both', maxWidth: 600 }}
           >
             {step.description}
           </p>
@@ -163,7 +159,7 @@ export const TutorialScreen: React.FC = () => {
             onClick={isLast ? handlePrev : skipTutorial}
             style={{
               background: 'transparent',
-              color: '#64748b',
+              color: 'var(--color-text-base)', opacity: 0.8,
               border: 'none',
               padding: '1.25rem 2rem',
               borderRadius: '1.5rem',
