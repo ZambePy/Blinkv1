@@ -9,6 +9,7 @@
 
 import { mapGaze, setGazeCorrections } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
+import { USE_L2CS_ANGLES } from './l2cs/flags';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
@@ -295,10 +296,19 @@ function finishTest(
   // Exportar relatório em JSON versionável (Sprint 0). `meta` carrega a condição
   // do teste (iluminação, óculos, cabeça, minutos de sessão) para que a entrada
   // no BASELINE.md seja auto-descritiva.
+  // pipeline: reflete o que ESTAVA ativo na sessão, não o que o usuário
+  // preencheu. Essencial para A/B — a comparação (frontend/scripts/
+  // l2cs_ab_compare.mjs) usa esse campo para não trocar baseline com L2CS.
+  const pipeline = {
+    l2csEnabled: USE_L2CS_ANGLES,
+    regressor: REGRESSOR_MODE,
+  };
+
   const jsonReport = JSON.stringify({
     timestamp: new Date().toISOString(),
     resolution: `${vw}x${vh}`,
     meta: meta ?? null,
+    pipeline,
     result,
     diagnostics,
   }, null, 2);
@@ -317,7 +327,8 @@ function finishTest(
   if (meta) {
     console.log(`[accuracy] Condição: ${meta.iluminacao} | cabeça=${meta.movimentoCabeca} | óculos=${meta.oculos ? 'sim' : 'não'} | ${meta.minutosDeSessao} min`);
   }
-  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | p90=${Math.round(p90Error)}px | jitter=${jitterRMS.toFixed(1)}px | ${score}`);
+  const l2csTag = USE_L2CS_ANGLES ? '+L2CS' : '';
+  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo${l2csTag}): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | p90=${Math.round(p90Error)}px | jitter=${jitterRMS.toFixed(1)}px | ${score}`);
   for (const d of diagnostics) {
     const flag = d.error > 45 ? ' ✗' : '';
     console.log(`[accuracy]   ${d.name.padEnd(18)}: err=${Math.round(d.error)}px jitter=${d.jitterRMS.toFixed(1)}px${flag}`);

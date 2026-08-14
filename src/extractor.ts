@@ -1,3 +1,5 @@
+import { buildL2CSBlock } from './l2cs/block';
+
 export type Point3D = { x: number; y: number; z: number; visibility?: number };
 
 export interface GeometryFeatures {
@@ -293,7 +295,21 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
   return { featuresLeft, featuresRight, blinkDetected, advancedFeatures };
 }
 
-export function extractCompactFeatures(landmarks: Point3D[], faceMatrix?: Float32Array): ExtractorResult {
+// L2CS gaze data (E5/E6 do L2CS-NET.md). Interface local para evitar
+// dependência do módulo l2cs — o extractor permanece agnóstico. Quem passar
+// o objeto (engine.ts) sabe quando o gaze é válido e quando não é (cache
+// stale, worker não pronto, etc).
+export interface L2CSGazeInput {
+  yaw: number;    // rad
+  pitch: number;  // rad
+  valid: boolean; // false → bloco de 7 zeros
+}
+
+export function extractCompactFeatures(
+  landmarks: Point3D[],
+  faceMatrix?: Float32Array,
+  l2csGaze?: L2CSGazeInput | null,
+): ExtractorResult {
   const baseResult = extractEyeFeatures(landmarks, faceMatrix);
   if (baseResult.featuresLeft.length === 0) return baseResult;
 
@@ -378,6 +394,23 @@ export function extractCompactFeatures(landmarks: Point3D[], faceMatrix?: Float3
 
   const compLeft = getEyeCompact(468, [469, 470, 471, 472], 133, 33, 159, 145, pose);
   const compRight = getEyeCompact(473, [474, 475, 476, 477], 362, 263, 386, 374, pose);
+
+  // E5/E6 do L2CS-NET.md — quando o engine passa gaze, ambos olhos ganham o
+  // mesmo bloco de 7 dims (angulares são face-level, não per-eye). Se `null`
+  // ou undefined, nada é anexado — mantém backward-compat com callers que não
+  // participam do pipeline L2CS (parity test, calibrações antigas, etc).
+  if (l2csGaze != null) {
+    const block = buildL2CSBlock(
+      l2csGaze.yaw,
+      l2csGaze.pitch,
+      l2csGaze.valid,
+      face.cameraDistanceEstimate,
+    );
+    for (let i = 0; i < block.length; i++) {
+      compLeft.push(block[i]);
+      compRight.push(block[i]);
+    }
+  }
 
   return {
     featuresLeft: compLeft,

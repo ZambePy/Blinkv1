@@ -62,8 +62,17 @@ export class OneEuroFilter {
     this.lasttime = timestamp;
     
     const dvalue = this.x ? (value - this.x.lastValue()) * this.freq : 0.0;
+    // E8 ponto 1 do L2CS-NET.md: alpha depende de te = 1/freq, e freq é
+    // atualizado com Δt real logo acima. Sem o setAlpha aqui, o dx ficava
+    // preso ao freq inicial do constructor (60 Hz), amortecendo demais a
+    // derivada quando os frames chegavam a 30 Hz — resultado: `edvalue`
+    // sub-representa velocidade → cutoff fica baixo durante movimento rápido
+    // → filtro suaviza demais justamente quando deveria ser responsivo.
+    // Simétrico com o setAlpha do this.x logo abaixo.
     if (this.dx === null) {
       this.dx = new LowPassFilter(this.alpha(this.dcutoff));
+    } else {
+      this.dx.setAlpha(this.alpha(this.dcutoff));
     }
     const edvalue = this.dx.filter(dvalue);
     

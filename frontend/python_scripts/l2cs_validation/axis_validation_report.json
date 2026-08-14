@@ -1,0 +1,58 @@
+{
+  "timestamp": "2026-08-13T19:10:16.022Z",
+  "model": "l2cs_gaze360.onnx",
+  "meta": {
+    "dataset": "gaze360",
+    "bins": 90,
+    "binWidth": 4,
+    "binOffset": -180
+  },
+  "results": {
+    "look_center": {
+      "yawDeg": 1.19,
+      "pitchDeg": -4.05,
+      "yawRad": 0.0208,
+      "pitchRad": -0.0707,
+      "inferenceMs": 80.9,
+      "src": {
+        "w": 1280,
+        "h": 720,
+        "cropSide": 432
+      }
+    },
+    "look_up": {
+      "yawDeg": 2.18,
+      "pitchDeg": -5.59,
+      "yawRad": 0.0381,
+      "pitchRad": -0.0976,
+      "inferenceMs": 88.1,
+      "src": {
+        "w": 1280,
+        "h": 720,
+        "cropSide": 432
+      }
+    },
+    "look_right": {
+      "yawDeg": 26.86,
+      "pitchDeg": -17.27,
+      "yawRad": 0.4687,
+      "pitchRad": -0.3014,
+      "inferenceMs": 79.6,
+      "src": {
+        "w": 1280,
+        "h": 720,
+        "cropSide": 432
+      }
+    }
+  },
+  "verdicts": {
+    "centerOK": true,
+    "upAxisCorrect": false,
+    "rightAxisCorrect": true,
+    "upPitchDeltaDeg": -1.54,
+    "rightYawDeltaDeg": 25.67,
+    "upSignConvention": "up_is_negative",
+    "rightSignConvention": "right_is_positive"
+  },
+  "allOK": false
+}

@@ -1,0 +1,24 @@
+{
+  "model": "L2CS-Net",
+  "dataset": "gaze360",
+  "file": "l2cs_gaze360.onnx",
+  "inputSize": 448,
+  "inputLayout": "NCHW",
+  "inputColorOrder": "RGB",
+  "normalization": {
+    "mean": [0.485, 0.456, 0.406],
+    "std": [0.229, 0.224, 0.225]
+  },
+  "outputBins": 90,
+  "binWidth": 4,
+  "binOffset": -180,
+  "angleUnit": "degrees",
+  "inputTensorName": "input",
+  "outputTensorNames": { "yaw": "yaw", "pitch": "pitch" },
+  "inferenceLatencyMsCpuNode": 99,
+  "signConvention": {
+    "yaw":   { "positive": "right",  "confidence": "high",       "evidence": "look_right → Δyaw = +25.67° em imagem não espelhada" },
+    "pitch": { "positive": "up",     "confidence": "provisional", "evidence": "look_right (com olhar down-right) → Δpitch = -13.22°; inferência: down → negativo, up → positivo (Gaze360)" }
+  },
+  "notes": "Outputs nomeados pelo export ('yaw', 'pitch') — SEMPRE indexar por nome, nunca por posição. Sinal de yaw confirmado empiricamente. Sinal de pitch inferido — para confirmar rodar validação com look_down.jpg (opcional)."
+}

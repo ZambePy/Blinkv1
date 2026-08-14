@@ -16,6 +16,7 @@ release
 
 # Modelos treinados (binários grandes, não versionados)
 resources/models/*.onnx
+frontend/public/models/**/*.onnx
 
 # Datasets e artefatos ML pesados
 python_ml/datasets/

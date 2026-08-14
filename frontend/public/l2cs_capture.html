@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8" />
+<title>L2CS — Captura de fotos de validação</title>
+<style>
+  :root {
+    --bg: #0b0f14;
+    --panel: #121821;
+    --border: #223040;
+    --text: #e6edf3;
+    --muted: #8b9bab;
+    --accent: #4da3ff;
+    --ok: #33c48a;
+    --warn: #ffb454;
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  }
+  .wrap { max-width: 1100px; margin: 0 auto; padding: 24px; }
+  h1 { margin: 0 0 8px; font-size: 22px; }
+  p.sub { color: var(--muted); margin: 0 0 16px; font-size: 14px; }
+
+  .grid { display: grid; grid-template-columns: 1fr 340px; gap: 20px; }
+  @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } }
+
+  .video-wrap {
+    position: relative; background: #000; border: 1px solid var(--border);
+    border-radius: 8px; overflow: hidden; aspect-ratio: 4 / 3;
+  }
+  video, canvas.preview {
+    width: 100%; height: 100%; object-fit: cover; display: block;
+    /* IMPORTANTE: sem espelhamento — o L2CS precisa da imagem "como a câmera vê" */
+    transform: none !important;
+  }
+  .crosshair {
+    position: absolute; inset: 0; pointer-events: none;
+    background:
+      linear-gradient(to right, transparent 49.5%, rgba(77,163,255,.4) 49.5%, rgba(77,163,255,.4) 50.5%, transparent 50.5%),
+      linear-gradient(to bottom, transparent 49.5%, rgba(77,163,255,.4) 49.5%, rgba(77,163,255,.4) 50.5%, transparent 50.5%);
+  }
+  .face-guide {
+    position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%);
+    width: 30%; aspect-ratio: 3 / 4; border: 2px dashed rgba(77,163,255,.5);
+    border-radius: 50% / 45%; pointer-events: none;
+  }
+  .hint {
+    position: absolute; left: 12px; top: 12px; padding: 6px 10px;
+    background: rgba(0,0,0,.65); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; color: var(--text);
+  }
+
+  .panel {
+    background: var(--panel); border: 1px solid var(--border);
+    border-radius: 8px; padding: 16px;
+  }
+  .shot {
+    display: flex; align-items: center; gap: 12px; padding: 10px;
+    border: 1px solid var(--border); border-radius: 6px; margin-bottom: 10px;
+    background: #0e141c;
+  }
+  .shot.active { border-color: var(--accent); }
+  .shot.done { border-color: var(--ok); }
+  .shot .thumb {
+    width: 64px; height: 48px; background: #000; border-radius: 4px;
+    display: flex; align-items: center; justify-content: center;
+    color: var(--muted); font-size: 11px; overflow: hidden;
+  }
+  .shot .thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .shot .info { flex: 1; min-width: 0; }
+  .shot .name { font-weight: 600; font-size: 14px; }
+  .shot .desc { color: var(--muted); font-size: 12px; }
+  .shot button.retake {
+    background: transparent; color: var(--muted); border: 1px solid var(--border);
+    padding: 4px 8px; border-radius: 4px; font-size: 12px; cursor: pointer;
+  }
+  .shot button.retake:hover { color: var(--text); }
+
+  .controls { display: flex; gap: 10px; margin-top: 12px; }
+  button.primary {
+    flex: 1; padding: 12px; font-size: 16px; font-weight: 600;
+    background: var(--accent); color: #000; border: 0; border-radius: 6px;
+    cursor: pointer;
+  }
+  button.primary:disabled { background: #2a3441; color: var(--muted); cursor: not-allowed; }
+  button.secondary {
+    padding: 12px 16px; background: transparent; color: var(--text);
+    border: 1px solid var(--border); border-radius: 6px; cursor: pointer;
+  }
+
+  .status {
+    margin-top: 12px; padding: 10px; border-radius: 6px; font-size: 13px;
+    background: #0e141c; border: 1px solid var(--border); color: var(--muted);
+  }
+  .status.ok { color: var(--ok); border-color: var(--ok); }
+  .status.warn { color: var(--warn); border-color: var(--warn); }
+
+  details { margin-top: 16px; font-size: 13px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--text); }
+  code { background: #0e141c; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>L2CS — Captura de fotos de validação</h1>
+  <p class="sub">
+    Tire 3 fotos com a cabeça <b>imóvel</b>, movendo <b>apenas os olhos</b>. Sem espelhamento —
+    a imagem sai como a câmera vê. Cada foto vai ser baixada como JPG.
+  </p>
+
+  <div class="grid">
+    <div>
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+        <canvas class="preview" id="previewCanvas" style="display:none;"></canvas>
+        <div class="crosshair"></div>
+        <div class="face-guide"></div>
+        <div class="hint" id="hint">Aguardando webcam…</div>
+      </div>
+      <div class="status" id="status">Clique em <b>Iniciar câmera</b> para começar.</div>
+    </div>
+
+    <div class="panel">
+      <div class="shot" data-idx="0">
+        <div class="thumb" id="thumb-0">1</div>
+        <div class="info">
+          <div class="name">look_center.jpg</div>
+          <div class="desc">Olhe direto pra lente</div>
+        </div>
+        <button class="retake" data-retake="0" style="display:none;">Refazer</button>
+      </div>
+      <div class="shot" data-idx="1">
+        <div class="thumb" id="thumb-1">2</div>
+        <div class="info">
+          <div class="name">look_up.jpg</div>
+          <div class="desc">Olhos p/ o topo do monitor</div>
+        </div>
+        <button class="retake" data-retake="1" style="display:none;">Refazer</button>
+      </div>
+      <div class="shot" data-idx="2">
+        <div class="thumb" id="thumb-2">3</div>
+        <div class="info">
+          <div class="name">look_right.jpg</div>
+          <div class="desc">Olhos p/ a borda direita</div>
+        </div>
+        <button class="retake" data-retake="2" style="display:none;">Refazer</button>
+      </div>
+
+      <div class="controls">
+        <button class="secondary" id="startBtn">Iniciar câmera</button>
+        <button class="primary" id="captureBtn" disabled>Capturar</button>
+      </div>
+
+      <details>
+        <summary>Onde salvar as fotos</summary>
+        <p>
+          O navegador baixa em <code>Downloads</code>. Depois mova as 3 para:<br>
+          <code>frontend/python_scripts/l2cs_validation/</code>
+        </p>
+        <p>
+          Dicas: rosto centralizado no oval, ~50 cm de distância, boa iluminação frontal
+          (evite janela atrás). Não vire a cabeça entre as fotos — só os olhos.
+        </p>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script>
+(() => {
+  const video = document.getElementById('video');
+  const preview = document.getElementById('previewCanvas');
+  const hint = document.getElementById('hint');
+  const status = document.getElementById('status');
+  const startBtn = document.getElementById('startBtn');
+  const captureBtn = document.getElementById('captureBtn');
+
+  const shots = [
+    { name: 'look_center.jpg', hint: '① Olhe DIRETO para a lente' },
+    { name: 'look_up.jpg',     hint: '② Cabeça reta — olhos PARA CIMA (topo do monitor)' },
+    { name: 'look_right.jpg',  hint: '③ Cabeça reta — olhos PARA A DIREITA (borda direita)' },
+  ];
+  const taken = [null, null, null];
+  let currentIdx = 0;
+  let stream = null;
+
+  function setStatus(msg, kind = '') {
+    status.className = 'status' + (kind ? ' ' + kind : '');
+    status.innerHTML = msg;
+  }
+  function refreshUI() {
+    document.querySelectorAll('.shot').forEach((el, i) => {
+      el.classList.toggle('active', i === currentIdx && taken[i] === null);
+      el.classList.toggle('done', taken[i] !== null);
+      el.querySelector('.retake').style.display = taken[i] !== null ? 'inline-block' : 'none';
+    });
+    if (currentIdx < shots.length && taken[currentIdx] === null) {
+      hint.textContent = shots[currentIdx].hint;
+      captureBtn.textContent = 'Capturar ' + shots[currentIdx].name;
+      captureBtn.disabled = !stream;
+    } else if (taken.every(t => t !== null)) {
+      hint.textContent = '✅ Todas as 3 fotos capturadas';
+      captureBtn.textContent = 'Concluído';
+      captureBtn.disabled = true;
+      setStatus('Pronto! Mova os 3 arquivos de <b>Downloads</b> para <code>frontend/python_scripts/l2cs_validation/</code>.', 'ok');
+    } else {
+      // Some retake pending
+      const nextEmpty = taken.findIndex(t => t === null);
+      if (nextEmpty >= 0) {
+        currentIdx = nextEmpty;
+        refreshUI();
+      }
+    }
+  }
+
+  async function start() {
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+        audio: false,
+      });
+      video.srcObject = stream;
+      await video.play();
+      startBtn.textContent = 'Câmera ativa';
+      startBtn.disabled = true;
+      setStatus('Câmera ativa. Ajuste o rosto no oval e capture ' + shots[0].name + '.');
+      refreshUI();
+    } catch (e) {
+      setStatus('Erro ao acessar a câmera: ' + e.message, 'warn');
+    }
+  }
+
+  function capture() {
+    if (!stream) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (!w || !h) { setStatus('Vídeo ainda não pronto.', 'warn'); return; }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    // Desenho SEM flip — imagem exatamente como a câmera enxerga
+    ctx.drawImage(video, 0, 0, w, h);
+
+    canvas.toBlob((blob) => {
+      if (!blob) { setStatus('Falha ao gerar JPG.', 'warn'); return; }
+      const shot = shots[currentIdx];
+      const url = URL.createObjectURL(blob);
+      taken[currentIdx] = { blob, url };
+
+      // Thumb
+      const thumb = document.getElementById('thumb-' + currentIdx);
+      thumb.innerHTML = '';
+      const img = document.createElement('img');
+      img.src = url;
+      thumb.appendChild(img);
+
+      // Download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = shot.name;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+
+      setStatus('Baixado: <b>' + shot.name + '</b> (' + w + '×' + h + ').');
+
+      // Advance to next empty slot
+      const nextEmpty = taken.findIndex(t => t === null);
+      currentIdx = nextEmpty >= 0 ? nextEmpty : shots.length;
+      refreshUI();
+    }, 'image/jpeg', 0.92);
+  }
+
+  document.querySelectorAll('button.retake').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const idx = Number(btn.dataset.retake);
+      if (taken[idx]) URL.revokeObjectURL(taken[idx].url);
+      taken[idx] = null;
+      document.getElementById('thumb-' + idx).innerHTML = String(idx + 1);
+      currentIdx = idx;
+      refreshUI();
+    });
+  });
+
+  startBtn.addEventListener('click', start);
+  captureBtn.addEventListener('click', capture);
+
+  // Space bar to capture
+  window.addEventListener('keydown', (e) => {
+    if (e.code === 'Space' && !captureBtn.disabled) {
+      e.preventDefault();
+      capture();
+    }
+  });
+})();
+</script>
+</body>
+</html>

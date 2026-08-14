@@ -9,6 +9,10 @@ import type { FilterPreset } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
 import { feedAccuracyRaw } from '../accuracy';
 import { EyeQualityAnalyzer } from '../qualityAnalyzer';
+import { USE_L2CS_ANGLES } from '../l2cs/flags';
+import { createL2CSClient, type L2CSClient } from '../l2cs/client';
+import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/crop';
+import type { L2CSGazeInput } from '../extractor';
 
 export interface GazeSample {
   x: number;
@@ -48,6 +52,40 @@ export interface GazeEngine {
 
 const BUFFER_SIZE = 6;
 const BUFFER_WEIGHTS = [1, 2, 3, 4, 5, 6];
+
+// E1 do L2CS-NET.md — orientação dos pixels do vídeo.
+//
+// O L2CS foi treinado com a imagem "como a câmera vê" (não espelhada). Esta
+// constante descreve se os pixels do HTMLVideoElement entregue ao engine já
+// estão espelhados horizontalmente antes de chegar aqui. É consumida por
+// cropFaceToTensor (src/l2cs/crop.ts) em E6 — quando true, o crop faz o flip
+// horizontal antes de mandar para a inferência.
+//
+// EVIDÊNCIA para o valor `false` no setup atual do IrisFlow:
+//   1. GazeContext.tsx cria o <video> sem `transform: scaleX(-1)` (linhas 244-253).
+//   2. getUserMedia({ facingMode: 'user' }) devolve pixels crus da câmera —
+//      nenhum browser aplica mirror por padrão nos pixels (só na exibição CSS,
+//      quando o dev pede).
+//   3. axis_validation empírico com foto `look_right` (usuário olhou para a
+//      direita dele) → yaw = +26° do L2CS. Se os pixels estivessem espelhados,
+//      o L2CS interpretaria o gaze como "esquerda" e devolveria yaw negativo.
+//      Sinal positivo confirma pixels não espelhados.
+//
+// A doc §E1 do L2CS-NET.md interpreta a inversão `(1.0 - landmarks[1].x) * vw`
+// abaixo como sinal de mirror — na prática essa inversão é um proxy de gaze a
+// partir da pose da cabeça (nariz à esquerda da imagem = usuário virou a cabeça
+// à direita = alvo deve ir à direita da tela), não evidência de pixel mirror.
+//
+// QUANDO trocar para `true`:
+//   - Se adicionar `transform: scaleX(-1)` no elemento <video> exibido ao usuário
+//     E o mesmo elemento (não uma cópia) for entregue ao engine, OS PIXELS
+//     ainda não mudam — só a exibição. Manter `false`.
+//   - Se algum estágio pré-engine desenhar o vídeo em canvas espelhado e passar
+//     esse canvas como source, aí sim `true`.
+//   - Se algum driver/OS aplicar mirror nível-driver (raro), rodar
+//     axis_validation com os 3 fotos e checar sinal do yaw — se `look_right`
+//     virar yaw negativo, trocar para `true`.
+export const IS_VIDEO_MIRRORED = false;
 
 function weightedBufferAvg(buf: number[]): number {
   const len = buf.length;
@@ -99,6 +137,16 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let framesEmitted = 0;
   let lastStatMs = 0;
 
+  // E6 do L2CS-NET.md — cliente + contexto de crop. Inicializados só quando
+  // USE_L2CS_ANGLES=true. Nulls significam "L2CS desligado", e o loop pula
+  // toda a lógica associada. Não são recreados entre start/stop múltiplos
+  // pra evitar recarregar o ONNX de 91 MB.
+  let l2csClient: L2CSClient | null = null;
+  let cropCtx: CropContext | null = null;
+  let l2csFramesSubmitted = 0;
+  let l2csFramesValid = 0;
+  let l2csFramesStale = 0;
+
   function setState(next: EngineState): void {
     if (state === next) return;
     state = next;
@@ -129,6 +177,24 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     });
   }
 
+  // E6 — inicialização fire-and-forget do L2CS. Nunca bloqueia engine.start()
+  // e nunca crasha o engine se der ruim (o pipeline segue com bloco de 7 zeros
+  // via degradação graciosa do extractor).
+  function initL2CSAsync(): void {
+    if (!USE_L2CS_ANGLES) return;
+    if (l2csClient) return; // já iniciado
+    cropCtx = createCropContext();
+    l2csClient = createL2CSClient();
+    l2csClient.start().then(
+      () => console.log('[L2CS] worker ready'),
+      (err) => {
+        console.warn('[L2CS] worker init failed — pipeline continua sem gaze angular:', err);
+        l2csClient = null;
+        cropCtx = null;
+      },
+    );
+  }
+
   function loop(): void {
     if (!running || !videoEl || !faceLandmarker) return;
 
@@ -137,8 +203,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     // Diagnóstico periódico: se o loop está rodando mas nunca detecta face,
     // isso ajuda a distinguir "câmera parada" de "sem rosto no frame".
     if (startTimeMs - lastStatMs > 3000) {
+      const l2csLine = USE_L2CS_ANGLES
+        ? ` l2cs=${l2csClient?.isReady() ? 'ready' : 'off'} submit=${l2csFramesSubmitted} valid=${l2csFramesValid} stale=${l2csFramesStale}`
+        : '';
       console.log(
-        `[IrisFlow] engine stats — frames=${framesSeen} face=${framesWithFace} emit=${framesEmitted} videoTime=${videoEl.currentTime.toFixed(3)} paused=${videoEl.paused}`,
+        `[IrisFlow] engine stats — frames=${framesSeen} face=${framesWithFace} emit=${framesEmitted} videoTime=${videoEl.currentTime.toFixed(3)} paused=${videoEl.paused}${l2csLine}`,
       );
       lastStatMs = startTimeMs;
     }
@@ -173,7 +242,33 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
         const faceMatrix = rawMatrix ? new Float32Array(rawMatrix) : undefined;
 
-        const extractorResult = extractFeatures(landmarks, faceMatrix);
+        // E6 — L2CS: submete tensor throttled (10 Hz) e lê o último gaze
+        // válido do cache. O loop rAF nunca aguarda; se stale ou worker off,
+        // o extractor recebe {valid: false} e anexa 7 zeros (degradação
+        // graciosa, §E4). O crop só é construído quando canSubmit()=true
+        // pra não desperdiçar ~5ms/frame com getImageData de 448².
+        let l2csGaze: L2CSGazeInput | null = null;
+        if (l2csClient && cropCtx && videoEl) {
+          if (l2csClient.canSubmit(startTimeMs)) {
+            try {
+              const tensor = cropFaceToTensor(videoEl, {
+                landmarks,
+                isMirrored: IS_VIDEO_MIRRORED,
+                context: cropCtx,
+              });
+              if (l2csClient.submitTensor(tensor)) l2csFramesSubmitted++;
+            } catch (e) {
+              // Ex.: getImageData tainted, video not ready. Não afeta o resto
+              // do pipeline — extractor recebe null e não anexa bloco.
+              console.warn('[L2CS] crop failed:', e);
+            }
+          }
+          const g = l2csClient.getLatestGaze(startTimeMs);
+          l2csGaze = { yaw: g.yaw, pitch: g.pitch, valid: g.valid };
+          if (g.valid) l2csFramesValid++; else l2csFramesStale++;
+        }
+
+        const extractorResult = extractFeatures(landmarks, faceMatrix, l2csGaze);
         if (!extractorResult.blinkDetected && extractorResult.featuresLeft.length > 0) {
           const featuresLeft = extractorResult.featuresLeft;
           const featuresRight = extractorResult.featuresRight;
@@ -262,6 +357,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       }
 
       calibration.init();
+      initL2CSAsync();
       running = true;
       setState('tracking');
       rafHandle = requestAnimationFrame(loop);
@@ -271,6 +367,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       running = false;
       if (rafHandle) cancelAnimationFrame(rafHandle);
       rafHandle = 0;
+      // Preserva l2csClient e cropCtx entre start/stop para evitar recarregar
+      // o ONNX de 91 MB. Só é liberado se o consumidor destruir o engine
+      // inteiro (não expomos API pra isso ainda).
       setState('idle');
     },
 

@@ -1,0 +1,373 @@
+═══════════════════════════════════════════════════════════════════════════════
+ IRISFLOW × L2CS — PASSOS DE TESTE E ROLLOUT
+ (do estado atual até promoção da flag em produção)
+═══════════════════════════════════════════════════════════════════════════════
+
+Contexto atual (o que já está feito):
+  ✔ Pipeline L2CS implementado (E1-E8.1 do L2CS-NET.md)
+  ✔ 73 testes unitários passando, type-check + build limpos
+  ✔ Bug de resolução WASM corrigido (worker usa ?url do Vite, sem public/ort)
+  ✔ Flag runtime-toggleable via localStorage
+  ✔ Auto-tag do report accuracy com { l2csEnabled: true|false }
+  ✔ Script de comparação A/B pronto
+
+Estado da flag: USE_L2CS_ANGLES = false (default de compilação)
+                override via localStorage.setItem('l2cs.enabled','true'|'false')
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 1 — SMOKE TEST DO WORKER (5 min)
+ Objetivo: provar que o worker do L2CS carrega sem crash antes de calibrar
+═══════════════════════════════════════════════════════════════════════════════
+
+1.1  Reinicie o dev server para pegar as últimas mudanças de código:
+       Ctrl+C no terminal do dev
+       npm --prefix frontend run dev
+
+1.2  Abra http://localhost:5173 no browser.
+     Abra DevTools (F12) → aba Console.
+
+1.3  No console, ligue a flag:
+       localStorage.setItem('l2cs.enabled','true'); location.reload();
+
+1.4  Passe pela permissão de câmera normalmente.
+     Aguarde ~5-10 segundos (o ONNX de 91 MB precisa baixar).
+
+1.5  Procure no console:
+       [L2CS] worker ready
+       [IrisFlow] engine stats — frames=... l2cs=ready submit=N valid=N stale=N
+
+     Checklist:
+       [ ] "[L2CS] worker ready" apareceu
+       [ ] Stats contém "l2cs=ready" (NÃO "l2cs=off")
+       [ ] "submit" cresce a cada 3 s (worker aceitando frames)
+       [ ] "valid" cresce (worker produzindo resultados)
+       [ ] Cursor gaze se move sem travamentos perceptíveis
+
+1.6  Se algo falhar:
+       - "worker init failed" → aba Network, procure se os arquivos
+         .wasm/.mjs (ort-wasm-simd-threaded-*.wasm e .mjs) retornaram 200
+       - "l2cs=off" persistente após 15s → worker crashou;
+         DevTools → Sources → aba Workers para stack trace
+       - Cursor travou → CPU sobrecarregada; verificar que outros processos
+         pesados (call de vídeo, etc.) estão fechados
+
+     ► Se o smoke passou, prossiga. Se falhou, resolva antes de ir adiante.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 2 — BASELINE LIMPO (L2CS OFF, ~15 min)
+ Objetivo: obter referência de precisão SEM L2CS, com calibração cuidadosa
+═══════════════════════════════════════════════════════════════════════════════
+
+⚠ IMPORTANTE: o baseline.json anterior estava degenerado (predX/predY = 0 em
+  vários pontos = colapso de calibração). Não use ele — recomece do zero.
+
+2.1  No console:
+       localStorage.setItem('l2cs.enabled','false'); location.reload();
+
+2.2  Confirme no console: a linha de stats deve mostrar SEM sufixo l2cs= no fim
+     (isso significa flag OFF).
+
+2.3  Sente na posição em que vai ficar durante todo o teste:
+       - ~50 cm da tela
+       - Cabeça no centro do enquadramento da câmera
+       - Iluminação frontal (nada de janela às costas)
+       - Sem óculos escuros; com óculos comuns tudo bem
+
+2.4  Vá para o fluxo de CALIBRAÇÃO no app (menu principal).
+
+     Durante a calibração:
+       - Olhe EXATAMENTE para cada ponto (não pra proximidade)
+       - Cabeça 100% imóvel entre pontos
+       - Não pisque durante a coleta (~1.5s por ponto)
+       - Não fale, não mexa a boca
+
+2.5  Vá em Settings → "Testar precisão".
+     Preencha o formulário de condições:
+       - Iluminação: (boa/média/ruim — anote qual)
+       - Óculos: sim/não
+       - Movimento cabeça: parada
+     Anote esses valores — vai usar os mesmos na Fase 3.
+
+2.6  Execute o teste. Ao fim, um JSON baixa em Downloads/.
+
+2.7  Renomeie IMEDIATAMENTE (evita confundir com o próximo):
+       Downloads/accuracy-report-<timestamp>.json  →  baseline.json
+
+2.8  Abra o JSON e confira que:
+       "pipeline": { "l2csEnabled": false, "regressor": "ridge" }
+     Se estiver true, você esqueceu de mudar a flag — refaça.
+
+2.9  ► CHECKPOINT: meanError precisa ser < 100 px (ideal < 60 px).
+     Se vier > 200 px, calibração colapsou — REFAÇA a calibração + teste.
+
+     Sintomas de colapso a procurar no JSON:
+       - Muitos "predX": 0 ou "predY": 0 nos diagnostics
+       - meanError > 300 px
+       - jitterRMS < 5 px (pontos "colados" no mesmo lugar da tela)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 3 — CAPTURA COM L2CS (flag ON, ~15 min)
+ Objetivo: medir mesma coisa, mas com L2CS ativo. NÃO SAIA DA CADEIRA.
+═══════════════════════════════════════════════════════════════════════════════
+
+3.1  No console:
+       localStorage.setItem('l2cs.enabled','true'); location.reload();
+
+3.2  Aguarde "[L2CS] worker ready" no console (~5-10s).
+
+3.3  Confirme no stats: "l2cs=ready" + "valid" crescendo.
+
+3.4  CALIBRE DE NOVO — o reload zerou a calibração em memória.
+     Isso é esperado: o vetor mudou de 31 → 38 dims, então a calibração
+     anterior seria inválida.
+
+     Mesmo cuidado da Fase 2 (olhar exato, cabeça parada, sem piscar).
+
+3.5  Vá em Settings → "Testar precisão".
+     ⚠ PREENCHA COM EXATAMENTE OS MESMOS VALORES da Fase 2.
+     (O script de comparação avisa se divergir, mas melhor evitar.)
+
+3.6  Execute o teste. JSON baixa.
+
+3.7  Renomeie:
+       Downloads/accuracy-report-<timestamp>.json  →  l2cs.json
+
+3.8  Confira no JSON:
+       "pipeline": { "l2csEnabled": true, "regressor": "ridge" }
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 4 — COMPARAÇÃO A/B (2 min)
+ Objetivo: ver os números lado a lado + veredicto textual
+═══════════════════════════════════════════════════════════════════════════════
+
+4.1  Mova os dois JSONs para uma pasta comum (Downloads ou raiz do projeto).
+
+4.2  No terminal:
+       node frontend/scripts/l2cs_ab_compare.mjs \
+            <caminho>/baseline.json \
+            <caminho>/l2cs.json
+
+     Exemplo no Windows (bash-compat):
+       node frontend/scripts/l2cs_ab_compare.mjs \
+            ~/Downloads/baseline.json \
+            ~/Downloads/l2cs.json
+
+4.3  O script imprime:
+       - Cabeçalho com timestamps e condição
+       - Tabela agregada (meanError, medianError, p90, jitter, etc.)
+       - Tabela por ponto (13 targets)
+       - Ganho médio (mean+p90+jitter)
+       - Veredicto textual
+
+4.4  Salve o output do script (Ctrl+A / Ctrl+C ou pipe para arquivo):
+       node frontend/scripts/l2cs_ab_compare.mjs ... > ab_rodada_1.txt
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 5 — DECISÃO BASEADA NO VEREDICTO
+═══════════════════════════════════════════════════════════════════════════════
+
+O script emite 1 de 4 veredictos:
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CASO A — ✅ Ganho substancial (meanError melhora ≥ 10%)                     │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ação: ir direto para FASE 8 (promoção).                                     │
+│ Nota: se o jitter piorou > 15%, considerar FASE 7 (retuning One Euro)       │
+│       antes de promover.                                                    │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CASO B — ~ Ganho modesto (+3% a +10%)                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ação: rodar mais 2-3 rodadas de A/B para confirmar consistência.            │
+│       Se possível, com pessoas/ambientes diferentes.                        │
+│                                                                             │
+│ Para cada rodada extra:                                                     │
+│   - Repetir FASES 2, 3, 4                                                   │
+│   - Salvar output como ab_rodada_N.txt                                      │
+│                                                                             │
+│ Se 2 de 3 confirmam ganho → ir para FASE 8.                                 │
+│ Se inconsistente → ir para FASE 6 (investigação).                           │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CASO C — = Empate (dentro de ±3%)                                           │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ação: ir para FASE 6 (investigação dos culpados prováveis).                 │
+│ Não vale o custo de compute do L2CS sem ganho de precisão.                  │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────────────────┐
+│ CASO D — ✗ Piorou (meanError > +3%)                                         │
+├─────────────────────────────────────────────────────────────────────────────┤
+│ Ação: FASE 6 obrigatória. Algum dos "riscos silenciosos" §6 disparou.       │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 6 — INVESTIGAÇÃO (só se veredicto for = ou ✗)
+ Objetivo: encontrar qual das falhas silenciosas do §6 disparou
+═══════════════════════════════════════════════════════════════════════════════
+
+Suspeitos ordenados por probabilidade e ordem de investigação:
+
+6.1  ══ Sinal do pitch invertido (5 min) ══
+     Sintoma: L2CS piora em Y mas não em X, ou vice-versa.
+     Teste: tire uma foto extra "look_down" (olhando pra parte de baixo do
+            monitor) usando http://localhost:5173/l2cs_capture.html.
+            Salve em frontend/python_scripts/l2cs_validation/look_down.jpg
+            e rode:
+              node frontend/scripts/l2cs_axis_validation.mjs
+
+     Se o script apontar sinal invertido do pitch:
+       Editar src/l2cs/block.ts, na função buildL2CSBlock, negar `p`:
+         const p = -clamp(pitch, -CLAMP_RAD, CLAMP_RAD);
+       Rebuild, recalibrar, refazer A/B.
+
+6.2  ══ EXPAND_FACTOR fora da convenção (30-60 min) ══
+     Sintoma: L2CS empata ou piora consistentemente, sem viés em nenhum eixo.
+     Ação: varrer valores em src/l2cs/crop.ts:
+       Trocar EXPAND_FACTOR entre [1.0, 1.2, 1.4, 1.6, 1.8] uma de cada vez.
+       Para cada valor, rebuild + calibrar + rodar accuracy test.
+       Salvar l2cs.json de cada rodada como l2cs_ef1.0.json, l2cs_ef1.2.json etc.
+       Comparar com baseline.json usando l2cs_ab_compare.mjs.
+       Fixar o valor que der o menor meanError.
+
+6.3  ══ BGR/RGB trocado ══
+     Sintoma: ângulos coerentes na direção mas com bias grande.
+     Teste: rodar axis_validation e conferir se look_center dá (~0, ~0).
+       Se der offset grande e sistemático, editar
+       src/l2cs/crop.ts::preprocess448FromRGBA — trocar índices R e B.
+       (Improvável — Canvas 2D sempre entrega RGBA em ordem, mas verificar.)
+
+6.4  ══ Ordem yaw/pitch trocada ══
+     Sintoma: L2CS piora fortemente em ambos eixos.
+     Teste: rodar axis_validation. Se look_right mexer principalmente PITCH
+            (em vez de yaw), o export trocou os nomes.
+     Fix: editar frontend/public/models/l2cs/l2cs.meta.json:
+       Trocar "outputTensorNames": { "yaw": "pitch", "pitch": "yaw" }
+
+6.5  ══ Fórmula de decodificação (Gaze360 vs MPIIGaze) ══
+     Sintoma: ângulos absurdos (ex. 90° com rosto reto).
+     Teste: axis_validation com look_center deve dar |yaw|,|pitch| < 15°.
+     Se der 100°+, está usando fórmula errada. Trocar no meta.json:
+       Gaze360 = { bins:90, binWidth:4, binOffset:-180 }
+       MPIIGaze = { bins:28, binWidth:3, binOffset:-42 } (aprox.)
+
+Após cada correção: rebuild + recalibrar + refazer FASE 4.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 7 — RETUNING DO ONE EURO (opcional, se jitter mudou muito)
+ Objetivo: ajustar mincutoff/beta pra minimizar jitter com L2CS ativo
+═══════════════════════════════════════════════════════════════════════════════
+
+7.1  Só faça se o A/B mostrou jitterRMS mudando > 15% (pra qualquer direção).
+
+7.2  Editar src/oneEuroFilter.ts, FILTER_PRESETS:
+     Testar variações do preset ativo (default 'balanceado'):
+       - mincutoff 0.010, 0.020, 0.040
+       - beta      0.5, 1.5, 3.0
+     Uma variação por sessão. Rebuild + calibrar + rodar accuracy test.
+
+7.3  Alvo: manter jitterRMS baseline ± 10% com meanError não piorado.
+
+7.4  Se algum preset precisar de valores MUITO diferentes entre L2CS on/off,
+     considerar criar presets duplicados (ex. 'balanceado_l2cs') pra não
+     regredir usuários que ficarem sem L2CS.
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ FASE 8 — PROMOÇÃO DA FLAG (rollout em produção)
+ Objetivo: fazer L2CS ser o default
+═══════════════════════════════════════════════════════════════════════════════
+
+Só entre nesta fase depois de A/B validar ganho consistente (FASE 5 caso A/B).
+
+Duas opções de rollout, escolha uma:
+
+8.A  ══ OPÇÃO A: FLIP DIRETO (mais simples) ══
+
+     8.A.1  Editar src/l2cs/flags.ts:
+              const DEFAULT_USE_L2CS_ANGLES = true;  // era false
+
+     8.A.2  Commit:
+              git add src/l2cs/flags.ts
+              git commit -m "Promove L2CS a default após A/B (ganho de X%)"
+
+     8.A.3  npm --prefix frontend run build
+            npm run electron:build
+
+     8.A.4  Usuários que não tiverem override em localStorage recebem L2CS ligado.
+            Quem tinha 'false' explícito continua com L2CS desligado (opt-out).
+
+8.B  ══ OPÇÃO B: TOGGLE EM SETTINGS (mais controlado) ══
+
+     8.B.1  Manter DEFAULT_USE_L2CS_ANGLES = false por enquanto.
+
+     8.B.2  Adicionar toggle em frontend/src/pages/SettingsScreen.tsx:
+              - Section "Recursos experimentais"
+              - Switch "Reconhecimento avançado de olhar (L2CS)"
+              - onChange: setItem('l2cs.enabled', novo) + confirmação de
+                "reiniciar app pra aplicar"
+
+     8.B.3  Documentar no README/tutorial que o toggle exige reinício
+            (mesma razão da FASE 3.4 — vetor muda 31→38 dims).
+
+     8.B.4  Rollout gradual: liberar em canary/beta, monitorar métricas,
+            depois promover a default (Opção A).
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ CHECKLIST FINAL PRÉ-PRODUÇÃO
+═══════════════════════════════════════════════════════════════════════════════
+
+Antes de fechar a promoção:
+
+  [ ] A/B rodado no mínimo 2 vezes (rodadas diferentes) confirmando ganho
+  [ ] Latência do worker verificada em ambiente Electron final (não só browser)
+  [ ] FPS do cursor não regrediu (30 Hz constante)
+  [ ] Nenhum warning [L2CS] recorrente no console
+  [ ] Testes automatizados verdes: npm test
+  [ ] Type-check limpo: npx tsc --noEmit (raiz) + npm --prefix frontend run type-check
+  [ ] Build de produção limpo: npm --prefix frontend run build
+  [ ] Build do Electron limpo: npm run electron:build
+  [ ] Modelo ONNX empacotado (verificar em dist-electron/*/models/l2cs/)
+  [ ] Documentação atualizada (README, CLAUDE.md se aplicável)
+
+
+═══════════════════════════════════════════════════════════════════════════════
+ REFERÊNCIAS RÁPIDAS
+═══════════════════════════════════════════════════════════════════════════════
+
+Comandos do console DevTools:
+  Ver flag atual:      localStorage.getItem('l2cs.enabled')
+  Ligar L2CS:          localStorage.setItem('l2cs.enabled','true');  location.reload()
+  Desligar L2CS:       localStorage.setItem('l2cs.enabled','false'); location.reload()
+  Voltar ao default:   localStorage.removeItem('l2cs.enabled');       location.reload()
+
+Sinais no console (linha [IrisFlow] engine stats):
+  Sem "l2cs=..." no fim → flag OFF nessa sessão
+  "l2cs=ready submit=N valid=N stale=N" → flag ON, worker rodando
+  "l2cs=off submit=0"                   → flag ON mas worker falhou (checar Network)
+
+Arquivos importantes:
+  src/l2cs/flags.ts                         → default de compilação
+  src/l2cs/l2cs.worker.ts                   → worker + config do ORT
+  src/l2cs/crop.ts                          → EXPAND_FACTOR fica aqui
+  src/l2cs/block.ts                         → sinais do bloco de 7 dims
+  frontend/public/models/l2cs/              → onnx + meta.json
+  frontend/scripts/l2cs_ab_compare.mjs      → script de A/B
+  frontend/scripts/l2cs_axis_validation.mjs → validação de sinal/decodificação
+  L2CS-NET.md                               → documento de arquitetura completo
+
+Se algo der errado ou aparecer sintoma estranho:
+  1. Salvar o output do console (Ctrl+A no console + copiar)
+  2. Salvar os JSONs de accuracy relevantes
+  3. Anotar o que exatamente foi feito
+  → aí é possível diagnosticar sem re-rodar tudo

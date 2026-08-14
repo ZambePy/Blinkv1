@@ -1,5 +1,5 @@
 import { extractEyeFeatures, extractCompactFeatures } from './extractor';
-import type { Point3D, AdvancedFrameFeatures } from './extractor';
+import type { Point3D, AdvancedFrameFeatures, L2CSGazeInput } from './extractor';
 
 export interface FeaturePipelineResult {
   featuresLeft:  number[];
@@ -13,9 +13,13 @@ export const USE_COMPACT_FEATURES = true;
 export function extractFeatures(
   landmarks: Point3D[],
   faceMatrix?: Float32Array,
+  l2csGaze?: L2CSGazeInput | null,
 ): FeaturePipelineResult {
-  const geo = USE_COMPACT_FEATURES 
-    ? extractCompactFeatures(landmarks, faceMatrix)
+  // extractEyeFeatures (path legado, USE_COMPACT_FEATURES=false) não recebe
+  // L2CS por design — só o compact expõe o extension point; se um dia quiser
+  // suportar no path full, adicionar aqui.
+  const geo = USE_COMPACT_FEATURES
+    ? extractCompactFeatures(landmarks, faceMatrix, l2csGaze)
     : extractEyeFeatures(landmarks, faceMatrix);
 
   return {

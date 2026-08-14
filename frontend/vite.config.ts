@@ -12,8 +12,17 @@ export default defineConfig({
   resolve: {
     alias: {
       '@tracker': path.resolve(__dirname, '../src'),
+      // O worker do L2CS vive em ../src/l2cs/l2cs.worker.ts (fora do frontend/),
+      // e o Rolldown resolve deps a partir do dir do arquivo. Alias explícito
+      // pra `onnxruntime-web` (que só existe em frontend/node_modules) faz o
+      // bundler achar. Mesma razão do path mapping em tsconfig.app.json.
+      'onnxruntime-web': path.resolve(__dirname, 'node_modules/onnxruntime-web'),
     },
   },
+  optimizeDeps: {
+    exclude: ['onnxruntime-web']
+  },
+  assetsInclude: ['**/*.wasm', '**/ort-wasm-simd-threaded.mjs'],
   server: {
     // Só aceita conexões de localhost por padrão — evita expor dev server na rede
     host: '127.0.0.1',
