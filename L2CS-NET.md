@@ -382,7 +382,7 @@ E8 → UI    { x: px, y: px }
 | 2 | E3 — recorte | `src/l2cs/crop.ts` | `EXPAND_FACTOR` escolhido por varredura, não por intuição |
 | 3 | E1 — desespelhamento | `src/tracker/engine.ts` | Teste travando o sinal do yaw |
 | 4 | E5 — bloco de 7 dims | `src/extractor.ts` | Clamp ±45° antes da tangente; zeros quando `valid === false` |
-| 5 | E6/E7 — integração | `src/featurePipeline.ts` | Flag `USE_L2CS_ANGLES`; testes de paridade atualizados (31→38 dims) |
+| 5 | E6/E7 — integração | `src/featurePipeline.ts` | Bloco anexado sempre (L2CS é obrigatório); testes de paridade atualizados (31→38 dims) |
 | 6 | E8 — retuning | `src/oneEuroFilter.ts` | Jitter medido antes/depois |
 
 **Medição:** `startAccuracyTest` (`src/accuracy.ts`) com a flag on/off, nas condições

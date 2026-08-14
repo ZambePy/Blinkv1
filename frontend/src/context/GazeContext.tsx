@@ -9,11 +9,11 @@ import React, {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
-import type { GazeEngine, GazeSample, EngineState, CalibrationApi } from '@tracker/tracker/engine';
+import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus } from '@tracker/tracker/engine';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
 import { useSettings } from './SettingsContext';
 
-export type { GazeSample, EngineState } from '@tracker/tracker/engine';
+export type { GazeSample, EngineState, L2CSStatus } from '@tracker/tracker/engine';
 
 // Dwell time by user preset (matches DwellButton's own table).
 const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
@@ -31,6 +31,10 @@ const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 interface GazeContextValue {
   subscribe: (cb: (sample: GazeSample) => void) => () => void;
   state: EngineState;
+  // Estado do worker L2CS. UI de calibração deve bloquear enquanto != 'ready'
+  // porque treinar o Ridge com o bloco angular zerado gera modelo
+  // dessincronizado quando o worker liga (§ L2CS-TESTE-PASSOS.txt Fase 2).
+  l2csStatus: L2CSStatus;
   calibration: CalibrationApi;
   setFilterPreset: (preset: FilterPreset) => void;
 }
@@ -49,6 +53,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const cursorRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<EngineState>('idle');
+  const [l2csStatus, setL2csStatus] = useState<L2CSStatus>('loading');
 
   // Sub pool: subscribers can hook in and receive callbacks. We keep the callback
   // model instead of React state to avoid re-rendering the tree at 30 Hz.
@@ -115,6 +120,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     const unsubState = engine.onStateChange((s) => {
       if (!cancelled) setState(s);
+    });
+
+    const unsubL2CSStatus = engine.onL2CSStatusChange((s) => {
+      if (!cancelled) setL2csStatus(s);
     });
 
     let cbInvocations = 0;
@@ -287,6 +296,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       cancelled = true;
       unsubState();
+      unsubL2CSStatus();
       unsubGaze();
       engine.stop();
       engineRef.current = null;
@@ -325,8 +335,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   const value = useMemo<GazeContextValue>(
-    () => ({ subscribe, state, calibration, setFilterPreset }),
-    [subscribe, state, calibration, setFilterPreset],
+    () => ({ subscribe, state, l2csStatus, calibration, setFilterPreset }),
+    [subscribe, state, l2csStatus, calibration, setFilterPreset],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

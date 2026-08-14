@@ -1,6 +1,6 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, Ruler, Lightbulb } from 'lucide-react';
+import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 import { BackButton } from '../../components/ui/BackButton';
 
@@ -25,7 +25,13 @@ const CALIBRATION_POINTS = [
 
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
-  const { calibration } = useGaze();
+  const { calibration, l2csStatus } = useGaze();
+  // Bloqueio: calibrar antes do worker L2CS ficar 'ready' treina o Ridge com
+  // o bloco angular zerado; quando o worker liga depois, o vetor muda e o
+  // modelo fica dessincronizado (predições ficam ~fixas ou aleatórias).
+  // Mantemos o botão desabilitado até 'ready' ou 'error' resolver.
+  const l2csReady = l2csStatus === 'ready';
+  const l2csFailed = l2csStatus === 'error';
 
   const [stage, setStage] = useState<'pre-calibration' | 'tutorial' | 'calibrating' | 'finished' | 'transitioning'>('pre-calibration');
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -111,6 +117,9 @@ export const CalibrationCheck: React.FC = () => {
   };
 
   const handleStart = () => {
+    // Guard além do disabled — dwell click / teclado / auto-retry poderiam
+    // burlar o disabled visual. Silencioso: o botão já mostra o motivo.
+    if (!l2csReady) return;
     setStage('calibrating');
     setCompletedList([]);
     const order = CALIBRATION_POINTS.map((_, i) => i);
@@ -249,15 +258,71 @@ export const CalibrationCheck: React.FC = () => {
                 </p>
               </div>
               
-              <button 
-                type="button" 
-                onClick={handleStart} 
-                style={{ background: '#1B54A8', color: 'white', border: 'none', padding: '1.2rem 3rem', borderRadius: '2rem', fontSize: '1.25rem', fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '1rem', transition: 'all 0.2s', boxShadow: '0 12px 24px rgba(27,84,168,0.2)' }}
-                onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-2px)' }}
-                onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}
+              <button
+                type="button"
+                onClick={handleStart}
+                disabled={!l2csReady}
+                data-no-dwell="true"
+                aria-disabled={!l2csReady}
+                aria-describedby="l2cs-status-message"
+                style={{
+                  background: l2csReady ? '#1B54A8' : (l2csFailed ? '#94a3b8' : '#94a3b8'),
+                  color: 'white',
+                  border: 'none',
+                  padding: '1.2rem 3rem',
+                  borderRadius: '2rem',
+                  fontSize: '1.25rem',
+                  fontWeight: 700,
+                  cursor: l2csReady ? 'pointer' : 'not-allowed',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  marginTop: '1rem',
+                  transition: 'all 0.2s',
+                  boxShadow: l2csReady ? '0 12px 24px rgba(27,84,168,0.2)' : 'none',
+                  opacity: l2csReady ? 1 : 0.7,
+                }}
+                onMouseOver={(e) => { if (l2csReady) e.currentTarget.style.transform = 'translateY(-2px)'; }}
+                onMouseOut={(e) => { if (l2csReady) e.currentTarget.style.transform = 'translateY(0)'; }}
               >
-                Começar
+                {l2csReady && 'Começar'}
+                {l2csStatus === 'loading' && (
+                  <>
+                    <Loader2 size={20} style={{ animation: 'spin 1s linear infinite' }} />
+                    Carregando modelo...
+                  </>
+                )}
+                {l2csFailed && (
+                  <>
+                    <AlertTriangle size={20} />
+                    Modelo indisponível
+                  </>
+                )}
               </button>
+
+              {/* Mensagem persistente sobre o motivo do bloqueio.
+                  Renderizada sempre para manter a região presente ao leitor
+                  de tela (aria-describedby aponta para cá) — invisível quando
+                  ready para não poluir a UI. */}
+              <div
+                id="l2cs-status-message"
+                role={l2csFailed ? 'alert' : 'status'}
+                aria-live="polite"
+                style={{
+                  marginTop: '0.75rem',
+                  fontSize: '0.95rem',
+                  color: l2csFailed ? '#dc2626' : '#64748b',
+                  textAlign: 'center',
+                  minHeight: '1.4rem',
+                  maxWidth: 480,
+                  lineHeight: 1.4,
+                }}
+              >
+                {l2csStatus === 'loading' &&
+                  'Aguardando o modelo de gaze carregar (~10-15s na primeira vez). Não feche a página.'}
+                {l2csFailed &&
+                  'Não foi possível carregar o modelo. Verifique o console (F12), recarregue a página e tente novamente.'}
+              </div>
             </div>
           </div>
         )}

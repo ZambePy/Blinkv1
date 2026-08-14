@@ -9,7 +9,6 @@
 
 import { mapGaze, setGazeCorrections } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
-import { USE_L2CS_ANGLES } from './l2cs/flags';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
@@ -296,11 +295,14 @@ function finishTest(
   // Exportar relatório em JSON versionável (Sprint 0). `meta` carrega a condição
   // do teste (iluminação, óculos, cabeça, minutos de sessão) para que a entrada
   // no BASELINE.md seja auto-descritiva.
-  // pipeline: reflete o que ESTAVA ativo na sessão, não o que o usuário
-  // preencheu. Essencial para A/B — a comparação (frontend/scripts/
-  // l2cs_ab_compare.mjs) usa esse campo para não trocar baseline com L2CS.
+  //
+  // pipeline: identifica a versão do pipeline usada. L2CS agora é obrigatório
+  // (não há mais A/B), então o campo é fixo em `l2cs+ridge` — preserva o
+  // shape do JSON para não quebrar leitores externos (script de sumário,
+  // dashboards), mas remove o campo booleano `l2csEnabled` que sinalizava
+  // o toggle antigo.
   const pipeline = {
-    l2csEnabled: USE_L2CS_ANGLES,
+    variant: 'l2cs+ridge' as const,
     regressor: REGRESSOR_MODE,
   };
 
@@ -327,8 +329,7 @@ function finishTest(
   if (meta) {
     console.log(`[accuracy] Condição: ${meta.iluminacao} | cabeça=${meta.movimentoCabeca} | óculos=${meta.oculos ? 'sim' : 'não'} | ${meta.minutosDeSessao} min`);
   }
-  const l2csTag = USE_L2CS_ANGLES ? '+L2CS' : '';
-  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo${l2csTag}): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | p90=${Math.round(p90Error)}px | jitter=${jitterRMS.toFixed(1)}px | ${score}`);
+  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo+L2CS): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | p90=${Math.round(p90Error)}px | jitter=${jitterRMS.toFixed(1)}px | ${score}`);
   for (const d of diagnostics) {
     const flag = d.error > 45 ? ' ✗' : '';
     console.log(`[accuracy]   ${d.name.padEnd(18)}: err=${Math.round(d.error)}px jitter=${d.jitterRMS.toFixed(1)}px${flag}`);

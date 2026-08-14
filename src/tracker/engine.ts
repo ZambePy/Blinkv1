@@ -9,10 +9,16 @@ import type { FilterPreset } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
 import { feedAccuracyRaw } from '../accuracy';
 import { EyeQualityAnalyzer } from '../qualityAnalyzer';
-import { USE_L2CS_ANGLES } from '../l2cs/flags';
 import { createL2CSClient, type L2CSClient } from '../l2cs/client';
 import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/crop';
 import type { L2CSGazeInput } from '../extractor';
+
+// Status do subsistema L2CS. Exposto via engine.getL2CSStatus() para a UI
+// poder bloquear calibração enquanto o worker não estiver 'ready' — calibrar
+// com o worker 'loading' treina o Ridge com o bloco de 7 dims em zero
+// (buildL2CSBlock(valid=false)) e depois, quando o worker liga, o vetor muda
+// e o modelo fica dessincronizado.
+export type L2CSStatus = 'loading' | 'ready' | 'error';
 
 export interface GazeSample {
   x: number;
@@ -47,6 +53,12 @@ export interface GazeEngine {
   // `estavel`/`balanceado`/`responsivo` alteram mincutoff, beta e o buffer
   // ponderado. Ver FILTER_PRESETS em oneEuroFilter.ts.
   setFilterPreset(preset: FilterPreset): void;
+  // Estado do subsistema L2CS. UI deve bloquear calibração enquanto != 'ready'.
+  // getL2CSStatus é síncrono (para leituras pontuais); onL2CSStatusChange
+  // dispara o cb no ato da subscrição com o valor atual + em cada transição
+  // (mesmo padrão de onStateChange).
+  getL2CSStatus(): L2CSStatus;
+  onL2CSStatusChange(cb: (status: L2CSStatus) => void): () => void;
   calibration: CalibrationApi;
 }
 
@@ -137,12 +149,16 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let framesEmitted = 0;
   let lastStatMs = 0;
 
-  // E6 do L2CS-NET.md — cliente + contexto de crop. Inicializados só quando
-  // USE_L2CS_ANGLES=true. Nulls significam "L2CS desligado", e o loop pula
-  // toda a lógica associada. Não são recreados entre start/stop múltiplos
-  // pra evitar recarregar o ONNX de 91 MB.
+  // E6 do L2CS-NET.md — cliente + contexto de crop. L2CS é obrigatório no
+  // pipeline atual (não há fallback A/B). O worker carrega uma única vez;
+  // não é recreado entre start/stop múltiplos pra evitar recarregar o ONNX
+  // de 91 MB. Se a inicialização falhar, l2csStatus fica 'error' e a UI
+  // deve exibir isso; o loop rAF continua rodando (com bloco zerado) só
+  // para o cursor não travar completamente.
   let l2csClient: L2CSClient | null = null;
   let cropCtx: CropContext | null = null;
+  let l2csStatus: L2CSStatus = 'loading';
+  const l2csStatusSubscribers = new Set<(s: L2CSStatus) => void>();
   let l2csFramesSubmitted = 0;
   let l2csFramesValid = 0;
   let l2csFramesStale = 0;
@@ -151,6 +167,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     if (state === next) return;
     state = next;
     stateSubscribers.forEach(cb => cb(state));
+  }
+
+  function setL2CSStatus(next: L2CSStatus): void {
+    if (l2csStatus === next) return;
+    l2csStatus = next;
+    l2csStatusSubscribers.forEach(cb => cb(l2csStatus));
   }
 
   function emit(sample: GazeSample): void {
@@ -178,19 +200,18 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   }
 
   // E6 — inicialização fire-and-forget do L2CS. Nunca bloqueia engine.start()
-  // e nunca crasha o engine se der ruim (o pipeline segue com bloco de 7 zeros
-  // via degradação graciosa do extractor).
+  // porque o loop rAF precisa começar já para o cursor não ficar parado.
+  // Se init falhar, marca status='error' — a UI deve consultar via
+  // getL2CSStatus() e mostrar erro/impedir calibração.
   function initL2CSAsync(): void {
-    if (!USE_L2CS_ANGLES) return;
     if (l2csClient) return; // já iniciado
     cropCtx = createCropContext();
     l2csClient = createL2CSClient();
     l2csClient.start().then(
-      () => console.log('[L2CS] worker ready'),
+      () => { setL2CSStatus('ready'); console.log('[L2CS] worker ready'); },
       (err) => {
-        console.warn('[L2CS] worker init failed — pipeline continua sem gaze angular:', err);
-        l2csClient = null;
-        cropCtx = null;
+        setL2CSStatus('error');
+        console.error('[L2CS] worker init FAILED — pipeline degradado (bloco angular zerado). Motivo:', err);
       },
     );
   }
@@ -203,11 +224,8 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     // Diagnóstico periódico: se o loop está rodando mas nunca detecta face,
     // isso ajuda a distinguir "câmera parada" de "sem rosto no frame".
     if (startTimeMs - lastStatMs > 3000) {
-      const l2csLine = USE_L2CS_ANGLES
-        ? ` l2cs=${l2csClient?.isReady() ? 'ready' : 'off'} submit=${l2csFramesSubmitted} valid=${l2csFramesValid} stale=${l2csFramesStale}`
-        : '';
       console.log(
-        `[IrisFlow] engine stats — frames=${framesSeen} face=${framesWithFace} emit=${framesEmitted} videoTime=${videoEl.currentTime.toFixed(3)} paused=${videoEl.paused}${l2csLine}`,
+        `[IrisFlow] engine stats — frames=${framesSeen} face=${framesWithFace} emit=${framesEmitted} videoTime=${videoEl.currentTime.toFixed(3)} paused=${videoEl.paused} l2cs=${l2csStatus} submit=${l2csFramesSubmitted} valid=${l2csFramesValid} stale=${l2csFramesStale}`,
       );
       lastStatMs = startTimeMs;
     }
@@ -399,6 +417,18 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         bufferY.length = 0;
       }
       console.log(`[IrisFlow] filtro → ${preset} (mincutoff=${activeConfig.mincutoff}, beta=${activeConfig.beta}, buffer=${activeConfig.useRollingBuffer})`);
+    },
+
+    getL2CSStatus(): L2CSStatus {
+      return l2csStatus;
+    },
+
+    onL2CSStatusChange(cb: (s: L2CSStatus) => void): () => void {
+      l2csStatusSubscribers.add(cb);
+      // Emite o valor atual imediatamente para o subscriber não precisar
+      // combinar getL2CSStatus() + subscribe (mesmo padrão de onStateChange).
+      cb(l2csStatus);
+      return () => { l2csStatusSubscribers.delete(cb); };
     },
 
     calibration: {
