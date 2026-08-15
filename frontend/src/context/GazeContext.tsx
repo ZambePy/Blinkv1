@@ -9,12 +9,12 @@ import React, {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
-import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi } from '@tracker/tracker/engine';
+import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
 import * as accuracy from '@tracker/accuracy';
 import { useSettings } from './SettingsContext';
 
-export type { GazeSample, EngineState, L2CSStatus, RecordingApi } from '@tracker/tracker/engine';
+export type { GazeEngine, GazeSample, EngineState, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 
 // Dwell time by user preset (matches DwellButton's own table).
 const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
@@ -43,6 +43,7 @@ interface GazeContextValue {
   // contador de frames.
   recording: RecordingApi;
   setFilterPreset: (preset: FilterPreset) => void;
+  getDiagnostics: () => EngineDiagnostics | null;
 }
 
 const GazeContext = createContext<GazeContextValue | null>(null);
@@ -358,13 +359,18 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [],
   );
 
-  const setFilterPreset = useCallback((preset: FilterPreset) => {
-    engineRef.current?.setFilterPreset(preset);
-  }, []);
 
   const value = useMemo<GazeContextValue>(
-    () => ({ subscribe, state, l2csStatus, calibration, recording, setFilterPreset }),
-    [subscribe, state, l2csStatus, calibration, recording, setFilterPreset],
+    () => ({
+      subscribe,
+      state,
+      l2csStatus,
+      calibration,
+      recording,
+      setFilterPreset: (preset: FilterPreset) => engineRef.current?.setFilterPreset(preset),
+      getDiagnostics: () => engineRef.current?.getDiagnostics() ?? null,
+    }),
+    [subscribe, state, l2csStatus, calibration, recording],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

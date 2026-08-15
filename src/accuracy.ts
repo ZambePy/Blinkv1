@@ -183,26 +183,26 @@ export function startAccuracyTest(
         return;
       }
 
-      let error = 0;
-      let errorX = 0;
-      let errorY = 0;
+      let error = NaN;
+      let errorX = NaN;
+      let errorY = NaN;
+      let jitterRMS = NaN;
+      let samplesError: number[] = [];
       let meanPX = targetScreenX;
       let meanPY = targetScreenY;
-      let jitterRMS = 0;
+
       if (predictedX.length > 0) {
         meanPX = predictedX.reduce((s, v) => s + v, 0) / predictedX.length;
         meanPY = predictedY.reduce((s, v) => s + v, 0) / predictedY.length;
-        const dx = meanPX - targetScreenX;
-        const dy2 = meanPY - targetScreenY;
-        errorX = Math.abs(dx);
-        errorY = Math.abs(dy2);
-        error = Math.sqrt(dx * dx + dy2 * dy2);
+        
+        errorX = Math.abs(meanPX - targetScreenX);
+        errorY = Math.abs(meanPY - targetScreenY);
+        error = Math.sqrt((meanPX - targetScreenX) ** 2 + (meanPY - targetScreenY) ** 2);
 
         // Jitter RMS = raiz da média das distâncias² de cada amostra à média do
         // ponto. Isola o ruído do filtro/regressor do erro de calibração:
         // um alvo pode ter bias alto mas jitter baixo (ou vice-versa).
         let sumSq = 0;
-        let samplesError: number[] = [];
         for (let i = 0; i < predictedX.length; i++) {
           const jx = predictedX[i] - meanPX;
           const jy = predictedY[i] - meanPY;
@@ -213,8 +213,6 @@ export function startAccuracyTest(
           samplesError.push(Math.sqrt(ex * ex + ey * ey));
         }
         jitterRMS = Math.sqrt(sumSq / predictedX.length);
-      } else {
-        var samplesError: number[] = [];
       }
 
       pointErrors.push(error);

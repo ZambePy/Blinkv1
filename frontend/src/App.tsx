@@ -4,6 +4,7 @@ import { GazeProvider } from './context/GazeContext';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
+import { DebugHUD } from './components/DebugHUD';
 
 // Ondas de onboarding carregadas cedo — poucas telas, alta chance de uso imediato
 import { InitialSplash } from './pages/onboarding/InitialSplash';
@@ -93,6 +94,7 @@ function App() {
         <ToastProvider>
           <GazeProvider>
             <BrowserRouter>
+              <DebugHUD />
               <Suspense fallback={<RouteFallback />}>
                 <Routes>
                   {/* Onboarding — públicas */}

@@ -28,11 +28,11 @@ export interface L2CSClient {
   getLatestGaze(nowMs?: number): L2CSGaze;
   isReady(): boolean;
   getMeta(): L2CSModelMeta | null;
+  getAverageLatencyMs(): number;
 }
 
 const DEFAULT_MODEL_URL = '/models/l2cs/l2cs_gaze360.onnx';
 const DEFAULT_META_URL = '/models/l2cs/l2cs.meta.json';
-const DEFAULT_CADENCE_MS = 100;
 const DEFAULT_STALE_MS = 500;
 
 export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
@@ -51,6 +51,7 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
   let lastSubmitMs = 0;
   let pendingId = 0;
   let latest: L2CSGaze = { yaw: 0, pitch: 0, timestamp: 0, valid: false };
+  let recentLatencies: number[] = [];
 
   function post(msg: L2CSWorkerRequest, transfer?: Transferable[]): void {
     if (!worker) return;
@@ -79,6 +80,8 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
         timestamp: performance.now(),
         valid: true,
       };
+      recentLatencies.push(msg.inferenceMs);
+      if (recentLatencies.length > 20) recentLatencies.shift();
     } else if (msg.type === 'infer_error') {
       // Não invalidamos o cache — mantemos o último valor enquanto ele ainda
       // for fresh; se ficar stale, valid cai para false naturalmente.
@@ -154,5 +157,11 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
     getMeta(): L2CSModelMeta | null {
       return meta;
     },
+    getAverageLatencyMs(): number {
+      if (recentLatencies.length === 0) return 0;
+      let sum = 0;
+      for (const t of recentLatencies) sum += t;
+      return sum / recentLatencies.length;
+    }
   };
 }

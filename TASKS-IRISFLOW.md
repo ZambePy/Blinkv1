@@ -507,7 +507,7 @@ Atualizar também `AUTO_TEST_META` em `CalibrationCheck.tsx` e o formulário de 
 
 ---
 
-### D1-4 🟢 — Painel de diagnóstico ao vivo ⏱️ 40 min
+### D1-4 🟢 — Painel de diagnóstico ao vivo ⏱️ 40 min [✅ FEITO - GATE ACEITO: painel debug adicionado]
 
 **Motivo:** você vai passar D1 e D2 olhando para o comportamento do pipeline. Hoje o diagnóstico está espalhado por `console.log` a cada 3 s.
 

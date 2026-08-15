@@ -59,6 +59,43 @@ export interface RecordingApi {
   clear(): void;
 }
 
+export interface EngineDiagnostics {
+  fpsRender: number;
+  l2cs: {
+    status: L2CSStatus;
+    hz: number;
+    latencyMs: number;
+    stalePct: number;
+  };
+  gaze: {
+    yaw: number;
+    pitch: number;
+  };
+  pose: {
+    yaw: number;
+    pitch: number;
+    roll: number;
+  };
+  features: {
+    dims: number;
+    blink: boolean;
+  };
+  prediction: {
+    x: number;
+    y: number;
+  };
+  calibration: {
+    calibrated: boolean;
+    lambda: number;
+    samples: number;
+  };
+  experiment: {
+    expandFactor: number;
+    cadenceMs: number;
+    applyGazeCorrection: boolean;
+  };
+}
+
 export interface GazeEngine {
   start(video: HTMLVideoElement): Promise<void>;
   stop(): void;
@@ -75,6 +112,7 @@ export interface GazeEngine {
   // (mesmo padrão de onStateChange).
   getL2CSStatus(): L2CSStatus;
   onL2CSStatusChange(cb: (status: L2CSStatus) => void): () => void;
+  getDiagnostics(): EngineDiagnostics;
   calibration: CalibrationApi;
   recording: RecordingApi;
 }
@@ -205,6 +243,19 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let l2csFramesValid = 0;
   let l2csFramesStale = 0;
 
+  // Diagnostics counters
+  let diagRenderFps = 0;
+  let diagL2csHz = 0;
+  let diagL2csStalePct = 0;
+  let diagLastUpdateMs = performance.now();
+  let diagFramesSeen = 0;
+  let diagL2csValidFrames = 0;
+  let diagL2csTotalFrames = 0;
+  let diagPose: { yaw: number; pitch: number; roll: number } = { yaw: 0, pitch: 0, roll: 0 };
+  let diagBlink = false;
+  let diagL2csYaw = 0;
+  let diagL2csPitch = 0;
+
   function setState(next: EngineState): void {
     if (state === next) return;
     state = next;
@@ -307,7 +358,33 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           });
         }
       } else {
-        const landmarks = results.faceLandmarks[0];
+        if (framesSeen === 1) {
+        lastStatMs = performance.now();
+      } else if (framesSeen % 60 === 0) {
+        const nowMs = performance.now();
+        const deltaSec = (nowMs - lastStatMs) / 1000;
+        console.log(
+          `[IrisFlow] FPS: ${(60 / deltaSec).toFixed(1)} ` +
+          `| Face: ${(framesWithFace / framesSeen * 100).toFixed(0)}% ` +
+          `| L2CS: ${l2csFramesValid}/${l2csFramesSubmitted} (stale: ${l2csFramesStale})`,
+        );
+        lastStatMs = nowMs;
+      }
+
+      const now = performance.now();
+      if (now - diagLastUpdateMs >= 250) {
+        const deltaMs = now - diagLastUpdateMs;
+        diagRenderFps = (framesSeen - diagFramesSeen) * 1000 / deltaMs;
+        const l2csTotal = (l2csFramesValid + l2csFramesStale) - diagL2csTotalFrames;
+        const l2csValid = l2csFramesValid - diagL2csValidFrames;
+        diagL2csHz = l2csValid * 1000 / deltaMs;
+        diagL2csStalePct = l2csTotal > 0 ? ((l2csTotal - l2csValid) / l2csTotal) * 100 : 0;
+        
+        diagFramesSeen = framesSeen;
+        diagL2csValidFrames = l2csFramesValid;
+        diagL2csTotalFrames = l2csFramesValid + l2csFramesStale;
+        diagLastUpdateMs = now;
+      }  const landmarks = results.faceLandmarks[0];
         const rawIod = Math.sqrt(
           (landmarks[33].x - landmarks[263].x) ** 2 +
           (landmarks[33].y - landmarks[263].y) ** 2,
@@ -342,9 +419,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           const g = l2csClient.getLatestGaze(startTimeMs);
           l2csGaze = { yaw: g.yaw, pitch: g.pitch, valid: g.valid };
           if (g.valid) l2csFramesValid++; else l2csFramesStale++;
+          diagL2csYaw = g.yaw;
+          diagL2csPitch = g.pitch;
         }
 
         const extractorResult = extractFeatures(landmarks, faceMatrix, l2csGaze);
+        diagBlink = extractorResult.blinkDetected;
 
         // Fase 0.1 — snapshot para o gravador. As duas variáveis abaixo são
         // preenchidas dentro do bloco de emissão; fora dele ficam undefined
@@ -375,6 +455,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             pitch: face?.pitch,
             roll:  face?.roll,
           };
+
+          if (face) {
+            diagPose = { yaw: face.yaw, pitch: face.pitch, roll: face.roll };
+          }
 
           calibration.feedRawData(featuresLeft, featuresRight, quality);
           feedAccuracyRaw(featuresLeft, featuresRight);
@@ -536,6 +620,41 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       // combinar getL2CSStatus() + subscribe (mesmo padrão de onStateChange).
       cb(l2csStatus);
       return () => { l2csStatusSubscribers.delete(cb); };
+    },
+
+    getDiagnostics(): EngineDiagnostics {
+      return {
+        fpsRender: diagRenderFps,
+        l2cs: {
+          status: l2csStatus,
+          hz: diagL2csHz,
+          latencyMs: l2csClient?.getAverageLatencyMs() ?? 0,
+          stalePct: diagL2csStalePct,
+        },
+        gaze: {
+          yaw: diagL2csYaw,
+          pitch: diagL2csPitch,
+        },
+        pose: diagPose,
+        features: {
+          dims: latestFeaturesLeft.length * 2,
+          blink: diagBlink,
+        },
+        prediction: {
+          x: lastEmittedX,
+          y: lastEmittedY,
+        },
+        calibration: {
+          calibrated: calibration.isCalibrated(),
+          lambda: calibration.getCurrentLambda(),
+          samples: calibration.getSampleCount(),
+        },
+        experiment: {
+          expandFactor: EXPERIMENT.expandFactor,
+          cadenceMs: EXPERIMENT.l2csCadenceMs,
+          applyGazeCorrection: EXPERIMENT.applyGazeCorrection,
+        },
+      };
     },
 
     calibration: {

@@ -140,6 +140,20 @@ export function clearCalibration() {
   regressorLeft = null;
   regressorRight = null;
   _gazeCorrections = [];
+  onlineLeft = null;
+  onlineRight = null;
+}
+
+export function getSampleCount(): number {
+  return profile.length;
+}
+
+export function getCurrentLambda(): number {
+  if (regressorLeft && 'getModel' in regressorLeft) {
+    const model = (regressorLeft as any).getModel();
+    return model.lambda ?? 0;
+  }
+  return 0;
 }
 
 export function loadProfile(): boolean {
