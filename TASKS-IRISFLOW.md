@@ -422,7 +422,7 @@ diff <(jq .accuracy.meanErrorPx /tmp/a.json) <(jq .accuracy.meanErrorPx /tmp/b.j
 
 ---
 
-### D1-1 🟡 — Separar medição de correção ⏱️ 30 min
+### D1-1 🟡 — Separar medição de correção ⏱️ 30 min [✅ FEITO - GATE ACEITO: 69/69 passed]
 
 Corrige A2.
 

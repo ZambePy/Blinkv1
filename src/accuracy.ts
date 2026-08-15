@@ -9,6 +9,7 @@
 
 import { mapGaze, setGazeCorrections } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
+import { EXPERIMENT } from './config/experiment';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
@@ -330,6 +331,7 @@ function finishTest(
   const pipeline = {
     variant: 'l2cs+ridge' as const,
     regressor: REGRESSOR_MODE,
+    gazeCorrectionApplied: EXPERIMENT.applyGazeCorrection,
   };
 
   const jsonReport = JSON.stringify({
@@ -383,12 +385,14 @@ function finishTest(
   }
   console.log(`[accuracy] === FIM ===`);
 
-  setGazeCorrections(diagnostics.map(d => ({
-    refX:    d.predX,
-    refY:    d.predY,
-    offsetX: d.groundX - d.predX,
-    offsetY: d.groundY - d.predY,
-  })));
+  if (EXPERIMENT.applyGazeCorrection) {
+    setGazeCorrections(diagnostics.map(d => ({
+      refX:    d.predX,
+      refY:    d.predY,
+      offsetX: d.groundX - d.predX,
+      offsetY: d.groundY - d.predY,
+    })));
+  }
 
   showDiagnosticOverlay(diagnostics, result, onComplete);
 }
@@ -488,6 +492,7 @@ function showDiagnosticOverlay(
   footer.innerHTML = `
     <div class="diagnostic-card">
       <div class="diagnostic-title">Calibração Concluída</div>
+      ${EXPERIMENT.applyGazeCorrection ? '<div class="diagnostic-warning" style="color:#ffcc00; font-size:12px; margin-top:4px;">⚠️ Métricas calculadas PRÉ-correção</div>' : ''}
 
       <div class="diagnostic-legend">
         <span class="legend-item">
