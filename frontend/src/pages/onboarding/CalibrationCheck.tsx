@@ -78,6 +78,8 @@ export const CalibrationCheck: React.FC = () => {
     movimentoCabeca: 'parada',
     minutosDeSessao: 0,
     observacoes: 'auto (imediatamente após calibração)',
+    distanciaCm: 60,
+    telaPolegadas: 15.6,
   };
 
   const runAccuracyTestThenExit = () => {

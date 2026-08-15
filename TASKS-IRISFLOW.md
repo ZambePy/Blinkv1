@@ -443,7 +443,7 @@ jq '.result.meanError, .pipeline.gazeCorrectionApplied' accuracy-report-*.json
 
 ---
 
-### D1-2 🟡 — Métricas que predizem sucesso de dwell ⏱️ 45 min
+### D1-2 🟡 — Métricas que predizem sucesso de dwell ⏱️ 45 min [✅ FEITO - GATE ACEITO: 69/69 passed]
 
 Corrige A5.
 
@@ -471,7 +471,7 @@ hitRateByRadius: { radiusPx: number; pct: number }[];
 
 ---
 
-### D1-3 🟡 — `RunMeta` com geometria real ⏱️ 20 min
+### D1-3 🟡 — `RunMeta` com geometria real ⏱️ 20 min [✅ FEITO - GATE ACEITO: 69/69 passed]
 
 Corrige A6.
 

@@ -131,6 +131,8 @@ export const SettingsScreen: React.FC = () => {
     oculos: false,
     movimentoCabeca: 'parada',
     minutosDeSessao: 0,
+    distanciaCm: 60,
+    telaPolegadas: 15.6,
   });
   const [onlineCalibration, setOnlineCalibration] = useState(false);
 
@@ -934,6 +936,41 @@ export const SettingsScreen: React.FC = () => {
                 <option value="20">20</option>
                 <option value="40">40</option>
               </select>
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+                Distância (cm)
+              </span>
+              <input
+                type="number"
+                value={accuracyMeta.distanciaCm}
+                onChange={(e) => setAccuracyMeta({ ...accuracyMeta, distanciaCm: Number(e.target.value) })}
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid var(--color-card-border)',
+                  fontSize: '0.95rem',
+                }}
+              />
+            </label>
+
+            <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+                Tela (polegadas)
+              </span>
+              <input
+                type="number"
+                step="0.1"
+                value={accuracyMeta.telaPolegadas}
+                onChange={(e) => setAccuracyMeta({ ...accuracyMeta, telaPolegadas: Number(e.target.value) })}
+                style={{
+                  padding: '0.75rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid var(--color-card-border)',
+                  fontSize: '0.95rem',
+                }}
+              />
             </label>
           </div>
 

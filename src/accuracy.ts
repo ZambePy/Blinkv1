@@ -25,6 +25,13 @@ export interface AccuracyResult {
   colorClass: string;     // Classe CSS para colorir o painel
   pointErrors: number[];  // Erro por ponto de validação
   pointJitters: number[]; // Jitter RMS por ponto (px)
+  /** Erro por AMOSTRA (não por média do ponto). É o que o dwell sente. */
+  sampleMeanError: number;
+  sampleMedianError: number;
+  sampleP90Error: number;          // p90 real, sobre todas as amostras
+  /** % de amostras dentro de um alvo de raio R centrado no ponto.
+   *  Preditor direto da taxa de sucesso do dwell. */
+  hitRateByRadius: { radiusPx: number; pct: number }[];
 }
 
 // Metadata sobre a condição em que o teste foi rodado. Preenchida pela UI
@@ -38,6 +45,11 @@ export interface RunMeta {
   minutosDeSessao: number;    // 0, 20, 40 para curva de deriva
   usuario?: string;           // Identificador opcional do participante
   observacoes?: string;
+  /** Distância olho→tela MEDIDA com fita métrica, em cm. Obrigatório para
+   *  que o erro angular tenha significado fora desta máquina. */
+  distanciaCm: number;
+  /** Diagonal física do monitor em polegadas. */
+  telaPolegadas: number;
 }
 
 interface PointDiagnostic {
@@ -50,6 +62,7 @@ interface PointDiagnostic {
   errorY: number;
   jitterRMS: number;
   name: string;
+  samplesError: number[];
 }
 
 // Grade 3×3 disjunta da calibração — calibração usa 10/50/90, precisão usa
@@ -189,12 +202,19 @@ export function startAccuracyTest(
         // ponto. Isola o ruído do filtro/regressor do erro de calibração:
         // um alvo pode ter bias alto mas jitter baixo (ou vice-versa).
         let sumSq = 0;
+        let samplesError: number[] = [];
         for (let i = 0; i < predictedX.length; i++) {
           const jx = predictedX[i] - meanPX;
           const jy = predictedY[i] - meanPY;
           sumSq += jx * jx + jy * jy;
+          
+          const ex = predictedX[i] - targetScreenX;
+          const ey = predictedY[i] - targetScreenY;
+          samplesError.push(Math.sqrt(ex * ex + ey * ey));
         }
         jitterRMS = Math.sqrt(sumSq / predictedX.length);
+      } else {
+        var samplesError: number[] = [];
       }
 
       pointErrors.push(error);
@@ -208,6 +228,7 @@ export function startAccuracyTest(
         errorY,
         jitterRMS,
         name: vp.name,
+        samplesError,
       });
 
       pointIndex++;
@@ -280,11 +301,35 @@ function finishTest(
   const meanErrorX = diagnostics.reduce((s, d) => s + d.errorX, 0) / diagnostics.length || 0;
   const meanErrorY = diagnostics.reduce((s, d) => s + d.errorY, 0) / diagnostics.length || 0;
 
+  const allSampleErrors = diagnostics.flatMap(d => d.samplesError);
+  const nSamples = allSampleErrors.length;
+  const sampleMeanError = nSamples ? allSampleErrors.reduce((s, v) => s + v, 0) / nSamples : 0;
+  const sortedSampleErrors = [...allSampleErrors].sort((a, b) => a - b);
+  const sampleMedianError = nSamples > 0 ? sortedSampleErrors[Math.floor(nSamples / 2)] : 0;
+  const sampleP90Error = nSamples > 0 ? sortedSampleErrors[Math.min(nSamples - 1, Math.ceil(nSamples * 0.9) - 1)] : 0;
+
+  const radii = [60, 100, 150, 200];
+  const hitRateByRadius = radii.map(r => ({
+    radiusPx: r,
+    pct: nSamples > 0 ? (allSampleErrors.filter(e => e <= r).length / nSamples) * 100 : 0
+  }));
+
   const maxError = Math.max(...pointErrors);
   const diagonal = Math.sqrt(vw ** 2 + vh ** 2);
   const errorPct = (meanError / diagonal) * 100;
 
-  const meanErrorDeg = (Math.atan(meanError / ASSUMED_DIST_PX) * 180) / Math.PI;
+  let distPx = ASSUMED_DIST_PX;
+  let geometryAssumed = true;
+  let pxPorCm = 0;
+
+  if (meta && meta.distanciaCm && meta.telaPolegadas) {
+    const diagPx = Math.hypot(vw, vh);
+    pxPorCm = diagPx / (meta.telaPolegadas * 2.54);
+    distPx = meta.distanciaCm * pxPorCm;
+    geometryAssumed = false;
+  }
+
+  const meanErrorDeg = (Math.atan(meanError / distPx) * 180) / Math.PI;
 
   const pointJitters = diagnostics.map(d => d.jitterRMS);
   const jitterRMS = pointJitters.length
@@ -310,6 +355,7 @@ function finishTest(
   const result: AccuracyResult = {
     meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
     jitterRMS, score, colorClass, pointErrors, pointJitters,
+    sampleMeanError, sampleMedianError, sampleP90Error, hitRateByRadius,
   };
 
   try {
@@ -341,6 +387,7 @@ function finishTest(
     pipeline,
     result,
     diagnostics,
+    geometry: { assumed: geometryAssumed, distPx, pxPorCm: pxPorCm || undefined }
   }, null, 2);
 
   // Preferir gravar direto na raiz do projeto (via middleware do Vite dev):
@@ -525,6 +572,10 @@ function showDiagnosticOverlay(
           <div class="metric-value" style="color:${scoreColor}">${result.score}</div>
           <div class="metric-label">Classificação</div>
         </div>
+      </div>
+      
+      <div style="text-align:center; font-size:14px; font-weight:600; color:#fff; margin-bottom:16px;">
+        Taxa de acerto em alvo de 150 px: <span style="color:${scoreColor}">${result.hitRateByRadius.find(r => r.radiusPx === 150)?.pct.toFixed(0) || 0}%</span>
       </div>
 
       <div class="diagnostic-point-grid">
