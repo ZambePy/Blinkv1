@@ -359,7 +359,7 @@ npm run replay -- --jsonl fixtures/replay/<arquivo>.jsonl -v 2>&1 | head -20
 
 ---
 
-### PREP-4 🔴 — Falhar alto em incompatibilidade de dimensão ⏱️ 20 min
+### PREP-4 🔴 — Falhar alto em incompatibilidade de dimensão ⏱️ 20 min [✅ FEITO - GATE ACEITO: 69/69 passed]
 
 **Motivo:** corrige A4 — o modo de falha mais caro do sistema hoje é totalmente silencioso.
 

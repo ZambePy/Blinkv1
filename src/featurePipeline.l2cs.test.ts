@@ -98,4 +98,17 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
     for (const v of result.featuresLeft) expect(Number.isFinite(v)).toBe(true);
     for (const v of result.featuresRight) expect(Number.isFinite(v)).toBe(true);
   });
+
+  it('vetor tem sempre 44 dims quando l2csGaze != null, independente de valid', () => {
+    if (!USE_COMPACT_FEATURES) return;
+    const lms = makeLandmarks();
+    
+    const withValid = extractFeatures(lms, undefined, { yaw: 0, pitch: 0, valid: true });
+    expect(withValid.featuresLeft).toHaveLength(44);
+    expect(withValid.featuresRight).toHaveLength(44);
+    
+    const withInvalid = extractFeatures(lms, undefined, { yaw: 0, pitch: 0, valid: false });
+    expect(withInvalid.featuresLeft).toHaveLength(44);
+    expect(withInvalid.featuresRight).toHaveLength(44);
+  });
 });

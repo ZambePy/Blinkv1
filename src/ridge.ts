@@ -90,7 +90,12 @@ export function predictRidge(
   features: number[]
 ): { x: number; y: number } {
   if (features.length !== model.numFeatures) {
-    return { x: 0, y: 0 };
+    throw new RangeError(
+      `[ridge] dimensão incompatível: modelo treinado com ${model.numFeatures} features, ` +
+      `recebeu ${features.length}. Causa provável: calibração feita com o bloco L2CS ` +
+      `ativo (44 dims/olho) e inferência sem ele (37 dims), ou vice-versa. ` +
+      `Recalibre com o worker L2CS em estado 'ready'.`
+    );
   }
   const f = [1.0, ...features];
 

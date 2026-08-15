@@ -563,6 +563,8 @@ export function getCurrentTargetPx(): { xPx: number; yPx: number } | null {
   return { xPx: currentTargetX * vw, yPx: currentTargetY * vh };
 }
 
+let _dimErrorLogged = false;
+
 export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
@@ -572,8 +574,19 @@ export function mapGaze(
   const scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
   const scaledRight = featureScalerRight.transformSingle(featuresRight);
 
-  const predLeft = regressorLeft.predict(scaledLeft);
-  const predRight = regressorRight.predict(scaledRight);
+  let predLeft: { x: number; y: number };
+  let predRight: { x: number; y: number };
+  try {
+    predLeft = regressorLeft.predict(scaledLeft);
+    predRight = regressorRight.predict(scaledRight);
+    _dimErrorLogged = false; // reseta a flag num frame feliz
+  } catch (e) {
+    if (!_dimErrorLogged) {
+      console.error(e);
+      _dimErrorLogged = true;
+    }
+    return null;
+  }
 
   let baseX = (predLeft.x + predRight.x) / 2;
   let baseY = (predLeft.y + predRight.y) / 2;
