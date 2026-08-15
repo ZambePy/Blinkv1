@@ -3,24 +3,23 @@ import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 import { BackButton } from '../../components/ui/BackButton';
+import { startAccuracyTest } from '@tracker/accuracy';
+import type { RunMeta } from '@tracker/accuracy';
 
-// Grade simétrica de 13 pontos (Sprint 1.3). Quatro em cada linha (10, 37, 63,
-// 90) mais o centro (50, 50). Substitui a grade antiga 4-5-3 + diagonal, que
-// subamostrava a borda inferior e enviesava o erro na periferia.
+// Grade 3×3 nos cantos e bordas (10/50/90). Total de coleta preservado ao
+// escalar COLLECTION_MS_BASE/RANGE no calibration.ts (fator ~1.40), então
+// menos pontos com mais frames cada — mesmo número de amostras alimentando o
+// Ridge, menor fadiga do usuário.
 const CALIBRATION_POINTS = [
   { x: 10, y: 10, name: "Superior Esquerdo" },
-  { x: 37, y: 10, name: "Superior Meio-Esquerdo" },
-  { x: 63, y: 10, name: "Superior Meio-Direito" },
+  { x: 50, y: 10, name: "Superior Central" },
   { x: 90, y: 10, name: "Superior Direito" },
   { x: 10, y: 50, name: "Meio Esquerdo" },
-  { x: 37, y: 50, name: "Meio Esquerdo-Central" },
-  { x: 63, y: 50, name: "Meio Direito-Central" },
+  { x: 50, y: 50, name: "Centro" },
   { x: 90, y: 50, name: "Meio Direito" },
   { x: 10, y: 90, name: "Inferior Esquerdo" },
-  { x: 37, y: 90, name: "Inferior Meio-Esquerdo" },
-  { x: 63, y: 90, name: "Inferior Meio-Direito" },
+  { x: 50, y: 90, name: "Inferior Central" },
   { x: 90, y: 90, name: "Inferior Direito" },
-  { x: 50, y: 50, name: "Centro" },
 ];
 
 export const CalibrationCheck: React.FC = () => {
@@ -33,12 +32,21 @@ export const CalibrationCheck: React.FC = () => {
   const l2csReady = l2csStatus === 'ready';
   const l2csFailed = l2csStatus === 'error';
 
-  const [stage, setStage] = useState<'pre-calibration' | 'tutorial' | 'calibrating' | 'finished' | 'transitioning'>('pre-calibration');
+  // 'testing' = teste de precisão auto-disparado após completeCalibration —
+  // o overlay do startAccuracyTest toma a tela inteira, então este stage só
+  // renderiza uma tela mínima de "aguarde" enquanto o overlay sobe.
+  const [stage, setStage] = useState<'pre-calibration' | 'tutorial' | 'calibrating' | 'testing' | 'transitioning'>('pre-calibration');
   const [currentIndex, setCurrentIndex] = useState(0);
   const [completedList, setCompletedList] = useState<number[]>([]);
   const [isCollecting, setIsCollecting] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastCompletedPoint, setLastCompletedPoint] = useState<number | null>(null);
+  // 1.5s de janela entre "clicou Começar" e primeira amostra — usuário
+  // relatou que a movimentação do clique/olhar contamina o primeiro ponto
+  // e infla o erro global. Enquanto true, a UI mostra "Prepare-se..." e
+  // não dispara startCollectingPoint.
+  const [preparing, setPreparing] = useState(false);
+  const PREPARE_MS = 1500;
 
   const shuffleOrderRef = useRef<number[]>([]);
 
@@ -60,14 +68,49 @@ export const CalibrationCheck: React.FC = () => {
   const retryCountRef = useRef(0);
   const MAX_RETRIES_PER_POINT = 3;
 
+  // Meta default do teste de precisão. O usuário pediu fluxo automático
+  // (calibração → teste sem interrupção) — sem form intermediário. Se quiser
+  // condições diferentes no relatório, roda o teste manual via Settings.
+  const AUTO_TEST_META: RunMeta = {
+    data: new Date().toISOString().slice(0, 10),
+    iluminacao: 'boa',
+    oculos: false,
+    movimentoCabeca: 'parada',
+    minutosDeSessao: 0,
+    observacoes: 'auto (imediatamente após calibração)',
+  };
+
+  const runAccuracyTestThenExit = () => {
+    // O overlay do startAccuracyTest é fullscreen (z-index alto) e cobre o
+    // stage 'testing'; ao terminar, o próprio overlay já mostra as métricas
+    // e espera Espaço (continue) ou R (redo).
+    startAccuracyTest((_result, action) => {
+      if (!isMounted.current) return;
+      if (action === 'redo') {
+        // Volta pro tutorial pra usuário reiniciar do zero.
+        // clear() zera o modelo — precisa recalibrar antes de novo teste.
+        calibration.clear?.();
+        setStage('tutorial');
+        setCompletedList([]);
+        return;
+      }
+      finishAndTransition();
+    }, AUTO_TEST_META);
+  };
+
   const startNextPoint = (step: number) => {
     if (!isMounted.current) return;
-    
+
     const order = shuffleOrderRef.current;
     if (step >= order.length) {
-      setStage('finished');
+      setStage('testing');
       calibration.completeCalibration?.(() => {
-        console.log('[React] Calibração Headless Concluída e Modelo Treinado!');
+        console.log('[React] Calibração concluída — disparando teste de precisão automático');
+        // Pequeno delay pra o stage 'testing' renderizar antes do overlay do
+        // accuracy tomar a tela (evita flash da tela anterior).
+        setTimeout(() => {
+          if (isMounted.current) runAccuracyTestThenExit();
+        }, 400);
       });
       return;
     }
@@ -130,7 +173,14 @@ export const CalibrationCheck: React.FC = () => {
     shuffleOrderRef.current = order;
     setCurrentIndex(order[0]);
     calibration.startCalibrationMode?.();
-    startNextPoint(0);
+    // Prepare-se: o primeiro ponto já aparece na tela, mas a coleta só
+    // começa depois de PREPARE_MS pra o usuário estabilizar o olhar.
+    setPreparing(true);
+    setTimeout(() => {
+      if (!isMounted.current) return;
+      setPreparing(false);
+      startNextPoint(0);
+    }, PREPARE_MS);
   };
 
   const finishAndTransition = () => {
@@ -338,8 +388,8 @@ export const CalibrationCheck: React.FC = () => {
               </div>
             </div>
 
-            <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', zIndex: 40, color: errorMessage ? '#ef4444' : '#64748b', fontSize: '1.5rem', fontWeight: 600, transition: 'all 0.3s ease', opacity: isCollecting || errorMessage ? 1 : 0.4 }}>
-              {errorMessage ? errorMessage : "Siga o ponto com os olhos"}
+            <div style={{ position: 'absolute', bottom: '2rem', left: '50%', transform: 'translateX(-50%)', zIndex: 40, color: errorMessage ? '#ef4444' : (preparing ? '#1B54A8' : '#64748b'), fontSize: '1.5rem', fontWeight: 600, transition: 'all 0.3s ease', opacity: preparing || isCollecting || errorMessage ? 1 : 0.4 }}>
+              {errorMessage ? errorMessage : (preparing ? "Prepare-se... olhe para o ponto" : "Siga o ponto com os olhos")}
             </div>
 
             {CALIBRATION_POINTS.map((pt, idx) => {
@@ -381,23 +431,20 @@ export const CalibrationCheck: React.FC = () => {
           </>
         )}
 
-        {stage === 'finished' && (
-          <div className="animate-scale-in" style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 50 }}>
-            <div className="glass-card" style={{ padding: '4rem', borderRadius: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 600, width: '100%', gap: '2rem' }}>
-              <div style={{ width: 100, height: 100, borderRadius: '50%', background: '#16a34a', display: 'flex', alignItems: 'center', justifyContent: 'center', boxShadow: '0 20px 40px rgba(22,163,74,0.3)' }}>
-                <CheckCircle2 size={50} color="#ffffff" />
-              </div>
+        {stage === 'testing' && (
+          /* Tela de transição enquanto o overlay do startAccuracyTest sobe
+             (~400ms após completeCalibration). O overlay é fullscreen e
+             z-index 100+, então cobre esta tela; a razão desta existir é
+             evitar flash da tela de calibração vazia entre o último ponto
+             e o overlay. */
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem', zIndex: 50 }}>
+            <div className="glass-card" style={{ padding: '3rem', borderRadius: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', textAlign: 'center', maxWidth: 520, width: '100%', gap: '1.5rem' }}>
+              <Loader2 size={48} color="#1B54A8" style={{ animation: 'spin 1s linear infinite' }} />
               <div>
-                <h2 style={{ fontSize: '2.5rem', fontWeight: 800, margin: '0 0 1rem 0' }}>Tudo pronto!</h2>
-                <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0 }}>Seu olhar foi calibrado com sucesso.</p>
-              </div>
-              <div style={{ display: 'flex', gap: '1.5rem', width: '100%', marginTop: '1rem', justifyContent: 'center' }}>
-                <button type="button" onClick={handleStart} style={{ padding: '1.2rem 2.5rem', borderRadius: '2rem', border: '2px solid var(--color-card-border)', background: 'transparent', color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.1rem', fontWeight: 700, cursor: 'pointer', transition: 'all 0.2s' }} onMouseOver={(e) => e.currentTarget.style.color = '#334155'} onMouseOut={(e) => e.currentTarget.style.color = '#64748b'}>
-                  Refazer
-                </button>
-                <button type="button" onClick={finishAndTransition} style={{ padding: '1.2rem 3.5rem', borderRadius: '2rem', border: 'none', background: '#1B54A8', color: 'white', fontSize: '1.25rem', fontWeight: 700, cursor: 'pointer', boxShadow: '0 12px 24px rgba(27, 84, 168, 0.3)', transition: 'all 0.2s' }} onMouseOver={(e) => { e.currentTarget.style.transform = 'translateY(-2px)' }} onMouseOut={(e) => { e.currentTarget.style.transform = 'translateY(0)' }}>
-                  Continuar
-                </button>
+                <h2 style={{ fontSize: '1.75rem', fontWeight: 800, margin: '0 0 0.5rem 0' }}>Iniciando teste de precisão</h2>
+                <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.05rem', margin: 0, lineHeight: 1.5 }}>
+                  Não se mexa. Olhe para os pontos que aparecerão em seguida.
+                </p>
               </div>
             </div>
           </div>

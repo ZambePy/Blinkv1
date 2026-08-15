@@ -1,13 +1,49 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
+import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+// Endpoint dev que grava o accuracy-report na raiz do projeto e apaga
+// o(s) anterior(es) — evita acúmulo de JSONs em Downloads. Só existe no
+// dev server; em build, accuracy.ts cai no fallback de download.
+function saveAccuracyReportPlugin(): Plugin {
+  const projectRoot = path.resolve(__dirname, '..');
+  return {
+    name: 'save-accuracy-report',
+    configureServer(server) {
+      server.middlewares.use('/__/save-accuracy-report', (req, res, next) => {
+        if (req.method !== 'POST') { next(); return; }
+        let body = '';
+        req.on('data', (chunk) => { body += chunk; });
+        req.on('end', () => {
+          try {
+            for (const f of fs.readdirSync(projectRoot)) {
+              if (/^accuracy-report-.*\.json$/.test(f)) {
+                fs.unlinkSync(path.join(projectRoot, f));
+              }
+            }
+            const fname = `accuracy-report-${Date.now()}.json`;
+            fs.writeFileSync(path.join(projectRoot, fname), body, 'utf-8');
+            res.statusCode = 200;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ saved: fname }));
+          } catch (e) {
+            res.statusCode = 500;
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify({ error: String(e) }));
+          }
+        });
+      });
+    },
+  };
+}
+
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react()],
+  plugins: [react(), saveAccuracyReportPlugin()],
   envPrefix: 'VITE_',
   resolve: {
     alias: {

@@ -11,6 +11,7 @@ import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus } from '@tracker/tracker/engine';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
+import * as accuracy from '@tracker/accuracy';
 import { useSettings } from './SettingsContext';
 
 export type { GazeSample, EngineState, L2CSStatus } from '@tracker/tracker/engine';
@@ -202,13 +203,18 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Move cursor via transform (no layout / no React re-render).
       // Visual feedback: green + growing while dwell fills; red otherwise.
-      // The cursor is completely hidden during calibration to avoid distracting
-      // the user while they are fixating on calibration targets.
+      // Cursor completamente escondido em 3 casos: (1) durante calibração
+      // para não distrair a fixação; (2) antes de calibrar (não há mapeamento
+      // ainda, mostrar um cursor aleatório confunde); (3) durante o teste
+      // de precisão — se o usuário vir o cursor ele tenta "corrigi-lo"
+      // olhando para outro lugar, criando feedback loop que corrompe a
+      // medida (a variável isAccuracyTesting é lida a cada frame, então
+      // pega o valor fresco assim que startAccuracyTest liga).
       if (cursorRef.current) {
         const isInCalibration = engineRef.current?.getState() === 'calibrating';
         const isCalibrated = engineRef.current?.calibration.isCalibrated() ?? false;
-        
-        if (isInCalibration || !isCalibrated) {
+
+        if (isInCalibration || !isCalibrated || accuracy.isAccuracyTesting) {
           // Hard-hide: move offscreen + opacity 0
           cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
           cursorRef.current.style.opacity = '0';
