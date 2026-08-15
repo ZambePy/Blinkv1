@@ -9,6 +9,7 @@
     "build": "npm --prefix frontend run build",
     "preview": "npm --prefix frontend run preview",
     "test": "vitest run",
+    "replay": "node scripts/replay.mjs",
     "electron:compile": "node electron/build.mjs",
     "electron:dev": "node electron/dev.mjs",
     "electron:build": "npm run build && node electron/build.mjs && node electron/package-app.mjs"
