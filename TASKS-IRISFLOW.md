@@ -284,7 +284,7 @@ npm run dev
 
 ---
 
-### PREP-3 🔴 — Gravar a decisão de aceite de cada amostra ⏱️ 40 min
+### PREP-3 🔴 — Gravar a decisão de aceite de cada amostra ⏱️ 40 min [✅ FEITO - GATE ACEITO: 68/68 passed]
 
 **Motivo:** corrige o achado A3. Sem isto, todo número que o replay produzir em D1/D2 é incomparável com o número ao vivo.
 

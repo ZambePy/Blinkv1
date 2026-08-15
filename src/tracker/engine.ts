@@ -462,6 +462,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             quality: recordedQuality,
             predicted: recordedPredicted,
             target: getRecorderTarget(),
+            sampleDecision: calibration.consumeLastSampleDecision() ?? undefined,
           });
         }
       }

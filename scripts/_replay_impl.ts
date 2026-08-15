@@ -146,6 +146,8 @@ function splitFrames(rec: Recording): {
   accuracy: AccuracySample[];
   live: number; // apenas contagem
   discarded: number;
+  rejectedByDecision: number;
+  legacyNoDecision: number;
 } {
   const vw = rec.header.resolution.w;
   const vh = rec.header.resolution.h;
@@ -153,6 +155,8 @@ function splitFrames(rec: Recording): {
   const accuracy: AccuracySample[] = [];
   let live = 0;
   let discarded = 0;
+  let rejectedByDecision = 0;
+  let legacyNoDecision = 0;
 
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
@@ -161,6 +165,14 @@ function splitFrames(rec: Recording): {
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {
+      // v2+: honra a decisão gravada. Sem isto o replay treina em frames de
+      // acomodação/baixa qualidade que o pipeline ao vivo descartou — e o
+      // baseline offline deixa de ser comparável ao online (achado A3).
+      if (rec.header.formatVersion >= 2) {
+        if (!f.sampleDecision?.accepted) { rejectedByDecision++; continue; }
+      } else {
+        legacyNoDecision++;   // v1: comportamento antigo, mas avisa no relatório
+      }
       calibration.push({
         featuresLeft: feats.left,
         featuresRight: feats.right,
@@ -181,7 +193,7 @@ function splitFrames(rec: Recording): {
       live++;
     }
   }
-  return { calibration, accuracy, live, discarded };
+  return { calibration, accuracy, live, discarded, rejectedByDecision, legacyNoDecision };
 }
 
 // Espelha a matematica de calibration.trainScalersAndRegressors + mapGaze
@@ -261,6 +273,8 @@ interface Report {
     accuracy: number;
     live: number;
     discarded: number;
+    rejectedByDecision: number;
+    legacyNoDecision: number;
   };
   calibration: { uniqueTargets: number };
   accuracy: {
@@ -325,6 +339,14 @@ async function runInner(args: CliArgs): Promise<number> {
   }
 
   const split = splitFrames(rec);
+  
+  if (split.legacyNoDecision > 0) {
+    process.stderr.write(
+      `\nAVISO: gravação v1 sem sampleDecision — o modelo do replay inclui frames\n` +
+      `que o pipeline ao vivo descartaria. Números NÃO comparáveis com o teste online.\n\n`
+    );
+  }
+
   if (split.calibration.length < 2) {
     process.stderr.write(
       `ERRO: nao ha frames de calibracao suficientes no JSONL (${split.calibration.length}). ` +
@@ -422,6 +444,8 @@ async function runInner(args: CliArgs): Promise<number> {
       accuracy: split.accuracy.length,
       live: split.live,
       discarded: split.discarded,
+      rejectedByDecision: split.rejectedByDecision,
+      legacyNoDecision: split.legacyNoDecision,
     },
     calibration: { uniqueTargets },
     accuracy: accSection,

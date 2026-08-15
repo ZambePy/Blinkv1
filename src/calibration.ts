@@ -9,6 +9,7 @@ import { isAccuracyTesting } from './accuracy';
 import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
 import { EXPERIMENT } from './config/experiment';
+import type { RecordedSampleDecision } from './telemetry/types';
 
 // Sprint 4 — recalibração implícita. `false` = comportamento antigo (só modelo
 // offline). Ligar via `setOnlineCalibrationEnabled(true)` a partir da UI/settings.
@@ -110,6 +111,13 @@ let currentTargetY = 0;
 let currentCollectionMs = COLLECTION_MS_FALLBACK;
 let pointCompleteCallback: ((success: boolean) => void) | null = null;
 let collectionTimeoutHandle: ReturnType<typeof setTimeout> | null = null;
+let lastDecision: RecordedSampleDecision | null = null;
+
+export function consumeLastSampleDecision(): RecordedSampleDecision | null {
+  const d = lastDecision;
+  lastDecision = null;
+  return d;
+}
 
 let regressorLeft: GazeRegressor | null = null;
 let regressorRight: GazeRegressor | null = null;
@@ -290,12 +298,18 @@ function calculateFeatureVariance(features: number[][]): number {
 }
 
 export function feedRawData(featuresLeft: number[], featuresRight: number[], quality?: any | null) {
-  if (!isCalibrating || !isCollecting) return;
+  if (!isCalibrating || !isCollecting) {
+    lastDecision = { accepted: false, elapsedMs: 0, reason: 'not_collecting' };
+    return;
+  }
 
   const elapsed = performance.now() - collectionStartTime;
 
   // Descartar os primeiros 400ms (fase de sacada / acomodação)
-  if (elapsed < 400) return;
+  if (elapsed < 400) {
+    lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'acclimation' };
+    return;
+  }
 
   // Sprint 1.1 — filtros de qualidade agora usam valores reais medidos no
   // crop dos olhos por `EyeQualityAnalyzer` (não mais constantes hardcoded).
@@ -317,6 +331,7 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
       (typeof quality.contrastEstimate === 'number' && quality.contrastEstimate < 0.02) ||
       (typeof quality.blurEstimate === 'number' && quality.blurEstimate > 0.85)
     ) {
+      lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'quality' };
       return; // Ignora frame ruim
     }
 
@@ -343,6 +358,7 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
           Math.abs(quality.roll  - currentPointBaselinePose.roll)  > POSE_DRIFT_ROLL_MAX
         ) {
           poseDriftRejects++;
+          lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'pose_drift' };
           return;
         }
       }
@@ -352,6 +368,8 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   collectedFeaturesLeft.push(featuresLeft);
   collectedFeaturesRight.push(featuresRight);
   collectedQualities.push(quality ?? null);
+  
+  lastDecision = { accepted: true, elapsedMs: elapsed };
 
   if (elapsed >= currentCollectionMs) {
     isCollecting = false;

@@ -8,7 +8,17 @@
 // dado biométrico; adicionar vídeo multiplicaria o passivo sem ganho para o
 // replay (que precisa reproduzir o pipeline, não a imagem).
 
-export const RECORDING_FORMAT_VERSION = 1;
+export const RECORDING_FORMAT_VERSION = 2; // era 1 — v2 adiciona `sampleDecision`
+
+/** Decisão do pipeline de calibração sobre este frame. Reproduz, no replay,
+ *  exatamente o filtro que `calibration.feedRawData` aplicou ao vivo.
+ *  Ausente em frames fora de coleta de calibração. */
+export interface RecordedSampleDecision {
+  accepted: boolean;
+  /** ms desde o início da coleta deste ponto. */
+  elapsedMs: number;
+  reason?: 'acclimation' | 'quality' | 'pose_drift' | 'not_collecting';
+}
 
 // Cap de frames em memória. ~30k frames a ~4 KB cada ≈ 120 MB — teto seguro
 // para sessões de até ~17 min a 30 fps. Além disso, novos frames são
@@ -80,6 +90,7 @@ export interface RecordedFrame {
 
   quality?: RecordedQuality;
   target?: RecordedTarget;
+  sampleDecision?: RecordedSampleDecision;
 
   // Ponto emitido pelo pipeline após regressor + filtro temporal, em px.
   // Undefined quando o frame não gerou emissão (piscada + features vazias,
