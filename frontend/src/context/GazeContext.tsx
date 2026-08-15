@@ -9,11 +9,12 @@ import React, {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
-import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus } from '@tracker/tracker/engine';
+import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi } from '@tracker/tracker/engine';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
+import * as accuracy from '@tracker/accuracy';
 import { useSettings } from './SettingsContext';
 
-export type { GazeSample, EngineState, L2CSStatus } from '@tracker/tracker/engine';
+export type { GazeSample, EngineState, L2CSStatus, RecordingApi } from '@tracker/tracker/engine';
 
 // Dwell time by user preset (matches DwellButton's own table).
 const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
@@ -36,6 +37,11 @@ interface GazeContextValue {
   // dessincronizado quando o worker liga (§ L2CS-TESTE-PASSOS.txt Fase 2).
   l2csStatus: L2CSStatus;
   calibration: CalibrationApi;
+  // Fase 0.1 — API do gravador de sessão. Estado é lido via polling em
+  // getStats (recorder é singleton de módulo); a UI que consome pode
+  // querer um setInterval de ~500 ms enquanto ativo pra atualizar o
+  // contador de frames.
+  recording: RecordingApi;
   setFilterPreset: (preset: FilterPreset) => void;
 }
 
@@ -202,13 +208,18 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // Move cursor via transform (no layout / no React re-render).
       // Visual feedback: green + growing while dwell fills; red otherwise.
-      // The cursor is completely hidden during calibration to avoid distracting
-      // the user while they are fixating on calibration targets.
+      // Cursor completamente escondido em 3 casos: (1) durante calibração
+      // para não distrair a fixação; (2) antes de calibrar (não há mapeamento
+      // ainda, mostrar um cursor aleatório confunde); (3) durante o teste
+      // de precisão — se o usuário vir o cursor ele tenta "corrigi-lo"
+      // olhando para outro lugar, criando feedback loop que corrompe a
+      // medida (a variável isAccuracyTesting é lida a cada frame, então
+      // pega o valor fresco assim que startAccuracyTest liga).
       if (cursorRef.current) {
         const isInCalibration = engineRef.current?.getState() === 'calibrating';
         const isCalibrated = engineRef.current?.calibration.isCalibrated() ?? false;
-        
-        if (isInCalibration || !isCalibrated) {
+
+        if (isInCalibration || !isCalibrated || accuracy.isAccuracyTesting) {
           // Hard-hide: move offscreen + opacity 0
           cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
           cursorRef.current.style.opacity = '0';
@@ -330,13 +341,30 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [],
   );
 
+  // Fase 0.1 — mesma estratégia da calibration: identidade estável, leitura
+  // lazy do ref. As respostas de isActive/getStats vêm do singleton do
+  // recorder, que é global — se o engine for recriado (StrictMode) o estado
+  // da gravação persiste, o que é o comportamento desejado.
+  const recording = useMemo<RecordingApi>(
+    () => ({
+      start: () => engineRef.current?.recording.start(),
+      stop: () => engineRef.current?.recording.stop(),
+      isActive: () => engineRef.current?.recording.isActive() ?? false,
+      getStats: () =>
+        engineRef.current?.recording.getStats() ?? { frames: 0, dropped: 0 },
+      exportAsJSONL: () => engineRef.current?.recording.exportAsJSONL() ?? '',
+      clear: () => engineRef.current?.recording.clear(),
+    }),
+    [],
+  );
+
   const setFilterPreset = useCallback((preset: FilterPreset) => {
     engineRef.current?.setFilterPreset(preset);
   }, []);
 
   const value = useMemo<GazeContextValue>(
-    () => ({ subscribe, state, l2csStatus, calibration, setFilterPreset }),
-    [subscribe, state, l2csStatus, calibration, setFilterPreset],
+    () => ({ subscribe, state, l2csStatus, calibration, recording, setFilterPreset }),
+    [subscribe, state, l2csStatus, calibration, recording, setFilterPreset],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

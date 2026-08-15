@@ -7,11 +7,13 @@ import * as calibration from '../calibration';
 import { OneEuroFilter2D, FILTER_PRESETS } from '../oneEuroFilter';
 import type { FilterPreset } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
-import { feedAccuracyRaw } from '../accuracy';
+import { feedAccuracyRaw, getCurrentTargetPx as getAccuracyTargetPx } from '../accuracy';
 import { EyeQualityAnalyzer } from '../qualityAnalyzer';
 import { createL2CSClient, type L2CSClient } from '../l2cs/client';
 import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/crop';
 import type { L2CSGazeInput } from '../extractor';
+import * as recorder from '../telemetry/recorder';
+import type { RecordedQuality, RecordedTarget } from '../telemetry/types';
 
 // Status do subsistema L2CS. Exposto via engine.getL2CSStatus() para a UI
 // poder bloquear calibração enquanto o worker não estiver 'ready' — calibrar
@@ -43,6 +45,19 @@ export interface CalibrationApi {
   onlineSampleCount(): number;
 }
 
+// Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
+// a UI (SettingsScreen) não precise conhecer o singleton do recorder nem os
+// detalhes do que compõe o header (video res, l2cs meta) — o engine já tem
+// esses dados em mão.
+export interface RecordingApi {
+  start(): void;
+  stop(): void;
+  isActive(): boolean;
+  getStats(): { frames: number; dropped: number };
+  exportAsJSONL(): string;
+  clear(): void;
+}
+
 export interface GazeEngine {
   start(video: HTMLVideoElement): Promise<void>;
   stop(): void;
@@ -60,6 +75,7 @@ export interface GazeEngine {
   getL2CSStatus(): L2CSStatus;
   onL2CSStatusChange(cb: (status: L2CSStatus) => void): () => void;
   calibration: CalibrationApi;
+  recording: RecordingApi;
 }
 
 const BUFFER_SIZE = 6;
@@ -110,6 +126,31 @@ function weightedBufferAvg(buf: number[]): number {
     weightSum += w;
   }
   return valueSum / weightSum;
+}
+
+// Fase 0.1 — helpers do gravador de sessão. Ficam em escopo de módulo pra
+// não realocar closures a 30 Hz.
+function flattenLandmarks(landmarks: readonly { x: number; y: number; z: number }[]): number[] {
+  // 478 × 3 = 1434 números. Achatado (não array de objetos) porque:
+  //   (a) reduz o JSON serializado em ~30% (sem repetir chaves x/y/z),
+  //   (b) o replay decodifica em Float64 sequencial de qualquer jeito.
+  const out = new Array<number>(landmarks.length * 3);
+  for (let i = 0; i < landmarks.length; i++) {
+    const p = landmarks[i];
+    const j = i * 3;
+    out[j] = p.x;
+    out[j + 1] = p.y;
+    out[j + 2] = p.z;
+  }
+  return out;
+}
+
+function getRecorderTarget(): RecordedTarget | undefined {
+  const cal = calibration.getCurrentTargetPx();
+  if (cal) return { kind: 'calibration', xPx: cal.xPx, yPx: cal.yPx };
+  const acc = getAccuracyTargetPx();
+  if (acc) return { kind: 'accuracy', xPx: acc.xPx, yPx: acc.yPx, label: acc.label };
+  return undefined;
 }
 
 export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
@@ -249,6 +290,21 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             hasFace: false,
           });
         }
+        // Fase 0.1 — mesmo sem rosto, gravamos o frame para o replay saber
+        // que houve perda de tracking (dwell precisa distinguir "sem sinal"
+        // de "sinal fraco" — congelamento de piscada vs. rosto perdido).
+        if (recorder.isRecording()) {
+          recorder.recordFrame({
+            captureTs: startTimeMs,
+            emitTs: performance.now(),
+            frameIdx: framesSeen,
+            hasFace: false,
+            predicted: lastEmitHadFace
+              ? { x: lastEmittedX, y: lastEmittedY }
+              : undefined,
+            target: getRecorderTarget(),
+          });
+        }
       } else {
         const landmarks = results.faceLandmarks[0];
         const rawIod = Math.sqrt(
@@ -287,6 +343,15 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         }
 
         const extractorResult = extractFeatures(landmarks, faceMatrix, l2csGaze);
+
+        // Fase 0.1 — snapshot para o gravador. As duas variáveis abaixo são
+        // preenchidas dentro do bloco de emissão; fora dele ficam undefined
+        // (sinalizando "frame processado mas sem predição" — tipicamente
+        // piscada ou features vazias). O recorder call único no fim do
+        // branch hasFace consome esse snapshot.
+        let recordedPredicted: { x: number; y: number } | undefined;
+        let recordedQuality: RecordedQuality | undefined;
+
         if (!extractorResult.blinkDetected && extractorResult.featuresLeft.length > 0) {
           const featuresLeft = extractorResult.featuresLeft;
           const featuresRight = extractorResult.featuresRight;
@@ -357,6 +422,45 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             hasFace: true,
           });
           framesEmitted++;
+
+          recordedPredicted = { x: smoothed.x, y: smoothed.y };
+          recordedQuality = {
+            brightnessEstimate: cropQuality.brightnessEstimate,
+            contrastEstimate: cropQuality.contrastEstimate,
+            blurEstimate: cropQuality.blurEstimate,
+            detectorConfidence: cropQuality.detectorConfidence,
+            irisVisibilityPercentage:
+              extractorResult.advancedFeatures?.quality?.irisVisibilityPercentage,
+            yaw: face?.yaw, pitch: face?.pitch, roll: face?.roll,
+          };
+        }
+
+        // Fase 0.1 — recorder hook único do branch hasFace. Fica FORA do
+        // if (!blink && features) para cobrir também os frames de piscada
+        // (que carregam blink=true e ausência de predição — informação que
+        // o replay usa para depurar o portão de confiança da Fase 3).
+        if (recorder.isRecording()) {
+          recorder.recordFrame({
+            captureTs: startTimeMs,
+            emitTs: performance.now(),
+            frameIdx: framesSeen,
+            hasFace: true,
+            blink: extractorResult.blinkDetected,
+            landmarks: flattenLandmarks(landmarks),
+            faceMatrix: faceMatrix ? Array.from(faceMatrix) : undefined,
+            l2cs: l2csGaze
+              ? { yaw: l2csGaze.yaw, pitch: l2csGaze.pitch, valid: l2csGaze.valid }
+              : undefined,
+            featuresLeft: extractorResult.featuresLeft.length
+              ? extractorResult.featuresLeft.slice()
+              : undefined,
+            featuresRight: extractorResult.featuresRight.length
+              ? extractorResult.featuresRight.slice()
+              : undefined,
+            quality: recordedQuality,
+            predicted: recordedPredicted,
+            target: getRecorderTarget(),
+          });
         }
       }
     }
@@ -463,6 +567,51 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       onlineSampleCount(): number {
         return calibration.onlineSampleCount();
+      },
+    },
+
+    // Fase 0.1 — API do gravador. O engine preenche o header com dados que
+    // só ele conhece (resolução de vídeo + metadados do L2CS) para a UI
+    // não precisar plumar isso.
+    recording: {
+      start(): void {
+        const meta = l2csClient?.getMeta() ?? null;
+        recorder.startRecording({
+          resolution: {
+            w: typeof document !== 'undefined' ? document.documentElement.clientWidth : 0,
+            h: typeof document !== 'undefined' ? document.documentElement.clientHeight : 0,
+          },
+          videoResolution: {
+            w: videoEl?.videoWidth ?? 0,
+            h: videoEl?.videoHeight ?? 0,
+          },
+          l2cs: meta
+            ? {
+                dataset: meta.dataset,
+                inputSize: meta.inputSize,
+                binWidth: meta.binWidth,
+                binOffset: meta.binOffset,
+              }
+            : undefined,
+        });
+      },
+      stop(): void {
+        recorder.stopRecording();
+      },
+      isActive(): boolean {
+        return recorder.isRecording();
+      },
+      getStats(): { frames: number; dropped: number } {
+        return {
+          frames: recorder.getFrameCount(),
+          dropped: recorder.getDroppedCount(),
+        };
+      },
+      exportAsJSONL(): string {
+        return recorder.exportAsJSONL();
+      },
+      clear(): void {
+        recorder.clearRecording();
       },
     },
   };

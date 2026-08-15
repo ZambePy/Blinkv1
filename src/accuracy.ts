@@ -51,21 +51,21 @@ interface PointDiagnostic {
   name: string;
 }
 
-// 13 pontos de validação independentes da grade de calibração (0.05, 0.50, 0.95)
+// Grade 3×3 disjunta da calibração — calibração usa 10/50/90, precisão usa
+// 25/50/75. Sem sobreposição de posições entre treino e teste (a exceção é o
+// centro, comum às duas grades por convenção). Se validássemos nas mesmas
+// posições da calibração, o erro reportado seria artificialmente baixo (mede
+// memorização, não generalização).
 const VALIDATION_POINTS = [
-  { name: "P1", screenX: 0.15, screenY: 0.15 },
-  { name: "P2", screenX: 0.50, screenY: 0.15 },
-  { name: "P3", screenX: 0.85, screenY: 0.15 },
-  { name: "P4", screenX: 0.15, screenY: 0.40 },
-  { name: "P5", screenX: 0.85, screenY: 0.40 },
-  { name: "P6", screenX: 0.15, screenY: 0.60 },
-  { name: "P7", screenX: 0.85, screenY: 0.60 },
-  { name: "P8", screenX: 0.15, screenY: 0.85 },
-  { name: "P9", screenX: 0.50, screenY: 0.85 },
-  { name: "P10", screenX: 0.85, screenY: 0.85 },
-  { name: "P11", screenX: 0.35, screenY: 0.35 },
-  { name: "P12", screenX: 0.65, screenY: 0.35 },
-  { name: "P13", screenX: 0.50, screenY: 0.65 },
+  { name: "P1", screenX: 0.25, screenY: 0.25 },
+  { name: "P2", screenX: 0.50, screenY: 0.25 },
+  { name: "P3", screenX: 0.75, screenY: 0.25 },
+  { name: "P4", screenX: 0.25, screenY: 0.50 },
+  { name: "P5", screenX: 0.50, screenY: 0.50 },
+  { name: "P6", screenX: 0.75, screenY: 0.50 },
+  { name: "P7", screenX: 0.25, screenY: 0.75 },
+  { name: "P8", screenX: 0.50, screenY: 0.75 },
+  { name: "P9", screenX: 0.75, screenY: 0.75 },
 ];
 
 // Hotfix pós-Sprint 0 — paridade com o protocolo de calibração: descartar os
@@ -86,6 +86,15 @@ let currentFeaturesRight: number[] = [];
 // Usada por main.ts para reduzir suavização durante o teste
 export let isAccuracyTesting = false;
 
+// Fase 0.1 — alvo do dot atualmente visível ao usuário. Setado por
+// runNextPoint ao mostrar cada ponto e limpo entre pontos + no fim do
+// teste. Consumido pelo gravador de sessão como ground-truth do frame.
+let currentValidationTarget: { xPx: number; yPx: number; label: string } | null = null;
+
+export function getCurrentTargetPx(): { xPx: number; yPx: number; label: string } | null {
+  return currentValidationTarget;
+}
+
 // Recebe a posição crua do olhar a cada frame — chamado por main.ts
 export function feedAccuracyRaw(
   featuresLeft: number[],
@@ -98,8 +107,12 @@ export function feedAccuracyRaw(
 // Inicia o teste de validação de precisão pós-calibração.
 // `meta` é opcional: quando fornecido, é serializado junto do relatório JSON
 // para que o histórico em BASELINE.md/RESULTADOS.md preserve a condição de teste.
+// `onComplete` recebe o resultado + a intenção do usuário no overlay final:
+//   - 'continue' → tecla Espaço (seguir para próximo fluxo)
+//   - 'redo'     → tecla R (refazer calibração)
+// Callers que ignorem o segundo argumento continuam funcionando (backward-compat).
 export function startAccuracyTest(
-  onComplete?: (result: AccuracyResult) => void,
+  onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
   meta?: RunMeta,
 ) {
   isAccuracyTesting = true;
@@ -115,6 +128,7 @@ export function startAccuracyTest(
   function runNextPoint() {
     if (pointIndex >= VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
+      currentValidationTarget = null;
       finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta);
       return;
     }
@@ -128,6 +142,14 @@ export function startAccuracyTest(
 
     const targetScreenX = vp.screenX * vw;
     const targetScreenY = vp.screenY * vh;
+
+    // Fase 0.1 — publica alvo para o gravador. Mantido setado durante toda a
+    // janela (inclusive os 400 ms de acomodação) porque o dot já está visível
+    // ao usuário; qualquer frame gravado nesse intervalo tem ground-truth
+    // legítimo desse ponto.
+    currentValidationTarget = {
+      xPx: targetScreenX, yPx: targetScreenY, label: vp.name,
+    };
 
     function collect() {
       const elapsed = performance.now() - startTime;
@@ -194,7 +216,11 @@ export function startAccuracyTest(
     requestAnimationFrame(collect);
   }
 
-  setTimeout(runNextPoint, 500);
+  // 1.5s de preparação antes do primeiro ponto — o usuário acabou de
+  // sair da calibração (ou de clicar em Testar) e precisa estabilizar o
+  // olhar. Sem essa janela, a sacada de entrada contamina P1 e infla o
+  // erro global. Casado com o mesmo delay em CalibrationCheck.handleStart.
+  setTimeout(runNextPoint, 1500);
 }
 
 function createAccuracyOverlay(): HTMLDivElement {
@@ -237,7 +263,7 @@ function finishTest(
   overlay: HTMLDivElement,
   pointErrors: number[],
   diagnostics: PointDiagnostic[],
-  onComplete?: (result: AccuracyResult) => void,
+  onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
   meta?: RunMeta,
 ) {
   overlay.remove();
@@ -314,15 +340,36 @@ function finishTest(
     result,
     diagnostics,
   }, null, 2);
-  const blob = new Blob([jsonReport], { type: "application/json" });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = `accuracy-report-${Date.now()}.json`;
-  document.body.appendChild(a);
-  a.click();
-  a.remove();
-  URL.revokeObjectURL(url);
+
+  // Preferir gravar direto na raiz do projeto (via middleware do Vite dev):
+  // o endpoint apaga accuracy-report-*.json antigos e escreve o novo, então
+  // sempre há exatamente um arquivo no repo — sem acúmulo em Downloads.
+  // Fallback: se o endpoint não responde (build de produção, offline), cai
+  // no download tradicional do browser.
+  (async () => {
+    try {
+      const resp = await fetch('/__/save-accuracy-report', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: jsonReport,
+      });
+      if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json() as { saved?: string; error?: string };
+      if (data.error) throw new Error(data.error);
+      console.log(`[accuracy] Relatório salvo no projeto: ${data.saved}`);
+    } catch (e) {
+      console.warn('[accuracy] Endpoint de save falhou — usando download do browser', e);
+      const blob = new Blob([jsonReport], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `accuracy-report-${Date.now()}.json`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+  })();
 
   console.log(`[accuracy] === RESULTADO FINAL ===`);
   console.log(`[accuracy] Resolução: ${vw}×${vh}px | distância estimada: ${ASSUMED_DIST_PX}px`);
@@ -349,7 +396,7 @@ function finishTest(
 function showDiagnosticOverlay(
   diagnostics: PointDiagnostic[],
   result: AccuracyResult,
-  onComplete?: (result: AccuracyResult) => void
+  onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void
 ) {
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
@@ -502,13 +549,13 @@ function showDiagnosticOverlay(
       setTimeout(() => {
         overlay.remove();
         document.removeEventListener('keydown', handleKey);
-        onComplete?.(result);
+        onComplete?.(result, 'continue');
       }, 300);
     } else if (e.code === 'KeyR') {
       e.preventDefault();
       overlay.remove();
       document.removeEventListener('keydown', handleKey);
-      onComplete?.(result);
+      onComplete?.(result, 'redo');
     }
   }
 

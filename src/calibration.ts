@@ -58,11 +58,16 @@ export interface GazeDistanceLogEntry {
 // pior nas bordas, e o Ridge extrapola pior perto do limite do fecho convexo.
 // Mais amostras nesses pontos reduz variância do fit local.
 //
-// CUIDADO: se o total ultrapassar ~40s (13 pontos × ~3s + acomodação), a fadiga
+// Valores escalados ×1.402 (12/2026) ao migrar de 13 → 9 pontos (grade 3×3
+// 10/50/90). A soma total de tempo de coleta é preservada (~21.2s),
+// garantindo o mesmo número de amostras alimentando o Ridge com menos
+// fadiga do usuário.
+//
+// CUIDADO: se o total ultrapassar ~40s (9 pontos × ~2.6s + acomodação), a fadiga
 // do usuário-alvo (ELA) piora as fixações finais e anula o ganho. Este budget
-// atual: 13 pontos ~ 1200..2000ms + 400ms acomodação = 20.8..31.2s. Ok.
-const COLLECTION_MS_BASE = 1200;
-const COLLECTION_MS_RANGE = 800;
+// atual: 9 pontos ~ 1680..2800ms + 400ms acomodação = 18.7..28.8s. Ok.
+const COLLECTION_MS_BASE = 1680;
+const COLLECTION_MS_RANGE = 1120;
 const COLLECTION_MS_FALLBACK = COLLECTION_MS_BASE + COLLECTION_MS_RANGE;
 
 export function getCollectionMsForPoint(x: number, y: number): number {
@@ -214,6 +219,13 @@ export function exportGazeDistanceLog(): void {
 export function startCalibrationMode() {
   isCalibrating = true;
   profile = [];
+  regressorLeft = null;
+  regressorRight = null;
+  _gazeCorrections = [];
+  scaledProfileLeft = [];
+  scaledProfileRight = [];
+  onlineLeft = null;
+  onlineRight = null;
 }
 
 export function startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void) {
@@ -516,6 +528,19 @@ export function feedOnlineSample(
 export function onlineSampleCount(): number {
   if (!onlineLeft || !onlineRight) return 0;
   return Math.min(onlineLeft.n, onlineRight.n);
+}
+
+// Fase 0.1 — expõe o alvo atual da coleta em px de viewport, para o gravador
+// de sessão anexar como ground-truth no frame. Retorna null quando não há
+// ponto sendo coletado (fora da calibração, ou entre pontos). Devolve o
+// centro do dot mesmo durante os 400 ms de acomodação — o dot está visível
+// ali, o replay precisa saber disso.
+export function getCurrentTargetPx(): { xPx: number; yPx: number } | null {
+  if (!isCalibrating || !isCollecting) return null;
+  if (typeof document === 'undefined') return null;
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  return { xPx: currentTargetX * vw, yPx: currentTargetY * vh };
 }
 
 export function mapGaze(

@@ -1,0 +1,6 @@
+# JSONL crus não vão pro Git por padrão (tamanho + privacidade). Ver README.md.
+# Para versionar uma gravação específica: `git add -f fixtures/replay/.../arquivo.jsonl`.
+*.jsonl
+
+# Relatórios do replay SÃO commitados — servem como snapshot histórico.
+!*.report.json
