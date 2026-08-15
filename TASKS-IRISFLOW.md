@@ -394,7 +394,7 @@ npm test   # inclui o teste novo
 
 ---
 
-### PREP-5 🟡 — `--recompute-features` no replay ⏱️ 20 min
+### PREP-5 🟡 — `--recompute-features` no replay ⏱️ 20 min [✅ FEITO - GATE ACEITO: 69/69 passed]
 
 **Motivo:** hoje o replay prefere `featuresLeft/Right` gravados, então **mudanças em `extractor.ts` ou `block.ts` não aparecem no replay**. Isso mata metade da varredura offline de D2.
 

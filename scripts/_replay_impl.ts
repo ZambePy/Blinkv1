@@ -40,16 +40,18 @@ interface CliArgs {
   report?: string;
   filter: FilterPreset;
   verbose: boolean;
+  recomputeFeatures: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
     else if (a === '--report') args.report = argv[++i];
     else if (a === '--filter') args.filter = argv[++i] as FilterPreset;
     else if (a === '--verbose' || a === '-v') args.verbose = true;
+    else if (a === '--recompute-features') args.recomputeFeatures = true;
     else if (a === '--help' || a === '-h') {
       printHelp();
       process.exit(0);
@@ -70,7 +72,7 @@ function parseArgs(argv: string[]): CliArgs {
 function printHelp(): void {
   process.stdout.write(`
 Uso:
-  npm run replay -- --jsonl <path> [--report <path>] [--filter <preset>] [-v]
+  npm run replay -- --jsonl <path> [--report <path>] [--filter <preset>] [-v] [--recompute-features]
 
 Argumentos:
   --jsonl <path>    Arquivo .jsonl produzido pelo gravador (Fase 0.1). Obrigatorio.
@@ -78,6 +80,7 @@ Argumentos:
                     imprime na stdout.
   --filter <preset> Preset do OneEuroFilter: estavel | balanceado | responsivo.
                     Padrao: balanceado.
+  --recompute-features Ignora features gravados e recomputa a partir de landmarks.
   -v, --verbose     Loga cada frame de precisao com erro por frame.
   -h, --help        Mostra esta ajuda.
 `);
@@ -126,8 +129,8 @@ interface AccuracySample {
 // usa direto — economiza CPU e garante paridade com a gravacao. Se nao tem,
 // tenta re-computar a partir de landmarks; se tambem nao tem landmarks, retorna
 // null (frame descartado). O replay reporta a contagem de frames descartados.
-function getFeatures(f: RecordedFrame): { left: number[]; right: number[] } | null {
-  if (f.featuresLeft && f.featuresRight
+function getFeatures(f: RecordedFrame, recomputeFeatures: boolean): { left: number[]; right: number[] } | null {
+  if (!recomputeFeatures && f.featuresLeft && f.featuresRight
       && f.featuresLeft.length > 0 && f.featuresRight.length > 0
       && f.featuresLeft.length === f.featuresRight.length) {
     return { left: f.featuresLeft, right: f.featuresRight };
@@ -141,7 +144,7 @@ function getFeatures(f: RecordedFrame): { left: number[]; right: number[] } | nu
 
 // Split canonico dos frames em calibracao, precisao e uso livre. Descarta
 // frames sem face, sem features utilizaveis, ou com blink.
-function splitFrames(rec: Recording): {
+function splitFrames(rec: Recording, recomputeFeatures: boolean): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
   live: number; // apenas contagem
@@ -161,7 +164,7 @@ function splitFrames(rec: Recording): {
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
-    const feats = getFeatures(f);
+    const feats = getFeatures(f, recomputeFeatures);
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {
@@ -288,7 +291,7 @@ interface Report {
     p90ErrorDeg: number;
     perPoint: PerPointStat[];
   } | null;
-  config: { assumedDistPx: number; rbfApplied: false; onlineRls: false; source: 'src/' };
+  config: { assumedDistPx: number; rbfApplied: false; onlineRls: false; source: 'src/'; featuresSource: 'recorded' | 'recomputed' };
 }
 
 function median(values: number[]): number {
@@ -338,7 +341,7 @@ async function runInner(args: CliArgs): Promise<number> {
     return 2;
   }
 
-  const split = splitFrames(rec);
+  const split = splitFrames(rec, args.recomputeFeatures);
   
   if (split.legacyNoDecision > 0) {
     process.stderr.write(
@@ -449,7 +452,7 @@ async function runInner(args: CliArgs): Promise<number> {
     },
     calibration: { uniqueTargets },
     accuracy: accSection,
-    config: { assumedDistPx: ASSUMED_DIST_PX, rbfApplied: false, onlineRls: false, source: 'src/' },
+    config: { assumedDistPx: ASSUMED_DIST_PX, rbfApplied: false, onlineRls: false, source: 'src/', featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded' },
   };
 
   const output = JSON.stringify(report, null, 2);
