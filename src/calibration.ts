@@ -530,6 +530,19 @@ export function onlineSampleCount(): number {
   return Math.min(onlineLeft.n, onlineRight.n);
 }
 
+// Fase 0.1 — expõe o alvo atual da coleta em px de viewport, para o gravador
+// de sessão anexar como ground-truth no frame. Retorna null quando não há
+// ponto sendo coletado (fora da calibração, ou entre pontos). Devolve o
+// centro do dot mesmo durante os 400 ms de acomodação — o dot está visível
+// ali, o replay precisa saber disso.
+export function getCurrentTargetPx(): { xPx: number; yPx: number } | null {
+  if (!isCalibrating || !isCollecting) return null;
+  if (typeof document === 'undefined') return null;
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+  return { xPx: currentTargetX * vw, yPx: currentTargetY * vh };
+}
+
 export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],

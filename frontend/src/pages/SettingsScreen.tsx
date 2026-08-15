@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -14,6 +14,9 @@ import {
   Target,
   Moon,
   Sun,
+  Video,
+  Square,
+  FileText,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -53,8 +56,68 @@ export const SettingsScreen: React.FC = () => {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { calibration, setFilterPreset } = useGaze();
+  const { calibration, recording, setFilterPreset } = useGaze();
   const [filterPreset, setFilterPresetState] = useState<FilterPreset>('balanceado');
+
+  // Fase 0.1 — estado local do gravador de sessão. `active` é derivado do
+  // singleton do recorder, mas mantido em state pra o botão trocar de rótulo
+  // sem esperar o poll; `stats` é atualizado por setInterval enquanto
+  // gravando (o singleton não é reativo).
+  const [recActive, setRecActive] = useState(false);
+  const [recStats, setRecStats] = useState<{ frames: number; dropped: number }>(
+    { frames: 0, dropped: 0 },
+  );
+  useEffect(() => {
+    if (!recActive) {
+      // Após parar, atualiza uma última vez pra o painel refletir o total
+      // final. Sem intervalo — não precisa continuar polling.
+      setRecStats(recording.getStats());
+      return;
+    }
+    const id = setInterval(() => {
+      setRecStats(recording.getStats());
+    }, 500);
+    return () => clearInterval(id);
+  }, [recActive, recording]);
+
+  const toggleRecording = () => {
+    if (recActive) {
+      recording.stop();
+      setRecActive(false);
+      toast.success(`Gravação parada com ${recording.getStats().frames} frames.`);
+    } else {
+      recording.start();
+      setRecActive(true);
+      toast.success('Gravação iniciada.');
+    }
+  };
+
+  const exportRecording = () => {
+    const jsonl = recording.exportAsJSONL();
+    if (!jsonl) {
+      toast.error('Nada para exportar — inicie uma gravação primeiro.');
+      return;
+    }
+    const blob = new Blob([jsonl], { type: 'application/x-ndjson' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    // ISO com ':' trocado por '-' pra o filesystem aceitar (Windows não
+    // permite ':' em nomes de arquivo).
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    a.download = `irisflow-recording-${stamp}.jsonl`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exportado ${recording.getStats().frames} frames.`);
+  };
+
+  const clearRecording = () => {
+    recording.clear();
+    setRecActive(false);
+    setRecStats({ frames: 0, dropped: 0 });
+    toast.success('Gravação descartada.');
+  };
+
 
   const chooseFilterPreset = (preset: FilterPreset) => {
     setFilterPresetState(preset);
@@ -970,6 +1033,108 @@ export const SettingsScreen: React.FC = () => {
             >
               {onlineCalibration ? 'Ligado' : 'Desligado'}
             </button>
+          </div>
+        </section>
+
+        {/* Gravador de sessão (Fase 0.1 do SPRINTSELA.MD) */}
+        <section aria-labelledby="recorder-title" style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+            <Video size={28} color="#1B54A8" aria-hidden="true" />
+            <h2 id="recorder-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}>
+              Gravador de sessão
+            </h2>
+          </div>
+          <p style={{ color: 'var(--color-text-base)', opacity: 0.9, marginBottom: '1.25rem', fontFamily: 'system-ui, sans-serif', lineHeight: 1.6 }}>
+            Grava landmarks, saída do L2CS, features e ponto predito em
+            JSONL — <strong>sem vídeo</strong>. Consumido pelo replay offline
+            para reexecutar o pipeline sem câmera. Use para depurar sem se
+            preocupar em reproduzir a sessão.
+          </p>
+
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={toggleRecording}
+              aria-label={recActive ? 'Parar gravação' : 'Iniciar gravação'}
+              style={{
+                padding: '1rem 1.5rem',
+                borderRadius: '1rem',
+                border: 'none',
+                background: recActive
+                  ? 'linear-gradient(135deg, #dc2626, #b91c1c)'
+                  : 'linear-gradient(135deg, #1B54A8, #2563eb)',
+                color: 'white',
+                fontWeight: 700,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              {recActive ? <Square size={20} aria-hidden="true" /> : <Video size={20} aria-hidden="true" />}
+              {recActive ? 'Parar gravação' : 'Iniciar gravação'}
+            </button>
+
+            <button
+              type="button"
+              onClick={exportRecording}
+              disabled={recStats.frames === 0}
+              aria-label="Exportar gravação em JSONL"
+              style={{
+                padding: '1rem 1.5rem',
+                borderRadius: '1rem',
+                border: '2px solid var(--color-card-border)',
+                background: recStats.frames === 0 ? '#e2e8f0' : 'var(--color-card-bg)',
+                color: 'var(--color-text-base)',
+                opacity: recStats.frames === 0 ? 0.5 : 0.9,
+                fontWeight: 700,
+                cursor: recStats.frames === 0 ? 'not-allowed' : 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <FileText size={20} aria-hidden="true" /> Exportar (.jsonl)
+            </button>
+
+            <button
+              type="button"
+              onClick={clearRecording}
+              disabled={recStats.frames === 0}
+              aria-label="Descartar gravação atual"
+              style={{
+                padding: '1rem 1.5rem',
+                borderRadius: '1rem',
+                border: '2px solid var(--color-card-border)',
+                background: 'transparent',
+                color: 'var(--color-text-base)',
+                opacity: recStats.frames === 0 ? 0.4 : 0.9,
+                fontWeight: 700,
+                cursor: recStats.frames === 0 ? 'not-allowed' : 'pointer',
+              }}
+            >
+              Descartar
+            </button>
+
+            <div
+              role="status"
+              aria-live="polite"
+              style={{
+                marginLeft: 'auto',
+                padding: '0.75rem 1.25rem',
+                background: recActive ? '#fef2f2' : '#f1f5f9',
+                border: `1px solid ${recActive ? '#fecaca' : '#e2e8f0'}`,
+                borderRadius: '0.75rem',
+                fontSize: '0.9rem',
+                fontFamily: 'system-ui, sans-serif',
+                color: recActive ? '#991b1b' : '#475569',
+                fontWeight: 600,
+              }}
+            >
+              {recActive ? '● Gravando · ' : ''}
+              {recStats.frames} frames
+              {recStats.dropped > 0 && ` (${recStats.dropped} descartados — buffer cheio)`}
+            </div>
           </div>
         </section>
 

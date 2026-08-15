@@ -86,6 +86,15 @@ let currentFeaturesRight: number[] = [];
 // Usada por main.ts para reduzir suavização durante o teste
 export let isAccuracyTesting = false;
 
+// Fase 0.1 — alvo do dot atualmente visível ao usuário. Setado por
+// runNextPoint ao mostrar cada ponto e limpo entre pontos + no fim do
+// teste. Consumido pelo gravador de sessão como ground-truth do frame.
+let currentValidationTarget: { xPx: number; yPx: number; label: string } | null = null;
+
+export function getCurrentTargetPx(): { xPx: number; yPx: number; label: string } | null {
+  return currentValidationTarget;
+}
+
 // Recebe a posição crua do olhar a cada frame — chamado por main.ts
 export function feedAccuracyRaw(
   featuresLeft: number[],
@@ -119,6 +128,7 @@ export function startAccuracyTest(
   function runNextPoint() {
     if (pointIndex >= VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
+      currentValidationTarget = null;
       finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta);
       return;
     }
@@ -132,6 +142,14 @@ export function startAccuracyTest(
 
     const targetScreenX = vp.screenX * vw;
     const targetScreenY = vp.screenY * vh;
+
+    // Fase 0.1 — publica alvo para o gravador. Mantido setado durante toda a
+    // janela (inclusive os 400 ms de acomodação) porque o dot já está visível
+    // ao usuário; qualquer frame gravado nesse intervalo tem ground-truth
+    // legítimo desse ponto.
+    currentValidationTarget = {
+      xPx: targetScreenX, yPx: targetScreenY, label: vp.name,
+    };
 
     function collect() {
       const elapsed = performance.now() - startTime;
