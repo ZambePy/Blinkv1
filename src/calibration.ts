@@ -8,6 +8,7 @@ import { StandardScaler } from './scaler';
 import { isAccuracyTesting } from './accuracy';
 import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
+import { EXPERIMENT } from './config/experiment';
 
 // Sprint 4 — recalibração implícita. `false` = comportamento antigo (só modelo
 // offline). Ligar via `setOnlineCalibrationEnabled(true)` a partir da UI/settings.
@@ -149,6 +150,7 @@ export function setGazeCorrections(corrections: GazeCorrection[]): void {
 }
 
 function applyGazeCorrection(x: number, y: number): { x: number; y: number } {
+  if (!EXPERIMENT.applyGazeCorrection) return { x, y };
   if (_gazeCorrections.length < 3) return { x, y };
 
   let sumW = 0, cx = 0, cy = 0;
@@ -587,17 +589,19 @@ export function mapGaze(
     y: avgNormY * vh,
   };
 
-  const nearestDistLeft  = nearestDistance(scaledLeft, scaledProfileLeft);
-  const nearestDistRight = nearestDistance(scaledRight, scaledProfileRight);
-  logGazeDistance({
-    timestamp: Date.now(),
-    phase: currentGazePhase(),
-    screenX: result.x,
-    screenY: result.y,
-    nearestDistLeft,
-    nearestDistRight,
-    nearestDistAvg: (nearestDistLeft + nearestDistRight) / 2,
-  });
+  if (EXPERIMENT.enableDistanceLog) {
+    const nearestDistLeft  = nearestDistance(scaledLeft, scaledProfileLeft);
+    const nearestDistRight = nearestDistance(scaledRight, scaledProfileRight);
+    logGazeDistance({
+      timestamp: Date.now(),
+      phase: currentGazePhase(),
+      screenX: result.x,
+      screenY: result.y,
+      nearestDistLeft,
+      nearestDistRight,
+      nearestDistAvg: (nearestDistLeft + nearestDistRight) / 2,
+    });
+  }
 
   return applyGazeCorrection(result.x, result.y);
 }

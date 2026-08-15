@@ -8,6 +8,7 @@
 // e segue a vida se valid === false (o bloco de E5 vai a zero nesse caso).
 
 import type { L2CSGaze, L2CSModelMeta, L2CSWorkerRequest, L2CSWorkerResponse } from './types';
+import { EXPERIMENT } from '../config/experiment';
 
 export interface L2CSClientOptions {
   modelUrl?: string;
@@ -37,7 +38,7 @@ const DEFAULT_STALE_MS = 500;
 export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
   const modelUrl = opts.modelUrl ?? DEFAULT_MODEL_URL;
   const metaUrl = opts.metaUrl ?? DEFAULT_META_URL;
-  const cadenceMs = opts.cadenceMs ?? DEFAULT_CADENCE_MS;
+  const cadenceMs = opts.cadenceMs ?? EXPERIMENT.l2csCadenceMs;
   const staleMs = opts.staleMs ?? DEFAULT_STALE_MS;
 
   let worker: Worker | null = null;

@@ -14,6 +14,7 @@ import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/c
 import type { L2CSGazeInput } from '../extractor';
 import * as recorder from '../telemetry/recorder';
 import type { RecordedQuality, RecordedTarget } from '../telemetry/types';
+import { EXPERIMENT } from '../config/experiment';
 
 // Status do subsistema L2CS. Exposto via engine.getL2CSStatus() para a UI
 // poder bloquear calibração enquanto o worker não estiver 'ready' — calibrar
@@ -329,6 +330,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
                 landmarks,
                 isMirrored: IS_VIDEO_MIRRORED,
                 context: cropCtx,
+                expandFactor: EXPERIMENT.expandFactor,
               });
               if (l2csClient.submitTensor(tensor)) l2csFramesSubmitted++;
             } catch (e) {

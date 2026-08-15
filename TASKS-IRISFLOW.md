@@ -155,7 +155,7 @@ Faça **tudo isto antes** de qualquer tarefa D1. São mudanças pequenas, de bai
 
 ---
 
-### PREP-1 🔴 — Escopar o Vitest da raiz ⏱️ 5 min
+### PREP-1 🔴 — Escopar o Vitest da raiz ⏱️ 5 min [✅ FEITO - GATE ACEITO: 12 files / 68 tests passed]
 
 **Arquivo:** `vitest.config.ts` (raiz)
 
@@ -183,7 +183,7 @@ npm test
 
 ---
 
-### PREP-2 🔴 — Flags de experimento em runtime ⏱️ 25 min
+### PREP-2 🔴 — Flags de experimento em runtime ⏱️ 25 min [✅ FEITO - GATE ACEITO: 68/68 passed e testado]
 
 **Motivo:** metade das tarefas de D2 é A/B. Sem flags em runtime, cada variante exige rebuild — inviável em 48h.
 
