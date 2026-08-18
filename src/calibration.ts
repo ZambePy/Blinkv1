@@ -505,6 +505,17 @@ export function init() {
   } catch (_) {}
 
   (window as unknown as Record<string, unknown>).__exportGazeDistanceLog = exportGazeDistanceLog;
+
+  // A0-5 (temporário): expõe hooks de diagnóstico do bug dos óculos no console.
+  // Uso: __irisflowDebug.isCalibrated(), __irisflowDebug.sampleCount(),
+  //      __irisflowDebug.hasRegressors(). Remover quando A1 estiver estável.
+  (window as unknown as Record<string, unknown>).__irisflowDebug = {
+    isCalibrated,
+    sampleCount: getSampleCount,
+    currentLambda: getCurrentLambda,
+    hasRegressors: () => ({ left: regressorLeft !== null, right: regressorRight !== null }),
+    isCalibrating: () => isCalibrating,
+  };
 }
 
 export function feedFaceMetrics(_detected: boolean, _iod: number): void {

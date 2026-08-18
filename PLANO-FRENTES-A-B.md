@@ -36,6 +36,20 @@ Quatro regras que valem para tudo neste documento:
 
 > Nenhuma alteração funcional. Se alguma tarefa daqui revelar algo que contradiz este documento, **pare e reporte** em vez de seguir.
 
+### 🚦 Gate de validação do SPRINT 0
+
+Para dar o sprint por fechado (e liberar SPRINT 1), **todos os itens abaixo têm que ser verdade**:
+
+1. ✅ Tag `v0-melhor-erro` existe em `f9d9252` (local **e** empurrada para `origin`).
+2. ✅ `docs/PONTO-DE-REFERENCIA.md` existe e as 10 condições estão preenchidas com valores reais (não `[PREENCHER]`).
+3. ✅ `npm install && npm --prefix frontend install && npm test && npm run build && npm run electron:compile` roda limpo em clone do zero.
+4. ✅ `docs/AUDITORIA-SPRINT-0.md` lista todos os `catch` / `return null` / `?? 0` / `|| 0` com severidade e "usuário percebe?".
+5. ✅ Inventário de estado mutável de módulo no mesmo doc, com "reset em…" e "se não resetar…" preenchidos.
+6. ✅ `docs/BUG-OCULOS-EVIDENCIA.md` com **logs brutos** das rodadas A/B e a resposta `isCalibrated()` pós-óculos.
+7. ✅ Nenhuma alteração funcional de comportamento neste sprint (só instrumento e docs). `git diff v0-melhor-erro..HEAD -- src/ frontend/src/` deve mostrar apenas: hook temporário `__irisflowDebug`.
+
+Status atual: 1 (parcial — falta push), 2 (parcial — falta dados), 3 ✅, 4 ✅, 5 ✅, 6 (parcial — falta execução manual), 7 ✅.
+
 ## A0-1 🔴 Congelar o ponto de referência ✅ FEITO
 
 > **Status:** tag `v0-melhor-erro` criada em `f9d9252` (local). `docs/PONTO-DE-REFERENCIA.md` criado como template com 10 campos (7 obrigatórios do plano + 3 auxiliares). Campos `[PREENCHER]` aguardam dados reais do responsável pela medição. **Push da tag para origin pendente** — ação de estado compartilhado, aguardando autorização.
@@ -113,7 +127,9 @@ Comece por: `earHistory` (extractor), `profile` / `isCalibrating` / `isCollectin
 
 Estado de módulo que atravessa sessões é a fonte clássica de "funcionou ontem e hoje não". A tabela vai revelar bugs — é o objetivo do exercício.
 
-## A0-5 🔴 Reproduzir o bug dos óculos com evidência
+## A0-5 🔴 Reproduzir o bug dos óculos com evidência 🟨 PARCIAL — instrumento pronto, captura manual pendente
+
+> **Status:** hook `window.__irisflowDebug` adicionado em `src/calibration.ts:init()` expondo `isCalibrated()`, `sampleCount()`, `currentLambda()`, `hasRegressors()`, `isCalibrating()`. Template `docs/BUG-OCULOS-EVIDENCIA.md` criado com passos de reprodução, tabela de variâncias por ponto, campos para logs brutos das rodadas A/B e diagnóstico final. `npm test` verde (69/69). **Falta apenas você rodar as duas rodadas e colar os logs no documento.** Sem esse dado real, A1-2 (`VARIANCE_FLOOR`) fica sem número — vai ficar como chute até a captura acontecer.
 
 Não conserte. **Documente.**
 
