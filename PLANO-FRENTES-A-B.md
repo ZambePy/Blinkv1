@@ -60,7 +60,9 @@ Sem essas condições, o número não é reproduzível — e um número não rep
 
 **Aceite:** tag criada e empurrada; documento existe com as 7 condições preenchidas.
 
-## A0-2 🔴 Verificar que o projeto compila e testa
+## A0-2 🔴 Verificar que o projeto compila e testa ✅ FEITO
+
+> **Status:** todos os 4 comandos passaram em `f9d9252`. `npm test` → 12 arquivos, 69 testes verdes em 4,87 s. `npm run build` → Vite ok em 4,29 s. `npm run electron:compile` → ok em 7 ms. Resultados detalhados em `docs/AUDITORIA-SPRINT-0.md`. Vulnerabilidades de `npm audit` e peer conflict `vite × @vitest/mocker` registradas como não-bloqueantes para depois.
 
 Clone limpo, do zero:
 
