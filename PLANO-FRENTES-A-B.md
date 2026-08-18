@@ -103,7 +103,9 @@ Para cada ocorrência, preencha uma linha em `docs/AUDITORIA-SPRINT-0.md`:
 
 Esses três, encadeados, são o bug dos óculos. Ver A1.
 
-## A0-4 🟡 Inventário de estado mutável
+## A0-4 🟡 Inventário de estado mutável ✅ FEITO
+
+> **Status:** inventário completo em `docs/AUDITORIA-SPRINT-0.md`. Confirmado A2-4 (`earHistory` como `const` mutável de módulo sem reset, sem encapsulamento — deriva de precisão progressiva ao longo da sessão). Nota importante: o plano cita `latest`/`lastSubmitMs` do `l2cs/client` como suspeitos, mas na verdade estão dentro de `createL2CSClient()` (per-instância, não módulo — falso positivo). Três padrões de risco em `calibration.ts`: (1) três caminhos parciais de reset em vez de um `resetCalibrationState()` único; (2) `isCalibrating` / `isAccuracyTesting` exportados e mutados de dentro; (3) `earHistory`. Também descoberto: `isAccuracyTesting = true` pode ficar preso se a UI desmontar no meio de um teste → cursor invisível pelo resto da sessão sem explicação (🟡 novo).
 
 Todo `let` e `const` mutável de escopo de módulo em `src/`. Para cada um: quem escreve, quem lê, quando é resetado, e o que acontece se **não** for resetado.
 

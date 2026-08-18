@@ -107,4 +107,82 @@ Ordenando por gravidade dentro da 🔴:
 
 ## A0-4 — Estado mutável de módulo
 
-_(a preencher)_
+Escopo: `let` (e `const` de array/Map mutáveis) declarados no **top-level de
+módulo** de `src/`. Estado dentro de factories (`createGazeEngine`,
+`createL2CSClient`) é per-instância e não conta como global.
+
+Verificado com `grep -n "^let " src/**/*.ts` e leitura por arquivo.
+
+### `src/extractor.ts` — o mais grave
+
+| Variável | Escrita | Leitura | Reset? | Se não resetar |
+|---|---|---|---|---|
+| `earHistory: number[]` (linha 105) | `earHistory.push(ear)` em cada frame (linha 234), com `shift()` acima de 50 (`EAR_HISTORY_LEN`) | `meanEar = ...reduce(...)` na linha 241, gera limiar `thr = meanEar × 0,8` (linha 242) | **Nunca.** Não existe `reset()` exportado. Sobrevive a: recalibração, troca de perfil, mudança de tela, F5 no dev-server. | **Deriva de precisão descrita em A2-4.** Fadiga faz o EAR cair → média cai → limiar cai → menos piscadas detectadas → frames semi-fechados entram no regressor. Progressivo e invisível. |
+
+### `src/calibration.ts` — estado da calibração
+
+Todos são `let` de módulo, resetados manualmente por `clearCalibration()`
+(linha 138), `startCalibrationMode()` (linha 243) e `loadProfile()` (linha
+159). Não existe um `reset()` único; três caminhos parciais.
+
+| Variável | Escrita | Leitura | Reset em… | Se não resetar |
+|---|---|---|---|---|
+| `profile: CalibrationPoint[]` (101) | `.push` em `processStaticPoint`, atribuído em `startCalibrationMode` e `clearCalibration`. | `trainScalersAndRegressors`, `getSampleCount`. | `startCalibrationMode`, `clearCalibration`. **Não** em `loadProfile` (por design — perfil salvo entra por outro caminho). | Segunda calibração acumula pontos da primeira se não for chamado o start. |
+| `isCalibrating: boolean` (102, **exportado**) | `startCalibrationMode = true`; `completeCalibration = false`. | Consumido por `startCollectingPoint`, `mapGaze` e por UI. | Só em `completeCalibration`. | Se `completeCalibration` não rodar (ex.: user aborta com ESC), fica em `true` — bloqueia próximo start; sintoma: "startCollectingPoint chamado mas isCalibrating=false — ignorando" invertido, ou UI presa em "calibrando". |
+| `isCollecting: boolean` (103) | `startCollectingPoint = true`; `processStaticPoint` e `completeCalibration = false`. | `feedRawData` (gate para acumular), `mapGaze`. | Vários caminhos. | Coleta zumbi acumulando features do ponto anterior. |
+| `regressorLeft/Right: GazeRegressor \| null` (122-123) | Em `trainScalersAndRegressors` (linhas 454-457). Set a `null` em `clearCalibration`, `startCalibrationMode`, `loadProfile`. | `mapGaze` (linha 586), `ridgeModelFromRegressor`. | 3 caminhos acima. | **É a raiz do bug dos óculos:** se `trainScalersAndRegressors` lançar, `completeCalibration` engole no `catch` (487); mas se antes disso `startCalibrationMode` já zerou os regressors, ficam `null` para sempre — daí `mapGaze === null` para sempre — daí fallback do nariz. |
+| `onlineLeft/Right: RecursiveRidgeRegressor \| null` (131-132) | Set em `trainScalersAndRegressors`. `null` em muitos lugares. | `mapGaze` para blend com RLS quando `USE_ONLINE_CALIBRATION`. | Junto com regressors offline. | Blend com peso ~0.5 vezes valor obsoleto → discrepância silenciosa entre sessões. |
+| `scaledProfileLeft/Right: number[][]` (127-128) | Escrita em `trainScalersAndRegressors`. | Não achei leitor externo — parece cache/telemetria. | Nunca zerado; realocado em cada treino. | Baixo risco isolado; pode segurar amostras antigas em memória. |
+| `poseDriftRejects: number` (99) | Incrementado em `processStaticPoint`. | Logado no mesmo. | Não zerado entre pontos! | Contador acumulado entre pontos; log fica com números crescentes que dão impressão errada da estabilidade do ponto atual. **Bug menor de diagnóstico.** |
+| `currentPointBaselinePose` (98), `collectedFeaturesLeft/Right/Qualities` (105-107), `currentTargetX/Y` (109-110), `currentCollectionMs` (111), `pointCompleteCallback` (112), `collectionTimeoutHandle` (113) | Ciclo de vida do ponto atual, escrito em `startCollectingPoint` e limpo em `processStaticPoint`/timeout. | `feedRawData`, `processStaticPoint`. | Sim, no fim de cada ponto. | Ok em fluxo feliz; sujeito a ficar preso se exceção quebrar o ciclo. |
+| `distanceLog: GazeDistanceLogEntry[]` (83, `const` mutável) | `.push` em `mapGaze` quando `EXPERIMENT.enableDistanceLog`. | `exportGazeDistanceLog`. | Nunca. | Cresce sem limite em sessões longas com o flag ligado. Baixo risco (flag off por default). |
+| `_gazeCorrections: GazeCorrection[]` (129) | `setGazeCorrections`. | Consumido em `mapGaze`. | Substituído em cada set. | Ok. |
+| `_dimErrorLogged: boolean` (580) | Toggle no `catch` de `mapGaze`. | O próprio `mapGaze`. | Reseta a `false` no primeiro frame feliz. | Ok em fluxo saudável; **em fluxo degradado permanente, esconde exceções repetidas** — é o achado 🔴 de A0-3. |
+| `lastDecision: RecordedSampleDecision \| null` (114) | Escrita em `processStaticPoint`, consumida por `consumeLastSampleDecision`. | O consumidor. | Consumo zera. | Ok. |
+
+### `src/accuracy.ts`
+
+| Variável | Escrita | Leitura | Reset? | Se não resetar |
+|---|---|---|---|---|
+| `currentFeaturesLeft/Right: number[]` (96-97) | `feedAccuracyRaw` a cada frame. | `runNextPoint` para snapshot. | Substituído a cada frame. | Ok em fluxo, mas nunca zerado entre testes de precisão → primeira amostra do segundo teste usa features do fim do primeiro. |
+| `isAccuracyTesting: boolean` (101, **exportado**) | `startAccuracyTest = true`; em `runNextPoint` (quando acaba os pontos) `= false`. | `GazeContext.tsx` (esconde o cursor); `main.ts` (histórico de log). | Sim. | Se `startAccuracyTest` for chamado e a UI fechar antes de acabar (unmount, navegação, exceção), fica `true` para sempre → **cursor invisível pelo resto da sessão sem explicação.** 🟡 |
+| `currentValidationTarget` (106) | Set em `runNextPoint`; limpo em `null` no fim. | `getCurrentTargetPx` (gravador). | Só no fim do teste. | Análogo a `isAccuracyTesting`; gravador continua marcando o último alvo como "ativo" se o teste morrer no meio. |
+
+### `src/telemetry/recorder.ts`
+
+| Variável | Escrita | Leitura | Reset? | Se não resetar |
+|---|---|---|---|---|
+| `active: boolean` (28) | `start`/`stop`. | Toda função de gravação. | Sim. | Ok. |
+| `header: RecordingHeader \| null` (29) | `start = {...}`; `stop = null` | `pushFrame`, `serialize`. | Sim. | Ok. |
+| `frames: RecordedFrame[]` (30) | `.push`; `stop = []` | `serialize`. | Sim, no `stop`. | Cresce sem limite — sessão longa gravada estoura memória. Baixo risco (gravação é curta). |
+| `dropped: number` (31) | Incrementado. | `serialize`. | Sim. | Ok. |
+
+### `src/l2cs/l2cs.worker.ts`
+
+Roda em Web Worker, escopo dedicado:
+
+| Variável | Escrita | Leitura | Reset? | Se não resetar |
+|---|---|---|---|---|
+| `session: any` (27) | Set em `init`. | `infer`. | Nunca (recriar o worker é o "reset"). | Init duplicado sobrescreve modelo sem liberar o anterior. |
+| `meta: L2CSModelMeta \| null` (28) | Set em `init`. | `infer`. | Idem. | Idem. |
+
+### `src/l2cs/client.ts` — falso positivo
+
+`let latest`, `let lastSubmitMs` estão **dentro de `createL2CSClient()`**
+(linha 38), não em escopo de módulo. O plano cita "latest/lastSubmitMs
+(l2cs/client)" como suspeitos, mas na verdade são per-instância. Único
+risco: se alguém criar mais de um cliente, cada um tem seu próprio contador
+— comportamento correto.
+
+### Análise sinóptica
+
+**Três padrões de risco no arquivo `calibration.ts`, todos convergentes:**
+
+1. **Três caminhos parciais de reset** (`clearCalibration`, `startCalibrationMode`, `loadProfile`) em vez de um `reset()` único. É fácil adicionar um novo `let` e esquecer de zerá-lo em um dos caminhos. Vale considerar consolidar em `resetCalibrationState({ preserveProfile?: boolean })`.
+2. **Estado exportado (`isCalibrating`, `isAccuracyTesting`) muta de dentro do módulo** — sem opacidade. Consumidores podem ler valor "meio setado" durante uma transição.
+3. **`earHistory` é o pior**: `const` mutável, sem reset, sem encapsulamento, no arquivo em que menos se procura ("é só um detector de piscada"). Confirma A2-4.
+
+**Nada aqui é bug a consertar agora** (A0 é auditoria). Consolidação vai para
+o Sprint 1 (A1) para o que afeta o bug dos óculos, e A2-4 encapsula
+`earHistory` num `class BlinkDetector`.
+
