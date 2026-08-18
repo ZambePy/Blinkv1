@@ -75,7 +75,9 @@ npm run electron:compile
 
 Registre em `docs/AUDITORIA-SPRINT-0.md`: o que passou, o que falhou, e a saída do erro quando falhar. **Não conserte nada ainda** — só documente. A ordem importa: consertar antes de mapear é como você perde a noção do que estava quebrado.
 
-## A0-3 🔴 Varredura de degradação silenciosa
+## A0-3 🔴 Varredura de degradação silenciosa ✅ FEITO
+
+> **Status:** varredura completa em `src/` e `frontend/src/`. Os **3 pontos pré-mapeados do plano se confirmam exatamente** neste commit. Achados adicionais em `docs/AUDITORIA-SPRINT-0.md` — destaques 🔴 fora do trio já mapeado: (a) `mapGaze` em `calibration.ts:602` que silencia todas as exceções depois da primeira e reforça o bug do fallback; (b) `accuracy.ts:296` com `|| 0` que pode devolver "erro zero" quando na verdade não há amostra; (c) `GazeContext.tsx:302` que engole falha de câmera sem propagar para a UI; (d) `EmergencyEscalation.tsx:46` — `catch` no envio de alerta, precisa de retry/confirmação (vai para B4-1).
 
 Esta é a tarefa mais importante do Sprint 0, e ataca diretamente a regra 1.
 
