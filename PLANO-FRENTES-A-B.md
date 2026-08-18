@@ -48,7 +48,9 @@ Para dar o sprint por fechado (e liberar SPRINT 1), **todos os itens abaixo têm
 6. ✅ `docs/BUG-OCULOS-EVIDENCIA.md` com **logs brutos** das rodadas A/B e a resposta `isCalibrated()` pós-óculos.
 7. ✅ Nenhuma alteração funcional de comportamento neste sprint (só instrumento e docs). `git diff v0-melhor-erro..HEAD -- src/ frontend/src/` deve mostrar apenas: hook temporário `__irisflowDebug`.
 
-Status atual: 1 (parcial — falta push), 2 (parcial — falta dados), 3 ✅, 4 ✅, 5 ✅, 6 (parcial — falta execução manual), 7 ✅.
+Status atual: 1 (parcial — falta push), 2 (parcial — falta dados de condição em `PONTO-DE-REFERENCIA.md`), 3 ✅, 4 ✅, 5 ✅, 6 ✅ **fechado com achado importante — hipótese central do plano refutada; A1 repriorizado**, 7 ✅.
+
+**Bloco final do SPRINT 0:** pronto para SPRINT 1 do ponto de vista de código. Itens 1 e 2 do gate são administrativos e podem ser fechados sem alterar código (empurrar tag + preencher condições).
 
 ## A0-1 🔴 Congelar o ponto de referência ✅ FEITO
 
@@ -127,9 +129,21 @@ Comece por: `earHistory` (extractor), `profile` / `isCalibrating` / `isCollectin
 
 Estado de módulo que atravessa sessões é a fonte clássica de "funcionou ontem e hoje não". A tabela vai revelar bugs — é o objetivo do exercício.
 
-## A0-5 🔴 Reproduzir o bug dos óculos com evidência 🟨 PARCIAL — instrumento pronto, captura manual pendente
+## A0-5 🔴 Reproduzir o bug dos óculos com evidência ✅ FEITO — **hipótese do plano refutada parcialmente**
 
-> **Status:** hook `window.__irisflowDebug` adicionado em `src/calibration.ts:init()` expondo `isCalibrated()`, `sampleCount()`, `currentLambda()`, `hasRegressors()`, `isCalibrating()`. Template `docs/BUG-OCULOS-EVIDENCIA.md` criado com passos de reprodução, tabela de variâncias por ponto, campos para logs brutos das rodadas A/B e diagnóstico final. `npm test` verde (69/69). **Falta apenas você rodar as duas rodadas e colar os logs no documento.** Sem esse dado real, A1-2 (`VARIANCE_FLOOR`) fica sem número — vai ficar como chute até a captura acontecer.
+> **Status:** Rodadas A (sem óculos) e B (com óculos) capturadas com log completo. Resultados em `docs/BUG-OCULOS-EVIDENCIA.md`. **Resumo:**
+> - Sem óculos: 57 px / 0.9° | variâncias 0.98–1.05 | `isCalibrated=true`
+> - Com óculos: **440 px / 7.51°** (8× pior) | variâncias 1.27–1.32 | `isCalibrated=true`
+>
+> **A hipótese central do plano — "óculos → features congeladas → matriz singular → catch → cursor no nariz" — NÃO se confirma neste hardware.** O mecanismo real é o oposto: óculos **aumentam** a variância (+27%) e introduzem um viés sistemático de 400 px. Treino sobrevive; CV escolhe λ=1 num olho e λ=0.01 no outro (sinal de dado ruim que o CV já detecta mas não é propagado).
+>
+> **Bugs adjacentes descobertos:**
+> - `getCurrentLambda()` retorna 0 quando CV escolhe 1/0.01 — lê campo errado no modelo (calibration.ts:151).
+> - `óculos=não` no meta do relatório automático — `AccuracyRunMeta` não é preenchido pelo fluxo pós-calibração.
+> - `/Boldonse.ttf` retorna HTML 404 e navegador cai em fonte alternativa silenciosamente — higiene (A3).
+> - Portão de teto `VARIANCE_THRESHOLD=0.02` **nunca rejeita nada em condição real** (todas as variâncias observadas ≥ 0.98). Ordem de grandeza irrisória.
+>
+> **Repriorização do Sprint 1 aplicada nas seções A1 abaixo** (marcadores ⬆️/⬇️/🔄).
 
 Não conserte. **Documente.**
 
@@ -196,7 +210,9 @@ if (avgVarLeft > VARIANCE_THRESHOLD || avgVarRight > VARIANCE_THRESHOLD) { ... }
 
 ---
 
-### A1-1 🔴 Falhar alto quando o treino falha
+### A1-1 🟡 Falhar alto quando o treino falha ⬇️ REPRIORIZADO (A0-5)
+
+> **Nota A0-5:** o `catch` de `completeCalibration` **não dispara neste hardware** (treino sobrevive mesmo com óculos). A tarefa continua correta (é bug real: `_dimErrorLogged` silencia exceções repetidas do `mapGaze`), mas não é a raiz do sintoma dos óculos observado. Fazer, mas depois de A1-2/A1-3/A1-5/A1-6.
 
 `completeCalibration` não pode mais chamar `onComplete()` como se tudo tivesse dado certo.
 
@@ -224,7 +240,13 @@ A UI precisa mostrar uma tela de falha com linguagem que o cuidador entenda e co
 
 ---
 
-### A1-2 🔴 Portão de variância bidirecional
+### A1-2 🔴 Portão de variância bidirecional 🔄 REFORMULADO (A0-5)
+
+> **Nota A0-5:** o hardware do usuário mostrou o **oposto** da hipótese do plano — óculos causam variância **alta** (1.30), não baixa. O piso (`VARIANCE_FLOOR`) continua fazendo sentido como defesa, mas o principal é **calibrar o teto**: hoje `VARIANCE_THRESHOLD=0.02` nunca rejeita nada (todas as variâncias observadas ≥ 0.98). **Sugestão inicial:**
+> - `VARIANCE_CEIL ≈ 1.15` (rejeita óculos = 1.27+, aceita sem = 1.05− com folga)
+> - `VARIANCE_FLOOR ≈ 0.10` (defesa contra features congeladas em outro hw)
+> - Trocar o número mágico `0.02` — investigar se era ordem de grandeza errada desde o início (features não normalizadas?) ou se veio de outra unidade.
+> - **Também investigar por que Var L ≈ Var R até a 6ª casa decimal** (L=0.987331 R=0.987332). Dois olhos independentes não fariam isso — suspeita de compartilhamento de vetor de features ou agregação degenerada em `calculateFeatureVariance`.
 
 Adicione o piso que falta:
 
@@ -251,7 +273,9 @@ Se mais de ~30 % das dimensões estiverem mortas, aborte com `reason: 'degenerat
 
 ---
 
-### A1-3 🔴 Treino que não explode
+### A1-3 🔴 Treino que não explode ⬆️ SUBIU (A0-5)
+
+> **Nota A0-5:** o CV **já detecta** o dado ruim — escolheu λ=1 num olho e λ=0.01 no outro (100× diferença) na rodada com óculos. Erro final: 440 px. O sinal existe, só precisa ser (a) exposto ao diagnóstico e (b) usado para bloquear a UI de declarar "Calibração Concluída" quando λ_max/λ_min > 10. **Bug adjacente descoberto**: `getCurrentLambda()` retorna 0 apesar do log `[ridge] CV Lambda selecionado: 1` — corrigir junto com esta tarefa, provavelmente lê o campo errado no modelo (calibration.ts:151).
 
 Mesmo com os portões, `solveLinear` não deve derrubar o treino. Duas defesas:
 
@@ -286,7 +310,9 @@ O ponto 3 é o mais importante e o menos óbvio: **em estado degradado, permitir
 
 ---
 
-### A1-5 🟡 Detecção de reflexo especular
+### A1-5 🔴 Detecção de reflexo especular ⬆️⬆️ SUBIU (A0-5)
+
+> **Nota A0-5:** reflexo/refração é a **causa raiz confirmada** — óculos aumentaram variância em +27% e introduziram viés de 400 px. Atacar aqui é atacar a causa, não o efeito. Mesmo se A1-2 e A1-3 blindarem a decisão, sem detectar o reflexo o usuário fica preso num loop de "recalibrar → falha → recalibrar". Deve ser feito em paralelo com A1-2/A1-3.
 
 Ataca a causa em vez do efeito. `src/qualityAnalyzer.ts` já recorta a região dos olhos e calcula luminância — falta só olhar para o que interessa.
 
@@ -309,7 +335,9 @@ O limiar sai dos dados do A0-5, comparando com e sem óculos. **Não chute.**
 
 ---
 
-### A1-6 🟡 Perfil de calibração por condição óptica
+### A1-6 🔴 Perfil de calibração por condição óptica ⬆️⬆️⬆️ SUBIU MUITO (A0-5)
+
+> **Nota A0-5:** refração das lentes introduz **viés sistemático de 400 px**, não jitter. Isso é limite físico — nenhum ajuste de portão de variância, regularização ou filtro compensa. **Perfis separados é a única solução real** para o usuário que às vezes usa e às vezes não usa óculos. Sobe para prioridade máxima do Sprint 1 junto com A1-5.
 
 Óculos mudam a geometria óptica de verdade — não é só reflexo. Lentes corretivas refratam o raio de luz, e **lentes progressivas ou bifocais refratam de forma diferente conforme a região da lente pela qual você olha**. Isso é um deslocamento de olhar dependente da direção, que nenhum modelo linear global compensa bem.
 
