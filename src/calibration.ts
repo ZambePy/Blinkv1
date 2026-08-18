@@ -149,11 +149,39 @@ export function getSampleCount(): number {
 }
 
 export function getCurrentLambda(): number {
-  if (regressorLeft && 'getModel' in regressorLeft) {
-    const model = (regressorLeft as any).getModel();
-    return model.lambda ?? 0;
-  }
-  return 0;
+  // Compat: devolve o λ do olho esquerdo. Consumidores novos devem preferir
+  // getLambdaDiagnostics() para pegar os dois olhos + razão de disparidade.
+  const diag = getLambdaDiagnostics();
+  return diag?.left ?? 0;
+}
+
+// A1-3 — diagnóstico de regularização. Uma razão λ_max/λ_min > 10 entre os
+// dois olhos indica que o CV está detectando dado ruim em pelo menos um dos
+// lados (A0-5 observou λ=1 num olho e λ=0.01 no outro com óculos, ratio 100).
+// nearSingular* revela colunas do vetor de features que degeneram no treino.
+export interface LambdaDiagnostics {
+  left: number;
+  right: number;
+  ratio: number;                  // max(l,r) / max(min(l,r), 1e-12)
+  nearSingularLeft: number[];
+  nearSingularRight: number[];
+}
+
+export function getLambdaDiagnostics(): LambdaDiagnostics | null {
+  const modelL = regressorLeft ? ridgeModelFromRegressor(regressorLeft) : null;
+  const modelR = regressorRight ? ridgeModelFromRegressor(regressorRight) : null;
+  if (!modelL || !modelR) return null;
+  const left = modelL.lambda ?? 0;
+  const right = modelR.lambda ?? 0;
+  const lo = Math.max(Math.min(left, right), 1e-12);
+  const ratio = Math.max(left, right) / lo;
+  return {
+    left,
+    right,
+    ratio,
+    nearSingularLeft: modelL.nearSingularCols ?? [],
+    nearSingularRight: modelR.nearSingularCols ?? [],
+  };
 }
 
 export function loadProfile(): boolean {
@@ -459,6 +487,20 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
   scaledProfileLeft  = scaledFeaturesLeft;
   scaledProfileRight = scaledFeaturesRight;
 
+  // A1-3 — sinal de dado ruim que o CV já detecta mas não era propagado.
+  // A0-5 observou λ=1 num olho e λ=0.01 no outro com óculos (ratio 100).
+  // Um ratio > 10 significa que os dois olhos discordam violentamente sobre
+  // quanto regularizar, sinal de que pelo menos um dos lados está com
+  // features degeneradas ou ruído desproporcional.
+  const diag = getLambdaDiagnostics();
+  if (diag && diag.ratio > 10) {
+    console.warn(
+      `[calib] ⚠ λ discrepante entre olhos: L=${diag.left} R=${diag.right} (ratio=${diag.ratio.toFixed(1)}). ` +
+      `Dado provavelmente ruim (reflexo em óculos, iluminação assimétrica). ` +
+      `Ver A0-5 no plano.`,
+    );
+  }
+
   // Sprint 4 — inicializa os regressores online a partir do modelo Ridge
   // recém-treinado. Só suportado quando o modo ativo é 'ridge' — outros
   // regressores (kernel) não expõem β_x/β_y diretamente.
@@ -506,13 +548,14 @@ export function init() {
 
   (window as unknown as Record<string, unknown>).__exportGazeDistanceLog = exportGazeDistanceLog;
 
-  // A0-5 (temporário): expõe hooks de diagnóstico do bug dos óculos no console.
-  // Uso: __irisflowDebug.isCalibrated(), __irisflowDebug.sampleCount(),
-  //      __irisflowDebug.hasRegressors(). Remover quando A1 estiver estável.
+  // A0-5 + A1-3: expõe hooks de diagnóstico do bug dos óculos no console.
+  // Uso: __irisflowDebug.isCalibrated(), __irisflowDebug.lambdaDiag(), etc.
+  // Remover quando A1 estiver estável.
   (window as unknown as Record<string, unknown>).__irisflowDebug = {
     isCalibrated,
     sampleCount: getSampleCount,
     currentLambda: getCurrentLambda,
+    lambdaDiag: getLambdaDiagnostics,
     hasRegressors: () => ({ left: regressorLeft !== null, right: regressorRight !== null }),
     isCalibrating: () => isCalibrating,
   };

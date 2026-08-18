@@ -11,10 +11,32 @@ export interface RidgeModel {
   betaX: number[];  // coeficientes para predizer screenX
   betaY: number[];  // coeficientes para predizer screenY
   numFeatures: number;
+  // A1-3 — diagnóstico que sobrevive à serialização. `lambda` é o λ
+  // efetivamente usado no treino (pode ser maior que o escolhido pelo CV
+  // se houve escalonamento defensivo por matriz singular). `nearSingularCols`
+  // são as colunas cujo pivô durante a eliminação gaussiana ficou abaixo
+  // de 1e-6 mas acima de 1e-12: resolve numericamente mas gera coeficientes
+  // grandes que produzem predições instáveis.
+  lambda: number;
+  nearSingularCols: number[];
 }
 
-// Eliminação gaussiana com pivotação parcial para resolver Aβ = b
-export function solveLinear(A: number[][], b: number[]): number[] {
+// A1-3 — limiar de "quase-singular". Acima de 1e-12 solveLinear ainda
+// resolve, mas abaixo de 1e-6 os coeficientes β ficam ordens de grandeza
+// maiores que o razoável, gerando predições que "explodem" para pequenas
+// variações da entrada. É a assinatura do bug de erro grande + jitter
+// baixo observado em A0-5 com óculos (viés de 400 px).
+const NEAR_SINGULAR_PIVOT = 1e-6;
+const SINGULAR_PIVOT = 1e-12;
+
+// Eliminação gaussiana com pivotação parcial para resolver Aβ = b.
+// Popula `nearSingularCols` (out-param) com índices de colunas cujo pivô
+// ficou abaixo de NEAR_SINGULAR_PIVOT — o chamador decide se avisa/rejeita.
+export function solveLinear(
+  A: number[][],
+  b: number[],
+  nearSingularCols?: number[],
+): number[] {
   const n = A.length;
   const M: number[][] = A.map((row, i) => [...row, b[i]]);
 
@@ -26,8 +48,11 @@ export function solveLinear(A: number[][], b: number[]): number[] {
     [M[col], M[pivot]] = [M[pivot], M[col]];
 
     const d = M[col][col];
-    if (Math.abs(d) < 1e-12) {
+    if (Math.abs(d) < SINGULAR_PIVOT) {
       throw new Error(`Matriz singular na coluna ${col}. O sistema não pode ser resolvido.`);
+    }
+    if (Math.abs(d) < NEAR_SINGULAR_PIVOT && nearSingularCols) {
+      nearSingularCols.push(col);
     }
     for (let j = col; j <= n; j++) M[col][j] /= d;
 
@@ -47,8 +72,8 @@ export function trainRidgeModel(
   lambda = 1.0
 ): RidgeModel {
   const m = features.length;
-  if (m === 0) return { betaX: [], betaY: [], numFeatures: 0 };
-  
+  if (m === 0) return { betaX: [], betaY: [], numFeatures: 0, lambda, nearSingularCols: [] };
+
   const rawFeatures = features[0].length;
   const nf = rawFeatures + 1; // +1 para o Bias term
 
@@ -71,18 +96,23 @@ export function trainRidgeModel(
     for (let k = 0; k < m; k++) s += Phi[k][i] * targets[k].screenX;
     return s;
   });
-  
+
   const bY = Array.from({ length: nf }, (_, i) => {
     let s = 0;
     for (let k = 0; k < m; k++) s += Phi[k][i] * targets[k].screenY;
     return s;
   });
 
-  return { 
-    betaX: solveLinear(A, bX), 
-    betaY: solveLinear(A, bY),
-    numFeatures: rawFeatures 
-  };
+  // A1-3 — acumula colunas quase-singulares das duas solvidas. A união
+  // (não a interseção) porque uma coluna instável em X é sinal de β_x
+  // ruim, mesmo que β_y esteja ok.
+  const nearSingularX: number[] = [];
+  const nearSingularY: number[] = [];
+  const betaX = solveLinear(A, bX, nearSingularX);
+  const betaY = solveLinear(A, bY, nearSingularY);
+  const nearSingularCols = Array.from(new Set([...nearSingularX, ...nearSingularY])).sort((a, b) => a - b);
+
+  return { betaX, betaY, numFeatures: rawFeatures, lambda, nearSingularCols };
 }
 
 export function predictRidge(
@@ -129,7 +159,33 @@ export class RidgeRegressor {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
     const lambdas = [1e-4, 1e-3, 1e-2, 0.1, 1, 10, 100, 1000];
     const bestLambda = this.selectLambdaCV(features, targets, lambdas);
-    this.model = trainRidgeModel(features, targets, bestLambda);
+
+    // A1-3 — escalonamento defensivo. O CV pode escolher λ ótimo sobre
+    // folds parciais, mas o treino final (com TODAS as amostras) pode ter
+    // colunas ativas adicionais que tornam ΦᵀΦ singular. Escalona λ × 10
+    // até 3 tentativas antes de desistir. O λ efetivamente usado fica em
+    // model.lambda — comparar com bestLambda revela se houve socorro.
+    const MAX_ESCALATIONS = 3;
+    let lambda = bestLambda;
+    let lastError: unknown = null;
+    for (let attempt = 0; attempt <= MAX_ESCALATIONS; attempt++) {
+      try {
+        this.model = trainRidgeModel(features, targets, lambda);
+        if (attempt > 0) {
+          console.warn(`[ridge] λ escalonado ${attempt}× até ${lambda} (CV escolheu ${bestLambda}) — dado provavelmente ruim`);
+        }
+        if (this.model.nearSingularCols.length > 0) {
+          console.warn(`[ridge] pivô quase-singular em ${this.model.nearSingularCols.length} coluna(s): ${this.model.nearSingularCols.slice(0, 10).join(',')}${this.model.nearSingularCols.length > 10 ? '…' : ''}. β pode gerar predições instáveis.`);
+        }
+        return;
+      } catch (e) {
+        lastError = e;
+        lambda *= 10;
+      }
+    }
+    throw lastError instanceof Error
+      ? lastError
+      : new Error('[ridge] treino falhou após 3 escalonamentos de λ');
   }
 
   private selectLambdaCV(

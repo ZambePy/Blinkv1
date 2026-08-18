@@ -273,9 +273,20 @@ Se mais de ~30 % das dimensões estiverem mortas, aborte com `reason: 'degenerat
 
 ---
 
-### A1-3 🔴 Treino que não explode ⬆️ SUBIU (A0-5)
+### A1-3 🔴 Treino que não explode ⬆️ SUBIU (A0-5) ✅ FEITO
 
 > **Nota A0-5:** o CV **já detecta** o dado ruim — escolheu λ=1 num olho e λ=0.01 no outro (100× diferença) na rodada com óculos. Erro final: 440 px. O sinal existe, só precisa ser (a) exposto ao diagnóstico e (b) usado para bloquear a UI de declarar "Calibração Concluída" quando λ_max/λ_min > 10. **Bug adjacente descoberto**: `getCurrentLambda()` retorna 0 apesar do log `[ridge] CV Lambda selecionado: 1` — corrigir junto com esta tarefa, provavelmente lê o campo errado no modelo (calibration.ts:151).
+>
+> **Status ✅:**
+> - `RidgeModel` ganhou `lambda: number` e `nearSingularCols: number[]` (persistem na serialização — cabe em A2-7 depois).
+> - `solveLinear` recebe out-param `nearSingularCols` e popula com colunas cujo pivô < 1e-6 (mas ≥ 1e-12). Limiar `NEAR_SINGULAR_PIVOT = 1e-6` centralizado.
+> - `trainRidgeModel` propaga λ efetivo e a união (não interseção) de colunas quase-singulares dos dois solves (X e Y).
+> - `RidgeRegressor.train` escalona λ × 10 até 3 tentativas se o treino final lançar. Warn com o λ efetivo vs. o do CV. Warn separado quando `nearSingularCols.length > 0`.
+> - `getCurrentLambda()` corrigido — agora lê `model.lambda` real. Nova `getLambdaDiagnostics()` retorna `{left, right, ratio, nearSingularLeft, nearSingularRight}`.
+> - `trainScalersAndRegressors` loga `⚠ λ discrepante entre olhos` quando ratio > 10 (o caso exato observado em A0-5).
+> - `__irisflowDebug.lambdaDiag()` exposto no console.
+> - **8 testes novos** em `src/ridge.a1-3.test.ts`. Total: 13 arquivos, 77 testes verdes. Build e electron:compile ok.
+> - **Sem mudança de comportamento no caminho feliz** — escalonamento só dispara quando o treino atual lançaria (regra 4 do plano preservada).
 
 Mesmo com os portões, `solveLinear` não deve derrubar o treino. Duas defesas:
 
