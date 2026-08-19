@@ -110,6 +110,17 @@ const DEAD_FEATURE_MAX_RATIO = 0.30;
 let varianceFloorBreaches = 0;
 let varianceCeilBreaches = 0;
 
+// A1-5 — detecção de reflexo especular por frame. Um único frame com specular
+// alto é ruído (piscada de luz, cursor branco cruzando o crop); avisar só
+// quando persistente durante um ponto (>SPECULAR_PERSISTENCE dos frames).
+// Não rejeita o frame — sinaliza para o cuidador que a lente pode estar
+// refletindo. Sinal barato: qualityAnalyzer já calcula.
+const SPECULAR_FRAME_THRESHOLD = 0.02;      // 2% do crop saturado = "há reflexo"
+const SPECULAR_PERSISTENCE     = 0.30;      // >30% dos frames do ponto → warn
+let currentPointSpecularHits   = 0;         // frames deste ponto com specular alto
+let currentPointFramesAccepted = 0;         // frames deste ponto que passaram os gates
+let specularWarningsIssued     = 0;         // pontos que dispararam o warn
+
 const DIST_LOG_CAPACITY = 500;
 const distanceLog: GazeDistanceLogEntry[] = [];
 
@@ -175,6 +186,9 @@ export function clearCalibration() {
   onlineRight = null;
   varianceFloorBreaches = 0;
   varianceCeilBreaches = 0;
+  currentPointSpecularHits = 0;
+  currentPointFramesAccepted = 0;
+  specularWarningsIssued = 0;
 }
 
 export function getSampleCount(): number {
@@ -313,6 +327,9 @@ export function startCalibrationMode() {
   onlineRight = null;
   varianceFloorBreaches = 0;
   varianceCeilBreaches = 0;
+  currentPointSpecularHits = 0;
+  currentPointFramesAccepted = 0;
+  specularWarningsIssued = 0;
 }
 
 export function startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void) {
@@ -338,6 +355,8 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   pointCompleteCallback = onDone;
   currentPointBaselinePose = null;
   poseDriftRejects = 0;
+  currentPointSpecularHits = 0;
+  currentPointFramesAccepted = 0;
 
   console.log(`[calib] ▶ Coletando ponto (${(x*100).toFixed(0)}%, ${(y*100).toFixed(0)}%) — aguardando ${currentCollectionMs}ms + 400ms acomodação`);
 
@@ -509,7 +528,15 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   collectedFeaturesLeft.push(featuresLeft);
   collectedFeaturesRight.push(featuresRight);
   collectedQualities.push(quality ?? null);
-  
+
+  // A1-5 — contagem de frames com reflexo especular alto. Não rejeita nada
+  // (regra do plano: prevenir vale mais que rejeitar); só acumula para o
+  // sumário do ponto avisar.
+  currentPointFramesAccepted++;
+  if (quality && typeof quality.specularRatio === 'number' && quality.specularRatio > SPECULAR_FRAME_THRESHOLD) {
+    currentPointSpecularHits++;
+  }
+
   lastDecision = { accepted: true, elapsedMs: elapsed };
 
   if (elapsed >= currentCollectionMs) {
@@ -550,6 +577,23 @@ function processStaticPoint() {
     `[calib] Variância intra-ponto: L=${avgVarLeft.toFixed(6)} R=${avgVarRight.toFixed(6)} avg=${avgVar.toFixed(6)} ` +
     `(faixa [${INTRA_POINT_VARIANCE_FLOOR}, ${INTRA_POINT_VARIANCE_CEIL}])`,
   );
+
+  // A1-5 — reflexo especular persistente no ponto. Só avisa (não bloqueia).
+  // Diagnóstico direto para o cuidador ver antes de rodar todos os 9 pontos:
+  // se o primeiro já dispara, mudar posição da tela vale mais que continuar.
+  if (currentPointFramesAccepted > 0) {
+    const specularPct = currentPointSpecularHits / currentPointFramesAccepted;
+    if (specularPct > SPECULAR_PERSISTENCE) {
+      specularWarningsIssued++;
+      console.warn(
+        `[calib] ⚠ Reflexo especular persistente no crop ocular: ` +
+        `${currentPointSpecularHits}/${currentPointFramesAccepted} frames ` +
+        `(${(specularPct * 100).toFixed(0)}% > ${(SPECULAR_PERSISTENCE * 100).toFixed(0)}%). ` +
+        `Provável reflexo em óculos ou tela muito próxima. Incline a tela para baixo ou ` +
+        `reduza luzes atrás de você.`,
+      );
+    }
+  }
 
   // A1-2 — portão bidirecional. Continuamos aceitando pontos fora da faixa
   // (comportamento antigo, para não gerar infinite retry loop em usuários
@@ -708,6 +752,13 @@ export function init() {
       ceil: varianceCeilBreaches,
       floorThreshold: INTRA_POINT_VARIANCE_FLOOR,
       ceilThreshold: INTRA_POINT_VARIANCE_CEIL,
+    }),
+    specularStats: () => ({
+      pointsWithReflectionWarning: specularWarningsIssued,
+      currentPointHits: currentPointSpecularHits,
+      currentPointFrames: currentPointFramesAccepted,
+      frameThreshold: SPECULAR_FRAME_THRESHOLD,
+      persistenceThreshold: SPECULAR_PERSISTENCE,
     }),
     deadFeatures: () => {
       if (profile.length === 0) return null;

@@ -333,9 +333,22 @@ O ponto 3 é o mais importante e o menos óbvio: **em estado degradado, permitir
 
 ---
 
-### A1-5 🔴 Detecção de reflexo especular ⬆️⬆️ SUBIU (A0-5)
+### A1-5 🔴 Detecção de reflexo especular ⬆️⬆️ SUBIU (A0-5) ✅ FEITO
 
 > **Nota A0-5:** reflexo/refração é a **causa raiz confirmada** — óculos aumentaram variância em +27% e introduziram viés de 400 px. Atacar aqui é atacar a causa, não o efeito. Mesmo se A1-2 e A1-3 blindarem a decisão, sem detectar o reflexo o usuário fica preso num loop de "recalibrar → falha → recalibrar". Deve ser feito em paralelo com A1-2/A1-3.
+>
+> **Status ✅:**
+> - `QualityFeatures.specularRatio?: number` adicionado ao tipo (opcional para compat com perfis antigos serializados / testes existentes).
+> - `qualityAnalyzer.analyze()` conta pixels com luminância > `SPECULAR_LUMINANCE = 0.95` no mesmo loop de brightness (custo zero — o loop já percorre tudo). Devolve `specularRatio` junto com brightness/contrast/blur.
+> - `extractor.ts` inicializa `specularRatio: 0` no fallback.
+> - `calibration.ts` ganha 3 constantes (`SPECULAR_FRAME_THRESHOLD = 0.02` = 2% do crop saturado; `SPECULAR_PERSISTENCE = 0.30` = >30% dos frames do ponto disparam warn) e 3 contadores (`currentPointSpecularHits`, `currentPointFramesAccepted`, `specularWarningsIssued`).
+> - `feedRawData` incrementa o contador quando o frame **é aceito** pelos gates existentes (não conta frame descartado por outra razão).
+> - `processStaticPoint` emite warn com percentual + orientação para o cuidador (*"Provável reflexo em óculos ou tela muito próxima. Incline a tela para baixo…"*).
+> - **Sem rejeição de frame** por reflexo — o plano diz "prevenção vale mais que rejeição". Só sinaliza.
+> - `__irisflowDebug.specularStats()` exposto no console.
+> - Contadores reset em `startCalibrationMode`/`clearCalibration`/`startCollectingPoint` (por-ponto vs. por-sessão).
+> - **5 testes novos** em `src/qualityAnalyzer.a1-5.test.ts`: crop cinza (~0), crop branco (~1), crop preto (=0), crop parcial (~0.5), tipo opcional preservado. **Total: 15 arquivos, 89 testes verdes**. Build + electron ok.
+> - **Baseline preservado**: sem óculos, `specularRatio` ficará baixo e nenhum warn dispara.
 
 Ataca a causa em vez do efeito. `src/qualityAnalyzer.ts` já recorta a região dos olhos e calcula luminância — falta só olhar para o que interessa.
 

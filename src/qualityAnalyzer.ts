@@ -34,6 +34,13 @@ const BLUR_REFERENCE_VARIANCE = 0.001;
 // brusco e ~0.94 em rosto parado.
 const LANDMARK_JITTER_SCALE = 20;
 
+// A1-5 — limiar de luminância "quase-saturada". Pixels acima disso na região
+// do olho são candidatos a reflexo especular (a tela refletindo na lente).
+// Pele e esclera raramente ultrapassam 0.95 sob exposição correta; lente
+// refletindo LCD frontal, sim. Valor conservador; pode subir para 0.97 se
+// falsos positivos em pele muito clara aparecerem em campo.
+const SPECULAR_LUMINANCE = 0.95;
+
 export class EyeQualityAnalyzer {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
@@ -108,6 +115,9 @@ export class EyeQualityAnalyzer {
 
       const lum = new Float32Array(N);
       let sum = 0;
+      // A1-5 — contagem de pixels quase-saturados feita no mesmo loop
+      // (custo zero). specularRatio = fração acima de SPECULAR_LUMINANCE.
+      let specularCount = 0;
       for (let i = 0; i < N; i++) {
         const r = data[i * 4];
         const g = data[i * 4 + 1];
@@ -116,8 +126,10 @@ export class EyeQualityAnalyzer {
         const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
         lum[i] = l;
         sum += l;
+        if (l > SPECULAR_LUMINANCE) specularCount++;
       }
       const brightnessEstimate = sum / N;
+      const specularRatio = specularCount / N;
       let varSum = 0;
       for (let i = 0; i < N; i++) {
         const d = lum[i] - brightnessEstimate;
@@ -150,7 +162,7 @@ export class EyeQualityAnalyzer {
         blurEstimate = Math.max(0, Math.min(1, 1 - lapVar / BLUR_REFERENCE_VARIANCE));
       }
 
-      return { detectorConfidence, brightnessEstimate, contrastEstimate, blurEstimate };
+      return { detectorConfidence, brightnessEstimate, contrastEstimate, blurEstimate, specularRatio };
     } catch (_) {
       // Canvas taint (raro, mas possível com camera stream cross-origin) — devolve confidence apenas.
       return { detectorConfidence };

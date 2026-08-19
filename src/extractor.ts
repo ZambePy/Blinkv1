@@ -32,6 +32,11 @@ export interface QualityFeatures {
   blurEstimate: number;
   occlusionEstimate: number;
   irisVisibilityPercentage: number;
+  // A1-5 — fração de pixels do crop ocular com luminância > SPECULAR_LUMINANCE
+  // (default 0.95). Pele e esclera raramente saturam sob exposição correta;
+  // lente refletindo a tela, sim. Opcional para compat com testes/perfis
+  // antigos serializados antes de A1-5.
+  specularRatio?: number;
 }
 
 export interface AdvancedFrameFeatures {
@@ -283,7 +288,8 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
     contrastEstimate: 0.5,
     blurEstimate: 0.0,
     occlusionEstimate: 0.0,
-    irisVisibilityPercentage: Math.min(1.0, ear / 0.25)
+    irisVisibilityPercentage: Math.min(1.0, ear / 0.25),
+    specularRatio: 0, // A1-5 — sobrescrito por qualityAnalyzer quando disponível
   };
 
   const advancedFeatures: AdvancedFrameFeatures = {
