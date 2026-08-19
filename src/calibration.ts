@@ -247,14 +247,123 @@ export function getLambdaDiagnostics(): LambdaDiagnostics | null {
   };
 }
 
+// A2-7 — persistência de perfis de calibração.
+//
+// Por que localStorage e não IndexedDB: os perfis são pequenos (~30-50 KB
+// de modelos Ridge + scalers + metadados) e o acesso síncrono do localStorage
+// simplifica a integração com `init()` que precisa restaurar antes do primeiro
+// frame. IndexedDB seria melhor para múltiplos perfis grandes; se isso virar
+// problema, migramos o storage sem mudar a API.
+//
+// Invalidação:
+//   - `featureDim` diferente → pipeline mudou (nova versão ou A2-5 ligado)
+//   - `screenW`/`screenH` diferente → Ridge mapeia para pixel; tela diferente
+//     desloca sistematicamente todas as predições
+//   - `videoW`/`videoH` diferente → aspecto do crop mudou
+//   - `experimentId` diferente → flags de A2 mudaram (isotropicLandmarks etc.)
+//   - `createdAt` > 24 h → oferece revalidação, não bloqueia
+
+const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles';
+const PROFILES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
+function buildContextKey(): string {
+  // Identificador compacto do contexto em que o perfil foi criado.
+  // Usado para detectar incompatibilidade (tela diferente, pipeline diferente).
+  const sw = typeof window !== 'undefined' ? window.screen.width : 0;
+  const sh = typeof window !== 'undefined' ? window.screen.height : 0;
+  // Inclui as flags de A2 que mudam o vetor
+  const expKey = [
+    EXPERIMENT.isotropicLandmarks ? 'iso' : '',
+    EXPERIMENT.applyGazeCorrection ? 'rbf' : '',
+  ].filter(Boolean).join(',') || 'default';
+  return `${sw}x${sh}_${expKey}`;
+}
+
+function tryParseStoredProfiles(): StoredCalibrationProfile[] {
+  if (typeof localStorage === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(PROFILES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed as StoredCalibrationProfile[];
+  } catch {
+    return [];
+  }
+}
+
 export function loadProfile(): boolean {
+  // A2-7 — tenta restaurar o perfil mais recente válido do localStorage.
   regressorLeft = null;
   regressorRight = null;
-  return false;
+
+  const profiles = tryParseStoredProfiles();
+  if (profiles.length === 0) return false;
+
+  const contextKey = buildContextKey();
+  const nowMs = Date.now();
+
+  // Filtra e ordena por data (mais recente primeiro)
+  const valid = profiles
+    .filter(p => {
+      // Validação de contexto: tela ou pipeline diferente → incompatível
+      if ((p as unknown as Record<string, unknown>)._contextKey !== contextKey) {
+        console.warn(`[calib] perfil ${p.meta.id} incompatível (contexto diferente) — ignorado`);
+        return false;
+      }
+      return true;
+    })
+    .sort((a, b) => new Date(b.meta.createdAt).getTime() - new Date(a.meta.createdAt).getTime());
+
+  if (valid.length === 0) return false;
+
+  const best = valid[0];
+  const age = nowMs - new Date(best.meta.createdAt).getTime();
+  if (age > PROFILES_MAX_AGE_MS) {
+    console.warn(`[calib] perfil ${best.meta.id} tem ${Math.round(age / 3600000)} h — mais antigo que 24 h. Recomendado recalibrar.`);
+    // Não bloqueia: oferecer revalidação, não bloqueio.
+  }
+
+  try {
+    // Restaura o perfil no registry e os regressors em memória
+    profileRegistry.save(best);
+    const reloadedLeft = ridgeRegressorFromModel(best.modelLeft);
+    const reloadedRight = ridgeRegressorFromModel(best.modelRight);
+    if (!reloadedLeft || !reloadedRight) return false;
+    regressorLeft = reloadedLeft;
+    regressorRight = reloadedRight;
+    featureScalerLeft.setParams(best.scalerParamsLeft.means, best.scalerParamsLeft.stds);
+    featureScalerRight.setParams(best.scalerParamsRight.means, best.scalerParamsRight.stds);
+    console.log(`[calib] perfil restaurado: ${best.meta.label} (${best.meta.opticalCondition}), ${age > PROFILES_MAX_AGE_MS ? '⚠️ >24h' : 'válido'}`);
+    return true;
+  } catch (e) {
+    console.warn('[calib] falha ao restaurar perfil:', e);
+    regressorLeft = null;
+    regressorRight = null;
+    return false;
+  }
 }
 
 function saveProfile() {
-  // Saved profiles disabled
+  // A2-7 — persiste todos os perfis do registry no localStorage.
+  // Chamado após `persistActiveProfileToRegistry` em `completeCalibration`.
+  if (typeof localStorage === 'undefined') return;
+  try {
+    const all = profileRegistry.list();
+    const profiles = all.map(entry => {
+      const stored = profileRegistry.get(entry.meta.id)!;
+      // Anota o contexto no perfil para invalidação futura
+      return { ...stored, _contextKey: buildContextKey() };
+    });
+    // Mantém no máximo 5 perfis para não estourar o localStorage
+    const latest = profiles
+      .sort((a, b) => new Date(b.meta.createdAt).getTime() - new Date(a.meta.createdAt).getTime())
+      .slice(0, 5);
+    localStorage.setItem(PROFILES_STORAGE_KEY, JSON.stringify(latest));
+    console.log(`[calib] ${latest.length} perfil(s) salvo(s) no localStorage`);
+  } catch (e) {
+    console.warn('[calib] falha ao salvar perfis:', e);
+  }
 }
 
 export function setGazeCorrections(corrections: GazeCorrection[]): void {

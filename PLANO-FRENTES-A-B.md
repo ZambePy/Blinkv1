@@ -460,7 +460,7 @@ Na seleção de perfil, o cuidador escolhe a condição atual. Isso resolve o ca
 
 > **Todas as tarefas de A2 entram atrás de flag, desligadas.** São correções que a análise indica serem certas, mas você tem 1°/111 px e não pode medir ainda. Implementadas e desligadas, elas estarão prontas para a fase de medição decidir uma por uma.
 
-### A2-1 🔴 O One Euro Filter está praticamente inativo
+### A2-1 ✅ FEITO — O One Euro Filter está praticamente inativo
 
 Este é o achado técnico mais forte deste documento.
 
@@ -488,9 +488,7 @@ Dois efeitos: o jitter que você vê hoje é essencialmente não filtrado; e com
 
 **Flag:** `filterInNormalizedSpace: false` por default. Os presets antigos ficam; os novos entram como `balanceado-v2` etc.
 
-> Curiosidade que vale registrar: você atingiu 1°/111 px **com o filtro praticamente desligado**. Isso significa que a predição bruta do seu pipeline já é boa. Ligar o filtro de verdade deve reduzir jitter sem custo de exatidão — mas é exatamente o tipo de afirmação que só a medição confirma.
-
-### A2-2 🟡 `LowPassFilter` inicia puxando para zero
+### A2-2 ✅ FEITO — `LowPassFilter` inicia puxando para zero
 
 ```ts
 constructor(alpha: number, initval: number = 0) {
@@ -506,13 +504,13 @@ A primeira amostra vira `a·value + (1−a)·0` — **puxada para a origem, o ca
 
 **Correção:** `y: number | null = null` e `initval` default `null`. **Sem flag** — é bug puro, e corrigi-lo com o filtro inerte não muda nada mensurável.
 
-### A2-3 🟡 `setParams` descarta o estado
+### A2-3 ✅ FEITO — `setParams` descarta o estado
 
 `OneEuroFilter2D.setParams` cria instâncias novas (`x = null`, `dx = null`, `lasttime = -1`), apesar do comentário afirmar que preserva o estado. Trocar preset em uso faz o cursor saltar.
 
 **Correção:** `setParams` na própria `OneEuroFilter`, mutando os campos. Corrija o comentário. **Sem flag.**
 
-### A2-4 🟡 `earHistory` é estado global de módulo
+### A2-4 ✅ FEITO — `earHistory` é estado global de módulo
 
 `src/extractor.ts:105`. O limiar de piscada é `média(earHistory) × 0,8`, e a média é realimentada pelos próprios frames de piscada: quanto mais o usuário pisca — fadiga progressiva, que é a regra em ELA — mais o limiar cai e menos piscadas são detectadas. Frame de olho semifechado entra no regressor como fixação válida.
 
@@ -520,7 +518,7 @@ A primeira amostra vira `a·value + (1−a)·0` — **puxada para a origem, o ca
 
 **Correção:** encapsular em `class BlinkDetector` com `reset()`; calcular a média **apenas sobre frames de não-piscada**, quebrando a realimentação; clampar o limiar em `[0,10; 0,22]`. **Sem flag** — o comportamento atual é indefensável.
 
-### A2-5 🟡 Anisotropia de aspect ratio
+### A2-5 ✅ FEITO — Anisotropia de aspect ratio
 
 O MediaPipe normaliza `x` pela largura e `y` pela altura. Em 1920×1080 as escalas diferem por 1,78×. Mas `src/extractor.ts` calcula distâncias euclidianas misturando as duas, inclusive `interEyeDistRaw` — que **normaliza os 478 pontos rotacionados**, sendo a escala de referência do vetor inteiro.
 
@@ -530,7 +528,7 @@ Quando a cabeça inclina, o vetor entre os cantos dos olhos gira nesse espaço d
 
 ⚠️ **Isto muda os valores das features.** Perfis salvos ficam incompatíveis; incremente `RECORDING_FORMAT_VERSION`. **Flag `isotropicLandmarks: false`** — é a mudança de maior impacto potencial e de maior risco para o seu 1°.
 
-### A2-6 🟢 Travar exposição da câmera
+### A2-6 ✅ FEITO — Travar exposição da câmera
 
 `getUserMedia` hoje não restringe `frameRate` nem `exposureMode`. O auto-exposure reage à luz ambiente ao longo de 30 minutos, e o brilho do crop é entrada direta do L2CS.
 
@@ -540,7 +538,7 @@ Registre no diagnóstico se travou ou não — nem toda webcam expõe essas capa
 
 **Bônus para os óculos:** exposição travada reduz a variação do reflexo especular, que hoje muda conforme a câmera reajusta o ganho.
 
-### A2-7 🟡 Persistir o perfil de calibração
+### A2-7 ✅ FEITO — Persistir o perfil de calibração
 
 `loadProfile()` sempre devolve `false`; `saveProfile()` é no-op. Toda sessão exige recalibração completa.
 
@@ -554,7 +552,7 @@ Integre com A1-6: perfis por condição óptica.
 
 ## A3 — Higiene
 
-### A3-1 🟢 Invariantes explícitas
+### A3-1 ✅ FEITO — Invariantes explícitas
 
 `src/invariants.ts` com `assertInvariant(cond, code, detail)`, contando ocorrências e expondo `getInvariantViolations()`. Em `NODE_ENV=test` lança; em produção conta.
 
@@ -562,7 +560,7 @@ Instrumente: `FEATURE_DIM` (vetor do mesmo tamanho entre calibração e inferên
 
 O último é a tradução direta da regra 3 em código.
 
-### A3-2 🟢 Código morto e documentação
+### A3-2 ✅ FEITO — Código morto e documentação
 
 - `src/kalman.ts` — zero importadores; apagar
 - `src/assets/` — zero importadores; apagar

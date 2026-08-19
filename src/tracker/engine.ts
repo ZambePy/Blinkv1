@@ -4,8 +4,8 @@
 
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import * as calibration from '../calibration';
-import { OneEuroFilter2D, FILTER_PRESETS } from '../oneEuroFilter';
-import type { FilterPreset } from '../oneEuroFilter';
+import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2 } from '../oneEuroFilter';
+import type { FilterPreset, FilterPresetV2 } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
 import { feedAccuracyRaw, getCurrentTargetPx as getAccuracyTargetPx } from '../accuracy';
 import { EyeQualityAnalyzer } from '../qualityAnalyzer';
@@ -155,7 +155,9 @@ export interface GazeEngine {
   // Sprint 5 — troca em tempo real do preset do filtro temporal.
   // `estavel`/`balanceado`/`responsivo` alteram mincutoff, beta e o buffer
   // ponderado. Ver FILTER_PRESETS em oneEuroFilter.ts.
-  setFilterPreset(preset: FilterPreset): void;
+  // A2-1 — presets v2 (sufixo '-v2') filtram em espaço normalizado [0,1]
+  // antes de converter para pixel — desligado por default.
+  setFilterPreset(preset: FilterPreset | FilterPresetV2): void;
   // Estado do subsistema L2CS. UI deve bloquear calibração enquanto != 'ready'.
   // getL2CSStatus é síncrono (para leituras pontuais); onL2CSStatusChange
   // dispara o cb no ato da subscrição com o valor atual + em cada transição
@@ -255,8 +257,8 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   // Sprint 5 — inicia no preset balanceado (equivalente aos parâmetros
   // pré-Sprint 5, para não regredir a percepção de suavidade em quem já
   // conhecia o app). Trocável em tempo real via setFilterPreset.
-  let activePreset: FilterPreset = 'balanceado';
-  let activeConfig = FILTER_PRESETS[activePreset];
+  let activePreset: FilterPreset | FilterPresetV2 = 'balanceado';
+  let activeConfig = FILTER_PRESETS[activePreset as FilterPreset];
   const oneEuro = new OneEuroFilter2D(60, activeConfig.mincutoff, activeConfig.beta);
   const qualityAnalyzer = new EyeQualityAnalyzer();
   const bufferX: number[] = [];
@@ -563,7 +565,21 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           }
 
           const now = performance.now() / 1000.0;
-          const smoothed = oneEuro.filter(targetX, targetY, now);
+          // A2-1 — quando filterInNormalizedSpace está ligado, filtrar em [0,1]
+          // antes de converter para pixel. O filtro se torna independente da
+          // resolução da tela: mincutoff=0.5 produz alpha≈0.50 em vez de 0.99.
+          // Desligado por default — só os presets "-v2" ativam essa flag.
+          let smoothed: { x: number; y: number };
+          if (activeConfig.filterInNormalizedSpace) {
+            const vwN = document.documentElement.clientWidth || 1;
+            const vhN = document.documentElement.clientHeight || 1;
+            const normX = targetX / vwN;
+            const normY = targetY / vhN;
+            const smoothedNorm = oneEuro.filter(normX, normY, now);
+            smoothed = { x: smoothedNorm.x * vwN, y: smoothedNorm.y * vhN };
+          } else {
+            smoothed = oneEuro.filter(targetX, targetY, now);
+          }
 
           // A1-4 — decide entre 'calibrating' | 'degraded' | 'tracking'.
           // 'degraded' entra quando mapGaze devolveu null por >500ms seguidos
@@ -674,9 +690,13 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       return state;
     },
 
-    setFilterPreset(preset: FilterPreset): void {
+    setFilterPreset(preset: FilterPreset | FilterPresetV2): void {
       activePreset = preset;
-      activeConfig = FILTER_PRESETS[preset];
+      // A2-1 — resolve o config de presets v1 (pixel) ou v2 (normalizado)
+      const isV2 = preset.endsWith('-v2');
+      activeConfig = isV2
+        ? FILTER_PRESETS_V2[preset as FilterPresetV2]
+        : FILTER_PRESETS[preset as FilterPreset];
       oneEuro.setParams(activeConfig.mincutoff, activeConfig.beta);
       // Purga o buffer se acabou de desligar — evita mescla estranha entre
       // o histórico buffered antigo e as amostras filtradas pelo One Euro puro.
@@ -684,7 +704,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         bufferX.length = 0;
         bufferY.length = 0;
       }
-      console.log(`[IrisFlow] filtro → ${preset} (mincutoff=${activeConfig.mincutoff}, beta=${activeConfig.beta}, buffer=${activeConfig.useRollingBuffer})`);
+      console.log(`[IrisFlow] filtro → ${preset} (mincutoff=${activeConfig.mincutoff}, beta=${activeConfig.beta}, buffer=${activeConfig.useRollingBuffer}, normalized=${activeConfig.filterInNormalizedSpace})`);
     },
 
     getL2CSStatus(): L2CSStatus {

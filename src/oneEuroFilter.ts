@@ -1,9 +1,16 @@
 export class LowPassFilter {
+  // A2-2 — y inicia null: a primeira amostra passa intacta (result = value).
+  // O constructor antigo aceitava `initval = 0`, que causava a primeira saída
+  // valer `alpha * value + (1-alpha) * 0` — puxada para o canto superior
+  // esquerdo (origem em pixels). Com alpha≈0.99 o efeito era quase invisível;
+  // com alpha~0.5 (filtro em espaço normalizado de A2-1) o salto seria de
+  // ~metade da tela no primeiro frame. Corrigido antes de ligar A2-1.
   private y: number | null = null;
   private a: number = 0;
 
-  constructor(alpha: number, initval: number = 0) {
-    this.y = initval;
+  // A2-2 — initval removido do constructor. Não há argumento que faça sentido
+  // como "valor inicial razoável" sem dados reais — null é a resposta correta.
+  constructor(alpha: number) {
     this.setAlpha(alpha);
   }
 
@@ -17,7 +24,7 @@ export class LowPassFilter {
   public filter(value: number): number {
     let result: number;
     if (this.y === null) {
-      result = value;
+      result = value;  // A2-2: primeira amostra não é interpolada com zero
     } else {
       result = this.a * value + (1.0 - this.a) * this.y;
     }
@@ -47,6 +54,19 @@ export class OneEuroFilter {
     this.mincutoff = mincutoff;
     this.beta_ = beta_;
     this.dcutoff = dcutoff;
+  }
+
+  // A2-3 — setters para mutação em tempo real pelo setParams da classe pai.
+  // Permitem que OneEuroFilter2D.setParams preserve o estado filtrado (x, dx,
+  // lasttime) enquanto troca os parâmetros de corte. Sem esses setters, a
+  // única opção era recriar a instância, o que zeraria o estado e causaria
+  // salto visível no cursor.
+  public setMincutoff(mincutoff: number): void {
+    if (mincutoff <= 0) throw new Error("mincutoff should be >0");
+    this.mincutoff = mincutoff;
+  }
+  public setBeta(beta: number): void {
+    this.beta_ = beta;
   }
 
   private alpha(cutoff: number): number {
@@ -100,34 +120,47 @@ export interface FilterConfig {
   mincutoff: number;
   beta: number;
   useRollingBuffer: boolean; // Sprint 5 — testar se o buffer de 6 frames adiciona lag sem ganho
+  // A2-1 — quando true, o filtro é aplicado em coordenadas normalizadas [0,1]
+  // ANTES da conversão para pixel. Desligado por default — ligar apenas quando
+  // a fase de medição confirmar que melhora o jitter sem custar lag.
+  // Razão: a 30fps e mincutoff=0.02 (espaço de pixel), alpha≈0.99 — o filtro
+  // estava praticamente inativo. Em espaço normalizado (0..1), mincutoff=0.5
+  // produz alpha≈0.50 — suavização real, independente da resolução da tela.
+  filterInNormalizedSpace: boolean;
 }
 
 export const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
-  // MELHORIA-1: Presets retuneados após análise técnica dos parâmetros originais.
-  // O 'estavel' anterior (mincutoff=0.005) causava cursor "morto" — não reagia
-  // a movimentos pequenos do olho. O 'balanceado' era muito conservador.
-  //
-  // Novos valores calibrados para uso real (Hz nominal = 30fps):
-  //   - mincutoff: frequência de corte mínima. Quanto menor, mais smooth mas mais lag.
-  //     A 30fps, mincutoff=0.05 equivale a ~τ=3.2s de "memória" em sinal estático.
-  //   - beta: aceleração do cutoff quando há movimento rápido. Maior = menos lag
-  //     em sacadas rápidas.
-  //
-  // Regra de ouro: mincutoff controla o jitter estático; beta controla o lag dinâmico.
-  estavel:    { mincutoff: 0.020, beta: 0.3,  useRollingBuffer: false },
-  balanceado: { mincutoff: 0.050, beta: 2.5,  useRollingBuffer: false },
-  responsivo: { mincutoff: 0.150, beta: 8.0,  useRollingBuffer: false },
+  // Presets em espaço de pixel (legado, compatíveis com código anterior a A2-1).
+  // Com esses valores, alpha≈0.99 a 30fps — suavização provém quase toda do
+  // useRollingBuffer, não do One Euro. Mantidos para não quebrar sessões
+  // existentes; "v2" abaixo são os equivalentes em espaço normalizado.
+  estavel:    { mincutoff: 0.020, beta: 0.3,  useRollingBuffer: false, filterInNormalizedSpace: false },
+  balanceado: { mincutoff: 0.050, beta: 2.5,  useRollingBuffer: false, filterInNormalizedSpace: false },
+  responsivo: { mincutoff: 0.150, beta: 8.0,  useRollingBuffer: false, filterInNormalizedSpace: false },
+};
+
+// A2-1 — presets em espaço normalizado [0,1] com parâmetros calibrados para
+// essa escala. A velocidade do cursor é ~1/vw e ~1/vh em vez de pixels/s,
+// então mincutoff e beta são ajustados para produzir suavização equivalente
+// independente da resolução. Desligados (filterInNormalizedSpace=false não é
+// possível aqui — esses presets só fazem sentido com filterInNormalizedSpace=true;
+// o engine valida isso antes de aplicar).
+export type FilterPresetV2 = 'estavel-v2' | 'balanceado-v2' | 'responsivo-v2';
+
+export const FILTER_PRESETS_V2: Record<FilterPresetV2, FilterConfig> = {
+  // mincutoff ≈ 0.5 Hz em normalizado produz alpha≈0.50 a 30fps — filtra de verdade.
+  // beta ≈ 2.0 em normalizado: aumenta cutoff quando o cursor se move mais
+  // que ~0.02 unidades/frame (~20px em 1920px) por segundo — responsivo em sacadas.
+  'estavel-v2':    { mincutoff: 0.30, beta: 1.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
+  'balanceado-v2': { mincutoff: 0.50, beta: 2.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
+  'responsivo-v2': { mincutoff: 1.00, beta: 5.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
 };
 
 export class OneEuroFilter2D {
   private filterX: OneEuroFilter;
   private filterY: OneEuroFilter;
-  private dcutoff: number;
-  private freq: number;
 
   constructor(freq: number = 60, mincutoff: number = 0.02, beta_: number = 1.5, dcutoff: number = 1.0) {
-    this.freq = freq;
-    this.dcutoff = dcutoff;
     this.filterX = new OneEuroFilter(freq, mincutoff, beta_, dcutoff);
     this.filterY = new OneEuroFilter(freq, mincutoff, beta_, dcutoff);
   }
@@ -139,10 +172,16 @@ export class OneEuroFilter2D {
     };
   }
 
-  // Reconfigura sem descartar o estado interno filtrado — a próxima chamada
-  // de `filter` já usa os novos parâmetros mas continua da última posição.
+  // A2-3 — muta os parâmetros das instâncias existentes em vez de recriá-las.
+  // O comentário anterior dizia "Reconfigura sem descartar o estado interno
+  // filtrado", mas a implementação criava `new OneEuroFilter` e descartava
+  // tudo — o cursor saltava ao trocar preset em uso. Agora `mincutoff` e
+  // `beta_` são mutados via setters internos do OneEuroFilter, preservando
+  // `x`, `dx`, `lasttime` e o estado filtrado acumulado.
   public setParams(mincutoff: number, beta_: number): void {
-    this.filterX = new OneEuroFilter(this.freq, mincutoff, beta_, this.dcutoff);
-    this.filterY = new OneEuroFilter(this.freq, mincutoff, beta_, this.dcutoff);
+    this.filterX.setMincutoff(mincutoff);
+    this.filterX.setBeta(beta_);
+    this.filterY.setMincutoff(mincutoff);
+    this.filterY.setBeta(beta_);
   }
 }

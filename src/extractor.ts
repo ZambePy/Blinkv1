@@ -1,4 +1,5 @@
 import { buildL2CSBlock } from './l2cs/block';
+import { EXPERIMENT } from './config/experiment';
 
 export type Point3D = { x: number; y: number; z: number; visibility?: number };
 
@@ -90,9 +91,7 @@ function cross(v1: Point3D, v2: Point3D): Point3D {
     z: v1.x * v2.y - v1.y * v2.x
   };
 }
-function dist2D(p1: Point3D, p2: Point3D): number {
-  return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2);
-}
+// BUG-3: dist2D foi substituída por dist3D no cálculo de EAR.
 function dist3D(p1: Point3D, p2: Point3D): number {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + (p1.z - p2.z) ** 2);
 }
@@ -106,28 +105,135 @@ function mulRT(xAxis: Point3D, yAxis: Point3D, zAxis: Point3D, v: Point3D): Poin
   };
 }
 
-// EAR Blink Detection History
-const earHistory: number[] = [];
-const EAR_HISTORY_LEN = 50;
-const BLINK_THRESHOLD_RATIO = 0.8;
-const MIN_HISTORY = 15;
+// A2-4 — detector de piscada encapsulado em classe com reset() explícito.
+// O design anterior usava um array `earHistory` de escopo de módulo que:
+//   1. Nunca era resetado entre sessões (até o fix de A0-4 adicionar resetEarHistory)
+//   2. Incluia frames de piscada no cálculo do threshold adaptativo —
+//      criando realimentação: quanto mais piscadas → média EAR menor → threshold
+//      menor → menos piscadas detectadas → frames de olho semifechado entram
+//      no regressor como fixação válida. Em usuário com ELA (fadiga progressiva)
+//      isso causa deriva de precisão ao longo da sessão.
+//   3. Não tinha clamping — o threshold podia cair abaixo de 0.10 (nunca
+//      detecta piscada) ou subir acima de 0.22 (detecta olho semi-fechado
+//      como piscada em usuários com ptose).
+//
+// BlinkDetector corrige tudo isso. Sem flag — o comportamento anterior era
+// indefensável.
+export class BlinkDetector {
+  private nonBlinkHistory: number[] = [];
+  private readonly histLen: number;
+  private readonly minHistory: number;
+  private readonly blinkRatio: number;
+  private readonly thrMin: number;
+  private readonly thrMax: number;
 
-// BUG-1: earHistory era estado mutável de módulo nunca resetado entre sessões.
-// O threshold adaptativo de piscada (meanEar * 0.8) ficava enviesado para o EAR
-// médio de sessões anteriores. Reset obrigatório em startCalibrationMode.
-export function resetEarHistory(): void {
-  earHistory.length = 0;
+  // thrMin/thrMax derivados da fisiologia: EAR mínimo do olho aberto
+  // (0.10) e máximo prático para não confundir olho semi-fechado (ptose)
+  // com piscada (0.22).
+  constructor({
+    histLen = 50,
+    minHistory = 15,
+    blinkRatio = 0.8,
+    thrMin = 0.10,
+    thrMax = 0.22,
+  }: {
+    histLen?: number;
+    minHistory?: number;
+    blinkRatio?: number;
+    thrMin?: number;
+    thrMax?: number;
+  } = {}) {
+    this.histLen = histLen;
+    this.minHistory = minHistory;
+    this.blinkRatio = blinkRatio;
+    this.thrMin = thrMin;
+    this.thrMax = thrMax;
+  }
+
+  // Retorna true se o frame é piscada. Atualiza o histórico só com
+  // frames de NÃO piscada (quebra a realimentação).
+  update(ear: number): boolean {
+    // Calcula threshold adaptativo sobre frames de não-piscada anteriores
+    let thr = this.thrMax; // default conservador: só olho bem fechado conta
+    if (this.nonBlinkHistory.length >= this.minHistory) {
+      const mean = this.nonBlinkHistory.reduce((a, b) => a + b, 0) / this.nonBlinkHistory.length;
+      thr = Math.max(this.thrMin, Math.min(this.thrMax, mean * this.blinkRatio));
+    }
+    const blink = ear < thr;
+
+    // Só adiciona ao histórico quando não é piscada — garante que a média
+    // representa o EAR de repouso, não a mistura com olho fechado.
+    if (!blink) {
+      this.nonBlinkHistory.push(ear);
+      if (this.nonBlinkHistory.length > this.histLen) {
+        this.nonBlinkHistory.shift();
+      }
+    }
+    return blink;
+  }
+
+  reset(): void {
+    this.nonBlinkHistory.length = 0;
+  }
+
+  /** Para testes: quantos frames de não-piscada estão no histórico. */
+  get nonBlinkCount(): number {
+    return this.nonBlinkHistory.length;
+  }
 }
 
-export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Array): ExtractorResult {
+// EAR Blink Detection — instância do módulo (compat com resetEarHistory)
+const _blinkDetector = new BlinkDetector();
+
+// BUG-1: earHistory era estado mutável de módulo nunca resetado entre sessões.
+// Agora delega para BlinkDetector.reset().
+export function resetEarHistory(): void {
+  _blinkDetector.reset();
+}
+
+// A2-5 — versão do formato de calibração. Incrementar quando mudança de
+// pipeline invalida perfis salvos (ex: ligar isotropicLandmarks muda o vetor).
+export const RECORDING_FORMAT_VERSION = 2;
+
+export function extractEyeFeatures(
+  landmarks: Point3D[],
+  faceMatrix?: Float32Array,
+  videoWidth?: number,
+  videoHeight?: number,
+): ExtractorResult {
   if (landmarks.length < 478) {
     return { featuresLeft: [], featuresRight: [], blinkDetected: false };
   }
 
   // 1. Head Pose Normalization (EyeTrax Logic)
-  const leftCorner = landmarks[33];
-  const rightCorner = landmarks[263];
-  const topOfHead = landmarks[10];
+  //
+  // A2-5 — correção de anisotropia de aspect ratio (atrás de flag).
+  // O MediaPipe normaliza x por videoWidth e y por videoHeight. Em 1920×1080
+  // a escala de x é 1.78× maior que a de y. Distâncias euclidianas que misturam
+  // as duas ficam distorcidas: o vetor interocular muda de comprimento quando
+  // a cabeça inclina, mesmo com distância física constante. Isso faz a escala
+  // de normalização (`interEyeDistRaw`) oscilar com o roll da cabeça.
+  //
+  // Correção: multiplicar x (e z) por (W/H) para equalizar as escalas antes
+  // de qualquer cálculo de distância. Só ativado quando
+  // EXPERIMENT.isotropicLandmarks === true (default false).
+  //
+  // ⚠️ Atenção: quando ligado, perfis calibrados anteriormente são
+  // incompatíveis — o vetor de features muda. RECORDING_FORMAT_VERSION
+  // foi incrementado para forçar invalidação de perfis salvos (A2-7).
+  let workingLandmarks = landmarks;
+  if (EXPERIMENT.isotropicLandmarks && videoWidth && videoHeight && videoHeight > 0) {
+    const aspectRatio = videoWidth / videoHeight;
+    workingLandmarks = landmarks.map(p => ({
+      ...p,
+      x: p.x * aspectRatio,
+      z: p.z * aspectRatio,
+    }));
+  }
+
+  const leftCorner = workingLandmarks[33];
+  const rightCorner = workingLandmarks[263];
+  const topOfHead = workingLandmarks[10];
 
   const eyeCenter = scale(add(leftCorner, rightCorner), 0.5);
   
@@ -145,8 +251,8 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
 
   // Rotate points using R^T
   const rotatedPoints: Point3D[] = [];
-  for (let i = 0; i < landmarks.length; i++) {
-    const shifted = sub(landmarks[i], eyeCenter);
+  for (let i = 0; i < workingLandmarks.length; i++) {
+    const shifted = sub(workingLandmarks[i], eyeCenter);
     const rot = mulRT(xAxis, yAxis, zAxis, shifted);
     rotatedPoints.push(rot);
   }
@@ -247,18 +353,7 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
 
   const ear = (leftEAR + rightEAR) / 2;
   
-  earHistory.push(ear);
-  if (earHistory.length > EAR_HISTORY_LEN) {
-    earHistory.shift();
-  }
-
-  let thr = 0.2;
-  if (earHistory.length >= MIN_HISTORY) {
-    const meanEar = earHistory.reduce((a, b) => a + b, 0) / earHistory.length;
-    thr = meanEar * BLINK_THRESHOLD_RATIO;
-  }
-
-  const blinkDetected = ear < thr;
+  const blinkDetected = _blinkDetector.update(ear);
 
   // 3. Geometry Extractions
   const irisCenterL = landmarks[468];

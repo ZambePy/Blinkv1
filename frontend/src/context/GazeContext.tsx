@@ -12,7 +12,9 @@ import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
 import * as accuracy from '@tracker/accuracy';
+import { EXPERIMENT } from '@tracker/config/experiment';
 import { useSettings } from './SettingsContext';
+
 
 export type { GazeEngine, GazeSample, EngineState, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 
@@ -314,7 +316,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         console.log('[IrisFlow] solicitando getUserMedia...');
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { width: 1280, height: 720, facingMode: 'user' },
+          // A2-6 — solicitar frameRate explícito para evitar que o auto-rate
+          // do driver oscile entre 15-60 Hz conforme a luminosidade ambiente.
+          // 30fps é o target; 24fps é o mínimo para rastreamento aceitável.
+          video: { width: 1280, height: 720, facingMode: 'user', frameRate: { ideal: 30, min: 24 } },
         });
         video.srcObject = stream;
         console.log('[IrisFlow] stream obtido, aguardando loadeddata...');
@@ -331,6 +336,35 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         console.log(
           `[IrisFlow] loadeddata OK — video ${video.videoWidth}x${video.videoHeight}, paused=${video.paused}, currentTime=${video.currentTime}`,
         );
+
+        // A2-6 — travar exposição da câmera após aquecimento de 2s (atrás de flag).
+        // O auto-exposure precisa de ~2s para convergir; travar de imediato
+        // congelaria uma exposição ainda não convergida, gerando crop escuro ou
+        // saturado pelo resto da sessão. Nem toda webcam suporta essas capabilities;
+        // registramos o resultado para o cuidador poder interpretar medidas futuras.
+        if (EXPERIMENT.lockCameraExposure) {
+          setTimeout(async () => {
+            try {
+              const track = stream.getVideoTracks()[0];
+              if (!track) return;
+              const caps = track.getCapabilities() as Record<string, unknown>;
+              const constraints: Record<string, unknown> = {};
+              if (caps.exposureMode) constraints.exposureMode = 'manual';
+              if (caps.focusMode) constraints.focusMode = 'manual';
+              if (caps.whiteBalanceMode) constraints.whiteBalanceMode = 'manual';
+              if (Object.keys(constraints).length > 0) {
+                await track.applyConstraints(constraints as MediaTrackConstraints);
+                console.log('[A2-6] exposição travada:', Object.keys(constraints).join(', '));
+              } else {
+                console.log('[A2-6] câmera não suporta constraints manuais (exposição livre)');
+              }
+            } catch (e) {
+              console.warn('[A2-6] applyConstraints falhou (exposição livre):', e);
+            }
+          }, 2000);
+        } else {
+          console.log('[A2-6] lockCameraExposure=false, exposição livre');
+        }
         if (cancelled) return;
         await engine.start(video);
         console.log('[IrisFlow] engine.start() concluído; loop rAF em execução.');

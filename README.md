@@ -1,98 +1,149 @@
 # IrisFlow
 
-IrisFlow é uma aplicação de Tecnologia Assistiva baseada em Rastreamento Ocular (Eye Tracking) desenvolvida para pessoas com Esclerose Lateral Amiotrófica (ELA) e outras condições severas de restrição motora. O sistema permite navegação, comunicação e lazer utilizando apenas o movimento dos olhos através de uma webcam comum, sem necessidade de hardware especializado.
+IrisFlow é uma tecnologia assistiva de rastreamento ocular (*eye tracking*) desenvolvida para pessoas com Esclerose Lateral Amiotrófica (ELA) e outras condições severas de restrição motora. O sistema permite navegação, comunicação e lazer utilizando apenas o movimento dos olhos através de uma webcam comum, sem hardware especializado.
 
-Todo o processamento de visão computacional e machine learning ocorre **100% localmente** no dispositivo, garantindo privacidade absoluta e baixíssima latência.
+Todo o processamento — visão computacional, machine learning e calibração — ocorre **100% localmente** no dispositivo, sem enviar nenhum dado para a nuvem.
 
-## 🌟 Funcionalidades Principais (Frontend)
+---
 
-O projeto passou recentemente por uma reestruturação completa de interface, focada em usabilidade, acessibilidade e estética moderna (Glassmorphism):
+## 🧠 Pipeline de Rastreamento Ocular
 
-- **Calibração Integrada:** Fluxo de 13 pontos (grade 4-5-3 + 1 diagonal — grade simétrica será entregue na Sprint 1) com tolerância a movimentos, limites de tentativas e feedback visual inteligente em tempo real.
-- **Sistema de "Dwell Click":** Seleção de elementos na interface simplesmente mantendo o olhar fixo por uma fração de segundo (Dwell Time customizável).
-- **Interface Otimizada para Olhar:** Botões grandes, alto contraste, transições fluidas e feedback sonoro/visual para evitar fadiga ocular.
-- **Módulos do Sistema:**
-  - 🗣️ **Comunicação:** Frases rápidas, teclado virtual preditivo e pictogramas.
-  - 🖥️ **Computador:** Controle de mouse virtual para o sistema operacional.
-  - 🎮 **Lazer:** Jogos adaptados (Estoura Bolhas, Jogo da Memória, Desenho) e ferramentas de relaxamento.
-  - ⚙️ **Configurações:** Ajuste fino de sensibilidade, velocidade do Dwell e configurações globais.
+O pipeline combina MediaPipe com L2CS-Net e regressão Ridge treinada em tempo real:
 
-## 🧠 Arquitetura do Rastreamento Ocular
-
-O pipeline de *Gaze Tracking* combina detecção facial do MediaPipe com modelos de regressão treinados em tempo real:
-
-```text
-Webcam (1280×720)
+```
+Câmera (getUserMedia)
     │
-    ├── MediaPipe FaceLandmarker (WASM) → 478 landmarks 3D
+    ├── MediaPipe FaceLandmarker ──→ 478 landmarks 3D normalizados [0..1]
     │
-    ├── Extrator Geométrico compacto → ~31 features por olho
-    │   (offsets de íris, cantos, EAR, ângulos de pose, interações pose×offset)
+    ├── L2CS-Net (ONNX, Web Worker) ──→ yaw / pitch do olhar (cadência 100ms)
+    │       ⚠️ Núcleo obrigatório do pipeline — não é fallback. O worker deve
+    │       estar 'ready' antes de iniciar a calibração.
     │
-    ├── Calibração (StandardScaler + Ridge com λ por CV leave-one-target-out)
-    │   → Mapeamento tela (X, Y), 2 regressores (L/R) → média binocular
+    ├── extractCompactFeatures ──→ ~44 dims/olho
+    │   (offsets de íris, cantos, EAR, pose 3D, interações + bloco angular L2CS)
     │
-    ├── OneEuroFilter2D → Suavização profunda de ruído e tremores
+    ├── EyeQualityAnalyzer ──→ brightness / contrast / blur / specularRatio
+    │   (filtra frames ruins antes de armazenar na calibração)
     │
-    └── Motor React (GazeContext) → Injeção de Cursor Dwell e Navegação no DOM
+    ├── Calibração (grade 3×3, 9 pontos)
+    │   StandardScaler + RidgeRegressor por CV leave-one-target-out
+    │   Soft clamp nas bordas | Correção RBF pós-Ridge
+    │
+    ├── OneEuroFilter2D ──→ suavização adaptativa jitter × lag
+    │
+    └── GazeContext (React) ──→ Cursor Dwell | Navegação | EmergencyEscalation
 ```
 
-*Nota Técnica:* Atualmente o sistema roda no modo geométrico compacto
-(`USE_COMPACT_FEATURES = true` em `src/featurePipeline.ts`), com ~31 dimensões
-por olho e regressão Ridge selecionando λ por validação cruzada leave-one-target-out.
-O encoder CNN pesado (`onnxruntime-node`) treinado no MPIIFaceGaze está implementado
-em repositório anexado para cenários de fallback, porém a inferência geométrica
-combinada ao Filtro OneEuro demonstrou estabilidade superior e menor custo de CPU
-para uso contínuo (30fps fixos). Documentação técnica da antiga pipeline híbrida
-pode ser encontrada em [IRISFLOW_PIPELINE_TECNICO.md](./IRISFLOW_PIPELINE_TECNICO.md).
+**Menor erro registrado:** 57 px / 0.9° (Rodada A, sem óculos, cabeça parada — commit `f9d9252`).
 
-## 🛠️ Tecnologias Utilizadas
+---
 
-- **Frontend:** React 18, TypeScript, Vite, React Router, CSS nativo (Design System Customizado).
-- **Processamento:** `@mediapipe/tasks-vision` (WASM offline), TypeScript math algorithms (OneEuro, Scalers).
-- **Desktop:** Electron, Node.js (compilação via `electron-builder`).
-- **Machine Learning (Pesquisa):** Python, TensorFlow, scikit-learn (veja `python_ml/`).
+## 🌟 Funcionalidades
 
-## 🚀 Como Rodar o Projeto
+- **Calibração CAA:** Fundo preto, ponto âmbar de alta visibilidade, linguagem direta sem jargão técnico. Grade 3×3 (9 pontos) com filtragem automática de frames de baixa qualidade e detecção de reflexo especular.
+- **Dwell Click:** Seleção de elementos mantendo o olhar fixo por tempo configurável. Bloqueio automático em estado degradado (exceto botão de emergência).
+- **Estado Degradado:** Quando o pipeline perde sinal por >500ms, o cursor muda de cor e o dwell é pausado, evitando cliques acidentais.
+- **Módulos de Comunicação:** Frases rápidas, teclado virtual preditivo, pictogramas.
+- **Lazer:** Jogos adaptados (Estoura Bolhas, Memória, Desenho) e relaxamento.
+- **Botão de Emergência:** Sempre acessível, com dwell reduzido e prioridade máxima.
 
-### Modo Web (Desenvolvimento Frontend)
+---
 
-Ideal para testes de interface e ajustes de UI (funciona independente dos binários do Electron):
+## 🛠️ Tecnologias
+
+| Camada | Tecnologias |
+|--------|-------------|
+| Frontend | React 19, TypeScript, Vite, React Router, CSS nativo |
+| Visão | `@mediapipe/tasks-vision` (WASM offline), L2CS-Net ONNX Runtime Web |
+| ML (calibração) | Ridge Regression, StandardScaler, OneEuroFilter — TypeScript puro |
+| Desktop | Electron + Node.js (`electron-builder`) |
+
+---
+
+## 🚀 Como Rodar
+
+### Desenvolvimento (Web)
 
 ```bash
 npm install
+npm --prefix frontend install
 npm run dev
 ```
 
-Acesse `http://localhost:5173`. O motor de rastreamento ocular e toda a navegação web funcionarão normalmente utilizando a webcam através do navegador.
+Acesse `http://localhost:5173`. O motor de rastreamento e calibração funcionam via webcam do navegador.
 
-### Modo Electron App (Produção Desktop)
+### Electron (Desktop)
 
 ```bash
-npm install
 npm run electron:dev
 ```
 
-Este comando levanta o servidor Vite e abre o container nativo do Electron com acesso profundo ao sistema operacional (necessário para o "Virtual Mouse" manipular o cursor do Windows/Mac).
+Necessário para o módulo de controle de mouse do sistema operacional.
 
-### Gerar Instalador (.exe, .dmg, .AppImage)
+### Gerar Instalador
 
 ```bash
 npm run electron:build
 ```
 
-O executável/instalador final otimizado será gerado na pasta `release/`.
+O instalador final é gerado em `release/`.
 
-## 📂 Estrutura do Projeto
+### Testes
 
-- `frontend/src/`: Código fonte da interface React.
-  - `pages/`: Telas principais do sistema (Menu, Onboarding, Calibração, Teclado, Jogos).
-  - `components/ui/`: Componentes reutilizáveis projetados para Interação Ocular.
-  - `context/`: Estados globais, destacando-se o `GazeContext.tsx` que orquestra o cursor vermelho de dwell.
-- `src/tracker/` e `src/`: Lógica core matemática de calibração, machine learning regressivo e filtros de ruído.
-- `electron/`: Código main do Electron e scripts de preload.
-- `python_ml/`: Scripts de treinamento offline de redes neurais.
+```bash
+npm test        # Vitest — 119 testes unitários
+```
 
-## 🤝 Licença e Privacidade
+---
 
-Privacidade é essencial na tecnologia assistiva. O IrisFlow não envia nenhuma imagem, telemetria facial ou dado de calibração para a nuvem. Toda a inferência neural acontece localmente. Para detalhes sobre o uso restrito de datasets não-comerciais (como o MPIIFaceGaze na pesquisa base), consulte a documentação técnica complementar.
+## 📂 Estrutura
+
+```
+src/                    # Core do pipeline de rastreamento
+  tracker/engine.ts     # Loop rAF principal e estados do sistema
+  calibration.ts        # Coleta, treino e inferência de gaze
+  extractor.ts          # Extração de features (landmarks + L2CS)
+  ridge.ts              # Regressão Ridge com CV lambda
+  oneEuroFilter.ts      # Filtro temporal adaptativo (A2-1: presets v2 em espaço normalizado)
+  l2cs/                 # Worker L2CS-Net (ONNX) + bloco angular
+  qualityAnalyzer.ts    # Filtros de qualidade por frame
+  calibrationProfiles.ts # Perfis por condição óptica (A1-6)
+  invariants.ts         # Invariantes explícitas do sistema (A3-1)
+
+frontend/src/
+  pages/                # Telas do sistema (Calibração, Menu, Jogos, Teclado…)
+  context/GazeContext.tsx # Estado global de gaze e dwell
+  components/           # Componentes otimizados para interação ocular
+
+docs/
+  PIPELINE-ARQUITETURA.md  # Arquitetura detalhada de cada etapa
+  AUDITORIA-SPRINT-0.md    # Auditoria de catch/null silenciosos
+  PONTO-DE-REFERENCIA.md   # Baseline de precisão (condições controladas)
+
+PLANO-FRENTES-A-B.md   # Roadmap técnico e regras de desenvolvimento
+```
+
+---
+
+## 📋 Estado Atual do Desenvolvimento
+
+**Sprint 0 (Auditoria):** ✅ Concluída  
+**Sprint 1 (Robustez do Backend):** ✅ Concluída — A1-1 a A1-6 implementados  
+**Sprint 5 (Precisão + Higiene):** ✅ Concluída — A2-1 a A2-7 atrás de flag; A3-1, A3-2 concluídos
+
+Fixes recentes (Sprint 5):
+- A2-1: One Euro Filter em espaço normalizado (`filterInNormalizedSpace`, presets `-v2`)
+- A2-2: `LowPassFilter` — primeira amostra não puxada para a origem
+- A2-3: `setParams` muta parâmetros sem descartar estado filtrado
+- A2-4: `BlinkDetector` encapsula detecção de piscada com média só de não-piscadas e clamping [0.10, 0.22]
+- A2-5: Correção de anisotropia de aspect ratio (`isotropicLandmarks`, atrás de flag)
+- A2-6: Trava exposição da câmera após aquecimento de 2s (`lockCameraExposure`, atrás de flag)
+- A2-7: Persistência de perfis de calibração em localStorage com invalidação por contexto
+- A3-1: `src/invariants.ts` — 5 invariantes críticas instrumentadas
+- A3-2: Código morto removido (kalman.ts, src/assets/, public/ raiz), README corrigido
+
+---
+
+## 🤝 Privacidade
+
+O IrisFlow não envia imagens, dados faciais ou calibração para a nuvem. Toda inferência ocorre localmente. Nenhuma telemetria é coletada.

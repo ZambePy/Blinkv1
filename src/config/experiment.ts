@@ -22,6 +22,28 @@ export interface ExperimentConfig {
   dwellGraceMs: number;
   /** Raio de snap magnético em px. 0 = desligado. */
   dwellSnapPx: number;
+  /**
+   * A2-5 — correção de anisotropia de aspect ratio.
+   * O MediaPipe normaliza x pela largura e y pela altura. Em 1920×1080 as
+   * escalas diferem por 1.78×. Distâncias euclidianas misturando as duas
+   * ficam distorcidas — `interEyeDistRaw` e o vetor inteiro ficam enviesados
+   * quando a cabeça inclina, porque o vetor inter-ocular gira nesse espaço
+   * anisotropico e muda de comprimento mesmo com distância física constante.
+   *
+   * Correção: multiplicar x (e z) por videoWidth/videoHeight antes de
+   * qualquer cálculo de distância. Isso invalida perfis antigos (RECORDING_FORMAT_VERSION).
+   * DEFAULT false — ligar só após medição confirmar melhora do 1°/111px.
+   */
+  isotropicLandmarks: boolean;
+  /**
+   * A2-6 — travar exposição da câmera após aquecimento de 2s.
+   * Solicita `exposureMode/focusMode/whiteBalanceMode = 'manual'` via
+   * ImageCapture API quando o driver suportar. Reduz variação de brilho
+   * do crop (entrada direta do L2CS) e estabiliza o reflexo especular em
+   * óculos ao longo de sessocões longas.
+   * DEFAULT false — nem toda webcam exposes essas capabilities.
+   */
+  lockCameraExposure: boolean;
 }
 
 const DEFAULTS: ExperimentConfig = {
@@ -31,6 +53,8 @@ const DEFAULTS: ExperimentConfig = {
   enableDistanceLog: false,
   dwellGraceMs: 0,
   dwellSnapPx: 0,
+  isotropicLandmarks: false,  // A2-5 — desligado até medição confirmar melhora
+  lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
 };
 
 const STORAGE_KEY = 'irisflow.experiment';
