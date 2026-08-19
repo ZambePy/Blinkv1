@@ -2,6 +2,7 @@ import type { GazeRegressor } from './gazeRegressor';
 import {
   createRegressor,
   ridgeModelFromRegressor,
+  ridgeRegressorFromModel,
   REGRESSOR_MODE
 } from './gazeRegressor';
 import { StandardScaler } from './scaler';
@@ -10,6 +11,14 @@ import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
 import { EXPERIMENT } from './config/experiment';
 import type { RecordedSampleDecision } from './telemetry/types';
+import {
+  profileRegistry,
+  shouldWarnPrecisionForCondition,
+  type CalibrationProfileMeta,
+  type OpticalCondition,
+  type StoredCalibrationProfile,
+  type ProfileListEntry,
+} from './calibrationProfiles';
 
 // Sprint 4 — recalibração implícita. `false` = comportamento antigo (só modelo
 // offline). Ligar via `setOnlineCalibrationEnabled(true)` a partir da UI/settings.
@@ -166,6 +175,11 @@ let regressorRight: GazeRegressor | null = null;
 export const featureScalerLeft = new StandardScaler();
 export const featureScalerRight = new StandardScaler();
 
+// A1-6 — meta da sessão de calibração em curso. Setada por startCalibrationMode
+// (default: `desconhecido`), consumida por completeCalibration para salvar o
+// perfil resultante no registry por condição óptica.
+let pendingProfileMeta: CalibrationProfileMeta | null = null;
+
 let scaledProfileLeft: number[][] = [];
 let scaledProfileRight: number[][] = [];
 let _gazeCorrections: GazeCorrection[] = [];
@@ -189,6 +203,7 @@ export function clearCalibration() {
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
+  pendingProfileMeta = null;
 }
 
 export function getSampleCount(): number {
@@ -315,7 +330,9 @@ export function exportGazeDistanceLog(): void {
 
 // ── Headless Calibration API ──────────────────────────────────────────────────
 
-export function startCalibrationMode() {
+export function startCalibrationMode(
+  opts?: { opticalCondition?: OpticalCondition; label?: string },
+) {
   isCalibrating = true;
   profile = [];
   regressorLeft = null;
@@ -330,6 +347,22 @@ export function startCalibrationMode() {
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
+
+  // A1-6 — meta para o perfil que resultar desta calibração. Default
+  // `desconhecido` porque a UI que pergunta a condição óptica (B1-6/B2-1)
+  // ainda não existe; quando existir, o React passa a condição explícita.
+  const cond: OpticalCondition = opts?.opticalCondition ?? 'desconhecido';
+  pendingProfileMeta = profileRegistry.createMeta({
+    opticalCondition: cond,
+    label: opts?.label,
+  });
+  if (shouldWarnPrecisionForCondition(cond)) {
+    console.warn(
+      `[calib] Condição óptica '${cond}' registrada. Progressivas refratam de forma ` +
+      `dependente da região da lente pela qual o usuário olha — nenhum modelo linear ` +
+      `global compensa. Não prometer a mesma precisão de outras condições.`,
+    );
+  }
 }
 
 export function startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void) {
@@ -630,7 +663,12 @@ function processStaticPoint() {
   if (cb) cb(true);
 }
 
-function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
+interface TrainingSummary {
+  deadFeaturesLeftPct: number;
+  deadFeaturesRightPct: number;
+}
+
+function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): TrainingSummary {
   const trainFeaturesLeft  = trainingProfile.map(p => p.featuresLeft);
   const trainFeaturesRight = trainingProfile.map(p => p.featuresRight);
   const trainTargets = trainingProfile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
@@ -703,6 +741,8 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
       console.log('[calib] Regressor online (RLS) inicializado a partir do Ridge offline.');
     }
   }
+
+  return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
 }
 
 export function completeCalibration(onComplete?: () => void) {
@@ -715,14 +755,112 @@ export function completeCalibration(onComplete?: () => void) {
   pointCompleteCallback = null;
 
   try {
-    trainScalersAndRegressors(profile);
+    const summary = trainScalersAndRegressors(profile);
     saveProfile();
+    // A1-6 — snapshot no registry por condição óptica. Se o pendingMeta não
+    // foi setado (chamador antigo não passou meta), salva como 'desconhecido'.
+    persistActiveProfileToRegistry(summary);
   } catch (e) {
     console.error('[calib] Erro fatal no treinamento:', e);
+    // A1-6 — não persistir perfil quando o treino falhou. isCalibrated()
+    // continua false por conta dos regressors serem zerados em startCalibrationMode.
   } finally {
     isCalibrating = false;
     if (onComplete) onComplete();
   }
+}
+
+// A1-6 — extrai um snapshot serializável do estado atual e enfileira no
+// registry sob a meta pendente. Chamador (completeCalibration) só invoca
+// quando o treino terminou sem exceção.
+function persistActiveProfileToRegistry(summary: TrainingSummary): void {
+  const modelL = regressorLeft ? ridgeModelFromRegressor(regressorLeft) : null;
+  const modelR = regressorRight ? ridgeModelFromRegressor(regressorRight) : null;
+  if (!modelL || !modelR) {
+    console.warn('[calib] persistActiveProfileToRegistry: regressors ausentes; nada a salvar.');
+    return;
+  }
+  const meta = pendingProfileMeta ?? profileRegistry.createMeta({ opticalCondition: 'desconhecido' });
+  pendingProfileMeta = null;
+
+  const diag = getLambdaDiagnostics();
+  const stored: StoredCalibrationProfile = {
+    meta,
+    modelLeft: modelL,
+    modelRight: modelR,
+    scalerParamsLeft:  featureScalerLeft.getParams(),
+    scalerParamsRight: featureScalerRight.getParams(),
+    quality: {
+      sampleCount: profile.length,
+      varianceFloorBreaches,
+      varianceCeilBreaches,
+      specularWarnings: specularWarningsIssued,
+      lambdaLeft:  diag?.left  ?? 0,
+      lambdaRight: diag?.right ?? 0,
+      lambdaRatio: diag?.ratio ?? 1,
+      deadFeaturesLeftPct:  summary.deadFeaturesLeftPct,
+      deadFeaturesRightPct: summary.deadFeaturesRightPct,
+    },
+  };
+  profileRegistry.save(stored);
+  console.log(
+    `[calib] Perfil salvo no registry: id=${meta.id} condição=${meta.opticalCondition} ` +
+    `label='${meta.label}' amostras=${profile.length}`,
+  );
+}
+
+// A1-6 — troca o perfil ativo (recarrega regressors e scalers a partir do
+// snapshot serializado). Devolve o meta do perfil ativado ou null se o id
+// não existe. NÃO chama startCalibrationMode — o perfil está pronto, é só
+// restaurar o estado.
+export function switchActiveProfile(id: string): CalibrationProfileMeta | null {
+  const stored = profileRegistry.switchTo(id);
+  if (!stored) {
+    console.warn(`[calib] switchActiveProfile: id '${id}' não encontrado.`);
+    return null;
+  }
+  regressorLeft = ridgeRegressorFromModel(stored.modelLeft);
+  regressorRight = ridgeRegressorFromModel(stored.modelRight);
+  featureScalerLeft.setParams(stored.scalerParamsLeft.means, stored.scalerParamsLeft.stds);
+  featureScalerRight.setParams(stored.scalerParamsRight.means, stored.scalerParamsRight.stds);
+  // Reset dos regressors online — eles são derivados do offline e precisam
+  // ser reinicializados a partir dos novos betas.
+  onlineLeft = null;
+  onlineRight = null;
+  if (REGRESSOR_MODE === 'ridge') {
+    onlineLeft = new RecursiveRidgeRegressor(stored.modelLeft.betaX, stored.modelLeft.betaY);
+    onlineRight = new RecursiveRidgeRegressor(stored.modelRight.betaX, stored.modelRight.betaY);
+  }
+  if (shouldWarnPrecisionForCondition(stored.meta.opticalCondition)) {
+    console.warn(
+      `[calib] Perfil ativado com condição '${stored.meta.opticalCondition}'. ` +
+      `Não prometer a mesma precisão de outras condições — refração progressiva ` +
+      `é limite físico, não bug.`,
+    );
+  }
+  console.log(`[calib] Perfil ativo: ${stored.meta.label} (${stored.meta.id})`);
+  return stored.meta;
+}
+
+export function listCalibrationProfiles(): ProfileListEntry[] {
+  return profileRegistry.list();
+}
+
+export function getActiveProfileMeta(): CalibrationProfileMeta | null {
+  return profileRegistry.getActive()?.meta ?? null;
+}
+
+export function deleteCalibrationProfile(id: string): boolean {
+  const active = profileRegistry.getActiveId() === id;
+  const ok = profileRegistry.delete(id);
+  if (ok && active) {
+    // O perfil ativo foi apagado — zerar regressors para isCalibrated() dizer a verdade.
+    regressorLeft = null;
+    regressorRight = null;
+    onlineLeft = null;
+    onlineRight = null;
+  }
+  return ok;
 }
 
 export function init() {
@@ -760,6 +898,12 @@ export function init() {
       frameThreshold: SPECULAR_FRAME_THRESHOLD,
       persistenceThreshold: SPECULAR_PERSISTENCE,
     }),
+    profiles: {
+      list: listCalibrationProfiles,
+      active: getActiveProfileMeta,
+      switchTo: switchActiveProfile,
+      remove: deleteCalibrationProfile,
+    },
     deadFeatures: () => {
       if (profile.length === 0) return null;
       const targets = profile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));

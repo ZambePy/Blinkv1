@@ -371,9 +371,22 @@ O limiar sai dos dados do A0-5, comparando com e sem óculos. **Não chute.**
 
 ---
 
-### A1-6 🔴 Perfil de calibração por condição óptica ⬆️⬆️⬆️ SUBIU MUITO (A0-5)
+### A1-6 🔴 Perfil de calibração por condição óptica ⬆️⬆️⬆️ SUBIU MUITO (A0-5) ✅ FEITO (backend em memória)
 
 > **Nota A0-5:** refração das lentes introduz **viés sistemático de 400 px**, não jitter. Isso é limite físico — nenhum ajuste de portão de variância, regularização ou filtro compensa. **Perfis separados é a única solução real** para o usuário que às vezes usa e às vezes não usa óculos. Sobe para prioridade máxima do Sprint 1 junto com A1-5.
+>
+> **Status ✅ (backend, sem UI):**
+> - **Novo módulo `src/calibrationProfiles.ts`**: `OpticalCondition` (`'sem_oculos' | 'oculos_simples' | 'oculos_progressivo' | 'lentes_contato' | 'desconhecido'`), `CalibrationProfileMeta`, `StoredCalibrationProfile` (meta + `RidgeModel` × 2 + `ScalerParams` × 2 + sumário de qualidade), `ProfileRegistry` (in-memory) e singleton `profileRegistry`.
+> - `startCalibrationMode({ opticalCondition?, label? })` — assinatura backwards-compatible (chamador antigo sem args continua funcionando; default `desconhecido`). Emite warn especial se condição = `oculos_progressivo`.
+> - `completeCalibration` extrai snapshot serializável (`persistActiveProfileToRegistry`) apenas quando o treino termina sem exceção — **falha no treino não persiste perfil ruim**.
+> - Novas exports: `switchActiveProfile(id)` (restaura `regressorLeft/Right` + `featureScalerLeft/Right` do snapshot), `listCalibrationProfiles()`, `getActiveProfileMeta()`, `deleteCalibrationProfile(id)`.
+> - `__irisflowDebug.profiles.{list, active, switchTo, remove}` expostos no console.
+> - **Sumário de qualidade persistido no perfil**: `sampleCount`, `varianceFloorBreaches`, `varianceCeilBreaches`, `specularWarnings`, `lambdaLeft/Right/Ratio`, `deadFeaturesLeft/RightPct` — permite ao cuidador comparar 2 perfis "com óculos" vs "sem óculos" sem recalibrar.
+> - **13 testes novos** em `src/calibrationProfiles.a1-6.test.ts` cobrindo API pura do registry + warning de progressivas.
+> - **Total: 16 arquivos, 102 testes verdes**. Build + electron ok.
+> - **Persistência real (localStorage + invalidação por resolução/vetor) fica para A2-7** (Sprint 5, atrás de flag). Hoje refresh de página apaga tudo, mas dentro de uma sessão o cuidador pode alternar "com óculos" ↔ "sem óculos" sem recalibrar.
+> - **UI para o cuidador escolher condição/trocar de perfil é B (Sprint 4)** — B1-6 (indicador de enquadramento) e B2-1 (migração de telas) vão consumir a API criada aqui.
+> - **Baseline preservado**: chamadores antigos de `startCalibrationMode()` funcionam sem mudança de comportamento (default `desconhecido`, sem warn).
 
 Óculos mudam a geometria óptica de verdade — não é só reflexo. Lentes corretivas refratam o raio de luz, e **lentes progressivas ou bifocais refratam de forma diferente conforme a região da lente pela qual você olha**. Isso é um deslocamento de olhar dependente da direção, que nenhum modelo linear global compensa bem.
 
