@@ -106,13 +106,38 @@ export const CalibrationCheck: React.FC = () => {
     const order = shuffleOrderRef.current;
     if (step >= order.length) {
       setStage('testing');
-      calibration.completeCalibration?.(() => {
-        console.log('[React] Calibração concluída — disparando teste de precisão automático');
-        // Pequeno delay pra o stage 'testing' renderizar antes do overlay do
-        // accuracy tomar a tela (evita flash da tela anterior).
-        setTimeout(() => {
-          if (isMounted.current) runAccuracyTestThenExit();
-        }, 400);
+      calibration.completeCalibration?.((outcome) => {
+        // A1-1 — só declara sucesso e roda o teste de precisão quando o
+        // treino terminou ok. Regra 3 do plano: o que a tela afirma tem
+        // que ser verdade. Antes, o pipeline chamava esta callback como
+        // se sempre tivesse dado certo mesmo em caso de matriz singular.
+        if (!outcome || outcome.ok !== false) {
+          console.log('[React] Calibração concluída — disparando teste de precisão automático');
+          setTimeout(() => {
+            if (isMounted.current) runAccuracyTestThenExit();
+          }, 400);
+          return;
+        }
+        // Falha: mensagem para o cuidador em linguagem humana. Não mostra
+        // stack trace; a mensagem técnica (outcome.detail) vai só para o
+        // console. B4-1 vai construir a tela dedicada de falha com botão
+        // de emergência acessível — por ora, retorna ao tutorial e mostra
+        // instrução acionável.
+        const humanMessage: Record<typeof outcome.reason, string> = {
+          degenerate_features:
+            'Não foi possível calibrar. A causa mais comum é reflexo nos óculos. Incline a tela um pouco para baixo, reduza luzes atrás de você, ou tente sem os óculos.',
+          singular_matrix:
+            'Não foi possível calibrar. O sistema não conseguiu distinguir os movimentos dos seus olhos. Tente com mais luz frontal e cabeça mais estável.',
+          insufficient_samples:
+            'Não foi possível calibrar: poucas amostras válidas. Verifique se o rosto está enquadrado e a câmera funcionando.',
+          unknown:
+            'Não foi possível calibrar. Tente novamente; se persistir, veja o console para detalhes.',
+        };
+        console.error(`[React] Calibração falhou (${outcome.reason}): ${outcome.detail}`);
+        if (!isMounted.current) return;
+        setErrorMessage(humanMessage[outcome.reason]);
+        setStage('tutorial');
+        setCompletedList([]);
       });
       return;
     }

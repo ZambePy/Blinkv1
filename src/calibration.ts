@@ -745,7 +745,41 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
 }
 
-export function completeCalibration(onComplete?: () => void) {
+// A1-1 — outcome tipado. O chamador agora sabe se a UI deve mostrar
+// "Calibração Concluída" (só se ok=true) ou uma tela de falha com a razão
+// específica. Regra 3 do plano: o que a tela afirma tem que ser verdade.
+export type CalibrationOutcome =
+  | { ok: true }
+  | {
+      ok: false;
+      reason:
+        | 'singular_matrix'          // solveLinear lançou mesmo após escalonamento λ (A1-3)
+        | 'insufficient_samples'     // profile vazio ou < 2 targets únicos
+        | 'degenerate_features'      // preflight de A1-2 (>30% features mortas)
+        | 'unknown';
+      detail: string;
+    };
+
+// A1-1 — classificação de exceções do treino em um CalibrationOutcome.
+// Prioriza mensagens específicas do próprio código (degenerate_features,
+// singular_matrix) para dar orientação acionável ao cuidador.
+function classifyTrainingError(e: unknown, sampleCount: number): CalibrationOutcome {
+  const detail = e instanceof Error ? e.message : String(e);
+  if (sampleCount === 0) {
+    return { ok: false, reason: 'insufficient_samples', detail };
+  }
+  if (/degenerate_features/i.test(detail)) {
+    return { ok: false, reason: 'degenerate_features', detail };
+  }
+  if (/matriz singular/i.test(detail)) {
+    return { ok: false, reason: 'singular_matrix', detail };
+  }
+  return { ok: false, reason: 'unknown', detail };
+}
+
+export function completeCalibration(
+  onComplete?: (outcome: CalibrationOutcome) => void,
+) {
   // Cancel any pending collection timeout before finalising
   if (collectionTimeoutHandle !== null) {
     clearTimeout(collectionTimeoutHandle);
@@ -754,19 +788,29 @@ export function completeCalibration(onComplete?: () => void) {
   isCollecting = false;
   pointCompleteCallback = null;
 
+  let outcome: CalibrationOutcome;
   try {
     const summary = trainScalersAndRegressors(profile);
     saveProfile();
     // A1-6 — snapshot no registry por condição óptica. Se o pendingMeta não
     // foi setado (chamador antigo não passou meta), salva como 'desconhecido'.
     persistActiveProfileToRegistry(summary);
+    outcome = { ok: true };
   } catch (e) {
-    console.error('[calib] Erro fatal no treinamento:', e);
-    // A1-6 — não persistir perfil quando o treino falhou. isCalibrated()
-    // continua false por conta dos regressors serem zerados em startCalibrationMode.
+    const failure = classifyTrainingError(e, profile.length);
+    outcome = failure;
+    // A1-6 — não persistir perfil quando o treino falhou.
+    // A1-1 — garantir que isCalibrated() diga a verdade após falha.
+    // Zeramos os regressors mesmo se algum tiver sobrevivido parcialmente.
+    regressorLeft = null;
+    regressorRight = null;
+    pendingProfileMeta = null;
+    if (!failure.ok) {
+      console.error(`[calib] ✗ Calibração falhou (${failure.reason}): ${failure.detail}`);
+    }
   } finally {
     isCalibrating = false;
-    if (onComplete) onComplete();
+    if (onComplete) onComplete(outcome!);
   }
 }
 
@@ -898,6 +942,7 @@ export function init() {
       frameThreshold: SPECULAR_FRAME_THRESHOLD,
       persistenceThreshold: SPECULAR_PERSISTENCE,
     }),
+    mapGazeErrors: () => _mapGazeConsecutiveErrors,
     profiles: {
       list: listCalibrationProfiles,
       active: getActiveProfileMeta,
@@ -988,7 +1033,21 @@ export function getCurrentTargetPx(): { xPx: number; yPx: number } | null {
   return { xPx: currentTargetX * vw, yPx: currentTargetY * vh };
 }
 
-let _dimErrorLogged = false;
+// A1-1 — antes: `_dimErrorLogged` era one-shot para toda a sessão. Frame 1
+// lançava, logava uma vez, e todos os N frames seguintes falhavam em silêncio.
+// Combinado com o fallback do nariz no engine, o cursor "funcionava" enquanto
+// mapGaze quebrava a 30 Hz sem nenhum sinal.
+// Agora: rate-limit por tempo (1×/segundo) + contador de erros consecutivos
+// exposto via getMapGazeErrorCount(). Recupera silêncio no caminho feliz
+// mas dá visibilidade quando há problema persistente. O estado degradado do
+// engine (A1-4) também vai capturar isso — as duas defesas se reforçam.
+let _mapGazeConsecutiveErrors = 0;
+let _mapGazeLastLoggedMs = 0;
+const MAP_GAZE_LOG_INTERVAL_MS = 1000;
+
+export function getMapGazeErrorCount(): number {
+  return _mapGazeConsecutiveErrors;
+}
 
 export function mapGaze(
   featuresLeft: number[],
@@ -1004,11 +1063,15 @@ export function mapGaze(
   try {
     predLeft = regressorLeft.predict(scaledLeft);
     predRight = regressorRight.predict(scaledRight);
-    _dimErrorLogged = false; // reseta a flag num frame feliz
+    _mapGazeConsecutiveErrors = 0; // caminho feliz: zera contador
   } catch (e) {
-    if (!_dimErrorLogged) {
-      console.error(e);
-      _dimErrorLogged = true;
+    _mapGazeConsecutiveErrors++;
+    const now = performance.now();
+    if (now - _mapGazeLastLoggedMs > MAP_GAZE_LOG_INTERVAL_MS) {
+      _mapGazeLastLoggedMs = now;
+      console.error(
+        `[calib] mapGaze exception (${_mapGazeConsecutiveErrors} consecutivo(s)):`, e,
+      );
     }
     return null;
   }

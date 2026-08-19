@@ -76,10 +76,16 @@ export function updateDegradedTimer(input: {
   return { newNullSinceMs: nullSince, isDegraded };
 }
 
+// A1-1 — re-export para a UI consumir sem depender diretamente de calibration.ts.
+export type { CalibrationOutcome } from '../calibration';
+
 export interface CalibrationApi {
   startCalibrationMode(): void;
   startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void;
-  completeCalibration(onComplete?: () => void): void;
+  // A1-1 — outcome tipado. Callback opcional; se fornecido, recebe { ok: true }
+  // no sucesso ou { ok: false, reason, detail } em qualquer falha do treino
+  // (matriz singular, features degeneradas, amostras insuficientes, etc.).
+  completeCalibration(onComplete?: (outcome: import('../calibration').CalibrationOutcome) => void): void;
   clear(): void;
   isCalibrated(): boolean;
   // Sprint 4 — recalibração implícita a partir de dwell clicks confirmados.
@@ -735,7 +741,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void {
         calibration.startCollectingPoint(x, y, onDone);
       },
-      completeCalibration(onComplete?: () => void): void {
+      completeCalibration(onComplete?: (outcome: import('../calibration').CalibrationOutcome) => void): void {
         calibration.completeCalibration(onComplete);
       },
       clear(): void {

@@ -166,6 +166,21 @@ Não conserte. **Documente.**
 
 ## A1 — O bug dos óculos
 
+### 🚦 Gate de validação do SPRINT 1 (Frente A)
+
+Para dar o Sprint 1 por fechado, **todos os itens abaixo têm que ser verdade**:
+
+1. ✅ `npm test` verde (**119 testes**, era 69 no fim do Sprint 0).
+2. ✅ `npm run build` verde. `npm run electron:compile` verde.
+3. ✅ A1-1 até A1-6 marcados FEITO (com ⬇️/🔄/⬆️ conforme repriorização de A0-5).
+4. ✅ Nenhum novo `catch` que engule exceção silenciosa em código do Sprint 1. Regra 1 do plano.
+5. ✅ **Caminho feliz preservado**: sessão sem óculos, cabeça parada, calibração automática deve produzir número comparável a 57 px / 0,9° da Rodada A de A0-5. Verificar rodando o app localmente após qualquer commit de A1. (Baseline em `docs/BUG-OCULOS-EVIDENCIA.md`.)
+6. ⏳ **Rodada B com A1 completo** (repetir o experimento de A0-5 com óculos) para medir o efeito combinado das defesas — pode acontecer no Sprint 8 (consolidação).
+7. ✅ Nenhuma flag de A2 ligada por default. Todas as mudanças de A1 são bug-fix ou instrumentação sem efeito no caminho feliz.
+8. ⏳ Push para `origin/main` — administrativo.
+
+Status: 1–5, 7 ✅. Itens 6 e 8 ficam para fim do Sprint 8 e para o usuário decidir.
+
 ### A hipótese, com a cadeia causal completa
 
 Lendo o código deste commit, existe um caminho que produz **exatamente** o sintoma que você descreve — cursor parado num ponto fixo da tela:
@@ -210,9 +225,25 @@ if (avgVarLeft > VARIANCE_THRESHOLD || avgVarRight > VARIANCE_THRESHOLD) { ... }
 
 ---
 
-### A1-1 🟡 Falhar alto quando o treino falha ⬇️ REPRIORIZADO (A0-5)
+### A1-1 🟡 Falhar alto quando o treino falha ⬇️ REPRIORIZADO (A0-5) ✅ FEITO
 
 > **Nota A0-5:** o `catch` de `completeCalibration` **não dispara neste hardware** (treino sobrevive mesmo com óculos). A tarefa continua correta (é bug real: `_dimErrorLogged` silencia exceções repetidas do `mapGaze`), mas não é a raiz do sintoma dos óculos observado. Fazer, mas depois de A1-2/A1-3/A1-5/A1-6.
+>
+> **Status ✅:**
+> - **Novo tipo exportado `CalibrationOutcome`** — discriminated union: `{ ok: true } | { ok: false; reason; detail }` com `reason` ∈ `singular_matrix | insufficient_samples | degenerate_features | unknown`.
+> - `completeCalibration(onComplete?: (outcome: CalibrationOutcome) => void)` — assinatura nova. Chamadores antigos que passam `() => void` ainda funcionam (callback recebe outcome que ele ignora), então **backwards-compatible em runtime**. Mas o `CalibrationApi` no engine.ts foi atualizado para tipar corretamente para consumidores TS novos.
+> - `classifyTrainingError(e, sampleCount)` mapeia exceções para `reason`:
+>   - `samples === 0` → `insufficient_samples` (precedência absoluta)
+>   - regex `degenerate_features` → `degenerate_features` (do preflight A1-2)
+>   - regex `matriz singular` → `singular_matrix` (do solveLinear pós-escalonamento A1-3)
+>   - fallback → `unknown`
+> - Em falha: `regressorLeft/Right = null` para `isCalibrated()` dizer a verdade; `pendingProfileMeta` limpo para não vazar entre calibrações. Regra 3 do plano em código.
+> - **Fix de `_dimErrorLogged` (silêncio permanente)**: substituído por `_mapGazeConsecutiveErrors` + rate-limit de 1×/s (`MAP_GAZE_LOG_INTERVAL_MS`). Antes: erro no frame 1 → silêncio pelo resto da sessão. Agora: caminho feliz zera; erro persistente loga 1×/s com contador. Nova função exportada `getMapGazeErrorCount()` + `__irisflowDebug.mapGazeErrors()`.
+> - **Frontend (`CalibrationCheck.tsx`)** consome o outcome: só dispara `runAccuracyTestThenExit()` se `ok !== false`. Em falha, `setErrorMessage(humanMessage[reason])` (mensagem para o cuidador em linguagem clara, ex.: "*Não foi possível calibrar. A causa mais comum é reflexo nos óculos. Incline a tela...*") e volta para stage `'tutorial'`. Console recebe `outcome.detail` técnico.
+> - **8 testes novos** em `src/calibration.a1-1.test.ts` cobrindo contrato do tipo + classificação (samples=0 sempre insufficient; degenerate/singular reconhecidos; unknown fallback; non-Error para string; precedência de degenerate sobre singular).
+> - **Total: 18 arquivos, 119 testes verdes**. Build + electron ok.
+> - **Uma tela dedicada de falha com botão de emergência** (o que o plano descreveu literal, com layout) é escopo de B4-1. A infra backend + a mensagem textual estão prontas.
+> - **Baseline preservado**: cenário feliz, callback recebe `{ ok: true }`, teste de precisão roda igual.
 
 `completeCalibration` não pode mais chamar `onComplete()` como se tudo tivesse dado certo.
 
