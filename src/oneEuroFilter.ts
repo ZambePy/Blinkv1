@@ -103,9 +103,20 @@ export interface FilterConfig {
 }
 
 export const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
-  estavel:    { mincutoff: 0.005, beta: 0.5, useRollingBuffer: true },
-  balanceado: { mincutoff: 0.020, beta: 1.5, useRollingBuffer: false },
-  responsivo: { mincutoff: 0.100, beta: 5.0, useRollingBuffer: false },
+  // MELHORIA-1: Presets retuneados após análise técnica dos parâmetros originais.
+  // O 'estavel' anterior (mincutoff=0.005) causava cursor "morto" — não reagia
+  // a movimentos pequenos do olho. O 'balanceado' era muito conservador.
+  //
+  // Novos valores calibrados para uso real (Hz nominal = 30fps):
+  //   - mincutoff: frequência de corte mínima. Quanto menor, mais smooth mas mais lag.
+  //     A 30fps, mincutoff=0.05 equivale a ~τ=3.2s de "memória" em sinal estático.
+  //   - beta: aceleração do cutoff quando há movimento rápido. Maior = menos lag
+  //     em sacadas rápidas.
+  //
+  // Regra de ouro: mincutoff controla o jitter estático; beta controla o lag dinâmico.
+  estavel:    { mincutoff: 0.020, beta: 0.3,  useRollingBuffer: false },
+  balanceado: { mincutoff: 0.050, beta: 2.5,  useRollingBuffer: false },
+  responsivo: { mincutoff: 0.150, beta: 8.0,  useRollingBuffer: false },
 };
 
 export class OneEuroFilter2D {

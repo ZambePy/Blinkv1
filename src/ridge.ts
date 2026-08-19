@@ -157,7 +157,20 @@ export class RidgeRegressor {
 
   train(features: number[][], targetsX: number[], targetsY: number[]): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
-    const lambdas = [1e-4, 1e-3, 1e-2, 0.1, 1, 10, 100, 1000];
+    // BUG-5: Grid original (8 lambdas, salto 10×) era muito esparso — o CV
+    // podia escolher λ=1 quando o ótimo era λ=3.2 ou λ=0.3. Com 16 lambdas
+    // em log-space o salto médio é ~3×, bem mais fino. Custo extra: ~2× o
+    // tempo do CV (~20ms vs ~10ms), ainda negligenciável vs. a calibração total.
+    const lambdas = [
+      1e-4, 2.15e-4, 4.64e-4,
+      1e-3, 2.15e-3, 4.64e-3,
+      1e-2, 2.15e-2, 4.64e-2,
+      1e-1, 2.15e-1, 4.64e-1,
+      1, 2.15, 4.64,
+      10, 21.5, 46.4,
+      100, 215, 464,
+      1000,
+    ];
     const bestLambda = this.selectLambdaCV(features, targets, lambdas);
 
     // A1-3 — escalonamento defensivo. O CV pode escolher λ ótimo sobre

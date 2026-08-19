@@ -112,6 +112,13 @@ const EAR_HISTORY_LEN = 50;
 const BLINK_THRESHOLD_RATIO = 0.8;
 const MIN_HISTORY = 15;
 
+// BUG-1: earHistory era estado mutável de módulo nunca resetado entre sessões.
+// O threshold adaptativo de piscada (meanEar * 0.8) ficava enviesado para o EAR
+// médio de sessões anteriores. Reset obrigatório em startCalibrationMode.
+export function resetEarHistory(): void {
+  earHistory.length = 0;
+}
+
 export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Array): ExtractorResult {
   if (landmarks.length < 478) {
     return { featuresLeft: [], featuresRight: [], blinkDetected: false };
@@ -226,12 +233,16 @@ export function extractEyeFeatures(landmarks: Point3D[], faceMatrix?: Float32Arr
   const lInner = landmarks[133], lOuter = landmarks[33], lTop = landmarks[159], lBottom = landmarks[145];
   const rInner = landmarks[362], rOuter = landmarks[263], rTop = landmarks[386], rBottom = landmarks[374];
 
-  const lWidth = dist2D(lOuter, lInner);
-  const lHeight = dist2D(lTop, lBottom);
+  // BUG-3: dist2D perdia a componente Z dos landmarks 3D do MediaPipe.
+  // Para cabeça inclinada (pitch > 0), a altura do olho em 2D parece menor
+  // que a real → EAR artificialmente baixo → falsa piscada → frame rejeitado
+  // na calibração. dist3D corrige isso sem custo adicional (já definida).
+  const lWidth = dist3D(lOuter, lInner);
+  const lHeight = dist3D(lTop, lBottom);
   const leftEAR = lHeight / (lWidth + 1e-9);
 
-  const rWidth = dist2D(rOuter, rInner);
-  const rHeight = dist2D(rTop, rBottom);
+  const rWidth = dist3D(rOuter, rInner);
+  const rHeight = dist3D(rTop, rBottom);
   const rightEAR = rHeight / (rWidth + 1e-9);
 
   const ear = (leftEAR + rightEAR) / 2;

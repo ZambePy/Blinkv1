@@ -11,6 +11,7 @@ import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
 import { EXPERIMENT } from './config/experiment';
 import type { RecordedSampleDecision } from './telemetry/types';
+import { resetEarHistory } from './extractor';
 import {
   profileRegistry,
   shouldWarnPrecisionForCondition,
@@ -265,11 +266,18 @@ function applyGazeCorrection(x: number, y: number): { x: number; y: number } {
   if (!EXPERIMENT.applyGazeCorrection) return { x, y };
   if (_gazeCorrections.length < 3) return { x, y };
 
+  const vw = document.documentElement.clientWidth;
+  const vh = document.documentElement.clientHeight;
+
   let sumW = 0, cx = 0, cy = 0;
   for (const c of _gazeCorrections) {
-    const dx = x - c.refX;
-    const dy = y - c.refY;
-    const w = 1.0 / (dx * dx + dy * dy + 1.0);
+    // BUG-6: antes as distâncias estavam em pixels (dx ~ centenas), então
+    // o +1.0 era irrisório (w = 1/(dist²+1) ≈ 1/10000 para 100px).
+    // Na prática só o ponto mais próximo influenciava. Normalizar por vw/vh
+    // garante que dx ∈ [0..1] e o kernel RBF opera em escala correta.
+    const dx = (x - c.refX) / vw;
+    const dy = (y - c.refY) / vh;
+    const w = 1.0 / (dx * dx + dy * dy + 1e-4);
     cx += c.offsetX * w;
     cy += c.offsetY * w;
     sumW += w;
@@ -277,8 +285,6 @@ function applyGazeCorrection(x: number, y: number): { x: number; y: number } {
   cx /= sumW;
   cy /= sumW;
 
-  const vw = document.documentElement.clientWidth;
-  const vh = document.documentElement.clientHeight;
   return {
     x: Math.max(0, Math.min(vw, x + cx)),
     y: Math.max(0, Math.min(vh, y + cy)),
@@ -333,6 +339,10 @@ export function exportGazeDistanceLog(): void {
 export function startCalibrationMode(
   opts?: { opticalCondition?: OpticalCondition; label?: string },
 ) {
+  // BUG-1: reset earHistory para que o threshold adaptativo de piscada
+  // não venha enviesado de sessões anteriores.
+  resetEarHistory();
+
   isCalibrating = true;
   profile = [];
   regressorLeft = null;
@@ -1095,11 +1105,36 @@ export function mapGaze(
     }
   }
 
-  // Clamp em unidades normalizadas [0,1] APÓS a média binocular (Sprint 1.2).
-  // Fazer o clamp aqui, e não em `predictRidge`, evita o viés de borda descrito
-  // no comentário de ridge.ts.
-  const avgNormX = Math.min(1, Math.max(0, baseX));
-  const avgNormY = Math.min(1, Math.max(0, baseY));
+  // BUG-4: Soft clamp nas bordas. O clamp abrupto anterior (Math.min/max) fazia
+  // o cursor "travar" na borda quando o Ridge extrapolava além dos pontos de
+  // calibração (ex.: x=1.15 → x=1.0 instantaneamente). Para o usuário ELA,
+  // elementos nas extremas bordas da tela pareciam inacessíveis.
+  //
+  // Solução: soft clamp — dentro de SOFT_MARGIN (5%) da borda, o movimento é
+  // amortecido progressivamente por uma curva sigmoide em vez de cortado abruptamente.
+  // Isso preserva a capacidade de alcançar a borda enquanto evita que o cursor
+  // "bounce" violentamente fora dos limites da tela.
+  //
+  // softClamp(v, margin):
+  //   - Para v em [margin, 1-margin]: identidade (sem alteração)
+  //   - Para v < margin ou v > 1-margin: amortecimento suave até 0 ou 1
+  const SOFT_MARGIN = 0.05;
+  function softClamp(v: number): number {
+    if (v <= 0) return 0;
+    if (v >= 1) return 1;
+    if (v < SOFT_MARGIN) {
+      // Borda esquerda/topo: amortece de 0 até MARGIN
+      return SOFT_MARGIN * (1 - Math.cos((v / SOFT_MARGIN) * Math.PI / 2));
+    }
+    if (v > 1 - SOFT_MARGIN) {
+      // Borda direita/baixo: amortece de (1-MARGIN) até 1
+      const t = (v - (1 - SOFT_MARGIN)) / SOFT_MARGIN;
+      return (1 - SOFT_MARGIN) + SOFT_MARGIN * Math.sin(t * Math.PI / 2);
+    }
+    return v;
+  }
+  const avgNormX = softClamp(baseX);
+  const avgNormY = softClamp(baseY);
 
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
