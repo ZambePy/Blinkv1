@@ -28,9 +28,53 @@ export interface GazeSample {
   y: number;
   timestamp: number;
   hasFace: boolean;
+  // A1-4 — true quando o engine está no estado 'degraded': calibração feita
+  // mas mapGaze devolveu null por >DEGRADED_THRESHOLD_MS seguidos. Consumidores
+  // devem tratar o cursor como não-confiável (é o fallback do nariz, não gaze),
+  // desabilitar dwell exceto para elementos data-emergency, e mostrar aparência
+  // distinta. Opcional para compat com consumidores anteriores a A1-4.
+  degraded?: boolean;
 }
 
-export type EngineState = 'idle' | 'loading' | 'tracking' | 'calibrating' | 'no_face';
+// A1-4 — estado 'degraded' distingue "sistema não sabe onde o olhar está" de
+// "sistema funcionando". Usuário-alvo ELA não pode desdizer um clique feito
+// sob cursor errado; melhor bloquear a UI que aceitar seleção aleatória.
+export type EngineState = 'idle' | 'loading' | 'tracking' | 'calibrating' | 'no_face' | 'degraded';
+
+// A1-4 — quanto tempo mapGaze pode devolver null antes de considerarmos que
+// a predição está degradada. 500 ms = ~15 frames a 30 fps — tolera glitch
+// isolado de 1-2 frames mas pega bug persistente (features degeneradas,
+// exceção repetida silenciada por _dimErrorLogged em calibration.ts).
+export const DEGRADED_THRESHOLD_MS = 500;
+
+// A1-4 — lógica pura do timer de degradação, testável sem rAF/DOM/worker.
+// Retorna o novo `nullSinceMs` (null se o timer foi zerado) e se o estado
+// deveria ser 'degraded' agora.
+//
+// Casos:
+// - Frame com predição válida (mapGazeReturnedNull=false) → zera timer, não degraded
+// - Sem calibração ativa ou em modo de calibração → zera timer (null não conta)
+// - Com calibração e mapGaze null → inicia/mantém timer; degrada se >threshold
+export function updateDegradedTimer(input: {
+  mapGazeReturnedNull: boolean;
+  isCalibrated: boolean;
+  isCalibrating: boolean;
+  currentNullSinceMs: number | null;
+  now: number;
+  thresholdMs?: number;
+}): { newNullSinceMs: number | null; isDegraded: boolean } {
+  const threshold = input.thresholdMs ?? DEGRADED_THRESHOLD_MS;
+  if (!input.mapGazeReturnedNull) {
+    return { newNullSinceMs: null, isDegraded: false };
+  }
+  const activeCalibration = input.isCalibrated && !input.isCalibrating;
+  if (!activeCalibration) {
+    return { newNullSinceMs: null, isDegraded: false };
+  }
+  const nullSince = input.currentNullSinceMs ?? input.now;
+  const isDegraded = input.now - nullSince > threshold;
+  return { newNullSinceMs: nullSince, isDegraded };
+}
 
 export interface CalibrationApi {
   startCalibrationMode(): void;
@@ -223,6 +267,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let lastEmittedY = 0;
   let lastEmitHadFace = false;
 
+  // A1-4 — timestamp do primeiro frame consecutivo em que mapGaze devolveu
+  // null (após a calibração estar completa). Zerado no primeiro sucesso.
+  let mapGazeNullSinceMs: number | null = null;
+
   // Diagnóstico [IrisFlow]: quantifica se o loop rAF está processando vídeo.
   let framesSeen = 0;
   let framesWithFace = 0;
@@ -333,7 +381,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
 
       if (!hasFace) {
         calibration.feedFaceMetrics(false, 0);
-        if (state === 'tracking') setState('no_face');
+        // A1-4 — face perdida zera o timer de degradação; sem rosto o problema
+        // é 'no_face', não 'degraded'. Quando o rosto voltar, começa uma nova
+        // janela de 500 ms antes de considerar degradado novamente.
+        mapGazeNullSinceMs = null;
+        if (state === 'tracking' || state === 'degraded') setState('no_face');
         if (lastEmitHadFace) {
           emit({
             x: lastEmittedX,
@@ -475,6 +527,18 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             targetX = (1.0 - landmarks[1].x) * vw;
             targetY = landmarks[1].y * vh;
           }
+          // A1-4 — atualiza o timer de degradação. Só conta null como
+          // degradação após a calibração estar completa e fora do modo de
+          // coleta (durante calibração null é normal).
+          const degradedUpdate = updateDegradedTimer({
+            mapGazeReturnedNull: calibrated === null,
+            isCalibrated: calibration.isCalibrated(),
+            isCalibrating: calibration.isCalibrating,
+            currentNullSinceMs: mapGazeNullSinceMs,
+            now: performance.now(),
+          });
+          mapGazeNullSinceMs = degradedUpdate.newNullSinceMs;
+          const isDegraded = degradedUpdate.isDegraded;
 
           // Sprint 5 — o buffer rolling adicionava lag e (em teste) não
           // aumentava a estabilidade em cima do One Euro. Só permanece quando
@@ -495,8 +559,14 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           const now = performance.now() / 1000.0;
           const smoothed = oneEuro.filter(targetX, targetY, now);
 
+          // A1-4 — decide entre 'calibrating' | 'degraded' | 'tracking'.
+          // 'degraded' entra quando mapGaze devolveu null por >500ms seguidos
+          // após a calibração estar completa. Sai automaticamente no primeiro
+          // frame bem-sucedido.
           if (calibration.isCalibrating) {
             setState('calibrating');
+          } else if (isDegraded) {
+            setState('degraded');
           } else {
             setState('tracking');
           }
@@ -506,6 +576,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             y: smoothed.y,
             timestamp: performance.now(),
             hasFace: true,
+            degraded: isDegraded,
           });
           framesEmitted++;
 

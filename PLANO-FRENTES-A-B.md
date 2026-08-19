@@ -315,7 +315,23 @@ if (Math.abs(d) < 1e-6) { degenerateColumns.push(col); }
 
 ---
 
-### A1-4 🔴 Estado degradado visível
+### A1-4 🔴 Estado degradado visível ✅ FEITO
+
+> **Status ✅:**
+> - **Engine (`src/tracker/engine.ts`)**:
+>   - `EngineState` ganha `'degraded'`. `GazeSample` ganha `degraded?: boolean` (opcional, compat).
+>   - `DEGRADED_THRESHOLD_MS = 500` (exportado — ~15 frames a 30 fps, tolera glitch isolado mas pega bug persistente).
+>   - Nova **função pura exportada `updateDegradedTimer({ mapGazeReturnedNull, isCalibrated, isCalibrating, currentNullSinceMs, now, thresholdMs? })`** — testável isolada (o loop rAF+DOM+worker do engine é intocável). Frame loop consome.
+>   - Só entra em `'degraded'` quando calibração **está completa** e não em modo de coleta e `mapGaze` devolveu null por >500 ms. Sai automaticamente no primeiro frame válido.
+>   - Face perdida zera o timer — problema é `'no_face'`, não `'degraded'`.
+> - **Frontend (`frontend/src/context/GazeContext.tsx`)**:
+>   - Dwell dispatcher lê `sample.degraded`. Em degraded, **bloqueia clique exceto** em elementos com `data-emergency="true"` — a "exceção obrigatória" do plano.
+>   - Dwell em botão de emergência sob degraded usa multiplicador `EMERGENCY_DEGRADED_MULT = 1.8×` do tempo normal — reduz falso positivo sem impedir o pedido de socorro.
+>   - Cursor em degraded: amarelo (`rgba(234,179,8,0.55)`) com **borda tracejada** de 2px, distinguível do vermelho normal e do verde de dwell ativo. Feedback verde de hitTarget (emergência) permanece coerente.
+>   - Alvo bloqueado por degraded limpa o dwell em progresso — usuário não pensa que "segurar mais" vai clicar.
+> - **9 testes novos** em `src/tracker/engine.a1-4.test.ts`: frame válido zera timer, sem calibração null não conta, em modo calibração null não conta, primeiro null inicia timer, contínuo sob limiar não degrada, contínuo acima degrada, frame válido pós-degradação sai, thresholdMs custom, glitch isolado 33ms não degrada. **Total: 17 arquivos, 111 testes verdes**. Build + electron ok.
+> - **Sem UI persistente do cuidador** ("*Rastreamento indisponível — recalibre*") — isso é B4-2. A infraestrutura de estado (`engine.getState() === 'degraded'` já sobe via `onStateChange`) está pronta para o Sprint 4 consumir.
+> - **Baseline preservado**: sem óculos e com calibração boa, `mapGaze` devolve não-null a cada frame; estado nunca entra em degraded, comportamento antigo idêntico.
 
 `src/tracker/engine.ts:474` — o fallback do nariz é a segunda metade do bug.
 

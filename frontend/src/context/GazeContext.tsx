@@ -29,6 +29,16 @@ const REFRACTORY_MS = 800;
 // data-no-dwell="true" on any element that should opt out.
 const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 
+// A1-4 — em estado 'degraded' o cursor está sobre o nariz (fallback do
+// engine), não sobre o olhar. Permitir dwell nesse estado dispara cliques
+// aleatórios na tela do paciente — em software de saúde isso é falha crítica
+// (mensagem errada enviada ao cuidador). O dwell é bloqueado, EXCETO em
+// elementos marcados com data-emergency="true": para o botão de emergência
+// vale mais um falso positivo ocasional que um pedido de socorro impossível
+// (plano A1-4, "exceção obrigatória"). Dwell nesses elementos usa um tempo
+// mais longo (EMERGENCY_DEGRADED_MULT) para reduzir o risco de falso positivo.
+const EMERGENCY_DEGRADED_MULT = 1.8;
+
 interface GazeContextValue {
   subscribe: (cb: (sample: GazeSample) => void) => () => void;
   state: EngineState;
@@ -147,16 +157,27 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Dwell dispatcher is entirely disabled during calibration — we don't want
       // accidental gaze clicks on calibration UI elements.
       const engineIsCalibrating = engineRef.current?.getState() === 'calibrating';
+      // A1-4 — em degraded, só permite dwell em botões de emergência.
+      const isDegraded = sample.degraded === true;
       if (!engineIsCalibrating && sample.hasFace && now >= refractoryUntilRef.current) {
         const el = document.elementFromPoint(sample.x, sample.y);
         const t = el?.closest(DWELL_SELECTOR) as HTMLElement | null;
+        const isEmergency = !!t && t.dataset.emergency === 'true';
         const isDisabled =
           !!t &&
           ((t as HTMLButtonElement).disabled ||
             t.getAttribute('aria-disabled') === 'true' ||
             t.dataset.noDwell === 'true');
-        if (t && !isDisabled) {
+        // A1-4 — em degraded, bloqueia dwell exceto no botão de emergência.
+        const blockedByDegraded = isDegraded && !isEmergency;
+        if (t && !isDisabled && !blockedByDegraded) {
           hitTarget = t;
+          // Em degraded, o único hitTarget possível é um botão de emergência;
+          // usa dwell mais longo para reduzir falso positivo (o cursor está
+          // errado e pode passar acidentalmente pelo botão).
+          const effectiveDwellMs = isDegraded && isEmergency
+            ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
+            : dwellMsRef.current;
           if (t !== dwellTargetRef.current) {
             if (dwellTargetRef.current) {
               dwellTargetRef.current.classList.remove('gaze-hover');
@@ -166,8 +187,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             t.classList.add('gaze-hover');
           } else {
             const elapsed = now - dwellStartMsRef.current;
-            dwellPct = Math.min(1, elapsed / dwellMsRef.current);
-            if (elapsed >= dwellMsRef.current) {
+            dwellPct = Math.min(1, elapsed / effectiveDwellMs);
+            if (elapsed >= effectiveDwellMs) {
               t.click();
               // Sprint 4 — recalibração implícita: o centro do botão que
               // acabou de ser clicado é um alvo supervisionado. Alimenta o
@@ -192,6 +213,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
           }
         } else {
+          // Alvo bloqueado (por disabled OU por degraded sem ser emergência).
+          // Limpa o dwell em progresso para o usuário não pensar que segurar
+          // o olhar vai clicar mesmo assim.
           if (dwellTargetRef.current) {
             dwellTargetRef.current.classList.remove('gaze-hover');
           }
@@ -229,9 +253,21 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           cursorRef.current.style.transform =
             `translate3d(${sample.x - 24}px, ${sample.y - 24}px, 0) scale(${scale})`;
           cursorRef.current.style.opacity = sample.hasFace ? '1' : '0.35';
-          cursorRef.current.style.background = hitTarget
-            ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
-            : 'rgba(239,68,68,0.6)';
+          // A1-4 — aparência distinta em degraded: amarelo com borda tracejada,
+          // sinaliza que o cursor não é confiável. O background verde só entra
+          // quando hitTarget existe (que em degraded só é possível se for
+          // emergency), então o feedback verde permanece coerente.
+          if (isDegraded) {
+            cursorRef.current.style.background = hitTarget
+              ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
+              : 'rgba(234,179,8,0.55)'; // amarelo tailwind-500 c/ transparência
+            cursorRef.current.style.border = '2px dashed rgba(234,179,8,0.9)';
+          } else {
+            cursorRef.current.style.background = hitTarget
+              ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
+              : 'rgba(239,68,68,0.6)';
+            cursorRef.current.style.border = '';
+          }
         }
       } else if (cbInvocations === 0) {
         console.warn('[IrisFlow] gaze subscribe callback disparou mas cursorRef.current é null');
