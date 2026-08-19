@@ -30,6 +30,13 @@ const ACCENT_DIM   = 'rgba(245,158,11,0.15)';
 const SUCCESS      = '#22C55E';
 const DANGER       = '#EF4444';
 
+const humanMessage: Record<string, string> = {
+  singular_matrix: 'Não foi possível treinar o modelo (matriz singular). A causa mais comum é reflexo constante nos óculos ou desvio extremo do olhar.',
+  insufficient_samples: 'Amostras insuficientes coletadas. Certifique-se de que seu rosto está visível e centralizado durante toda a calibração.',
+  degenerate_features: 'Os dados coletados não variaram o suficiente. A causa mais comum é reflexo nos óculos travando a detecção ou olhar fixo fora dos pontos.',
+  unknown: 'Erro desconhecido durante o treinamento do modelo. Por favor, tente novamente.',
+};
+
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
   const { calibration, l2csStatus } = useGaze();
@@ -97,6 +104,14 @@ export const CalibrationCheck: React.FC = () => {
         if (!outcome || outcome.ok !== false) {
           console.log('[React] Calibração concluída — disparando teste de precisão automático');
           setTimeout(() => { if (isMounted.current) runAccuracyTestThenExit(); }, 400);
+        } else {
+          if (isMounted.current) {
+            const reason = outcome.reason || 'unknown';
+            const msg = humanMessage[reason] || humanMessage.unknown;
+            console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
+            setErrorMessage(msg);
+            setStage('tutorial');
+          }
         }
       });
       return;
@@ -297,6 +312,30 @@ export const CalibrationCheck: React.FC = () => {
                   Olhe <strong style={{ color: TEXT_PRIMARY }}>direto para ele</strong> e fique parado até sumir.
                 </p>
               </div>
+
+              {errorMessage && (
+                <div style={{
+                  padding: '1rem',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${DANGER}`,
+                  borderRadius: '0.75rem',
+                  color: DANGER,
+                  fontSize: '0.95rem',
+                  maxWidth: 400,
+                  lineHeight: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  textAlign: 'left',
+                  animation: 'cfFadeUp 0.3s ease-out both'
+                }}>
+                  <AlertTriangle size={24} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '0.15rem' }}>Falha na calibração</strong>
+                    {errorMessage}
+                  </div>
+                </div>
+              )}
 
               <button
                 type="button"

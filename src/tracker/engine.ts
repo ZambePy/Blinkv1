@@ -483,7 +483,13 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           diagL2csPitch = g.pitch;
         }
 
-        const extractorResult = extractFeatures(landmarks, faceMatrix, l2csGaze);
+        const extractorResult = extractFeatures(
+          landmarks,
+          faceMatrix,
+          l2csGaze,
+          videoEl?.videoWidth,
+          videoEl?.videoHeight
+        );
         diagBlink = extractorResult.blinkDetected;
 
         // Fase 0.1 — snapshot para o gravador. As duas variáveis abaixo são
@@ -694,10 +700,14 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       activePreset = preset;
       // A2-1 — resolve o config de presets v1 (pixel) ou v2 (normalizado)
       const isV2 = preset.endsWith('-v2');
+      const oldConfig = activeConfig;
       activeConfig = isV2
         ? FILTER_PRESETS_V2[preset as FilterPresetV2]
         : FILTER_PRESETS[preset as FilterPreset];
       oneEuro.setParams(activeConfig.mincutoff, activeConfig.beta);
+      if (oldConfig && oldConfig.filterInNormalizedSpace !== activeConfig.filterInNormalizedSpace) {
+        oneEuro.reset();
+      }
       // Purga o buffer se acabou de desligar — evita mescla estranha entre
       // o histórico buffered antigo e as amostras filtradas pelo One Euro puro.
       if (!activeConfig.useRollingBuffer) {

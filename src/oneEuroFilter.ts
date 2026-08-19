@@ -68,6 +68,11 @@ export class OneEuroFilter {
   public setBeta(beta: number): void {
     this.beta_ = beta;
   }
+  public reset(): void {
+    this.x = null;
+    this.dx = null;
+    this.lasttime = -1;
+  }
 
   private alpha(cutoff: number): number {
     const te = 1.0 / this.freq;
@@ -183,5 +188,10 @@ export class OneEuroFilter2D {
     this.filterX.setBeta(beta_);
     this.filterY.setMincutoff(mincutoff);
     this.filterY.setBeta(beta_);
+  }
+
+  public reset(): void {
+    this.filterX.reset();
+    this.filterY.reset();
   }
 }
