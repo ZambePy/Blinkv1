@@ -78,7 +78,38 @@ export function getCollectionMsForPoint(x: number, y: number): number {
   return Math.round(COLLECTION_MS_BASE + d * COLLECTION_MS_RANGE);
 }
 
-const VARIANCE_THRESHOLD = 0.02;
+// A1-2 — portão de variância. O antigo `VARIANCE_THRESHOLD = 0.02` era
+// ordem de grandeza irrisória: em A0-5 medimos variâncias entre 0.98 e 1.32
+// (sem óculos ~1.02, com óculos ~1.30), então o teto de 0.02 nunca rejeitava
+// nada. Mantido como referência histórica para reconhecer casos vindos de
+// perfis antigos serializados. **Não usar em código novo.**
+const VARIANCE_THRESHOLD_LEGACY_UNUSED = 0.02;
+void VARIANCE_THRESHOLD_LEGACY_UNUSED;
+
+// Piso e teto derivados de A0-5 (Rodada A sem óculos: 0.98–1.05; Rodada B
+// com óculos: 1.27–1.32). Piso uma ordem de grandeza abaixo do mínimo
+// observado — defesa contra features congeladas em outros hardwares, nunca
+// acionado no hw testado. Teto entre os dois mundos, para rejeitar reflexo
+// de óculos e aceitar sessão limpa com folga. Estes números vão ser afinados
+// à medida que mais sessões forem capturadas — sinalizam, não bloqueiam.
+const INTRA_POINT_VARIANCE_FLOOR = 0.10;
+const INTRA_POINT_VARIANCE_CEIL = 1.15;
+
+// A1-2 — feature "morta" = dimensão cuja variância ENTRE as médias dos 9
+// alvos é próxima de zero. Uma feature que não muda entre alvos diferentes
+// não carrega informação de olhar. Se mais de DEAD_FEATURE_RATIO do vetor
+// estiver morto, o modelo linear não tem sinal para aprender e vai devolver
+// o viés (ponto fixo perto do centro dos alvos). É o cenário que a hipótese
+// original do plano descrevia para o bug dos óculos; A0-5 mostrou que **não
+// é o modo dominante neste hardware**, mas a defesa continua fazendo sentido.
+const DEAD_FEATURE_VARIANCE_EPS = 1e-6;
+const DEAD_FEATURE_MAX_RATIO = 0.30;
+
+// A1-2 — contadores de breach expostos via __irisflowDebug. Reset em
+// startCalibrationMode e clearCalibration.
+let varianceFloorBreaches = 0;
+let varianceCeilBreaches = 0;
+
 const DIST_LOG_CAPACITY = 500;
 const distanceLog: GazeDistanceLogEntry[] = [];
 
@@ -142,6 +173,8 @@ export function clearCalibration() {
   _gazeCorrections = [];
   onlineLeft = null;
   onlineRight = null;
+  varianceFloorBreaches = 0;
+  varianceCeilBreaches = 0;
 }
 
 export function getSampleCount(): number {
@@ -278,6 +311,8 @@ export function startCalibrationMode() {
   scaledProfileRight = [];
   onlineLeft = null;
   onlineRight = null;
+  varianceFloorBreaches = 0;
+  varianceCeilBreaches = 0;
 }
 
 export function startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void) {
@@ -337,6 +372,70 @@ function calculateFeatureVariance(features: number[][]): number {
     totalVariance += sumSq / (features.length - 1);
   }
   return totalVariance / numFeatures;
+}
+
+// A1-2 — variância ENTRE alvos (não dentro do alvo). Para cada dimensão de
+// feature, tira a média por alvo (agrupando amostras do mesmo screenX/screenY)
+// e mede quanto essa média varia entre os alvos. Dimensões com variância
+// entre-alvos ~ 0 não carregam informação de olhar — o modelo linear não
+// consegue diferenciar "olhar aqui" de "olhar ali" olhando pra elas.
+//
+// Retorna { deadCount, totalDims, deadIndices }. Chamador decide o corte
+// (DEAD_FEATURE_MAX_RATIO). Mede sobre um único array de features/targets;
+// para binocular, chame duas vezes (L e R).
+export function countDeadFeatures(
+  features: number[][],
+  targets: { screenX: number; screenY: number }[],
+  eps = DEAD_FEATURE_VARIANCE_EPS,
+): { deadCount: number; totalDims: number; deadIndices: number[] } {
+  if (features.length === 0 || targets.length !== features.length) {
+    return { deadCount: 0, totalDims: 0, deadIndices: [] };
+  }
+  const numDims = features[0].length;
+
+  // Agrupa índices por (screenX, screenY) arredondado — mesmo scheme do CV
+  // em ridge.ts (evita agrupamentos incorretos por drift de ponto flutuante).
+  const groups = new Map<string, number[]>();
+  for (let i = 0; i < targets.length; i++) {
+    const key = `${targets[i].screenX.toFixed(4)},${targets[i].screenY.toFixed(4)}`;
+    let g = groups.get(key);
+    if (!g) { g = []; groups.set(key, g); }
+    g.push(i);
+  }
+  const uniqueTargets = groups.size;
+  if (uniqueTargets < 2) {
+    // Precisa de pelo menos 2 alvos distintos para haver "variância entre alvos".
+    return { deadCount: 0, totalDims: numDims, deadIndices: [] };
+  }
+
+  // Média por alvo, dimensão a dimensão
+  const perTargetMeans: number[][] = [];
+  for (const idxs of groups.values()) {
+    const mean = new Array<number>(numDims).fill(0);
+    for (const i of idxs) {
+      const f = features[i];
+      for (let d = 0; d < numDims; d++) mean[d] += f[d];
+    }
+    for (let d = 0; d < numDims; d++) mean[d] /= idxs.length;
+    perTargetMeans.push(mean);
+  }
+
+  // Variância das médias por alvo, por dimensão
+  const deadIndices: number[] = [];
+  for (let d = 0; d < numDims; d++) {
+    let sum = 0;
+    for (const m of perTargetMeans) sum += m[d];
+    const grandMean = sum / perTargetMeans.length;
+    let sumSq = 0;
+    for (const m of perTargetMeans) {
+      const diff = m[d] - grandMean;
+      sumSq += diff * diff;
+    }
+    const varBetween = sumSq / (perTargetMeans.length - 1);
+    if (varBetween < eps) deadIndices.push(d);
+  }
+
+  return { deadCount: deadIndices.length, totalDims: numDims, deadIndices };
 }
 
 export function feedRawData(featuresLeft: number[], featuresRight: number[], quality?: any | null) {
@@ -440,13 +539,35 @@ function processStaticPoint() {
 
   const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
   const avgVarRight = calculateFeatureVariance(collectedFeaturesRight);
+  // Nota A0-5: como ~80% das dimensões do vetor de features vêm de landmarks
+  // e ângulos compartilhados entre os dois olhos (MUTUAL_INDICES, pose de
+  // cabeça), avgVarLeft ≈ avgVarRight até a 6ª casa decimal. NÃO é bug — é
+  // decorrência do design do extractor. Usamos a média das duas para o gate,
+  // e logamos as duas separadamente só para o developer confirmar o padrão.
+  const avgVar = (avgVarLeft + avgVarRight) / 2;
 
-  console.log(`[calib] Variância: L=${avgVarLeft.toFixed(6)} R=${avgVarRight.toFixed(6)} (threshold=${VARIANCE_THRESHOLD})`);
+  console.log(
+    `[calib] Variância intra-ponto: L=${avgVarLeft.toFixed(6)} R=${avgVarRight.toFixed(6)} avg=${avgVar.toFixed(6)} ` +
+    `(faixa [${INTRA_POINT_VARIANCE_FLOOR}, ${INTRA_POINT_VARIANCE_CEIL}])`,
+  );
 
-  if (avgVarLeft > VARIANCE_THRESHOLD || avgVarRight > VARIANCE_THRESHOLD) {
-    console.warn(`[calib] ✗ Ponto instável — aceitando mesmo assim com ${collectedFeaturesLeft.length} amostras`);
-    // Instead of failing, we accept unstable points but use a median subset.
-    // This prevents infinite retry loops on fidgety users.
+  // A1-2 — portão bidirecional. Continuamos aceitando pontos fora da faixa
+  // (comportamento antigo, para não gerar infinite retry loop em usuários
+  // inquietos), mas o log agora distingue piso vs. teto e contabiliza breaches
+  // para o preflight do treino decidir se aborta.
+  if (avgVar < INTRA_POINT_VARIANCE_FLOOR) {
+    varianceFloorBreaches++;
+    console.warn(
+      `[calib] ⚠ Ponto com variância BAIXA (${avgVar.toFixed(6)} < ${INTRA_POINT_VARIANCE_FLOOR}) — ` +
+      `features possivelmente congeladas (reflexo, foco perdido). Aceitando com ${collectedFeaturesLeft.length} amostras.`,
+    );
+  } else if (avgVar > INTRA_POINT_VARIANCE_CEIL) {
+    varianceCeilBreaches++;
+    console.warn(
+      `[calib] ⚠ Ponto com variância ALTA (${avgVar.toFixed(6)} > ${INTRA_POINT_VARIANCE_CEIL}) — ` +
+      `usuário instável ou landmarks ruidosos (reflexo em óculos é o padrão A0-5). ` +
+      `Aceitando com ${collectedFeaturesLeft.length} amostras.`,
+    );
   }
 
   for (let i = 0; i < collectedFeaturesLeft.length; i++) {
@@ -469,6 +590,29 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): void {
   const trainFeaturesLeft  = trainingProfile.map(p => p.featuresLeft);
   const trainFeaturesRight = trainingProfile.map(p => p.featuresRight);
   const trainTargets = trainingProfile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
+
+  // A1-2 — preflight: aborta antes do solveLinear se mais de 30% das dims
+  // não variam entre alvos diferentes. Falha barata com diagnóstico claro,
+  // vs. falhar caro dentro do CV lambda com "Matriz singular na coluna N".
+  // A1-1 (pendente) vai propagar essa exceção para a UI; hoje o catch de
+  // completeCalibration engole, mas o warn abaixo dá diagnóstico ao dev.
+  const deadL = countDeadFeatures(trainFeaturesLeft, trainTargets);
+  const deadR = countDeadFeatures(trainFeaturesRight, trainTargets);
+  const ratioL = deadL.totalDims > 0 ? deadL.deadCount / deadL.totalDims : 0;
+  const ratioR = deadR.totalDims > 0 ? deadR.deadCount / deadR.totalDims : 0;
+  console.log(
+    `[calib] Features mortas (variância entre alvos < ${DEAD_FEATURE_VARIANCE_EPS}): ` +
+    `L=${deadL.deadCount}/${deadL.totalDims} (${(ratioL * 100).toFixed(0)}%) ` +
+    `R=${deadR.deadCount}/${deadR.totalDims} (${(ratioR * 100).toFixed(0)}%)`,
+  );
+  if (ratioL > DEAD_FEATURE_MAX_RATIO || ratioR > DEAD_FEATURE_MAX_RATIO) {
+    throw new Error(
+      `[calib] degenerate_features: mais de ${(DEAD_FEATURE_MAX_RATIO * 100).toFixed(0)}% das dimensões ` +
+      `não variam entre alvos (L=${(ratioL * 100).toFixed(0)}% R=${(ratioR * 100).toFixed(0)}%). ` +
+      `Causa provável: reflexo travando landmarks de íris, ou face fixa fora do alvo. ` +
+      `Recalibre com atenção especial ao enquadramento e à luz.`,
+    );
+  }
 
   featureScalerLeft.fit(trainFeaturesLeft);
   featureScalerRight.fit(trainFeaturesRight);
@@ -548,8 +692,9 @@ export function init() {
 
   (window as unknown as Record<string, unknown>).__exportGazeDistanceLog = exportGazeDistanceLog;
 
-  // A0-5 + A1-3: expõe hooks de diagnóstico do bug dos óculos no console.
-  // Uso: __irisflowDebug.isCalibrated(), __irisflowDebug.lambdaDiag(), etc.
+  // A0-5 + A1-3 + A1-2: expõe hooks de diagnóstico do bug dos óculos no console.
+  // Uso: __irisflowDebug.isCalibrated(), __irisflowDebug.lambdaDiag(),
+  //      __irisflowDebug.varianceBreaches(), __irisflowDebug.deadFeatures().
   // Remover quando A1 estiver estável.
   (window as unknown as Record<string, unknown>).__irisflowDebug = {
     isCalibrated,
@@ -558,6 +703,23 @@ export function init() {
     lambdaDiag: getLambdaDiagnostics,
     hasRegressors: () => ({ left: regressorLeft !== null, right: regressorRight !== null }),
     isCalibrating: () => isCalibrating,
+    varianceBreaches: () => ({
+      floor: varianceFloorBreaches,
+      ceil: varianceCeilBreaches,
+      floorThreshold: INTRA_POINT_VARIANCE_FLOOR,
+      ceilThreshold: INTRA_POINT_VARIANCE_CEIL,
+    }),
+    deadFeatures: () => {
+      if (profile.length === 0) return null;
+      const targets = profile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
+      const left = countDeadFeatures(profile.map(p => p.featuresLeft), targets);
+      const right = countDeadFeatures(profile.map(p => p.featuresRight), targets);
+      return {
+        left: { count: left.deadCount, total: left.totalDims, pct: left.totalDims ? left.deadCount / left.totalDims : 0 },
+        right: { count: right.deadCount, total: right.totalDims, pct: right.totalDims ? right.deadCount / right.totalDims : 0 },
+        maxAllowed: DEAD_FEATURE_MAX_RATIO,
+      };
+    },
   };
 }
 

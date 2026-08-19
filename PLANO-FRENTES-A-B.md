@@ -240,13 +240,25 @@ A UI precisa mostrar uma tela de falha com linguagem que o cuidador entenda e co
 
 ---
 
-### A1-2 🔴 Portão de variância bidirecional 🔄 REFORMULADO (A0-5)
+### A1-2 🔴 Portão de variância bidirecional 🔄 REFORMULADO (A0-5) ✅ FEITO
 
 > **Nota A0-5:** o hardware do usuário mostrou o **oposto** da hipótese do plano — óculos causam variância **alta** (1.30), não baixa. O piso (`VARIANCE_FLOOR`) continua fazendo sentido como defesa, mas o principal é **calibrar o teto**: hoje `VARIANCE_THRESHOLD=0.02` nunca rejeita nada (todas as variâncias observadas ≥ 0.98). **Sugestão inicial:**
 > - `VARIANCE_CEIL ≈ 1.15` (rejeita óculos = 1.27+, aceita sem = 1.05− com folga)
 > - `VARIANCE_FLOOR ≈ 0.10` (defesa contra features congeladas em outro hw)
 > - Trocar o número mágico `0.02` — investigar se era ordem de grandeza errada desde o início (features não normalizadas?) ou se veio de outra unidade.
 > - **Também investigar por que Var L ≈ Var R até a 6ª casa decimal** (L=0.987331 R=0.987332). Dois olhos independentes não fariam isso — suspeita de compartilhamento de vetor de features ou agregação degenerada em `calculateFeatureVariance`.
+>
+> **Status ✅:**
+> - **Mistério do Var L ≈ Var R resolvido**: `extractor.ts:156-218` monta `featuresLeft` e `featuresRight` com **muita sobreposição literal** — `MUTUAL_INDICES × 3` + `[yaw, pitch, roll]` + várias outras dimensões idênticas. ~80% do vetor é compartilhado, então a média das variâncias por dim sai praticamente igual. **Não é bug — é decorrência do design**. Documentado inline em `processStaticPoint`.
+> - `VARIANCE_THRESHOLD = 0.02` marcado como `VARIANCE_THRESHOLD_LEGACY_UNUSED` com nota de por que nunca operou.
+> - Novos `INTRA_POINT_VARIANCE_FLOOR = 0.10` e `INTRA_POINT_VARIANCE_CEIL = 1.15` derivados dos números reais de A0-5.
+> - `processStaticPoint` continua **aceitando** pontos fora da faixa (preserva o comportamento antigo de não gerar infinite retry loop em usuários inquietos), mas com **log distinto por tipo de breach** (`⚠ Ponto com variância BAIXA/ALTA`) e contadores `varianceFloorBreaches`/`varianceCeilBreaches` reset em `startCalibrationMode`/`clearCalibration`.
+> - **Nova função pura exportada `countDeadFeatures(features, targets, eps)`** — implementa exatamente o que o plano descreveu: variância ENTRE médias de alvos, por dimensão. Retorna `{ deadCount, totalDims, deadIndices }`.
+> - **Preflight em `trainScalersAndRegressors`**: se `deadCount / totalDims > 0.30` em qualquer olho, **`throw new Error('degenerate_features: ...')`** antes do fit/scaler/solveLinear. Log claro com percentuais L/R. Hoje o catch de `completeCalibration` engole (A1-1 pendente), mas quando A1-1 for feito a propagação para a UI já está pronta.
+> - `__irisflowDebug.varianceBreaches()` e `__irisflowDebug.deadFeatures()` expostos no console.
+> - **7 testes novos** em `src/calibration.a1-2.test.ts` para `countDeadFeatures`: correlação com alvo, feature constante, ruído intra-alvo alto mas média igual, único alvo, features vazias, eps configurável, cenário 9 pontos × 30 dims disparando o corte de 30%.
+> - **Total: 14 arquivos, 84 testes verdes**. Build + electron:compile ok.
+> - **Sem mudança de comportamento no caminho feliz** (variâncias sem óculos ficam entre 0.10 e 1.15). Preserva baseline de 57 px / 0.9°.
 
 Adicione o piso que falta:
 
