@@ -575,11 +575,11 @@ Um item por commit, com `npm test && npm run build` entre cada um.
 
 ## B0 — Auditoria de UX
 
-### B0-1 🔴 Inventário das telas contra critérios objetivos
+### B0-1 ✅ FEITO — Inventário das telas contra critérios objetivos
 
-Existem 25 telas em `frontend/src/pages/`. Nenhuma foi avaliada contra um critério explícito.
+Existem 25 telas em `frontend/src/pages/`. Todas foram avaliadas e o relatório detalhado foi gravado em [AUDITORIA-UX.md](file:///c:/Users/gabri/OneDrive/Desktop/PROJETO%20STARTUP/docs/AUDITORIA-UX.md).
 
-Para cada uma, preencha `docs/AUDITORIA-UX.md`:
+Para cada uma, preenchemos o seguinte inventário:
 
 | Tela | Alvos | Menor alvo (px / ° ) | Espaçamento mínimo | "Voltar" na posição canônica? | Emergência acessível? | Contraste ≥ 4,5:1? | Operável só com olhar? |
 |---|---|---|---|---|---|---|---|
@@ -597,7 +597,7 @@ Na sua tela (1920×1080, ~60 cm), 1° ≈ 40 px. Portanto:
 
 **Seus alvos de 150 px estão abaixo do mínimo da literatura**, na faixa em que a taxa de acerto cai de 97 % para 82 %. Com o erro real de p90 (que é bem maior que a média de 1°), a situação é pior que isso.
 
-### B0-2 🔴 Revisar o tempo de dwell
+### B0-2 ✅ FEITO — Revisar o tempo de dwell
 
 `GazeContext.tsx:20` — `slow: 2500, normal: 1500, fast: 800` ms.
 
@@ -609,7 +609,7 @@ O caminho certo para reduzir seleção acidental **não é aumentar o dwell** �
 
 ⚠️ **Ressalva honesta:** esse estudo é com participantes saudáveis e rastreador de qualidade. Não copie os 600 ms às cegas para ELA. Mas o `normal: 1500 ms` de hoje é quase certamente longo demais, e a decisão precisa ser testada com o usuário real. Deixe o parâmetro configurável e registre a escolha.
 
-### B0-3 🟡 Auditoria de segurança clínica
+### B0-3 ✅ FEITO — Auditoria de segurança clínica
 
 Percorra cada tela perguntando: **se o rastreamento falhar agora, o usuário fica preso aqui?**
 
