@@ -697,7 +697,7 @@ Visível antes da calibração e sob demanda. Boa parte dos problemas de precis�
 
 ## B2 — Aplicar o design system
 
-### B2-1 🔴 Migrar as telas do paciente
+### B2-1 ✅ FEITO - Migrar as telas do paciente
 
 Ordem por criticidade de comunicação:
 
@@ -710,13 +710,13 @@ Ordem por criticidade de comunicação:
 
 Uma tela por commit, com print antes/depois no commit.
 
-### B2-2 🟡 Separar telas de cuidador
+### B2-2 ✅ FEITO - Separar telas de cuidador
 
 `SettingsScreen`, `CaregiverDashboard`, `LoginScreen`, e as de diagnóstico **não são operadas por olhar**. Elas podem usar controles densos, tipografia menor, formulários — e devem, porque otimizá-las para olhar prejudica quem as usa de fato com mouse.
 
 Marque com um layout distinto para a diferença ser visível de imediato, e proteja o acesso com PIN (B4-3).
 
-### B2-3 🟢 Revisar as telas de lazer
+### B2-3 ✅ FEITO - Revisar as telas de lazer
 
 Os jogos (`BubblePop`, `Memory`, `Drawing`, `FollowTarget`) têm requisitos diferentes: alvos podem ser menores porque errar não tem custo. **Mas o botão de sair, não** — esse segue o padrão. Um usuário preso num jogo sem conseguir sair é falha de segurança, não de UX.
 
