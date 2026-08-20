@@ -55,7 +55,8 @@
       "title": "Keyboard Layout",
       "frequency": "Frequency PT-BR",
       "alphabetical": "Alphabetical",
-      "qwerty": "QWERTY"
+      "qwerty": "QWERTY",
+      "hierarchical": "Hierarchical Scan"
     },
     "sound": {
       "title": "System Audio",

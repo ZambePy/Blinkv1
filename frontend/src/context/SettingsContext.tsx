@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 
 type DwellSpeed = 'slow' | 'normal' | 'fast';
-type KeyboardLayout = 'frequency' | 'alphabetical' | 'qwerty';
+type KeyboardLayout = 'frequency' | 'alphabetical' | 'qwerty' | 'hierarchical';
 type Theme = 'light' | 'dark';
 
 interface Settings {

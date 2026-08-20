@@ -739,7 +739,7 @@ Implementação para a V1, sem depender de nuvem:
 
 ⚠️ Sugestão deve ser **estável**: reordenar a lista enquanto o usuário está fixando é a pior coisa possível — ele seleciona o que não queria. Congele a lista durante um dwell em andamento.
 
-### B3-2 🟡 Teclado por varredura hierárquica
+### B3-2 ✅ FEITO - Teclado por varredura hierárquica
 
 Alternativa ao QWERTY em tela cheia para quando a precisão estiver ruim ou o usuário cansado. Seleciona grupo de letras (6 alvos grandes), depois a letra (6 alvos grandes).
 

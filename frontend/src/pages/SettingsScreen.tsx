@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
-  ArrowLeft,
   UserCog,
   Clock,
   Mic,
@@ -10,7 +9,6 @@ import {
   Volume2,
   VolumeX,
   Download,
-  LogOut,
   Target,
   Moon,
   Sun,
@@ -46,7 +44,7 @@ export const SettingsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { settings, updateSettings } = useSettings();
-  const { isCaregiver, loginCaregiver, logout, currentProfile } = useAuth();
+  const { isCaregiver, loginCaregiver, currentProfile } = useAuth();
   const toast = useToast();
 
   const [pin, setPin] = useState('');
@@ -348,10 +346,11 @@ export const SettingsScreen: React.FC = () => {
     { key: 'normal', label: t('settings.dwell.normal'), value: '1.5s' },
     { key: 'fast', label: t('settings.dwell.fast'), value: '0.8s' },
   ];
-  const layoutOptions: { key: 'frequency' | 'alphabetical' | 'qwerty'; label: string }[] = [
+  const layoutOptions: { key: 'frequency' | 'alphabetical' | 'qwerty' | 'hierarchical'; label: string }[] = [
     { key: 'frequency', label: t('settings.layout.frequency') },
     { key: 'alphabetical', label: t('settings.layout.alphabetical') },
     { key: 'qwerty', label: t('settings.layout.qwerty') },
+    { key: 'hierarchical', label: t('settings.layout.hierarchical') },
   ];
 
   return (

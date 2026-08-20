@@ -26,4 +26,14 @@ describe('SettingsContext', () => {
     expect(raw).toContain('fast');
     expect(raw).toContain('qwerty');
   });
+
+  it('permite definir layout de varredura hierárquica', () => {
+    const { result } = renderHook(() => useSettings(), { wrapper });
+    act(() => {
+      result.current.updateSettings({ keyboardLayout: 'hierarchical' });
+    });
+    expect(result.current.settings.keyboardLayout).toBe('hierarchical');
+    const raw = localStorage.getItem('irisflow_settings');
+    expect(raw).toContain('hierarchical');
+  });
 });

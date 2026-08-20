@@ -55,7 +55,8 @@
       "title": "Layout do Teclado",
       "frequency": "Frequência PT-BR",
       "alphabetical": "Alfabético",
-      "qwerty": "QWERTY"
+      "qwerty": "QWERTY",
+      "hierarchical": "Varredura Hierárquica"
     },
     "sound": {
       "title": "Áudio do Sistema",
