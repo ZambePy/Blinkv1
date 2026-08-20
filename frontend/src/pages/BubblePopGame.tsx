@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { BackButton } from './components/ui/BackButton';
 
 export const BubblePopGame: React.FC = () => {
-  const navigate = useNavigate();
   const [score, setScore] = useState(0);
   const [pos, setPos] = useState({ top: '45%', left: '45%' });
 
@@ -29,33 +27,9 @@ export const BubblePopGame: React.FC = () => {
         Estoura Bolhas
       </h1>
 
-      <button
-        type="button"
-        onClick={() => navigate('/games')}
-        aria-label="Sair e voltar aos mini-jogos"
-        style={{
-          position: 'absolute',
-          top: '1.5rem',
-          left: '1.5rem',
-          zIndex: 50,
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          padding: '0.75rem 1.5rem',
-          background: 'rgba(255,255,255,0.7)',
-          backdropFilter: 'blur(12px)',
-          border: '2px solid rgba(255,255,255,0.8)',
-          borderRadius: '999px',
-          cursor: 'pointer',
-          fontFamily: 'Boldonse, sans-serif',
-          fontWeight: 700,
-          fontSize: '1rem',
-          color: '#4f46e5',
-          boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
-        }}
-      >
-        <ArrowLeft size={20} aria-hidden="true" /> Sair
-      </button>
+      <div style={{ position: 'absolute', top: '1.5rem', left: '1.5rem', zIndex: 50 }}>
+        <BackButton to="/games" />
+      </div>
 
       <div
         role="status"
