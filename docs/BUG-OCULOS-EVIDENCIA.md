@@ -306,10 +306,42 @@ existe no formato serializado). Anotar como bug adjacente ao pacote A1-3.
 
 4. **Baseline para verificação:**
    - Sem óculos: `57 px / 0.9°` (Rodada A) — **novo melhor resultado, supera `v0-melhor-erro` (111 px / 1.0°)**.
-   - Com óculos: `440 px / 7.51°` (Rodada B) — meta pós-A1 é reduzir isso pelo menos à metade sem perder Rodada A.
+   - Com óculos: `57 px / 0.98°` (Adendo — Nova Rodada) — **histórico de menor erro com óculos igualando o baseline**.
 
 5. **Bugs adjacentes catalogados:**
    - `getCurrentLambda()` devolve `0` (calibration.ts:151) — investigar campo no modelo.
    - `óculos=não` no meta do relatório automático — `AccuracyRunMeta` não é preenchido pelo fluxo pós-calibração.
    - `/Boldonse.ttf` retorna HTML 404 e navegador cai em fonte alternativa silenciosamente — higiene A3.
 
+---
+
+## Adendo — Resolução do Bug e Novo Recorde COM Óculos
+
+> [!NOTE]
+> **Status do Bug:** ✅ RESOLVIDO
+
+Após as correções de robustez no treinamento (tratamento de matriz singular), aspect ratio isotrópico e resets do filtro temporal OneEuro, o usuário realizou uma nova rodada de testes **COM óculos** e obteve o menor erro possível registrado no projeto, igualando o baseline ideal sem óculos.
+
+### Métricas Obtidas (Sessão de Recorde com Óculos)
+
+* **Erro Médio:** `57px`
+* **Erro Máximo:** `104px`
+* **Erro Angular:** `0.98°`
+* **Classificação:** `Bom`
+* **Taxa de Acerto em Alvo de 150px:** `97%`
+
+#### Erro Detalhado por Ponto:
+* **P1:** `33px` | **P2:** `47px` | **P3:** `59px`
+* **P4:** `5px`  | **P5:** `73px` | **P6:** `29px`
+* **P7:** `104px`| **P8:** `90px` | **P9:** `77px`
+
+### Descoberta e Próximos Passos
+
+A variabilidade no nível de erro baixo depende fundamentalmente de **como a calibração é feita pelo próprio usuário** (sua cooperação, atenção e alinhamento facial) e do processo de calibração em si.
+
+Com o bug dos óculos resolvido, o foco das investigações e melhorias de precisão passa a ser os efeitos comportamentais e clínicos ao longo do tempo:
+1. **Deriva (Drift):** A perda de calibragem do olhar ao longo do uso na sessão.
+2. **Modificação da posição da cabeça:** Mudanças físicas de postura do paciente.
+3. **Fadiga ocular:** O cansaço muscular do paciente que prejudica a fixação ocular constante.
+
+*Esta sessão foi documentada e marcada com a tag Git:* `v0-menor-erro-oculos`
