@@ -144,6 +144,12 @@ export interface EngineDiagnostics {
     cadenceMs: number;
     applyGazeCorrection: boolean;
   };
+  framing: {
+    hasFace: boolean;
+    iod: number;
+    faceCenter: { x: number; y: number };
+    specularRatio: number;
+  };
 }
 
 export interface GazeEngine {
@@ -308,6 +314,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let diagL2csValidFrames = 0;
   let diagL2csTotalFrames = 0;
   let diagPose: { yaw: number; pitch: number; roll: number } = { yaw: 0, pitch: 0, roll: 0 };
+  let latestIod = 0;
+  let latestFaceCenter = { x: 0.5, y: 0.5 };
+  let latestSpecularRatio = 0;
+  let latestHasFace = false;
   let diagBlink = false;
   let diagL2csYaw = 0;
   let diagL2csPitch = 0;
@@ -389,6 +399,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
 
       if (!hasFace) {
         calibration.feedFaceMetrics(false, 0);
+        latestHasFace = false;
+        latestIod = 0;
+        latestFaceCenter = { x: 0.5, y: 0.5 };
+        latestSpecularRatio = 0;
         // A1-4 — face perdida zera o timer de degradação; sem rosto o problema
         // é 'no_face', não 'degraded'. Quando o rosto voltar, começa uma nova
         // janela de 500 ms antes de considerar degradado novamente.
@@ -450,6 +464,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           (landmarks[33].y - landmarks[263].y) ** 2,
         );
         calibration.feedFaceMetrics(true, rawIod);
+        latestHasFace = true;
+        latestIod = rawIod;
+        latestFaceCenter = { x: landmarks[1].x, y: landmarks[1].y };
 
         const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
         const faceMatrix = rawMatrix ? new Float32Array(rawMatrix) : undefined;
@@ -509,6 +526,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // irisVisibilityPercentage (EAR) que continua sendo calculado
           // no extractor.
           const cropQuality = qualityAnalyzer.analyze(videoEl, landmarks);
+          latestSpecularRatio = cropQuality.specularRatio ?? 0;
           // Hotfix — pose viaja no `quality` para que `feedRawData` possa
           // rejeitar amostras de calibração cuja cabeça se afastou do
           // baseline do ponto (fonte principal do colapso da coluna
@@ -760,6 +778,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           expandFactor: EXPERIMENT.expandFactor,
           cadenceMs: EXPERIMENT.l2csCadenceMs,
           applyGazeCorrection: EXPERIMENT.applyGazeCorrection,
+        },
+        framing: {
+          hasFace: latestHasFace,
+          iod: latestIod,
+          faceCenter: latestFaceCenter,
+          specularRatio: latestSpecularRatio,
         },
       };
     },

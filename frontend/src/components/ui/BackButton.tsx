@@ -1,28 +1,26 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft } from 'lucide-react';
+import { GazeButton } from './GazeButton';
 
-export const BackButton: React.FC = () => {
+interface BackButtonProps {
+  to?: string;
+}
+
+export const BackButton: React.FC<BackButtonProps> = ({ to }) => {
   const navigate = useNavigate();
   return (
-    <button
-      onClick={() => navigate(-1)}
+    <GazeButton
+      onClick={() => (to ? navigate(to) : navigate(-1))}
+      width={180}
+      height={64}
       style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '0.5rem',
-        padding: '0.75rem 1.5rem',
-        background: 'var(--color-card-bg)',
-        borderRadius: '1rem',
-        color: '#1B54A8',
-        fontSize: '1rem',
-        fontWeight: 700,
         border: 'none',
-        cursor: 'pointer',
         boxShadow: '0 4px 16px rgba(27,84,168,0.12)',
       }}
+      aria-label="Voltar para a tela anterior"
     >
       <ArrowLeft size={24} /> Voltar
-    </button>
+    </GazeButton>
   );
 };

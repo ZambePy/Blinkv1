@@ -83,6 +83,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const dwellTargetRef = useRef<HTMLElement | null>(null);
   const dwellStartMsRef = useRef<number>(0);
   const refractoryUntilRef = useRef<number>(0);
+  const lastDwellTargetRef = useRef<HTMLElement | null>(null);
+  const exitTimeMsRef = useRef<number>(0);
+  const frozenDwellProgressRef = useRef<number>(0);
 
   useEffect(() => {
     dwellMsRef.current = DWELL_MS_BY_SPEED[settings.dwellSpeed];
@@ -160,6 +163,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const engineIsCalibrating = engineRef.current?.getState() === 'calibrating';
       // A1-4 — em degraded, só permite dwell em botões de emergência.
       const isDegraded = sample.degraded === true;
+      const gracePeriodMs = 300;
+
       if (!engineIsCalibrating && sample.hasFace && now >= refractoryUntilRef.current) {
         const el = document.elementFromPoint(sample.x, sample.y);
         const t = el?.closest(DWELL_SELECTOR) as HTMLElement | null;
@@ -169,67 +174,101 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ((t as HTMLButtonElement).disabled ||
             t.getAttribute('aria-disabled') === 'true' ||
             t.dataset.noDwell === 'true');
-        // A1-4 — em degraded, bloqueia dwell exceto no botão de emergência.
         const blockedByDegraded = isDegraded && !isEmergency;
+
         if (t && !isDisabled && !blockedByDegraded) {
           hitTarget = t;
-          // Em degraded, o único hitTarget possível é um botão de emergência;
-          // usa dwell mais longo para reduzir falso positivo (o cursor está
-          // errado e pode passar acidentalmente pelo botão).
           const effectiveDwellMs = isDegraded && isEmergency
             ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
             : dwellMsRef.current;
+
           if (t !== dwellTargetRef.current) {
-            if (dwellTargetRef.current) {
-              dwellTargetRef.current.classList.remove('gaze-hover');
+            // Re-entrada no mesmo botão dentro da janela de tolerância: restaura progresso
+            if (t === lastDwellTargetRef.current && exitTimeMsRef.current > 0 && now - exitTimeMsRef.current < gracePeriodMs) {
+              dwellTargetRef.current = t;
+              t.classList.add('gaze-hover');
+              dwellStartMsRef.current = now - (frozenDwellProgressRef.current * effectiveDwellMs);
+              exitTimeMsRef.current = 0;
+              frozenDwellProgressRef.current = 0;
+            } else {
+              // Mudou de alvo: limpa o anterior imediatamente
+              if (dwellTargetRef.current) {
+                dwellTargetRef.current.classList.remove('gaze-hover');
+                dwellTargetRef.current.style.removeProperty('--gaze-dwell-progress');
+              }
+              if (lastDwellTargetRef.current && lastDwellTargetRef.current !== t) {
+                lastDwellTargetRef.current.classList.remove('gaze-hover');
+                lastDwellTargetRef.current.style.removeProperty('--gaze-dwell-progress');
+              }
+
+              dwellTargetRef.current = t;
+              dwellStartMsRef.current = now;
+              t.classList.add('gaze-hover');
+              lastDwellTargetRef.current = t;
+              exitTimeMsRef.current = 0;
+              frozenDwellProgressRef.current = 0;
             }
-            dwellTargetRef.current = t;
-            dwellStartMsRef.current = now;
-            t.classList.add('gaze-hover');
-          } else {
+          }
+
+          if (t === dwellTargetRef.current) {
             const elapsed = now - dwellStartMsRef.current;
             dwellPct = Math.min(1, elapsed / effectiveDwellMs);
+            t.style.setProperty('--gaze-dwell-progress', `${dwellPct}`);
+
             if (elapsed >= effectiveDwellMs) {
               t.click();
-              // Sprint 4 — recalibração implícita: o centro do botão que
-              // acabou de ser clicado é um alvo supervisionado. Alimenta o
-              // regressor online (RLS) com as features do frame atual.
-              // O calibrator faz rejeição de outlier internamente, então
-              // dwell acidental (usuário olhando para outro lugar) é
-              // descartado antes de degradar o modelo.
               try {
                 const rect = t.getBoundingClientRect();
                 const centerX = rect.left + rect.width / 2;
                 const centerY = rect.top + rect.height / 2;
                 engineRef.current?.calibration.feedOnlineSample(centerX, centerY);
               } catch (e) {
-                // Falha silenciosa — recalibração online é otimização, não requisito.
+                // Silencia
               }
               t.classList.remove('gaze-hover');
+              t.style.removeProperty('--gaze-dwell-progress');
               refractoryUntilRef.current = now + REFRACTORY_MS;
               dwellTargetRef.current = null;
+              lastDwellTargetRef.current = null;
               dwellStartMsRef.current = 0;
+              exitTimeMsRef.current = 0;
+              frozenDwellProgressRef.current = 0;
               dwellPct = 0;
               hitTarget = null;
             }
           }
         } else {
-          // Alvo bloqueado (por disabled OU por degraded sem ser emergência).
-          // Limpa o dwell em progresso para o usuário não pensar que segurar
-          // o olhar vai clicar mesmo assim.
-          if (dwellTargetRef.current) {
-            dwellTargetRef.current.classList.remove('gaze-hover');
-          }
+          handleGazeExit(now);
+        }
+      } else {
+        handleGazeExit(now);
+      }
+
+      function handleGazeExit(timestamp: number) {
+        if (dwellTargetRef.current) {
+          const effectiveDwellMs = isDegraded && dwellTargetRef.current.dataset.emergency === 'true'
+            ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
+            : dwellMsRef.current;
+          const elapsed = timestamp - dwellStartMsRef.current;
+          frozenDwellProgressRef.current = Math.min(1, elapsed / effectiveDwellMs);
+          exitTimeMsRef.current = timestamp;
+          lastDwellTargetRef.current = dwellTargetRef.current;
+          
+          // Desacopla dwellTarget ativo mas deixa o estilo congelado na tela
           dwellTargetRef.current = null;
+        }
+
+        // Se expirou a tolerância, remove do DOM o estado visual de progresso e hover
+        if (exitTimeMsRef.current > 0 && timestamp - exitTimeMsRef.current >= gracePeriodMs) {
+          if (lastDwellTargetRef.current) {
+            lastDwellTargetRef.current.classList.remove('gaze-hover');
+            lastDwellTargetRef.current.style.removeProperty('--gaze-dwell-progress');
+          }
+          lastDwellTargetRef.current = null;
+          exitTimeMsRef.current = 0;
+          frozenDwellProgressRef.current = 0;
           dwellStartMsRef.current = 0;
         }
-      } else if (!sample.hasFace) {
-        // Face lost — freeze dwell, reset target so re-entry restarts fresh.
-        if (dwellTargetRef.current) {
-          dwellTargetRef.current.classList.remove('gaze-hover');
-        }
-        dwellTargetRef.current = null;
-        dwellStartMsRef.current = 0;
       }
 
       // Move cursor via transform (no layout / no React re-render).

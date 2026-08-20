@@ -607,3 +607,103 @@ select:focus-visible,
 .accuracy-regular   { color: #ffcc00; }
 .accuracy-poor      { color: #ef4444; }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Design System de Interação Ocular — Componentes Canônicos (Sprint B1)
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+.gaze-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  border-radius: 1.5rem;
+  border: 2px solid var(--color-card-border);
+  background: var(--color-card-bg);
+  color: var(--color-text-base);
+  font-family: inherit;
+  font-weight: 700;
+  font-size: 1.25rem;
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s, box-shadow 0.15s;
+}
+
+/* 1. Entrada: contorno destacado */
+.gaze-button.gaze-hover {
+  border-color: var(--color-primary, #1B54A8);
+  box-shadow: 0 0 0 4px rgba(27, 84, 168, 0.2);
+  transform: scale(1.02);
+}
+
+/* 2. Área de acionamento 1.2x */
+.gaze-button-hit-area {
+  position: absolute;
+  top: -10%;
+  left: -10%;
+  right: -10%;
+  bottom: -10%;
+  border-radius: inherit;
+  z-index: 1;
+  pointer-events: auto; /* Garante que o hover seja disparado nessa zona maior */
+}
+
+.gaze-button-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  pointer-events: none;
+}
+
+/* 3. Progresso: anel desenhado por gradiente cônico */
+.gaze-button-progress-ring {
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 4px solid transparent;
+  background: conic-gradient(
+    #1B54A8 calc(var(--gaze-dwell-progress, 0) * 360deg),
+    transparent 0
+  ) border-box;
+  -webkit-mask: 
+     linear-gradient(#fff 0 0) padding-box, 
+     linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  opacity: 0;
+  z-index: 3;
+}
+.gaze-button.gaze-hover .gaze-button-progress-ring {
+  opacity: 1;
+}
+
+/* Emergência estilizada */
+.gaze-button.emergency {
+  border-color: #ef4444;
+  color: #ef4444;
+  background: rgba(239, 68, 68, 0.05);
+}
+.gaze-button.emergency.gaze-hover {
+  border-color: #dc2626;
+  box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.25);
+  background: rgba(239, 68, 68, 0.1);
+  color: #ffffff;
+}
+.gaze-button.emergency .gaze-button-progress-ring {
+  background: conic-gradient(
+    #ef4444 calc(var(--gaze-dwell-progress, 0) * 360deg),
+    transparent 0
+  ) border-box;
+}
+
+/* Estado desabilitado */
+.gaze-button:disabled,
+.gaze-button[data-no-dwell="true"] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+

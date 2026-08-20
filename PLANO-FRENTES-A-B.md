@@ -625,7 +625,7 @@ Isto é análise de risco de uso — a prática que a norma de engenharia de usa
 
 > Hoje cada tela reimplementa seus próprios botões e espaçamentos. Isso significa que ajustar o tamanho mínimo exige mexer em 25 arquivos — e que uma tela vai ficar para trás. Centralizar é pré-requisito de tudo que vem depois.
 
-### B1-1 🔴 Tokens dimensionados em ângulo, não em pixel
+### B1-1 ✅ FEITO — Tokens dimensionados em ângulo, não em pixel
 
 Pixel não é a unidade certa. O que importa é o **ângulo visual**, que depende da distância e da densidade da tela.
 
@@ -646,7 +646,7 @@ export function degToPx(deg: number, distanceCm: number, pxPerCm: number): numbe
 
 Emita como CSS custom properties (`--gaze-target-min`, `--gaze-spacing-min`) para o CSS consumir sem recalcular.
 
-### B1-2 🔴 `GazeButton` canônico
+### B1-2 ✅ FEITO — `GazeButton` canônico
 
 Um componente, todas as telas. Encapsula o padrão de feedback de fixação em três estágios que a literatura de AAC recomenda e que o app hoje implementa de forma inconsistente:
 
@@ -662,7 +662,7 @@ Requisitos:
 - O anel de progresso **nunca regride** — congela durante a graça, não volta a zero. Regressão visual é lida como "o sistema não me viu"
 - Contraste ≥ 4,5:1 e o estado **nunca comunicado só por cor** (WCAG 1.4.1) — parte dos usuários tem alteração de percepção de cor por idade ou medicação
 
-### B1-3 🟡 Layout em grade segura
+### B1-3 ✅ FEITO — Layout em grade segura
 
 ```tsx
 <GazeGrid columns={3} rows={2} />
@@ -672,7 +672,7 @@ Calcula o tamanho de célula a partir do viewport e dos tokens, e **avisa se a c
 
 Regra de conteúdo: **máximo 6 alvos por tela** para telas do paciente. O protótipo de referência do LAIS/UFRN usa 4 a 6, e a literatura de fixação recomenda ficar em torno disso. Mais que isso exige varredura hierárquica (B3-2).
 
-### B1-4 🔴 Posições canônicas
+### B1-4 ✅ FEITO — Posições canônicas
 
 Duas coisas na mesma posição em **todas** as telas do paciente:
 
@@ -681,13 +681,13 @@ Duas coisas na mesma posição em **todas** as telas do paciente:
 
 O valor está na constância: o usuário aprende a posição uma vez e não gasta busca visual depois. Enforce com um layout compartilhado, não com disciplina.
 
-### B1-5 🟡 Zona de descanso
+### B1-5 ✅ FEITO — Zona de descanso
 
 Hoje a tela inteira é potencialmente clicável, então o usuário **nunca pode simplesmente olhar** sem risco de acionar algo. É fadiga cognitiva permanente e um dos maiores incômodos relatados em sistemas de dwell.
 
 Faixa neutra, visualmente distinta, com `data-no-dwell="true"`, presente em todas as telas do paciente. Mínimo `restZoneMinDeg`.
 
-### B1-6 🟡 Indicador de enquadramento
+### B1-6 ✅ FEITO — Indicador de enquadramento
 
 Componente reutilizável mostrando distância estimada (via distância interocular) contra a faixa ideal, centralização do rosto, e — integrando com A1-5 — **aviso de reflexo nos óculos**.
 
