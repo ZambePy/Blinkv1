@@ -82,7 +82,7 @@ export const InitialSplash: React.FC = () => {
           </p>
         </div>
 
-        <div className="animate-scale-in" style={{ animationDelay: '0.4s', marginTop: '2rem' }}>
+        <div className="animate-scale-in" style={{ animationDelay: '0.4s', marginTop: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
           <button
             type="button"
             onClick={() => navigate('/tutorial')}
@@ -115,6 +115,32 @@ export const InitialSplash: React.FC = () => {
             }}
           >
             Vamos começar? <ArrowRight size={28} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigate('/menu')}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '2px solid rgba(27, 84, 168, 0.3)',
+              color: '#3b82f6',
+              padding: '1rem 2.5rem',
+              borderRadius: '1.5rem',
+              fontSize: '1.15rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = 'rgba(27, 84, 168, 0.15)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            Modo Desenvolvedor
           </button>
         </div>
       </div>
