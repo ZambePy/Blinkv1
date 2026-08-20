@@ -180,6 +180,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!engineIsCalibrating && sample.hasFace && now >= refractoryUntilRef.current) {
         const el = document.elementFromPoint(sample.x, sample.y);
         const t = el?.closest(DWELL_SELECTOR) as HTMLElement | null;
+        const customDwell = t?.dataset.dwellMs ? parseInt(t.dataset.dwellMs, 10) : null;
         const isEmergency = !!t && t.dataset.emergency === 'true';
         const isDisabled =
           !!t &&
@@ -190,9 +191,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (t && !isDisabled && !blockedByDegraded) {
           hitTarget = t;
-          const effectiveDwellMs = isDegraded && isEmergency
+          const effectiveDwellMs = customDwell || (isDegraded && isEmergency
             ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
-            : dwellMsRef.current;
+            : dwellMsRef.current);
 
           if (t !== dwellTargetRef.current) {
             // Re-entrada no mesmo botão dentro da janela de tolerância: restaura progresso
@@ -258,9 +259,11 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       function handleGazeExit(timestamp: number) {
         if (dwellTargetRef.current) {
-          const effectiveDwellMs = isDegraded && dwellTargetRef.current.dataset.emergency === 'true'
+          const t = dwellTargetRef.current;
+          const customDwell = t.dataset.dwellMs ? parseInt(t.dataset.dwellMs, 10) : null;
+          const effectiveDwellMs = customDwell || (isDegraded && t.dataset.emergency === 'true'
             ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
-            : dwellMsRef.current;
+            : dwellMsRef.current);
           const elapsed = timestamp - dwellStartMsRef.current;
           frozenDwellProgressRef.current = Math.min(1, elapsed / effectiveDwellMs);
           exitTimeMsRef.current = timestamp;

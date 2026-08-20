@@ -107,7 +107,10 @@ export const KeyboardScreen: React.FC = () => {
     }
   };
 
-  const rows = useMemo(() => LAYOUTS[settings.keyboardLayout], [settings.keyboardLayout]);
+  const rows = useMemo(() => {
+    if (settings.keyboardLayout === 'hierarchical') return [];
+    return LAYOUTS[settings.keyboardLayout as keyof typeof LAYOUTS];
+  }, [settings.keyboardLayout]);
 
   const triggerFeedback = (key: string) => {
     setLastPressed(key);
@@ -287,9 +290,9 @@ export const KeyboardScreen: React.FC = () => {
           ) : (
             /* Teclado Padrão (QWERTY / Frequencial / Alfabético) */
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
-              {rows.map((row, ri) => (
+              {rows.map((row: string[], ri: number) => (
                 <div key={ri} style={{ display: 'flex', gap: '0.75rem', flex: 1 }}>
-                  {row.map((k) => (
+                  {row.map((k: string) => (
                     <GazeButton
                       key={k}
                       onClick={() => append(k)}

@@ -745,7 +745,7 @@ Alternativa ao QWERTY em tela cheia para quando a precisão estiver ruim ou o us
 
 Dobra o número de seleções, mas **cada uma é muito mais confiável**. Com alvos de 6,6° em vez de 2°, a taxa de acerto sobe o suficiente para compensar. Ofereça como modo alternativo, comutável pelo cuidador — não substitua o layout atual.
 
-### B3-3 🟡 Modo descanso
+### B3-3 ✅ FEITO - Modo descanso
 
 O usuário não está sempre se comunicando. Sem um modo de descanso, o sistema segue interpretando fixações involuntárias como comandos durante a TV, a visita, o cochilo.
 

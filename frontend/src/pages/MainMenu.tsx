@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { MessageSquare, Keyboard, Monitor, Settings, Heart, LogOut } from 'lucide-react';
+import { MessageSquare, Keyboard, Monitor, Settings, Heart, Moon } from 'lucide-react';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeGrid } from '../components/ui/GazeGrid';
 import { GazeButton } from '../components/ui/GazeButton';
@@ -130,14 +130,14 @@ export const MainMenu: React.FC = () => {
               </GazeButton>
             ))}
 
-            {/* Sexto alvo: Sair */}
+            {/* Sexto alvo: Modo Descanso (B3-3) */}
             <GazeButton
-              onClick={() => navigate('/login')}
+              onClick={() => navigate('/rest')}
               style={{
                 height: '100%',
                 borderRadius: '2rem',
-                border: '2px solid rgba(239, 68, 68, 0.3)',
-                background: 'rgba(239, 68, 68, 0.05)',
+                border: '2px solid rgba(71, 85, 105, 0.3)',
+                background: 'rgba(71, 85, 105, 0.05)',
               }}
             >
               <div 
@@ -151,14 +151,14 @@ export const MainMenu: React.FC = () => {
                   width: '100%'
                 }}
               >
-                <div style={{ color: '#ef4444', marginBottom: '0.75rem' }}>
-                  <LogOut size={56} />
+                <div style={{ color: '#475569', marginBottom: '0.75rem' }}>
+                  <Moon size={56} />
                 </div>
-                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ef4444' }}>
-                  Sair
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--color-text-base)' }}>
+                  Modo Descanso
                 </div>
-                <div style={{ fontSize: '1.1rem', opacity: 0.7, marginTop: '0.5rem', fontWeight: 500, color: '#ef4444' }}>
-                  Encerrar sessão de comunicação
+                <div style={{ fontSize: '1.1rem', opacity: 0.7, marginTop: '0.5rem', fontWeight: 500, color: 'var(--color-text-base)' }}>
+                  Pausar tela e descansar olhar
                 </div>
               </div>
             </GazeButton>

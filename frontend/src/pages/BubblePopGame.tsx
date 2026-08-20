@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { BackButton } from './components/ui/BackButton';
+import { BackButton } from '../components/ui/BackButton';
 
 export const BubblePopGame: React.FC = () => {
   const [score, setScore] = useState(0);

@@ -41,6 +41,7 @@ const MemoryGame = lazyNamed(() => import('./pages/games/MemoryGame'), 'MemoryGa
 const DrawingGame = lazyNamed(() => import('./pages/games/DrawingGame'), 'DrawingGame');
 const MyOptionsScreen = lazyNamed(() => import('./pages/core/MyOptionsScreen'), 'MyOptionsScreen');
 const PictogramScreen = lazyNamed(() => import('./pages/core/PictogramScreen'), 'PictogramScreen');
+const RestScreen = lazyNamed(() => import('./pages/core/RestScreen'), 'RestScreen');
 const EmergencyEscalation = lazyNamed(
   () => import('./pages/output/EmergencyEscalation'),
   'EmergencyEscalation'
@@ -125,6 +126,16 @@ function App() {
                     element={
                       <Protected>
                         <MainMenu />
+                      </Protected>
+                    }
+                  />
+
+                  {/* Modo Descanso (B3-3) */}
+                  <Route
+                    path="/rest"
+                    element={
+                      <Protected>
+                        <RestScreen />
                       </Protected>
                     }
                   />
