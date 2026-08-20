@@ -25,8 +25,8 @@ const CALIBRATION_POINTS = [
 const BG           = '#000000';
 const TEXT_PRIMARY = '#FFFFFF';
 const TEXT_DIM     = 'rgba(255,255,255,0.65)';
-const ACCENT       = '#F59E0B';          // Âmbar — alta visibilidade, não cansa
-const ACCENT_DIM   = 'rgba(245,158,11,0.15)';
+const ACCENT       = '#1B54A8';          // IrisFlow Azul
+const ACCENT_DIM   = 'rgba(27, 84, 168, 0.15)';
 const SUCCESS      = '#22C55E';
 const DANGER       = '#EF4444';
 
@@ -271,15 +271,15 @@ export const CalibrationCheck: React.FC = () => {
                 type="button"
                 onClick={() => setStage('tutorial')}
                 style={{
-                  background: ACCENT, color: '#000',
+                  background: ACCENT, color: '#fff',
                   border: 'none', padding: '1rem 3rem',
                   borderRadius: '2rem', fontSize: '1.15rem', fontWeight: 800,
                   cursor: 'pointer', alignSelf: 'center',
-                  boxShadow: '0 8px 24px rgba(245,158,11,0.40)',
+                  boxShadow: '0 8px 24px rgba(27, 84, 168, 0.40)',
                   transition: 'transform 0.15s, box-shadow 0.15s',
                 }}
-                onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(245,158,11,0.55)'; }}
-                onMouseOut={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(245,158,11,0.40)'; }}
+                onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; }}
+                onMouseOut={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; }}
               >
                 Entendi ✓
               </button>
@@ -298,7 +298,7 @@ export const CalibrationCheck: React.FC = () => {
             }}>
               {/* Preview do ponto — mostra ao usuário o que vai aparecer */}
               <div style={{ position: 'relative', width: 90, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ position: 'absolute', width: 80, height: 80, borderRadius: '50%', background: `radial-gradient(circle, rgba(245,158,11,0.22) 0%, transparent 70%)`, animation: 'cfRadarPing 2s ease-out infinite' }} />
+                <div style={{ position: 'absolute', width: 80, height: 80, borderRadius: '50%', background: `radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)`, animation: 'cfRadarPing 2s ease-out infinite' }} />
                 <div style={{ width: 34, height: 34, borderRadius: '50%', background: ACCENT, boxShadow: `0 0 30px ${ACCENT}`, animation: 'cfPulse 1.2s infinite alternate' }} />
                 <div style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: BG, opacity: 0.85 }} />
               </div>
@@ -308,7 +308,7 @@ export const CalibrationCheck: React.FC = () => {
                   Calibração
                 </h1>
                 <p style={{ fontSize: '1.1rem', color: TEXT_DIM, margin: 0, lineHeight: 1.65 }}>
-                  Um ponto <strong style={{ color: ACCENT }}>amarelo</strong> vai aparecer na tela.<br />
+                  Um ponto <strong style={{ color: ACCENT }}>azul</strong> vai aparecer na tela.<br />
                   Olhe <strong style={{ color: TEXT_PRIMARY }}>direto para ele</strong> e fique parado até sumir.
                 </p>
               </div>
@@ -346,7 +346,7 @@ export const CalibrationCheck: React.FC = () => {
                 aria-describedby="l2cs-status-message"
                 style={{
                   background: l2csReady ? ACCENT : 'rgba(255,255,255,0.10)',
-                  color: l2csReady ? '#000' : TEXT_DIM,
+                  color: l2csReady ? '#fff' : TEXT_DIM,
                   border: 'none',
                   padding: '1rem 3rem',
                   borderRadius: '2rem',
@@ -354,11 +354,11 @@ export const CalibrationCheck: React.FC = () => {
                   cursor: l2csReady ? 'pointer' : 'not-allowed',
                   display: 'flex', alignItems: 'center', gap: '0.7rem',
                   transition: 'all 0.2s',
-                  boxShadow: l2csReady ? '0 8px 24px rgba(245,158,11,0.40)' : 'none',
+                  boxShadow: l2csReady ? '0 8px 24px rgba(27, 84, 168, 0.40)' : 'none',
                   opacity: l2csReady ? 1 : 0.75,
                 }}
-                onMouseOver={e => { if (l2csReady) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(245,158,11,0.55)'; } }}
-                onMouseOut={e => { if (l2csReady) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(245,158,11,0.40)'; } }}
+                onMouseOver={e => { if (l2csReady) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } }}
+                onMouseOut={e => { if (l2csReady) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; } }}
               >
                 {l2csReady && '👁  Começar'}
                 {l2csStatus === 'loading' && (<><Loader2 size={20} style={{ animation: 'cfSpin 1s linear infinite' }} />Carregando...</>)}
@@ -399,13 +399,13 @@ export const CalibrationCheck: React.FC = () => {
               <div style={{
                 position: 'absolute', bottom: '2.5rem', left: '50%', transform: 'translateX(-50%)',
                 zIndex: 40, padding: '0.7rem 2rem',
-                background: errorMessage ? 'rgba(239,68,68,0.12)' : 'rgba(245,158,11,0.10)',
+                background: errorMessage ? 'rgba(239,68,68,0.12)' : 'rgba(27, 84, 168, 0.10)',
                 border: `1px solid ${errorMessage ? DANGER : ACCENT}`,
                 borderRadius: '3rem',
                 color: errorMessage ? DANGER : ACCENT,
                 fontSize: '1.05rem', fontWeight: 600, whiteSpace: 'nowrap',
               }}>
-                {errorMessage ?? '👁  Prepare-se… olhe para o ponto amarelo'}
+                {errorMessage ?? '👁  Prepare-se… olhe para o ponto azul'}
               </div>
             )}
 
@@ -433,20 +433,20 @@ export const CalibrationCheck: React.FC = () => {
                       {/* Halo pulsante — "olhe aqui" */}
                       <div style={{
                         position: 'absolute', width: 72, height: 72, borderRadius: '50%',
-                        background: 'radial-gradient(circle, rgba(245,158,11,0.22) 0%, transparent 70%)',
+                        background: 'radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)',
                         animation: 'cfRadarPing 2.2s ease-out infinite',
                       }} />
                       {/* Anel rotativo de guia */}
                       <div style={{
                         position: 'absolute', width: 52, height: 52, borderRadius: '50%',
-                        border: '2px solid rgba(245,158,11,0.40)',
+                        border: '2px solid rgba(27, 84, 168, 0.40)',
                         animation: 'cfHalo 3s linear infinite',
                       }} />
-                      {/* Ponto central — âmbar, limpo, sem elementos sobre ele */}
+                      {/* Ponto central — azul, limpo, sem elementos sobre ele */}
                       <div style={{
                         width: 34, height: 34, borderRadius: '50%',
                         background: ACCENT,
-                        boxShadow: `0 0 0 8px rgba(245,158,11,0.18), 0 0 36px ${ACCENT}`,
+                        boxShadow: `0 0 0 8px rgba(27, 84, 168, 0.18), 0 0 36px ${ACCENT}`,
                         animation: 'cfPulse 1.2s infinite alternate',
                       }} />
                     </div>
@@ -504,17 +504,17 @@ export const CalibrationCheck: React.FC = () => {
         {/* ─── KEYFRAMES ───────────────────────────────────────────────── */}
         <style>{`
           @keyframes cfPulse {
-            0%   { transform: scale(0.88); box-shadow: 0 0 0 8px rgba(245,158,11,0.15), 0 0 18px #F59E0B; }
-            100% { transform: scale(1.10); box-shadow: 0 0 0 12px rgba(245,158,11,0.05), 0 0 44px #F59E0B; }
+            0%   { transform: scale(0.88); box-shadow: 0 0 0 8px rgba(27, 84, 168, 0.15), 0 0 18px #1B54A8; }
+            100% { transform: scale(1.10); box-shadow: 0 0 0 12px rgba(27, 84, 168, 0.05), 0 0 44px #1B54A8; }
           }
           @keyframes cfRadarPing {
             0%   { transform: scale(0.1); opacity: 0.9; }
             100% { transform: scale(2.8); opacity: 0; }
           }
           @keyframes cfHalo {
-            from { transform: rotate(0deg)   scale(1);    border-color: rgba(245,158,11,0.40); }
-            50%  { transform: rotate(180deg) scale(1.06); border-color: rgba(245,158,11,0.20); }
-            to   { transform: rotate(360deg) scale(1);    border-color: rgba(245,158,11,0.40); }
+            from { transform: rotate(0deg)   scale(1);    border-color: rgba(27, 84, 168, 0.40); }
+            50%  { transform: rotate(180deg) scale(1.06); border-color: rgba(27, 84, 168, 0.20); }
+            to   { transform: rotate(360deg) scale(1);    border-color: rgba(27, 84, 168, 0.40); }
           }
           @keyframes cfSpin    { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
           @keyframes cfFadeUp  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }

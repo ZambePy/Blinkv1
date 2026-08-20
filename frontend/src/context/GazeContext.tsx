@@ -11,7 +11,6 @@ import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
-import * as accuracy from '@tracker/accuracy';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import { useSettings } from './SettingsContext';
 
@@ -246,7 +245,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const isInCalibration = engineRef.current?.getState() === 'calibrating';
         const isCalibrated = engineRef.current?.calibration.isCalibrated() ?? false;
 
-        if (isInCalibration || !isCalibrated || accuracy.isAccuracyTesting) {
+        if (isInCalibration || !isCalibrated) {
           // Hard-hide: move offscreen + opacity 0
           cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
           cursorRef.current.style.opacity = '0';
