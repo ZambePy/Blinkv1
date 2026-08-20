@@ -17,6 +17,7 @@ import {
   Video,
   Square,
   FileText,
+  Activity,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -25,6 +26,7 @@ import { useToast } from '../context/ToastContext';
 import { api, ApiError } from '../utils/api';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { useGaze } from '../context/GazeContext';
+import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPreset } from '@tracker/oneEuroFilter';
@@ -353,81 +355,7 @@ export const SettingsScreen: React.FC = () => {
   ];
 
   return (
-    <main
-      role="main"
-      style={{
-        minHeight: '100vh',
-        background: 'var(--settings-bg, linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%))',
-        transition: 'background 0.4s ease',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '2rem',
-      }}
-    >
-      <div
-        className="glass-dark"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          padding: '1.25rem 2rem',
-          borderRadius: '1.5rem',
-          marginBottom: '2rem',
-        }}
-      >
-        <button
-          onClick={() => navigate('/menu')}
-          aria-label={t('settings.returnToMenu')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            background: 'rgba(255,255,255,0.15)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '999px',
-            padding: '0.6rem 1.2rem',
-            cursor: 'pointer',
-            fontSize: '0.95rem',
-            fontWeight: 700,
-          }}
-        >
-          <ArrowLeft size={20} aria-hidden="true" /> {t('settings.returnToMenu')}
-        </button>
-        <h1
-          style={{
-            flex: 1,
-            textAlign: 'center',
-            color: 'white',
-            fontSize: '1.5rem',
-            fontWeight: 700,
-          }}
-        >
-          {t('settings.title')}
-        </h1>
-        <button
-          onClick={() => {
-            logout();
-            navigate('/menu');
-          }}
-          aria-label={t('settings.logout')}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.5rem',
-            background: 'rgba(255,255,255,0.15)',
-            color: 'white',
-            border: 'none',
-            borderRadius: '999px',
-            padding: '0.6rem 1.2rem',
-            cursor: 'pointer',
-            fontSize: '0.95rem',
-            fontWeight: 700,
-          }}
-        >
-          <LogOut size={18} aria-hidden="true" /> {t('settings.logout')}
-        </button>
-      </div>
-
+    <CaregiverPageLayout title={t('settings.title')}>
       <div
         style={{
           display: 'flex',
@@ -438,6 +366,51 @@ export const SettingsScreen: React.FC = () => {
           width: '100%',
         }}
       >
+        {/* Card de Acesso ao Painel do Cuidador */}
+        <section
+          aria-labelledby="dashboard-link-title"
+          style={{
+            ...cardStyle,
+            background: 'rgba(34, 197, 94, 0.08)',
+            borderColor: 'rgba(34, 197, 94, 0.2)',
+          }}
+        >
+          <h2
+            id="dashboard-link-title"
+            style={{
+              fontSize: '1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              color: '#4ade80',
+              marginTop: 0,
+            }}
+          >
+            <Activity size={24} /> Painel de Acompanhamento (Rotina & Diário)
+          </h2>
+          <p style={{ color: '#cbd5e1', opacity: 0.9, marginBottom: '1.5rem', fontSize: '1rem', fontFamily: 'system-ui, sans-serif' }}>
+            Acesse a rotina diária de cuidados, registro clínico de sintomas e histórico recente do paciente.
+          </p>
+          <button
+            onClick={() => navigate('/caregiver')}
+            style={{
+              padding: '0.8rem 1.8rem',
+              background: '#22c55e',
+              border: 'none',
+              color: 'white',
+              borderRadius: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(34, 197, 94, 0.3)',
+              fontSize: '1rem',
+              transition: 'background 0.2s',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = '#15803d')}
+            onMouseOut={(e) => (e.currentTarget.style.background = '#22c55e')}
+          >
+            Abrir Painel do Cuidador
+          </button>
+        </section>
         {/* Temporizador */}
         <section aria-labelledby="dwell-title" style={cardStyle}>
           <div
@@ -1227,6 +1200,6 @@ export const SettingsScreen: React.FC = () => {
           produção.
         </p>
       </div>
-    </main>
+    </CaregiverPageLayout>
   );
 };
