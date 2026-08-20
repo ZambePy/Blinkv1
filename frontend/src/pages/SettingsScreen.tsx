@@ -16,6 +16,8 @@ import {
   Square,
   FileText,
   Activity,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -24,6 +26,7 @@ import { useToast } from '../context/ToastContext';
 import { api, ApiError } from '../utils/api';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { useGaze } from '../context/GazeContext';
+import { useReminders } from '../context/ReminderContext';
 import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
@@ -67,6 +70,25 @@ export const SettingsScreen: React.FC = () => {
   const [recStats, setRecStats] = useState<{ frames: number; dropped: number }>(
     { frames: 0, dropped: 0 },
   );
+
+  const [newReminderTitle, setNewReminderTitle] = useState('');
+  const [newReminderTime, setNewReminderTime] = useState('');
+  const { reminders, addReminder, deleteReminder } = useReminders();
+
+  const handleAddReminder = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newReminderTitle.trim() || !newReminderTime.trim()) {
+      toast.error('Por favor, preencha o título e o horário.');
+      return;
+    }
+    addReminder({
+      title: newReminderTitle.trim(),
+      time: newReminderTime,
+    });
+    setNewReminderTitle('');
+    setNewReminderTime('');
+    toast.success('Lembrete adicionado com sucesso!');
+  };
   useEffect(() => {
     if (!recActive) {
       // Após parar, atualiza uma última vez pra o painel refletir o total
@@ -1144,6 +1166,181 @@ export const SettingsScreen: React.FC = () => {
               {recStats.frames} frames
               {recStats.dropped > 0 && ` (${recStats.dropped} descartados — buffer cheio)`}
             </div>
+          </div>
+        </section>
+
+        {/* Lembretes e Rotinas do Paciente (B3-4) */}
+        <section aria-labelledby="reminders-title" style={cardStyle}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.5rem',
+            }}
+          >
+            <Clock size={28} color="#1B54A8" aria-hidden="true" />
+            <h2
+              id="reminders-title"
+              style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}
+            >
+              Lembretes e Rotina Diária
+            </h2>
+          </div>
+
+          {/* Form para Adicionar Lembrete */}
+          <form
+            onSubmit={handleAddReminder}
+            style={{
+              display: 'flex',
+              gap: '1rem',
+              marginBottom: '2rem',
+              alignItems: 'flex-end',
+              flexWrap: 'wrap',
+            }}
+          >
+            <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <label htmlFor="reminder-title" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#475569' }}>
+                Atividade / Lembrete
+              </label>
+              <input
+                id="reminder-title"
+                type="text"
+                value={newReminderTitle}
+                onChange={(e) => setNewReminderTitle(e.target.value)}
+                placeholder="Ex: Tomar água, Fisioterapia, etc."
+                style={{
+                  padding: '0.85rem 1.25rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid var(--color-card-border)',
+                  background: 'var(--color-card-bg)',
+                  color: 'var(--color-text-base)',
+                  fontSize: '1rem',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '130px' }}>
+              <label htmlFor="reminder-time" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#475569' }}>
+                Horário
+              </label>
+              <input
+                id="reminder-time"
+                type="time"
+                value={newReminderTime}
+                onChange={(e) => setNewReminderTime(e.target.value)}
+                style={{
+                  padding: '0.85rem 1.25rem',
+                  borderRadius: '0.75rem',
+                  border: '2px solid var(--color-card-border)',
+                  background: 'var(--color-card-bg)',
+                  color: 'var(--color-text-base)',
+                  fontSize: '1rem',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                }}
+              />
+            </div>
+
+            <button
+              type="submit"
+              style={{
+                padding: '0.85rem 1.5rem',
+                borderRadius: '0.75rem',
+                border: 'none',
+                background: '#1B54A8',
+                color: '#ffffff',
+                fontWeight: 700,
+                fontSize: '1rem',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                height: '47px',
+              }}
+            >
+              <Plus size={20} /> Adicionar
+            </button>
+          </form>
+
+          {/* Lista de Lembretes Ativos */}
+          <div>
+            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#475569', marginBottom: '1rem' }}>
+              Lembretes Agendados ({reminders.length})
+            </h3>
+            {reminders.length === 0 ? (
+              <p style={{ fontSize: '0.95rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                Nenhum lembrete configurado no momento.
+              </p>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                {reminders.map((r) => (
+                  <div
+                    key={r.id}
+                    style={{
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      padding: '1rem 1.25rem',
+                      background: 'var(--color-bg-base)',
+                      border: '1.5px solid var(--color-card-border)',
+                      borderRadius: '1rem',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+                      <div
+                        style={{
+                          width: '40px',
+                          height: '40px',
+                          borderRadius: '50%',
+                          background: 'rgba(27, 84, 168, 0.05)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          color: '#1B54A8',
+                          fontWeight: 700,
+                          fontSize: '0.9rem',
+                        }}
+                      >
+                        {r.time}
+                      </div>
+                      <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text-base)' }}>
+                        {r.title}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        deleteReminder(r.id);
+                        toast.success('Lembrete removido com sucesso!');
+                      }}
+                      aria-label={`Excluir lembrete ${r.title}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#ef4444',
+                        cursor: 'pointer',
+                        padding: '0.5rem',
+                        borderRadius: '0.5rem',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        transition: 'background 0.2s',
+                      }}
+                      onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)')}
+                      onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
+                      onFocus={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)')}
+                      onBlur={(e) => (e.currentTarget.style.background = 'transparent')}
+                    >
+                      <Trash2 size={20} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </section>
 

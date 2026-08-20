@@ -1,8 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertOctagon } from 'lucide-react';
+import { AlertOctagon, Bell } from 'lucide-react';
 import { BackButton } from './BackButton';
 import { GazeButton } from './GazeButton';
+import { useReminders } from '../../context/ReminderContext';
 
 interface GazePageLayoutProps {
   children: React.ReactNode;
@@ -18,6 +19,7 @@ export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
   backRoute,
 }) => {
   const navigate = useNavigate();
+  const { activeReminder, dismissActiveReminder } = useReminders();
 
   return (
     <div
@@ -97,6 +99,84 @@ export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>
         {children}
       </div>
+
+      {/* Lembretes e Rotina (B3-4) */}
+      {activeReminder && (
+        <div
+          style={{
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            width: '100vw',
+            height: '100vh',
+            background: 'rgba(2, 6, 23, 0.8)',
+            backdropFilter: 'blur(4px)',
+            zIndex: 99999,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: "'Inter', sans-serif",
+          }}
+        >
+          <div
+            style={{
+              background: 'var(--color-card-bg)',
+              border: '3px solid var(--color-primary)',
+              borderRadius: '2.5rem',
+              padding: '3rem',
+              maxWidth: '550px',
+              width: '90%',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '2rem',
+              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+            }}
+          >
+            <div
+              style={{
+                width: '80px',
+                height: '80px',
+                borderRadius: '50%',
+                background: 'rgba(27, 84, 168, 0.08)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--color-primary)',
+              }}
+            >
+              <Bell size={40} />
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+              <span style={{ fontSize: '1.2rem', opacity: 0.6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+                Lembrete de Rotina
+              </span>
+              <h2 style={{ fontSize: '2.2rem', fontWeight: 900, margin: 0, color: 'var(--color-text-base)' }}>
+                {activeReminder.title}
+              </h2>
+              <span style={{ fontSize: '1.25rem', opacity: 0.7, fontWeight: 600 }}>
+                Horário agendado: {activeReminder.time}
+              </span>
+            </div>
+
+            <GazeButton
+              onClick={dismissActiveReminder}
+              style={{
+                width: '280px',
+                height: '76px',
+                borderRadius: '1.75rem',
+                background: 'var(--color-primary)',
+                color: '#ffffff',
+                boxShadow: '0 10px 20px rgba(27, 84, 168, 0.25)',
+              }}
+            >
+              <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>Confirmar</span>
+            </GazeButton>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

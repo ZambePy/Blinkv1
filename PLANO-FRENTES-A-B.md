@@ -751,7 +751,7 @@ O usuário não está sempre se comunicando. Sem um modo de descanso, o sistema 
 
 Tela neutra, de baixo estímulo, reativada por gesto deliberado (fixação longa num alvo único e grande). Reduz seleção acidental e fadiga, e é uma das poucas funcionalidades que melhora a experiência *não usando* o sistema.
 
-### B3-4 🟡 Lembretes e rotina
+### B3-4 ✅ FEITO - Lembretes e rotina
 
 Medicação, hidratação, mudança de posição, fisioterapia. Configurado pelo cuidador, exibido como notificação discreta, confirmável com uma fixação.
 

@@ -56,6 +56,8 @@ interface GazeContextValue {
   setFilterPreset: (preset: FilterPreset) => void;
   getDiagnostics: () => EngineDiagnostics | null;
   isDwelling: boolean;
+  isComposing: boolean;
+  setIsComposing: (val: boolean) => void;
 }
 
 const GazeContext = createContext<GazeContextValue | null>(null);
@@ -74,6 +76,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [state, setState] = useState<EngineState>('idle');
   const [l2csStatus, setL2csStatus] = useState<L2CSStatus>('loading');
   const [isDwelling, setIsDwelling] = useState(false);
+  const [isComposing, setIsComposing] = useState(false);
   const wasDwellingRef = useRef(false);
 
   // Sub pool: subscribers can hook in and receive callbacks. We keep the callback
@@ -500,8 +503,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setFilterPreset: (preset: FilterPreset) => engineRef.current?.setFilterPreset(preset),
       getDiagnostics: () => engineRef.current?.getDiagnostics() ?? null,
       isDwelling,
+      isComposing,
+      setIsComposing,
     }),
-    [subscribe, state, l2csStatus, calibration, recording, isDwelling],
+    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

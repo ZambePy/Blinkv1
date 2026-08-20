@@ -51,7 +51,7 @@ const SUB_GROUPS = {
 
 export const KeyboardScreen: React.FC = () => {
   const { settings } = useSettings();
-  const { isDwelling } = useGaze();
+  const { isDwelling, setIsComposing } = useGaze();
   const [text, setText] = useState('');
   const [lastPressed, setLastPressed] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
@@ -61,6 +61,11 @@ export const KeyboardScreen: React.FC = () => {
     if (isDwelling) return;
     setSuggestions(getPredictions(text));
   }, [text, isDwelling]);
+
+  useEffect(() => {
+    setIsComposing(text.trim().length > 0);
+    return () => setIsComposing(false);
+  }, [text, setIsComposing]);
 
   const handleSelectSuggestion = (word: string) => {
     setText((t) => {

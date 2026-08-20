@@ -25,6 +25,8 @@ vi.mock('../context/GazeContext', () => ({
   useGaze: () => ({
     isDwelling: false,
     subscribe: vi.fn(() => vi.fn()),
+    isComposing: false,
+    setIsComposing: vi.fn(),
   }),
 }));
 
