@@ -5,6 +5,7 @@ interface GazeButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> 
   width?: number;
   height?: number;
   emergency?: boolean;
+  noWarn?: boolean;
 }
 
 export const GazeButton: React.FC<GazeButtonProps> = ({
@@ -12,6 +13,7 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
   width,
   height,
   emergency = false,
+  noWarn = false,
   disabled,
   style,
   className = '',
@@ -21,7 +23,7 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
   const minPx = 198; // Equivale a 5.0° (GAZE_TOKENS.targetMinDeg)
 
   useEffect(() => {
-    if (import.meta.env?.DEV) {
+    if (import.meta.env?.DEV && !noWarn) {
       const w = width ?? buttonRef.current?.offsetWidth;
       const h = height ?? buttonRef.current?.offsetHeight;
       if ((w && w < minPx) || (h && h < minPx)) {
@@ -30,7 +32,7 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
         );
       }
     }
-  }, [width, height]);
+  }, [width, height, noWarn]);
 
   return (
     <button
