@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Heart, Plus, Trash2, Volume2 } from 'lucide-react';
-import { PageHeader } from '../../components/ui/PageHeader';
-import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useAuth } from '../../context/AuthContext';
+import { GazePageLayout } from '../../components/ui/GazePageLayout';
+import { GazeButton } from '../../components/ui/GazeButton';
 
 interface Favorite {
   id: string;
@@ -56,161 +56,186 @@ export const MyOptionsScreen: React.FC = () => {
   };
 
   return (
-    <main
-      role="main"
-      aria-labelledby="options-title"
-      style={{
-        minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f8fafc 0%, #e2e8f0 100%)',
-        padding: '2rem',
-      }}
-    >
-      <PageHeader
-        title="Minhas Opções — Favoritos"
-        icon={<Heart color="#e11d48" aria-hidden="true" />}
-      />
-
-      <section
-        aria-labelledby="add-fav"
+    <GazePageLayout showBack={true} backRoute="/menu">
+      <div
         style={{
-          maxWidth: 900,
-          margin: '0 auto',
-          background: 'var(--color-card-bg)',
-          padding: '2rem',
-          borderRadius: '1.5rem',
-          boxShadow: '0 10px 30px rgba(0,0,0,0.05)',
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          width: '100%',
+          boxSizing: 'border-box',
+          gap: '2rem',
         }}
       >
-        <h2 id="add-fav" style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', margin: '0 0 1rem 0' }}>
-          Adicionar frase favorita
-        </h2>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <label htmlFor="fav-input" className="sr-only">
-            Nova frase favorita
-          </label>
-          <input
-            id="fav-input"
-            type="text"
-            value={newText}
-            onChange={(e) => setNewText(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && addFavorite()}
-            placeholder="Ex.: Quero um copo de água"
-            aria-label="Nova frase favorita"
-            style={{
-              flex: 1,
-              minWidth: 200,
-              padding: '1rem 1.25rem',
-              borderRadius: '1rem',
-              border: '2px solid var(--color-card-border)',
-              fontSize: '1.1rem',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          />
-          <PrimaryButton
-            onClick={addFavorite}
-            disabled={!newText.trim()}
-            aria-label="Adicionar frase aos favoritos"
-          >
-            <Plus size={18} aria-hidden="true" /> Adicionar
-          </PrimaryButton>
-        </div>
-      </section>
-
-      <section
-        aria-labelledby="fav-list-title"
-        style={{
-          maxWidth: 900,
-          margin: '1.5rem auto 0',
-        }}
-      >
-        <h2
-          id="fav-list-title"
-          style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', margin: '0 0 1rem 0.5rem' }}
-        >
-          Meus favoritos ({favorites.length})
-        </h2>
-
-        {favorites.length === 0 ? (
-          <p
-            role="status"
-            style={{
-              padding: '2rem',
-              background: 'var(--color-card-bg)',
-              borderRadius: '1.5rem',
-              color: 'var(--color-text-base)', opacity: 0.8,
-              textAlign: 'center',
-              fontFamily: 'system-ui, sans-serif',
-            }}
-          >
-            Nenhum favorito ainda. Adicione a primeira frase acima.
+        <div style={{ textAlign: 'center' }}>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+            <Heart color="#e11d48" fill="#e11d48" size={36} /> Minhas Opções — Favoritos
+          </h1>
+          <p style={{ fontSize: '1.2rem', color: 'rgba(255,255,255,0.7)', margin: 0 }}>
+            Gerencie e selecione suas frases favoritas
           </p>
-        ) : (
-          <ul
-            style={{
-              listStyle: 'none',
-              padding: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '0.75rem',
-            }}
+        </div>
+
+        {/* Adicionar frase (Operado por cuidador com mouse/teclado) */}
+        <section
+          aria-labelledby="add-fav"
+          style={{
+            background: 'var(--color-card-bg)',
+            padding: '1.5rem',
+            borderRadius: '1.5rem',
+            border: '2px solid var(--color-card-border)',
+          }}
+        >
+          <h2 id="add-fav" style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', margin: '0 0 1rem 0', fontWeight: 700 }}>
+            Adicionar frase favorita (Cuidador)
+          </h2>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+            <input
+              id="fav-input"
+              type="text"
+              value={newText}
+              onChange={(e) => setNewText(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addFavorite()}
+              placeholder="Ex.: Quero um copo de água"
+              aria-label="Nova frase favorita"
+              style={{
+                flex: 1,
+                minWidth: 200,
+                padding: '0.75rem 1.25rem',
+                borderRadius: '1rem',
+                border: '2px solid var(--color-card-border)',
+                fontSize: '1.1rem',
+                background: 'var(--color-bg-base)',
+                color: 'var(--color-text-base)',
+                outline: 'none',
+              }}
+            />
+            <button
+              onClick={addFavorite}
+              disabled={!newText.trim()}
+              style={{
+                padding: '0.75rem 1.5rem',
+                background: newText.trim() ? '#1B54A8' : 'rgba(255,255,255,0.05)',
+                color: newText.trim() ? 'white' : 'rgba(255,255,255,0.2)',
+                border: '1px solid var(--color-card-border)',
+                borderRadius: '1rem',
+                fontWeight: 700,
+                fontSize: '1.1rem',
+                cursor: newText.trim() ? 'pointer' : 'not-allowed',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+              }}
+            >
+              <Plus size={18} /> Adicionar
+            </button>
+          </div>
+        </section>
+
+        {/* Lista de Favoritos (Operado por paciente com gaze) */}
+        <section
+          aria-labelledby="fav-list-title"
+          style={{
+            flex: 1,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
+          <h2
+            id="fav-list-title"
+            style={{ fontSize: '1.35rem', color: '#ffffff', margin: '0 0 1rem 0.5rem', fontWeight: 700 }}
           >
-            {favorites.map((fav) => (
-              <li
-                key={fav.id}
-                style={{
-                  background: 'var(--color-card-bg)',
-                  padding: '1rem 1.25rem',
-                  borderRadius: '1rem',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.04)',
-                  display: 'flex',
-                  gap: '0.75rem',
-                  alignItems: 'center',
-                }}
-              >
-                <span style={{ flex: 1, fontSize: '1.1rem', color: '#1e293b' }}>{fav.text}</span>
-                <button
-                  type="button"
-                  onClick={() => speak(fav.text)}
-                  aria-label={`Falar frase: ${fav.text}`}
+            Seus favoritos ({favorites.length})
+          </h2>
+
+          {favorites.length === 0 ? (
+            <p
+              role="status"
+              style={{
+                padding: '3rem 2rem',
+                background: 'var(--color-card-bg)',
+                borderRadius: '1.5rem',
+                color: 'var(--color-text-base)',
+                opacity: 0.8,
+                textAlign: 'center',
+                fontSize: '1.25rem',
+                border: '2px solid var(--color-card-border)',
+              }}
+            >
+              Nenhum favorito ainda. Adicione a primeira frase acima.
+            </p>
+          ) : (
+            <ul
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                margin: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '1rem',
+                maxHeight: '400px',
+                overflowY: 'auto',
+              }}
+            >
+              {favorites.map((fav) => (
+                <li
+                  key={fav.id}
                   style={{
-                    background: '#eff6ff',
-                    color: '#1B54A8',
-                    border: 'none',
-                    padding: '0.6rem 0.9rem',
-                    borderRadius: '0.75rem',
-                    cursor: 'pointer',
+                    background: 'var(--color-card-bg)',
+                    padding: '1rem 1.5rem',
+                    borderRadius: '1.5rem',
+                    border: '2px solid var(--color-card-border)',
                     display: 'flex',
-                    gap: '0.4rem',
+                    gap: '1rem',
                     alignItems: 'center',
-                    fontWeight: 700,
                   }}
                 >
-                  <Volume2 size={18} aria-hidden="true" /> Falar
-                </button>
-                <button
-                  type="button"
-                  onClick={() => removeFavorite(fav.id)}
-                  aria-label={`Remover favorito: ${fav.text}`}
-                  style={{
-                    background: '#fef2f2',
-                    color: '#dc2626',
-                    border: 'none',
-                    padding: '0.6rem 0.9rem',
-                    borderRadius: '0.75rem',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    gap: '0.4rem',
-                    alignItems: 'center',
-                    fontWeight: 700,
-                  }}
-                >
-                  <Trash2 size={18} aria-hidden="true" />
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-    </main>
+                  <span style={{ flex: 1, fontSize: '1.4rem', fontWeight: 700, color: 'var(--color-text-base)' }}>
+                    {fav.text}
+                  </span>
+
+                  {/* Falar - GazeButton */}
+                  <GazeButton
+                    onClick={() => speak(fav.text)}
+                    style={{
+                      width: '180px',
+                      height: '60px',
+                      background: 'rgba(27, 84, 168, 0.05)',
+                      border: '2px solid rgba(27, 84, 168, 0.3)',
+                      borderRadius: '1rem',
+                      color: '#1B54A8',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '1.2rem', fontWeight: 800 }}>
+                      <Volume2 size={22} /> Falar
+                    </div>
+                  </GazeButton>
+
+                  {/* Remover - Botão comum (Cuidador) */}
+                  <button
+                    type="button"
+                    onClick={() => removeFavorite(fav.id)}
+                    aria-label={`Remover favorito: ${fav.text}`}
+                    style={{
+                      background: 'rgba(239, 68, 68, 0.05)',
+                      color: '#dc2626',
+                      border: '1px solid rgba(239, 68, 68, 0.2)',
+                      padding: '0.75rem',
+                      borderRadius: '1rem',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <Trash2 size={20} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+    </GazePageLayout>
   );
 };
