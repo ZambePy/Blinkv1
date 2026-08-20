@@ -68,10 +68,10 @@ export const MyOptionsScreen: React.FC = () => {
         }}
       >
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
             <Heart color="#e11d48" fill="#e11d48" size={36} /> Minhas Opções — Favoritos
           </h1>
-          <p style={{ fontSize: '1.2rem', color: 'rgba(255,255,255,0.7)', margin: 0 }}>
+          <p style={{ fontSize: '1.2rem', color: 'var(--color-text-base)', opacity: 0.7, margin: 0 }}>
             Gerencie e selecione suas frases favoritas
           </p>
         </div>
@@ -143,7 +143,7 @@ export const MyOptionsScreen: React.FC = () => {
         >
           <h2
             id="fav-list-title"
-            style={{ fontSize: '1.35rem', color: '#ffffff', margin: '0 0 1rem 0.5rem', fontWeight: 700 }}
+            style={{ fontSize: '1.35rem', color: 'var(--color-text-base)', margin: '0 0 1rem 0.5rem', fontWeight: 700 }}
           >
             Seus favoritos ({favorites.length})
           </h2>

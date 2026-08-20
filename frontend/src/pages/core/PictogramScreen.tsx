@@ -48,10 +48,10 @@ export const PictogramScreen: React.FC = () => {
         }}
       >
         <div style={{ textAlign: 'center' }}>
-          <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+          <h1 style={{ fontSize: '2.5rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0' }}>
             Pictogramas (CAA)
           </h1>
-          <p style={{ fontSize: '1.2rem', color: 'rgba(255, 255, 255, 0.7)', margin: 0, fontWeight: 500 }}>
+          <p style={{ fontSize: '1.2rem', color: 'var(--color-text-base)', opacity: 0.7, margin: 0, fontWeight: 500 }}>
             Página {currentPage + 1} de {totalPages} — Olhe para selecionar e falar
           </p>
         </div>

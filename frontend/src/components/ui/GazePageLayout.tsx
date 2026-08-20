@@ -25,8 +25,8 @@ export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
         position: 'relative',
         width: '100vw',
         height: '100vh',
-        background: '#000000', // Padrão escuro CAA para descanso ocular
-        color: '#ffffff',
+        background: 'var(--color-bg-base)', // Agora usa fundo branco/claro do tema
+        color: 'var(--color-text-base)',
         overflow: 'hidden',
         boxSizing: 'border-box',
         padding: '8.5rem 3rem 3rem 3rem', // Espaço para a barra superior
@@ -61,13 +61,13 @@ export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
           style={{
             width: '320px', // Equivalente a 8.0° (GAZE_TOKENS.restZoneMinDeg)
             height: '100%',
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '2px dashed rgba(255, 255, 255, 0.15)',
+            background: 'rgba(15, 23, 42, 0.03)',
+            border: '2px dashed rgba(15, 23, 42, 0.15)',
             borderRadius: '1.5rem',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'rgba(255, 255, 255, 0.6)',
+            color: 'rgba(15, 23, 42, 0.6)',
             fontSize: '1rem',
             fontWeight: 700,
             cursor: 'default',

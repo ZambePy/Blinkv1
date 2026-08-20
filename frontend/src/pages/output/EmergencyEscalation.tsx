@@ -76,7 +76,7 @@ export const EmergencyEscalation: React.FC = () => {
           >
             <AlertOctagon size={44} /> {t('emergency.title')}
           </h1>
-          <p style={{ fontSize: '1.25rem', color: 'rgba(255,255,255,0.7)', margin: 0, fontWeight: 500 }}>
+          <p style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.7, margin: 0, fontWeight: 500 }}>
             {triggered ? 'Seu alerta foi enviado. Aguarde atendimento.' : 'Selecione o tipo de ajuda necessário'}
           </p>
         </div>
@@ -102,7 +102,7 @@ export const EmergencyEscalation: React.FC = () => {
             <h2 style={{ fontSize: '3rem', color: '#dc2626', textAlign: 'center', marginTop: '1.5rem', fontWeight: 800 }}>
               {t('emergency.alertSent')}
             </h2>
-            <p style={{ fontSize: '1.75rem', color: '#fca5a5', textAlign: 'center', marginTop: '0.5rem', fontWeight: 600 }}>
+            <p style={{ fontSize: '1.75rem', color: '#991b1b', textAlign: 'center', marginTop: '0.5rem', fontWeight: 600 }}>
               {t('emergency.waiting', { label: triggered })}
             </p>
 

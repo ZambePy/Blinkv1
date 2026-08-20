@@ -1,5 +1,4 @@
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { Delete, Play, RotateCcw } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
@@ -27,7 +26,6 @@ const LAYOUTS: Record<'frequency' | 'alphabetical' | 'qwerty', string[][]> = {
 };
 
 export const KeyboardScreen: React.FC = () => {
-  const navigate = useNavigate();
   const { settings } = useSettings();
   const [text, setText] = useState('');
   const [lastPressed, setLastPressed] = useState<string | null>(null);
@@ -106,14 +104,14 @@ export const KeyboardScreen: React.FC = () => {
             style={{
               width: '200px',
               height: '100%',
-              background: text.trim() ? '#1B54A8' : 'rgba(255,255,255,0.05)',
+              background: text.trim() ? '#1B54A8' : 'rgba(15, 23, 42, 0.03)',
               border: '2px solid var(--color-card-border)',
               borderRadius: '1.5rem',
-              color: text.trim() ? 'white' : 'rgba(255,255,255,0.2)',
+              color: text.trim() ? 'white' : 'rgba(15, 23, 42, 0.25)',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.4rem', fontWeight: 800 }}>
-              <Play size={28} fill={text.trim() ? 'white' : 'none'} stroke={text.trim() ? 'white' : 'rgba(255,255,255,0.2)'} /> Falar
+              <Play size={28} fill={text.trim() ? 'white' : 'none'} stroke={text.trim() ? 'white' : 'rgba(15, 23, 42, 0.25)'} /> Falar
             </div>
           </GazeButton>
         </div>

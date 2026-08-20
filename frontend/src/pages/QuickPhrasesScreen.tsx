@@ -93,10 +93,10 @@ export const QuickPhrasesScreen: React.FC = () => {
         }}
       >
         <div style={{ marginBottom: '2.5rem', textAlign: 'center' }}>
-          <h1 style={{ fontSize: '2.75rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+          <h1 style={{ fontSize: '2.75rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0' }}>
             Frases Rápidas
           </h1>
-          <p style={{ fontSize: '1.25rem', color: 'rgba(255, 255, 255, 0.7)', margin: 0, fontWeight: 500 }}>
+          <p style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.7, margin: 0, fontWeight: 500 }}>
             Página {currentPage + 1} de {totalPages} — Olhe para selecionar
           </p>
         </div>

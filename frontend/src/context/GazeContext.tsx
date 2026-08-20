@@ -149,6 +149,15 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
     let cbInvocations = 0;
     const unsubGaze = engine.subscribe((sample) => {
+      const isDevMode = sessionStorage.getItem('irisflow_dev_mode') === 'true';
+      if (isDevMode) {
+        if (cursorRef.current) {
+          cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
+          cursorRef.current.style.opacity = '0';
+        }
+        return;
+      }
+
       const now = performance.now();
 
       // ── Global dwell dispatcher ───────────────────────────────────────────

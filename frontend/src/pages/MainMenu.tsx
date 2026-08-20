@@ -76,7 +76,7 @@ export const MainMenu: React.FC = () => {
             style={{ 
               fontSize: '2.75rem', 
               fontWeight: 800, 
-              color: '#ffffff', 
+              color: 'var(--color-text-base)', 
               margin: '0 0 0.5rem 0', 
               letterSpacing: '-0.02em',
               fontFamily: "'Inter', sans-serif"
@@ -87,7 +87,8 @@ export const MainMenu: React.FC = () => {
           <p 
             style={{ 
               fontSize: '1.25rem', 
-              color: 'rgba(255, 255, 255, 0.7)', 
+              color: 'var(--color-text-base)', 
+              opacity: 0.7,
               margin: 0, 
               fontWeight: 500,
               fontFamily: "'Inter', sans-serif"

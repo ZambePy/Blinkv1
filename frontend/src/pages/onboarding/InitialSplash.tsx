@@ -85,7 +85,10 @@ export const InitialSplash: React.FC = () => {
         <div className="animate-scale-in" style={{ animationDelay: '0.4s', marginTop: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
           <button
             type="button"
-            onClick={() => navigate('/tutorial')}
+            onClick={() => {
+              sessionStorage.removeItem('irisflow_dev_mode');
+              navigate('/tutorial');
+            }}
             aria-label="Vamos começar?"
             style={{
               background: '#1B54A8',
@@ -119,7 +122,10 @@ export const InitialSplash: React.FC = () => {
 
           <button
             type="button"
-            onClick={() => navigate('/menu')}
+            onClick={() => {
+              sessionStorage.setItem('irisflow_dev_mode', 'true');
+              navigate('/menu');
+            }}
             style={{
               background: 'rgba(255, 255, 255, 0.08)',
               border: '2px solid rgba(27, 84, 168, 0.3)',
