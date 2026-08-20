@@ -1,6 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MessageSquare, Keyboard, Monitor, Settings, Heart, LogOut } from 'lucide-react';
+import { GazePageLayout } from '../components/ui/GazePageLayout';
+import { GazeGrid } from '../components/ui/GazeGrid';
+import { GazeButton } from '../components/ui/GazeButton';
 
 interface AppModule {
   id: string;
@@ -15,15 +18,15 @@ const MODULES: AppModule[] = [
   {
     id: 'communication',
     title: 'Comunicação',
-    icon: <MessageSquare size={64} />,
+    icon: <MessageSquare size={56} />,
     color: '#1B54A8', // Azul principal
     route: '/phrases',
-    description: 'Voz, frases rápidas e pictogramas',
+    description: 'Frases rápidas e pictogramas',
   },
   {
     id: 'keyboard',
     title: 'Teclado Virtual',
-    icon: <Keyboard size={64} />,
+    icon: <Keyboard size={56} />,
     color: '#16a34a', // Verde
     route: '/keyboard',
     description: 'Digite livremente',
@@ -31,7 +34,7 @@ const MODULES: AppModule[] = [
   {
     id: 'computer',
     title: 'Computador',
-    icon: <Monitor size={64} />,
+    icon: <Monitor size={56} />,
     color: '#8b5cf6', // Roxo
     route: '/virtual-mouse',
     description: 'Mouse virtual e sistema',
@@ -39,15 +42,15 @@ const MODULES: AppModule[] = [
   {
     id: 'settings',
     title: 'Configurações',
-    icon: <Settings size={64} />,
+    icon: <Settings size={56} />,
     color: '#f59e0b', // Laranja
     route: '/settings',
-    description: 'Velocidade e sensibilidade',
+    description: 'Ajustes e calibração',
   },
   {
     id: 'leisure',
     title: 'Ajuda e Lazer',
-    icon: <Heart size={64} />,
+    icon: <Heart size={56} />,
     color: '#e11d48', // Vermelho/Rosa
     route: '/games',
     description: 'Jogos e relaxamento',
@@ -58,135 +61,109 @@ export const MainMenu: React.FC = () => {
   const navigate = useNavigate();
 
   return (
-    <>
-      <main
+    <GazePageLayout showBack={false} showEmergency={true}>
+      <div
         style={{
-          width: '100vw',
-          height: '100vh',
-          background: 'var(--color-bg-base)',
           display: 'flex',
           flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          padding: '3rem',
-          fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-          overflow: 'hidden',
-          position: 'relative',
+          height: '100%',
+          width: '100%',
+          boxSizing: 'border-box',
         }}
       >
-        <div 
-          className="animate-fade-in-up" 
-          style={{ 
-            width: '100%', 
-            maxWidth: '1200px', 
-            display: 'flex', 
-            flexDirection: 'column',
-            gap: '3rem',
-            zIndex: 10,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', padding: '0 1rem' }}>
-            <div>
-              <h1 style={{ fontSize: '3rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0', letterSpacing: '-0.02em' }}>
-                O que você deseja fazer?
-              </h1>
-              <p style={{ fontSize: '1.4rem', color: 'var(--color-text-base)', opacity: 0.8, margin: 0, fontWeight: 500 }}>
-                Olhe para o bloco desejado para selecioná-lo.
-              </p>
-            </div>
-            
-            <button
-              onClick={() => navigate('/login')}
-              style={{
-                background: 'var(--color-card-bg)',
-                border: '2px solid var(--color-card-border)',
-                borderRadius: '1.5rem',
-                padding: '1rem 1.5rem',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.75rem',
-                color: 'var(--color-text-base)',
-                opacity: 0.8,
-                fontWeight: 700,
-                fontSize: '1.1rem',
-                cursor: 'pointer',
-                transition: 'all 0.2s'
-              }}
-              onMouseOver={(e) => {
-                e.currentTarget.style.color = '#ef4444';
-                e.currentTarget.style.borderColor = '#fecaca';
-                e.currentTarget.style.background = '#fef2f2';
-              }}
-              onMouseOut={(e) => {
-                e.currentTarget.style.color = 'var(--color-text-base)';
-                e.currentTarget.style.borderColor = 'var(--color-card-border)';
-                e.currentTarget.style.background = 'var(--color-card-bg)';
-              }}
-            >
-              <LogOut size={24} /> Sair
-            </button>
-          </div>
-
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
-              gap: '2rem',
-              width: '100%',
+        <div style={{ marginBottom: '2.5rem', textAlign: 'center' }}>
+          <h1 
+            style={{ 
+              fontSize: '2.75rem', 
+              fontWeight: 800, 
+              color: '#ffffff', 
+              margin: '0 0 0.5rem 0', 
+              letterSpacing: '-0.02em',
+              fontFamily: "'Inter', sans-serif"
             }}
           >
-            {MODULES.map((module, idx) => (
-              <button
+            Menu Principal
+          </h1>
+          <p 
+            style={{ 
+              fontSize: '1.25rem', 
+              color: 'rgba(255, 255, 255, 0.7)', 
+              margin: 0, 
+              fontWeight: 500,
+              fontFamily: "'Inter', sans-serif"
+            }}
+          >
+            Olhe para o botão desejado para selecioná-lo.
+          </p>
+        </div>
+
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <GazeGrid columns={3} rows={2}>
+            {MODULES.map((module) => (
+              <GazeButton
                 key={module.id}
                 onClick={() => navigate(module.route)}
-                className="animate-fade-in-up"
-                style={{
-                  animationDelay: `${idx * 0.1}s`,
-                  background: 'var(--color-card-bg)',
-                  borderRadius: '2.5rem',
-                  padding: '2.5rem 2rem',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'flex-start',
-                  gap: '1.5rem',
-                  border: '1px solid var(--color-card-border)',
-                  boxShadow: '0 10px 30px var(--color-card-shadow)',
-                  cursor: 'pointer',
-                  textAlign: 'left',
-                  transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s',
-                  position: 'relative',
-                  overflow: 'hidden',
+                style={{ height: '100%', borderRadius: '2rem' }}
+              >
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    textAlign: 'center', 
+                    padding: '1rem',
+                    width: '100%'
+                  }}
+                >
+                  <div style={{ color: module.color, marginBottom: '0.75rem' }}>
+                    {module.icon}
+                  </div>
+                  <div style={{ fontSize: '1.8rem', fontWeight: 800, color: 'var(--color-text-base)' }}>
+                    {module.title}
+                  </div>
+                  <div style={{ fontSize: '1.1rem', opacity: 0.7, marginTop: '0.5rem', fontWeight: 500, color: 'var(--color-text-base)' }}>
+                    {module.description}
+                  </div>
+                </div>
+              </GazeButton>
+            ))}
+
+            {/* Sexto alvo: Sair */}
+            <GazeButton
+              onClick={() => navigate('/login')}
+              style={{
+                height: '100%',
+                borderRadius: '2rem',
+                border: '2px solid rgba(239, 68, 68, 0.3)',
+                background: 'rgba(239, 68, 68, 0.05)',
+              }}
+            >
+              <div 
+                style={{ 
+                  display: 'flex', 
+                  flexDirection: 'column', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  textAlign: 'center', 
+                  padding: '1rem',
+                  width: '100%'
                 }}
               >
-                <div style={{
-                  background: `${module.color}15`,
-                  color: module.color,
-                  padding: '1.25rem',
-                  borderRadius: '1.5rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}>
-                  {module.icon}
+                <div style={{ color: '#ef4444', marginBottom: '0.75rem' }}>
+                  <LogOut size={56} />
                 </div>
-                
-                <div>
-                  <h2 style={{ fontSize: '2.2rem', fontWeight: 800, color: 'var(--color-text-base)', margin: '0 0 0.5rem 0' }}>
-                    {module.title}
-                  </h2>
-                  <p style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.8, margin: 0, fontWeight: 500 }}>
-                    {module.description}
-                  </p>
+                <div style={{ fontSize: '1.8rem', fontWeight: 800, color: '#ef4444' }}>
+                  Sair
                 </div>
-              </button>
-            ))}
-          </div>
+                <div style={{ fontSize: '1.1rem', opacity: 0.7, marginTop: '0.5rem', fontWeight: 500, color: '#ef4444' }}>
+                  Encerrar sessão de comunicação
+                </div>
+              </div>
+            </GazeButton>
+          </GazeGrid>
         </div>
-        
-        {/* Decorative background elements */}
-        <div style={{ position: 'absolute', top: '-10%', right: '-5%', width: '600px', height: '600px', background: 'radial-gradient(circle, rgba(27, 84, 168, 0.03) 0%, rgba(255,255,255,0) 70%)', borderRadius: '50%', pointerEvents: 'none', zIndex: 0 }} />
-        <div style={{ position: 'absolute', bottom: '-20%', left: '-10%', width: '800px', height: '800px', background: 'radial-gradient(circle, rgba(22, 163, 74, 0.03) 0%, rgba(255,255,255,0) 70%)', borderRadius: '50%', pointerEvents: 'none', zIndex: 0 }} />
-      </main>
-    </>
+      </div>
+    </GazePageLayout>
   );
 };
