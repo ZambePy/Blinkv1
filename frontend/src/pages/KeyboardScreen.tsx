@@ -1,7 +1,9 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, Delete, Play } from 'lucide-react';
+import { Delete, Play, RotateCcw } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
+import { GazePageLayout } from '../components/ui/GazePageLayout';
+import { GazeButton } from '../components/ui/GazeButton';
 
 const LAYOUTS: Record<'frequency' | 'alphabetical' | 'qwerty', string[][]> = {
   frequency: [
@@ -66,190 +68,135 @@ export const KeyboardScreen: React.FC = () => {
   };
 
   return (
-    <main
-      role="main"
-      style={{
-        height: '100vh',
-        width: '100vw',
-        display: 'flex',
-        flexDirection: 'column',
-        background: 'var(--color-bg-base)',
-        padding: '2rem',
-        gap: '2rem',
-        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-      }}
-    >
-      <div style={{ display: 'flex', gap: '1rem', height: '8rem', width: '100%' }}>
-        <button
-          type="button"
-          onClick={() => navigate('/menu')}
-          style={{
-            flex: '0 0 120px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            background: 'var(--color-card-bg)',
-            border: '2px solid var(--color-card-border)',
-            borderRadius: '1.5rem',
-            color: 'var(--color-text-base)', opacity: 0.9,
-            cursor: 'pointer',
-            transition: 'all 0.2s',
-          }}
-          onMouseOver={(e) => { e.currentTarget.style.background = 'var(--color-bg-base)'; }}
-          onMouseOut={(e) => { e.currentTarget.style.background = 'var(--color-card-bg)'; }}
-        >
-          <ArrowLeft size={48} />
-        </button>
-
-        <div
-          style={{
-            flex: 1,
-            display: 'flex',
-            alignItems: 'center',
-            padding: '0 2rem',
-            background: 'var(--color-card-bg)',
-            borderRadius: '1.5rem',
-            border: '2px solid var(--color-card-border)',
-            fontSize: '3rem',
-            fontWeight: 700,
-            color: text ? 'var(--color-text-base)' : 'var(--color-card-border)',
-            overflow: 'hidden',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {text || 'Digite algo...'}
-        </div>
-
-        <button
-          type="button"
-          onClick={speak}
-          disabled={!text.trim()}
-          style={{
-            flex: '0 0 200px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            gap: '1rem',
-            background: text.trim() ? '#1B54A8' : '#cbd5e1',
-            borderRadius: '1.5rem',
-            border: 'none',
-            color: 'white',
-            fontSize: '1.5rem',
-            fontWeight: 800,
-            cursor: text.trim() ? 'pointer' : 'not-allowed',
-            transition: 'all 0.2s',
-            transform: lastPressed === 'speak' ? 'scale(0.95)' : 'scale(1)',
-          }}
-        >
-          <Play size={36} fill="white" /> Falar
-        </button>
-      </div>
-
-      <div style={{ display: 'flex', gap: '1rem', flex: 1, width: '100%' }}>
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-          {rows.map((row, ri) => (
-            <div key={ri} style={{ display: 'flex', gap: '1rem', flex: 1 }}>
-              {row.map((k) => (
-                <button
-                  key={k}
-                  type="button"
-                  onClick={() => append(k)}
-                  style={{
-                    flex: 1,
-                    background: lastPressed === k ? 'var(--color-primary-light)' : 'var(--color-card-bg)',
-                    border: '2px solid',
-                    borderColor: lastPressed === k ? 'var(--color-primary)' : 'var(--color-card-border)',
-                    borderRadius: '1rem',
-                    fontSize: '3rem',
-                    fontWeight: 700,
-                    color: lastPressed === k ? 'var(--color-primary)' : 'var(--color-text-base)',
-                    cursor: 'pointer',
-                    transition: 'all 0.1s',
-                    transform: lastPressed === k ? 'scale(0.96)' : 'scale(1)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                  onMouseOver={(e) => { e.currentTarget.style.borderColor = 'var(--color-primary)'; }}
-                  onMouseOut={(e) => { e.currentTarget.style.borderColor = lastPressed === k ? 'var(--color-primary)' : 'var(--color-card-border)'; }}
-                >
-                  {k}
-                </button>
-              ))}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', flex: '0 0 200px' }}>
-          <button
-            type="button"
-            onClick={backspace}
+    <GazePageLayout showBack={true} backRoute="/menu">
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          width: '100%',
+          boxSizing: 'border-box',
+          gap: '1.5rem',
+        }}
+      >
+        {/* Barra superior de saída de texto e botão de Fala */}
+        <div style={{ display: 'flex', gap: '1rem', height: '6rem', width: '100%' }}>
+          <div
             style={{
               flex: 1,
-              background: lastPressed === 'backspace' ? '#ef4444' : 'transparent',
-              border: '2px solid #ef4444',
-              borderRadius: '1.5rem',
-              color: lastPressed === 'backspace' ? 'white' : '#ef4444',
-              fontSize: '1.5rem',
-              fontWeight: 700,
-              cursor: 'pointer',
               display: 'flex',
-              flexDirection: 'column',
               alignItems: 'center',
-              justifyContent: 'center',
-              gap: '1rem',
-              transition: 'all 0.1s',
-              transform: lastPressed === 'backspace' ? 'scale(0.95)' : 'scale(1)',
-            }}
-          >
-            <Delete size={48} /> Apagar
-          </button>
-
-          <button
-            type="button"
-            onClick={clear}
-            style={{
-              flex: 1,
+              padding: '0 2rem',
               background: 'var(--color-card-bg)',
-              border: '2px solid var(--color-card-border)',
               borderRadius: '1.5rem',
-              color: 'var(--color-text-base)', opacity: 0.8,
-              fontSize: '1.25rem',
+              border: '2px solid var(--color-card-border)',
+              fontSize: '2.5rem',
               fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.1s',
-              transform: lastPressed === 'clear' ? 'scale(0.95)' : 'scale(1)',
+              color: text ? 'var(--color-text-base)' : 'var(--color-card-border)',
+              overflow: 'hidden',
+              whiteSpace: 'nowrap',
             }}
           >
-            Limpar
-          </button>
+            {text || 'Digite algo...'}
+          </div>
 
-          <button
-            type="button"
-            onClick={space}
+          <GazeButton
+            onClick={speak}
+            disabled={!text.trim()}
             style={{
-              flex: 2,
-              background: 'var(--color-bg-base)',
+              width: '200px',
+              height: '100%',
+              background: text.trim() ? '#1B54A8' : 'rgba(255,255,255,0.05)',
               border: '2px solid var(--color-card-border)',
               borderRadius: '1.5rem',
-              color: '#1B54A8',
-              fontSize: '1.5rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              transition: 'all 0.1s',
-              transform: lastPressed === 'space' ? 'scale(0.95)' : 'scale(1)',
+              color: text.trim() ? 'white' : 'rgba(255,255,255,0.2)',
             }}
           >
-            Espaço
-          </button>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', fontSize: '1.4rem', fontWeight: 800 }}>
+              <Play size={28} fill={text.trim() ? 'white' : 'none'} stroke={text.trim() ? 'white' : 'rgba(255,255,255,0.2)'} /> Falar
+            </div>
+          </GazeButton>
+        </div>
+
+        {/* Teclado e Painel Lateral de Ações */}
+        <div style={{ display: 'flex', gap: '1.5rem', flex: 1, minHeight: 0 }}>
+          {/* Letras e Números */}
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+            {rows.map((row, ri) => (
+              <div key={ri} style={{ display: 'flex', gap: '0.75rem', flex: 1 }}>
+                {row.map((k) => (
+                  <GazeButton
+                    key={k}
+                    onClick={() => append(k)}
+                    noWarn={true}
+                    style={{
+                      flex: 1,
+                      height: '100%',
+                      background: lastPressed === k ? 'rgba(27, 84, 168, 0.2)' : 'var(--color-card-bg)',
+                      border: '2px solid',
+                      borderColor: lastPressed === k ? '#1B54A8' : 'var(--color-card-border)',
+                      borderRadius: '1rem',
+                      fontSize: '2.5rem',
+                      fontWeight: 700,
+                      color: lastPressed === k ? '#1B54A8' : 'var(--color-text-base)',
+                    }}
+                  >
+                    {k}
+                  </GazeButton>
+                ))}
+              </div>
+            ))}
+          </div>
+
+          {/* Controle Lateral */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', width: '220px' }}>
+            <GazeButton
+              onClick={backspace}
+              style={{
+                flex: 1.5,
+                background: 'rgba(239, 68, 68, 0.05)',
+                border: '2px solid rgba(239, 68, 68, 0.3)',
+                borderRadius: '1.5rem',
+                color: '#ef4444',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                <Delete size={36} />
+                <span style={{ fontSize: '1.3rem', fontWeight: 800 }}>Apagar</span>
+              </div>
+            </GazeButton>
+
+            <GazeButton
+              onClick={clear}
+              style={{
+                flex: 1,
+                background: 'var(--color-card-bg)',
+                border: '2px solid var(--color-card-border)',
+                borderRadius: '1.5rem',
+                color: 'var(--color-text-base)',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+                <RotateCcw size={28} />
+                <span style={{ fontSize: '1.15rem', fontWeight: 700 }}>Limpar</span>
+              </div>
+            </GazeButton>
+
+            <GazeButton
+              onClick={space}
+              style={{
+                flex: 2,
+                background: 'rgba(27, 84, 168, 0.05)',
+                border: '2px solid rgba(27, 84, 168, 0.3)',
+                borderRadius: '1.5rem',
+                color: '#1B54A8',
+              }}
+            >
+              <span style={{ fontSize: '1.5rem', fontWeight: 800 }}>Espaço</span>
+            </GazeButton>
+          </div>
         </div>
       </div>
-    </main>
+    </GazePageLayout>
   );
 };
