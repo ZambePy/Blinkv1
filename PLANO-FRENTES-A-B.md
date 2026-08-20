@@ -757,7 +757,7 @@ Medicação, hidratação, mudança de posição, fisioterapia. Configurado pelo
 
 ⚠️ **Notificação nunca rouba o foco durante uma composição de mensagem.** Enfileire e mostre depois. Interromper alguém que leva 40 s para escrever uma frase é cruel.
 
-### B3-5 🟢 Histórico para o cuidador e a equipe clínica
+### B3-5 ✅ FEITO - Histórico para o cuidador e a equipe clínica
 
 Frases mais usadas, horários de maior atividade, evolução da qualidade de calibração ao longo das semanas.
 

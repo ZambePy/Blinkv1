@@ -6,6 +6,7 @@ import { GazeButton } from '../components/ui/GazeButton';
 import { GazeGrid } from '../components/ui/GazeGrid';
 import { useGaze } from '../context/GazeContext';
 import { getPredictions, learnSentence } from '../utils/wordPredictor';
+import { logSentence } from '../utils/clinicalLogger';
 
 const LAYOUTS: Record<'frequency' | 'alphabetical' | 'qwerty', string[][]> = {
   frequency: [
@@ -148,6 +149,7 @@ export const KeyboardScreen: React.FC = () => {
       window.speechSynthesis.speak(u);
       triggerFeedback('speak');
       learnSentence(text);
+      logSentence(text);
     }
   };
 

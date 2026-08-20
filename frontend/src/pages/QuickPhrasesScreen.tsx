@@ -3,6 +3,7 @@ import { MessageSquare, AlertCircle, Tv, Wind, Activity, ChevronRight, ChevronLe
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeGrid } from '../components/ui/GazeGrid';
 import { GazeButton } from '../components/ui/GazeButton';
+import { logSentence } from '../utils/clinicalLogger';
 
 const PHRASES = [
   {
@@ -73,6 +74,7 @@ export const QuickPhrasesScreen: React.FC = () => {
       utterance.lang = 'pt-BR';
       utterance.rate = 0.9;
       window.speechSynthesis.speak(utterance);
+      logSentence(text);
     }
   };
 

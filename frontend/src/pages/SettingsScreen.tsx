@@ -18,6 +18,7 @@ import {
   Activity,
   Plus,
   Trash2,
+  MessageSquare,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -27,6 +28,15 @@ import { api, ApiError } from '../utils/api';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { useGaze } from '../context/GazeContext';
 import { useReminders } from '../context/ReminderContext';
+import {
+  hasConsent,
+  setConsent,
+  getClinicalData,
+  clearClinicalData,
+  getMostUsedPhrases,
+  getActivityByHour,
+  logCalibrationAccuracy,
+} from '../utils/clinicalLogger';
 import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
@@ -74,6 +84,41 @@ export const SettingsScreen: React.FC = () => {
   const [newReminderTitle, setNewReminderTitle] = useState('');
   const [newReminderTime, setNewReminderTime] = useState('');
   const { reminders, addReminder, deleteReminder } = useReminders();
+
+  const [consentActive, setConsentActive] = useState(hasConsent());
+  const [clinicalData, setClinicalData] = useState(getClinicalData());
+
+  const handleToggleConsent = (consented: boolean) => {
+    setConsent(consented);
+    setConsentActive(consented);
+    setClinicalData(getClinicalData());
+    if (consented) {
+      toast.success('Consentimento de dados clínicos registrado!');
+    } else {
+      toast.success('Consentimento removido. Todos os dados clínicos locais foram apagados.');
+    }
+  };
+
+  const handleClearClinicalLogs = () => {
+    if (window.confirm('Tem certeza de que deseja apagar permanentemente todos os registros clínicos locais do paciente? Esta ação não pode ser desfeita.')) {
+      clearClinicalData();
+      setClinicalData(getClinicalData());
+      toast.success('Todos os dados clínicos locais foram excluídos.');
+    }
+  };
+
+  const handleExportClinicalLogs = () => {
+    const dataStr = JSON.stringify(clinicalData, null, 2);
+    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
+    
+    const exportFileDefaultName = `relatorio-clinico-paciente-${new Date().toISOString().split('T')[0]}.json`;
+    
+    const linkElement = document.createElement('a');
+    linkElement.setAttribute('href', dataUri);
+    linkElement.setAttribute('download', exportFileDefaultName);
+    linkElement.click();
+    toast.success('Relatório clínico exportado com sucesso!');
+  };
 
   const handleAddReminder = (e: React.FormEvent) => {
     e.preventDefault();
@@ -173,6 +218,8 @@ export const SettingsScreen: React.FC = () => {
     startAccuracyTest((r) => {
       setAccuracyRunning(false);
       setLastAccuracy(r);
+      logCalibrationAccuracy(r.meanErrorDeg);
+      setClinicalData(getClinicalData());
       toast.success(
         `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
       );
@@ -1342,6 +1389,361 @@ export const SettingsScreen: React.FC = () => {
               </div>
             )}
           </div>
+        </section>
+
+        {/* Histórico Clínico e Telemetria (B3-5 - LGPD Local) */}
+        <section aria-labelledby="clinical-title" style={cardStyle}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.25rem',
+            }}
+          >
+            <UserCog size={28} color="#1B54A8" aria-hidden="true" />
+            <h2
+              id="clinical-title"
+              style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}
+            >
+              Histórico Clínico e Telemetria (LGPD)
+            </h2>
+          </div>
+
+          <div
+            style={{
+              background: 'rgba(27, 84, 168, 0.03)',
+              border: '1.5px solid rgba(27, 84, 168, 0.15)',
+              borderRadius: '1rem',
+              padding: '1.25rem',
+              marginBottom: '1.5rem',
+              fontSize: '0.95rem',
+              lineHeight: 1.5,
+              color: '#334155',
+            }}
+          >
+            <p style={{ margin: '0 0 0.75rem 0', fontWeight: 700, color: '#1B54A8' }}>
+              🔒 Proteção de Dados e Privacidade (LGPD)
+            </p>
+            <p style={{ margin: 0 }}>
+              Em conformidade com a LGPD, o IrisFlow apenas armazena dados de uso, calibrações e sentenças faladas
+              localmente neste dispositivo para fins de acompanhamento clínico. Nenhum dado de saúde é enviado a servidores externos.
+            </p>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.75rem',
+                marginTop: '1.25rem',
+                cursor: 'pointer',
+                fontWeight: 700,
+                color: '#1e293b',
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={consentActive}
+                onChange={(e) => handleToggleConsent(e.target.checked)}
+                style={{
+                  width: '1.2rem',
+                  height: '1.2rem',
+                  cursor: 'pointer',
+                }}
+              />
+              Autorizar a coleta de dados de rotina e calibração local do paciente
+            </label>
+          </div>
+
+          {consentActive ? (
+            <div>
+              {/* Grid de Estatísticas */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
+                  gap: '1.5rem',
+                  marginBottom: '2rem',
+                }}
+              >
+                {/* Cartão 1: Evolução da Calibração */}
+                <div
+                  style={{
+                    background: 'var(--color-bg-base)',
+                    border: '1.5px solid var(--color-card-border)',
+                    borderRadius: '1.25rem',
+                    padding: '1.25rem',
+                  }}
+                >
+                  <h3
+                    style={{
+                      fontSize: '1.05rem',
+                      fontWeight: 700,
+                      color: '#475569',
+                      margin: '0 0 1rem 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <Activity size={20} color="#1B54A8" /> Histórico de Calibrações ({clinicalData.calibrations.length})
+                  </h3>
+                  {clinicalData.calibrations.length === 0 ? (
+                    <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                      Nenhum teste de precisão registrado.
+                    </p>
+                  ) : (
+                    <div
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '0.5rem',
+                        maxHeight: '200px',
+                        overflowY: 'auto',
+                      }}
+                    >
+                      {[...clinicalData.calibrations].reverse().map((c) => {
+                        const dateStr = new Date(c.timestamp).toLocaleString('pt-BR');
+                        const isHighError = c.errorDeg >= 1.5;
+                        return (
+                          <div
+                            key={c.id}
+                            style={{
+                              display: 'flex',
+                              justifyContent: 'space-between',
+                              alignItems: 'center',
+                              padding: '0.6rem 0.85rem',
+                              background: 'var(--color-card-bg)',
+                              border: `1.5px solid ${isHighError ? '#fca5a5' : 'var(--color-card-border)'}`,
+                              borderRadius: '0.75rem',
+                            }}
+                          >
+                            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>
+                              {dateStr}
+                            </span>
+                            <span
+                              style={{
+                                fontSize: '0.95rem',
+                                fontWeight: 800,
+                                color: isHighError ? '#ef4444' : '#16a34a',
+                              }}
+                            >
+                              {c.errorDeg.toFixed(2)}° {isHighError ? '(Alto)' : '(Excelente)'}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                  {clinicalData.calibrations.length > 2 && (
+                    <div
+                      style={{
+                        marginTop: '1rem',
+                        fontSize: '0.8rem',
+                        color: '#64748b',
+                        background: 'rgba(245, 158, 11, 0.05)',
+                        border: '1px solid rgba(245, 158, 11, 0.2)',
+                        borderRadius: '0.5rem',
+                        padding: '0.5rem 0.75rem',
+                        lineHeight: 1.4,
+                      }}
+                    >
+                      💡 <strong>Aviso clínico:</strong> Um aumento progressivo no desvio angular (° médio) ao longo das
+                      semanas pode indicar fadiga muscular ocular, alteração postural ou progressão da doença motora.
+                    </div>
+                  )}
+                </div>
+
+                {/* Cartão 2: Frases mais Usadas */}
+                <div
+                  style={{
+                    background: 'var(--color-bg-base)',
+                    border: '1.5px solid var(--color-card-border)',
+                    borderRadius: '1.25rem',
+                    padding: '1.25rem',
+                  }}
+                >
+                  <h3
+                    style={{
+                      fontSize: '1.05rem',
+                      fontWeight: 700,
+                      color: '#475569',
+                      margin: '0 0 1rem 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <MessageSquare size={20} color="#1B54A8" /> Frases mais Comuns
+                  </h3>
+                  {clinicalData.sentences.length === 0 ? (
+                    <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                      Nenhuma frase registrada no histórico.
+                    </p>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                      {getMostUsedPhrases(4).map((p, idx) => (
+                        <div
+                          key={idx}
+                          style={{
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                            padding: '0.6rem 0.85rem',
+                            background: 'var(--color-card-bg)',
+                            border: '1.5px solid var(--color-card-border)',
+                            borderRadius: '0.75rem',
+                          }}
+                        >
+                          <span
+                            style={{
+                              fontSize: '0.95rem',
+                              fontWeight: 700,
+                              color: 'var(--color-text-base)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              maxWidth: '80%',
+                            }}
+                          >
+                            "{p.text}"
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '0.85rem',
+                              fontWeight: 800,
+                              background: 'rgba(27, 84, 168, 0.08)',
+                              color: '#1B54A8',
+                              padding: '0.2rem 0.5rem',
+                              borderRadius: '0.5rem',
+                            }}
+                          >
+                            {p.count}x
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Cartão 3: Distribuição de Atividade */}
+                <div
+                  style={{
+                    background: 'var(--color-bg-base)',
+                    border: '1.5px solid var(--color-card-border)',
+                    borderRadius: '1.25rem',
+                    padding: '1.25rem',
+                  }}
+                >
+                  <h3
+                    style={{
+                      fontSize: '1.05rem',
+                      fontWeight: 700,
+                      color: '#475569',
+                      margin: '0 0 1rem 0',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '0.5rem',
+                    }}
+                  >
+                    <Clock size={20} color="#1B54A8" /> Atividade por Período
+                  </h3>
+                  {clinicalData.sentences.length === 0 ? (
+                    <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                      Nenhum dado de atividade disponível.
+                    </p>
+                  ) : (
+                    (() => {
+                      const hourly = getActivityByHour();
+                      const periods = {
+                        'Madrugada (00h - 06h)': hourly.slice(0, 6).reduce((a, b) => a + b, 0),
+                        'Manhã (06h - 12h)': hourly.slice(6, 12).reduce((a, b) => a + b, 0),
+                        'Tarde (12h - 18h)': hourly.slice(12, 18).reduce((a, b) => a + b, 0),
+                        'Noite (18h - 24h)': hourly.slice(18, 24).reduce((a, b) => a + b, 0),
+                      };
+                      return (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.65rem' }}>
+                          {Object.entries(periods).map(([name, count]) => (
+                            <div
+                              key={name}
+                              style={{
+                                display: 'flex',
+                                justifyContent: 'space-between',
+                                alignItems: 'center',
+                                fontSize: '0.95rem',
+                                color: '#475569',
+                              }}
+                            >
+                              <span style={{ fontWeight: 600 }}>{name}</span>
+                              <span style={{ fontWeight: 800, color: 'var(--color-primary)' }}>
+                                {count} falas
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              </div>
+
+              {/* Botões de Ação de Dados */}
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  onClick={handleExportClinicalLogs}
+                  style={{
+                    padding: '0.85rem 1.5rem',
+                    borderRadius: '0.75rem',
+                    border: 'none',
+                    background: '#1B54A8',
+                    color: '#ffffff',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                  }}
+                >
+                  <Download size={18} /> Exportar Relatório Clínico (JSON)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleClearClinicalLogs}
+                  style={{
+                    padding: '0.85rem 1.5rem',
+                    borderRadius: '0.75rem',
+                    border: '1.5px solid #fca5a5',
+                    background: 'transparent',
+                    color: '#ef4444',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.5rem',
+                    transition: 'all 0.2s',
+                  }}
+                  onMouseOver={(e) => {
+                    e.currentTarget.style.background = '#fef2f2';
+                  }}
+                  onMouseOut={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.background = '#fef2f2';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <Trash2 size={18} /> Excluir Todos os Dados Clínicos
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p style={{ fontSize: '0.95rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+              Ative a autorização de coleta acima para visualizar o painel histórico e evolução de calibrações.
+            </p>
+          )}
         </section>
 
         {/* Backup */}
