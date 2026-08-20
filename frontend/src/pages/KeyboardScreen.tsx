@@ -1,8 +1,10 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useState, useEffect } from 'react';
 import { Delete, Play, RotateCcw } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeButton } from '../components/ui/GazeButton';
+import { useGaze } from '../context/GazeContext';
+import { getPredictions, learnSentence } from '../utils/wordPredictor';
 
 const LAYOUTS: Record<'frequency' | 'alphabetical' | 'qwerty', string[][]> = {
   frequency: [
@@ -27,8 +29,28 @@ const LAYOUTS: Record<'frequency' | 'alphabetical' | 'qwerty', string[][]> = {
 
 export const KeyboardScreen: React.FC = () => {
   const { settings } = useSettings();
+  const { isDwelling } = useGaze();
   const [text, setText] = useState('');
   const [lastPressed, setLastPressed] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (isDwelling) return;
+    setSuggestions(getPredictions(text));
+  }, [text, isDwelling]);
+
+  const handleSelectSuggestion = (word: string) => {
+    setText((t) => {
+      if (t.endsWith(' ') || t === '') {
+        return t + word + ' ';
+      } else {
+        const words = t.trim().split(/\s+/);
+        words[words.length - 1] = word;
+        return words.join(' ') + ' ';
+      }
+    });
+    triggerFeedback(word);
+  };
 
   const rows = useMemo(() => LAYOUTS[settings.keyboardLayout], [settings.keyboardLayout]);
 
@@ -62,6 +84,7 @@ export const KeyboardScreen: React.FC = () => {
       u.rate = 0.9;
       window.speechSynthesis.speak(u);
       triggerFeedback('speak');
+      learnSentence(text);
     }
   };
 
@@ -114,6 +137,41 @@ export const KeyboardScreen: React.FC = () => {
               <Play size={28} fill={text.trim() ? 'white' : 'none'} stroke={text.trim() ? 'white' : 'rgba(15, 23, 42, 0.25)'} /> Falar
             </div>
           </GazeButton>
+        </div>
+
+        {/* Barra de Sugestões de Palavras (B3-1) */}
+        <div style={{ display: 'flex', gap: '1rem', height: '4.5rem', width: '100%' }}>
+          {suggestions.map((word, index) => (
+            <GazeButton
+              key={index}
+              onClick={() => handleSelectSuggestion(word)}
+              noWarn={true}
+              style={{
+                flex: 1,
+                height: '100%',
+                background: 'rgba(27, 84, 168, 0.05)',
+                border: '2px solid rgba(27, 84, 168, 0.25)',
+                borderRadius: '1.25rem',
+                color: '#1B54A8',
+              }}
+            >
+              <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>{word}</span>
+            </GazeButton>
+          ))}
+          {Array.from({ length: 4 - suggestions.length }).map((_, idx) => (
+            <GazeButton
+              key={`empty-${idx}`}
+              disabled
+              style={{
+                flex: 1,
+                height: '100%',
+                borderRadius: '1.25rem',
+                opacity: 0.1,
+              }}
+            >
+              <span>-</span>
+            </GazeButton>
+          ))}
         </div>
 
         {/* Teclado e Painel Lateral de Ações */}

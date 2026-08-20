@@ -724,7 +724,7 @@ Os jogos (`BubblePop`, `Memory`, `Drawing`, `FollowTarget`) têm requisitos dife
 
 ## B3 — Telas e funcionalidades novas
 
-### B3-1 🔴 Predição de palavras — a maior alavanca isolada de UX
+### B3-1 ✅ FEITO - Predição de palavras — a maior alavanca isolada de UX
 
 Faça a conta com os números de hoje: escrever "banheiro" letra por letra são 8 seleções × 1,5 s = **12 segundos**, sem contar correções. Com predição decente, 2 ou 3 seleções — **cerca de 4 segundos**.
 

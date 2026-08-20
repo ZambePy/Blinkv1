@@ -55,6 +55,7 @@ interface GazeContextValue {
   recording: RecordingApi;
   setFilterPreset: (preset: FilterPreset) => void;
   getDiagnostics: () => EngineDiagnostics | null;
+  isDwelling: boolean;
 }
 
 const GazeContext = createContext<GazeContextValue | null>(null);
@@ -72,6 +73,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const cursorRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<EngineState>('idle');
   const [l2csStatus, setL2csStatus] = useState<L2CSStatus>('loading');
+  const [isDwelling, setIsDwelling] = useState(false);
+  const wasDwellingRef = useRef(false);
 
   // Sub pool: subscribers can hook in and receive callbacks. We keep the callback
   // model instead of React state to avoid re-rendering the tree at 30 Hz.
@@ -335,6 +338,13 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.error('[GazeContext] subscriber threw', e);
         }
       });
+
+      // Sincroniza o estado de isDwelling de forma segura sem floodar re-renders
+      const targetExists = dwellTargetRef.current !== null;
+      if (wasDwellingRef.current !== targetExists) {
+        wasDwellingRef.current = targetExists;
+        setIsDwelling(targetExists);
+      }
     });
 
     async function boot() {
@@ -486,8 +496,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       recording,
       setFilterPreset: (preset: FilterPreset) => engineRef.current?.setFilterPreset(preset),
       getDiagnostics: () => engineRef.current?.getDiagnostics() ?? null,
+      isDwelling,
     }),
-    [subscribe, state, l2csStatus, calibration, recording],
+    [subscribe, state, l2csStatus, calibration, recording, isDwelling],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

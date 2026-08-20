@@ -113,6 +113,14 @@ export const InitialSplash: React.FC = () => {
               e.currentTarget.style.transform = 'translateY(0)';
               e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.3)';
             }}
+            onFocus={(e) => {
+              e.currentTarget.style.transform = 'translateY(-4px)';
+              e.currentTarget.style.boxShadow = '0 16px 40px rgba(27, 84, 168, 0.4)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.3)';
+            }}
             onMouseDown={(e) => {
               e.currentTarget.style.transform = 'translateY(2px)';
             }}
@@ -142,6 +150,14 @@ export const InitialSplash: React.FC = () => {
               e.currentTarget.style.transform = 'translateY(-2px)';
             }}
             onMouseOut={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.background = 'rgba(27, 84, 168, 0.15)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onBlur={(e) => {
               e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
               e.currentTarget.style.transform = 'translateY(0)';
             }}
