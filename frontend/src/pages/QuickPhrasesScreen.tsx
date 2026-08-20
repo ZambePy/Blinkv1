@@ -1,6 +1,8 @@
-import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, MessageSquare, AlertCircle, Tv, Wind, Activity } from 'lucide-react';
+import React, { useState } from 'react';
+import { MessageSquare, AlertCircle, Tv, Wind, Activity, ChevronRight, ChevronLeft } from 'lucide-react';
+import { GazePageLayout } from '../components/ui/GazePageLayout';
+import { GazeGrid } from '../components/ui/GazeGrid';
+import { GazeButton } from '../components/ui/GazeButton';
 
 const PHRASES = [
   {
@@ -8,61 +10,61 @@ const PHRASES = [
     text: 'Gostaria de conversar',
     Icon: MessageSquare,
     iconColor: '#0d9488',
-    bg: 'linear-gradient(135deg, #ccfbf1, #f0fdfa)',
+    bg: 'linear-gradient(135deg, rgba(13, 148, 136, 0.1), rgba(20, 253, 250, 0.05))',
   },
   {
     id: 2,
     text: 'Pode abrir a janela?',
     Icon: Wind,
     iconColor: '#0284c7',
-    bg: 'linear-gradient(135deg, #bae6fd, #f0f9ff)',
+    bg: 'linear-gradient(135deg, rgba(2, 132, 199, 0.1), rgba(240, 249, 255, 0.05))',
   },
   {
     id: 3,
     text: 'Quero descansar agora',
     Icon: Activity,
     iconColor: '#7c3aed',
-    bg: 'linear-gradient(135deg, #ede9fe, #f5f3ff)',
+    bg: 'linear-gradient(135deg, rgba(124, 58, 237, 0.1), rgba(245, 243, 255, 0.05))',
   },
   {
     id: 4,
     text: 'Pode mudar de posição?',
     Icon: AlertCircle,
     iconColor: '#d97706',
-    bg: 'linear-gradient(135deg, #fef3c7, #fffbeb)',
+    bg: 'linear-gradient(135deg, rgba(217, 119, 6, 0.1), rgba(255, 251, 235, 0.05))',
   },
   {
     id: 5,
     text: 'Pode ligar a televisão?',
     Icon: Tv,
     iconColor: '#4f46e5',
-    bg: 'linear-gradient(135deg, #e0e7ff, #eef2ff)',
+    bg: 'linear-gradient(135deg, rgba(79, 70, 229, 0.1), rgba(238, 242, 255, 0.05))',
   },
   {
     id: 6,
     text: 'Preciso de um cobertor',
     Icon: Wind,
     iconColor: '#0891b2',
-    bg: 'linear-gradient(135deg, #cffafe, #ecfeff)',
+    bg: 'linear-gradient(135deg, rgba(8, 145, 178, 0.1), rgba(236, 254, 255, 0.05))',
   },
   {
     id: 7,
     text: 'Quero ouvir música',
     Icon: MessageSquare,
     iconColor: '#db2777',
-    bg: 'linear-gradient(135deg, #fce7f3, #fdf2f8)',
+    bg: 'linear-gradient(135deg, rgba(219, 39, 119, 0.1), rgba(253, 242, 248, 0.05))',
   },
   {
     id: 8,
     text: 'Preciso que alguém fique aqui',
     Icon: AlertCircle,
     iconColor: '#16a34a',
-    bg: 'linear-gradient(135deg, #dcfce7, #f0fdf4)',
+    bg: 'linear-gradient(135deg, rgba(22, 163, 74, 0.1), rgba(240, 253, 244, 0.05))',
   },
 ];
 
 export const QuickPhrasesScreen: React.FC = () => {
-  const navigate = useNavigate();
+  const [currentPage, setCurrentPage] = useState(0);
 
   const handleSpeak = (text: string) => {
     if ('speechSynthesis' in window) {
@@ -74,127 +76,131 @@ export const QuickPhrasesScreen: React.FC = () => {
     }
   };
 
-  return (
-    <main
-      role="main"
-      aria-labelledby="phrases-title"
-      style={{
-        minHeight: '100vh',
-        background: 'var(--color-bg-base)',
-        display: 'flex',
-        flexDirection: 'column',
-        padding: '2rem',
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        aria-hidden="true"
-        className="bg-orb animate-float"
-        style={{
-          width: 450,
-          height: 450,
-          background: 'radial-gradient(circle, rgba(13,148,136,0.15), transparent)',
-          top: '-10%',
-          right: '-5%',
-        }}
-      />
+  const itemsPerPage = 5;
+  const startIndex = currentPage * itemsPerPage;
+  const visiblePhrases = PHRASES.slice(startIndex, startIndex + itemsPerPage);
+  const totalPages = Math.ceil(PHRASES.length / itemsPerPage);
 
+  return (
+    <GazePageLayout showBack={true} backRoute="/menu">
       <div
-        className="glass"
         style={{
           display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: '1rem',
-          padding: '1.25rem 2rem',
-          borderRadius: '1.5rem',
-          marginBottom: '2rem',
-          zIndex: 10,
-        }}
-      >
-        <MessageSquare size={28} color="#0d9488" aria-hidden="true" />
-        <h1
-          id="phrases-title"
-          style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-base)', margin: 0 }}
-        >
-          Frases rápidas
-        </h1>
-        <span style={{ color: '#94a3b8', margin: '0 0.5rem' }} aria-hidden="true">
-          /
-        </span>
-        <span
-          style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.9, fontFamily: 'system-ui, sans-serif' }}
-        >
-          Escolha uma frase
-        </span>
-      </div>
-
-      <div
-        role="group"
-        aria-label="Lista de frases rápidas"
-        className="animate-fade-in-up"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(3, 1fr)',
-          gap: '1.5rem',
-          flex: 1,
-          maxWidth: '1200px',
-          margin: '0 auto',
+          flexDirection: 'column',
+          height: '100%',
           width: '100%',
-          zIndex: 10,
+          boxSizing: 'border-box',
         }}
       >
-        <button
-          type="button"
-          onClick={() => navigate('/menu')}
-          className="action-card glass"
-          aria-label="Voltar ao menu principal"
-          style={{ border: '2px solid var(--color-card-border)', background: 'var(--color-card-bg)' }}
-        >
-          <div
-            className="card-icon"
-            aria-hidden="true"
-            style={{
-              background: 'var(--color-bg-base)',
-              boxShadow: '0 8px 24px var(--color-card-shadow)',
-            }}
-          >
-            <ArrowLeft size={56} color="var(--color-text-base)" strokeWidth={2} />
-          </div>
-          <span style={{ fontSize: '1.5rem', fontWeight: 700, color: 'var(--color-text-base)' }}>Voltar</span>
-        </button>
+        <div style={{ marginBottom: '2.5rem', textAlign: 'center' }}>
+          <h1 style={{ fontSize: '2.75rem', fontWeight: 800, color: '#ffffff', margin: '0 0 0.5rem 0' }}>
+            Frases Rápidas
+          </h1>
+          <p style={{ fontSize: '1.25rem', color: 'rgba(255, 255, 255, 0.7)', margin: 0, fontWeight: 500 }}>
+            Página {currentPage + 1} de {totalPages} — Olhe para selecionar
+          </p>
+        </div>
 
-        {PHRASES.map(({ id, text, Icon, iconColor, bg }) => (
-          <button
-            key={id}
-            type="button"
-            onClick={() => handleSpeak(text)}
-            aria-label={`Falar a frase: ${text}`}
-            className="action-card glass"
-            style={{ border: '2px solid var(--color-card-border)', background: 'var(--color-card-bg)' }}
-          >
-            <div
-              className="card-icon"
-              aria-hidden="true"
-              style={{ background: bg, boxShadow: `0 8px 24px ${iconColor}33` }}
-            >
-              <Icon size={56} color={iconColor} strokeWidth={1.5} />
-            </div>
-            <span
-              style={{
-                fontSize: '1.25rem',
-                fontWeight: 700,
-                color: 'var(--color-text-base)',
-                textAlign: 'center',
-                lineHeight: 1.3,
-              }}
-            >
-              {text}
-            </span>
-          </button>
-        ))}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          <GazeGrid columns={3} rows={2}>
+            {visiblePhrases.map((phrase) => (
+              <GazeButton
+                key={phrase.id}
+                onClick={() => handleSpeak(phrase.text)}
+                style={{
+                  height: '100%',
+                  borderRadius: '2rem',
+                  background: 'var(--color-card-bg)',
+                  border: '2px solid var(--color-card-border)',
+                }}
+              >
+                <div 
+                  style={{ 
+                    display: 'flex', 
+                    flexDirection: 'column', 
+                    alignItems: 'center', 
+                    justifyContent: 'center', 
+                    textAlign: 'center', 
+                    padding: '1rem',
+                    width: '100%'
+                  }}
+                >
+                  <div
+                    style={{
+                      background: phrase.bg,
+                      padding: '1rem',
+                      borderRadius: '1.5rem',
+                      color: phrase.iconColor,
+                      marginBottom: '1rem',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                    }}
+                  >
+                    <phrase.Icon size={56} strokeWidth={1.5} />
+                  </div>
+                  <span style={{ fontSize: '1.4rem', fontWeight: 700, lineHeight: 1.3, color: 'var(--color-text-base)' }}>
+                    {phrase.text}
+                  </span>
+                </div>
+              </GazeButton>
+            ))}
+
+            {/* Sexto slot: Botão de Paginação */}
+            {currentPage === 0 ? (
+              <GazeButton
+                onClick={() => setCurrentPage(1)}
+                style={{
+                  height: '100%',
+                  borderRadius: '2rem',
+                  border: '2px solid rgba(27, 84, 168, 0.3)',
+                  background: 'rgba(27, 84, 168, 0.05)',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', width: '100%' }}>
+                  <div style={{ color: '#1B54A8', marginBottom: '0.75rem' }}>
+                    <ChevronRight size={56} />
+                  </div>
+                  <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1B54A8' }}>
+                    Mais Frases
+                  </span>
+                </div>
+              </GazeButton>
+            ) : (
+              <GazeButton
+                onClick={() => setCurrentPage(0)}
+                style={{
+                  height: '100%',
+                  borderRadius: '2rem',
+                  border: '2px solid rgba(27, 84, 168, 0.3)',
+                  background: 'rgba(27, 84, 168, 0.05)',
+                }}
+              >
+                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', textAlign: 'center', width: '100%' }}>
+                  <div style={{ color: '#1B54A8', marginBottom: '0.75rem' }}>
+                    <ChevronLeft size={56} />
+                  </div>
+                  <span style={{ fontSize: '1.6rem', fontWeight: 800, color: '#1B54A8' }}>
+                    Voltar Página
+                  </span>
+                </div>
+              </GazeButton>
+            )}
+
+            {/* Placeholders desabilitados se for página 1 para manter grade 3x2 consistente */}
+            {currentPage === 1 && (
+              <>
+                <GazeButton disabled style={{ height: '100%', borderRadius: '2rem', opacity: 0.2 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.1)' }}>-</span>
+                </GazeButton>
+                <GazeButton disabled style={{ height: '100%', borderRadius: '2rem', opacity: 0.2 }}>
+                  <span style={{ color: 'rgba(255,255,255,0.1)' }}>-</span>
+                </GazeButton>
+              </>
+            )}
+          </GazeGrid>
+        </div>
       </div>
-    </main>
+    </GazePageLayout>
   );
 };
