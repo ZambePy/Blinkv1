@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { BackButton } from '../../components/ui/BackButton';
 import { AlertOctagon, HeartPulse, ShieldAlert, Thermometer, Wind } from 'lucide-react';
 import { api } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
+import { GazePageLayout } from '../../components/ui/GazePageLayout';
+import { GazeButton } from '../../components/ui/GazeButton';
+import { GazeGrid } from '../../components/ui/GazeGrid';
 
 const EMERGENCIES = [
   { id: 'pain', labelKey: 'emergency.items.pain', icon: HeartPulse },
@@ -22,7 +24,7 @@ export const EmergencyEscalation: React.FC = () => {
   const triggerAlert = (_id: string, label: string) => {
     setTriggered(label);
 
-    // Dispara som de alarme forte nativo (beep)
+    // Som de bip forte
     const AudioCtx =
       window.AudioContext ||
       (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
@@ -49,124 +51,110 @@ export const EmergencyEscalation: React.FC = () => {
   };
 
   return (
-    <main
-      role="main"
-      aria-labelledby="emergency-title"
-      style={{
-        minHeight: '100vh',
-        backgroundColor: '#fef2f2',
-        padding: '2rem',
-        display: 'flex',
-        flexDirection: 'column',
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2rem', gap: '1rem' }}>
-        <BackButton />
-        <h1
-          id="emergency-title"
-          style={{
-            fontSize: '2.5rem',
-            color: '#dc2626',
-            margin: 0,
-            fontWeight: 900,
-            display: 'flex',
-            alignItems: 'center',
-            gap: '1rem',
-          }}
-        >
-          <AlertOctagon size={48} aria-hidden="true" /> {t('emergency.title')}
-        </h1>
-      </div>
-
-      {triggered ? (
-        <div
-          role="alert"
-          aria-live="assertive"
-          style={{
-            flex: 1,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            animation: 'pulseBg 1s infinite',
-          }}
-        >
-          <AlertOctagon size={120} color="#dc2626" aria-hidden="true" />
-          <h2
-            style={{ fontSize: '4rem', color: '#dc2626', textAlign: 'center', marginTop: '2rem' }}
-          >
-            {t('emergency.alertSent')}
-          </h2>
-          <p style={{ fontSize: '2rem', color: '#7f1d1d', textAlign: 'center' }}>
-            {t('emergency.waiting', { label: triggered })}
-          </p>
-          <button
-            onClick={() => {
-              setTriggered(null);
-              navigate('/menu');
-            }}
-            aria-label={t('emergency.cancelAndReturn')}
+    <GazePageLayout showBack={true} backRoute="/menu" showEmergency={false}>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          height: '100%',
+          width: '100%',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div style={{ marginBottom: '2.5rem', textAlign: 'center' }}>
+          <h1
             style={{
-              marginTop: '3rem',
-              padding: '1.5rem 4rem',
-              fontSize: '1.5rem',
-              background: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '1rem',
-              fontWeight: 700,
-              cursor: 'pointer',
+              fontSize: '2.75rem',
+              color: '#ef4444',
+              margin: '0 0 0.5rem 0',
+              fontWeight: 900,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '1rem',
             }}
           >
-            {t('emergency.cancelAndReturn')}
-          </button>
-          <style>{`@keyframes pulseBg { 0% { background-color: #fef2f2; } 50% { background-color: #fecaca; } 100% { background-color: #fef2f2; } }`}</style>
+            <AlertOctagon size={44} /> {t('emergency.title')}
+          </h1>
+          <p style={{ fontSize: '1.25rem', color: 'rgba(255,255,255,0.7)', margin: 0, fontWeight: 500 }}>
+            {triggered ? 'Seu alerta foi enviado. Aguarde atendimento.' : 'Selecione o tipo de ajuda necessário'}
+          </p>
         </div>
-      ) : (
-        <div
-          role="group"
-          aria-label={t('emergency.chooseType')}
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(2, 1fr)',
-            gap: '2rem',
-            flex: 1,
-          }}
-        >
-          {EMERGENCIES.map((item) => {
-            const label = t(item.labelKey);
-            return (
-              <button
-                key={item.id}
-                type="button"
-                onClick={() => triggerAlert(item.id, label)}
-                aria-label={t('emergency.triggerAria', { label })}
-                style={{
-                  background: '#dc2626',
-                  border: '4px solid #991b1b',
-                  borderRadius: '2rem',
-                  color: 'white',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '1.5rem',
-                  cursor: 'pointer',
-                  boxShadow: '0 12px 40px rgba(220,38,38,0.4)',
-                  transition: 'transform 0.1s',
-                }}
-                onMouseOver={(e) => (e.currentTarget.style.transform = 'scale(1.02)')}
-                onMouseOut={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-                onFocus={(e) => (e.currentTarget.style.transform = 'scale(1.02)')}
-                onBlur={(e) => (e.currentTarget.style.transform = 'scale(1)')}
-              >
-                <item.icon size={100} color="white" aria-hidden="true" />
-                <span style={{ fontSize: '2.5rem', fontWeight: 900 }}>{label}</span>
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </main>
+
+        {triggered ? (
+          <div
+            role="alert"
+            aria-live="assertive"
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              justifyContent: 'center',
+              animation: 'pulseBg 1s infinite',
+              borderRadius: '2rem',
+              border: '3px solid #dc2626',
+              background: 'rgba(220, 38, 38, 0.05)',
+              padding: '2rem',
+            }}
+          >
+            <AlertOctagon size={100} color="#dc2626" aria-hidden="true" />
+            <h2 style={{ fontSize: '3rem', color: '#dc2626', textAlign: 'center', marginTop: '1.5rem', fontWeight: 800 }}>
+              {t('emergency.alertSent')}
+            </h2>
+            <p style={{ fontSize: '1.75rem', color: '#fca5a5', textAlign: 'center', marginTop: '0.5rem', fontWeight: 600 }}>
+              {t('emergency.waiting', { label: triggered })}
+            </p>
+
+            <GazeButton
+              onClick={() => {
+                setTriggered(null);
+                navigate('/menu');
+              }}
+              style={{
+                marginTop: '2.5rem',
+                width: '340px',
+                height: '80px',
+                background: '#3b82f6',
+                border: 'none',
+                borderRadius: '1.5rem',
+                color: 'white',
+              }}
+            >
+              <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>
+                {t('emergency.cancelAndReturn')}
+              </span>
+            </GazeButton>
+            <style>{`@keyframes pulseBg { 0% { background-color: rgba(220,38,38,0.05); } 50% { background-color: rgba(220,38,38,0.15); } 100% { background-color: rgba(220,38,38,0.05); } }`}</style>
+          </div>
+        ) : (
+          <div style={{ flex: 1, minHeight: 0 }}>
+            <GazeGrid columns={2} rows={2}>
+              {EMERGENCIES.map((item) => {
+                const label = t(item.labelKey);
+                return (
+                  <GazeButton
+                    key={item.id}
+                    onClick={() => triggerAlert(item.id, label)}
+                    style={{
+                      height: '100%',
+                      background: '#dc2626',
+                      border: '3px solid #991b1b',
+                      borderRadius: '2rem',
+                      color: 'white',
+                    }}
+                  >
+                    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: '1rem' }}>
+                      <item.icon size={80} color="white" />
+                      <span style={{ fontSize: '2.2rem', fontWeight: 900 }}>{label}</span>
+                    </div>
+                  </GazeButton>
+                );
+              })}
+            </GazeGrid>
+          </div>
+        )}
+      </div>
+    </GazePageLayout>
   );
 };
