@@ -333,6 +333,24 @@ export const CalibrationCheck: React.FC = () => {
                   <div>
                     <strong style={{ display: 'block', marginBottom: '0.15rem' }}>Falha na calibração</strong>
                     {errorMessage}
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <a
+                        href="/caregiver/guide"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          navigate('/caregiver/guide?from=/calibration-check');
+                        }}
+                        style={{
+                          color: '#ef4444',
+                          fontWeight: 700,
+                          textDecoration: 'underline',
+                          fontSize: '0.9rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Ver Guia de Instalação e Dicas do Cuidador
+                      </a>
+                    </div>
                   </div>
                 </div>
               )}

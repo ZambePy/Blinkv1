@@ -275,6 +275,49 @@ export const CaregiverDashboard: React.FC = () => {
 
   return (
     <CaregiverPageLayout title="Painel do Cuidador">
+      {/* Bloco de Boas-vindas e Guia do Cuidador (B4-4) */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '1.5rem',
+          padding: '2rem',
+          marginBottom: '2rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '1.5rem',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f8fafc', margin: '0 0 0.5rem 0' }}>
+            Olá, Cuidador!
+          </h3>
+          <p style={{ fontSize: '1.05rem', color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+            Certifique-se de que a câmera esteja bem posicionada e o ambiente iluminado para manter o rastreamento ocular calibrado.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/caregiver/guide?from=/caregiver')}
+          style={{
+            padding: '0.85rem 1.75rem',
+            background: 'rgba(255, 255, 255, 0.08)',
+            border: '1.5px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '1rem',
+            color: '#f8fafc',
+            fontSize: '1rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'background 0.2s',
+          }}
+          onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)')}
+          onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)')}
+        >
+          Ler Guia do Cuidador
+        </button>
+      </div>
+
       <div
         style={{
           display: 'grid',

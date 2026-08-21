@@ -791,7 +791,7 @@ Linguagem para o cuidador, não para o desenvolvedor: *"Rastreamento impreciso �
 
 Configurações, dashboard e dados clínicos atrás de PIN numérico, digitado por mouse ou teclado. Evita que o usuário altere parâmetros sensíveis por fixação prolongada acidental — e é requisito de proteção de dado de saúde.
 
-### B4-4 🟢 Onboarding do cuidador
+### B4-4 ✅ FEITO - Onboarding do cuidador
 
 A pessoa que instala provavelmente não é técnica. Um guia curto: posicionar a câmera, ajustar a iluminação, o que fazer se a calibração falhar (incluindo o caso dos óculos), como reajustar.
 

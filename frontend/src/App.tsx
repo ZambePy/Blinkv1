@@ -57,6 +57,10 @@ const CaregiverDashboard = lazyNamed(
   () => import('./pages/caregiver/CaregiverDashboard'),
   'CaregiverDashboard'
 );
+const CaregiverGuide = lazyNamed(
+  () => import('./pages/caregiver/CaregiverGuide'),
+  'CaregiverGuide'
+);
 const MeditationScreen = lazyNamed(
   () => import('./pages/health/MeditationScreen'),
   'MeditationScreen'
@@ -200,6 +204,14 @@ function App() {
                     element={
                       <Protected>
                         <CaregiverDashboard />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="/caregiver/guide"
+                    element={
+                      <Protected>
+                        <CaregiverGuide />
                       </Protected>
                     }
                   />

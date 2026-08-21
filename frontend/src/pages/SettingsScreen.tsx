@@ -559,7 +559,53 @@ export const SettingsScreen: React.FC = () => {
             onMouseOver={(e) => (e.currentTarget.style.background = '#15803d')}
             onMouseOut={(e) => (e.currentTarget.style.background = '#22c55e')}
           >
-            Abrir Painel do Cuidador
+            {t('settings.dashboardLink.button')}
+          </button>
+        </section>
+
+        {/* Card do Guia do Cuidador (B4-4) */}
+        <section
+          aria-labelledby="guide-link-title"
+          style={{
+            ...cardStyle,
+            background: 'rgba(245, 158, 11, 0.08)',
+            borderColor: 'rgba(245, 158, 11, 0.2)',
+          }}
+        >
+          <h2
+            id="guide-link-title"
+            style={{
+              fontSize: '1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              color: '#f59e0b',
+              marginTop: 0,
+            }}
+          >
+            <FileText size={24} /> Guia de Instalação e Suporte do Cuidador
+          </h2>
+          <p style={{ color: '#cbd5e1', opacity: 0.9, marginBottom: '1.5rem', fontSize: '1rem', fontFamily: 'system-ui, sans-serif' }}>
+            Instruções passo a passo sobre como posicionar a câmera, melhorar a iluminação do ambiente e solucionar problemas com óculos ou calibração.
+          </p>
+          <button
+            onClick={() => navigate('/caregiver/guide?from=/settings')}
+            style={{
+              padding: '0.8rem 1.8rem',
+              background: '#f59e0b',
+              border: 'none',
+              color: 'white',
+              borderRadius: '0.75rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 12px rgba(245, 158, 11, 0.3)',
+              fontSize: '1rem',
+              transition: 'background 0.2s',
+            }}
+            onMouseOver={(e) => (e.currentTarget.style.background = '#d97706')}
+            onMouseOut={(e) => (e.currentTarget.style.background = '#f59e0b')}
+          >
+            Abrir Guia do Cuidador
           </button>
         </section>
         {/* Temporizador */}
