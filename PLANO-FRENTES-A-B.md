@@ -769,7 +769,7 @@ O último item tem valor clínico real: degradação progressiva da precisão po
 
 ## B4 — Segurança e confiança
 
-### B4-1 🔴 Caminho de emergência à prova de falha
+### B4-1 ✅ FEITO - Caminho de emergência à prova de falha
 
 Requisitos, todos verificáveis:
 

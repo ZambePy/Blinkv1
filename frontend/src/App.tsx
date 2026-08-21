@@ -5,6 +5,7 @@ import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
 import { ReminderProvider } from './context/ReminderContext';
+import { EmergencyProvider } from './context/EmergencyContext';
 import { DebugHUD } from './components/DebugHUD';
 
 // Ondas de onboarding carregadas cedo — poucas telas, alta chance de uso imediato
@@ -97,9 +98,10 @@ function App() {
           <GazeProvider>
             <ReminderProvider>
               <BrowserRouter>
-                <DebugHUD />
-                <Suspense fallback={<RouteFallback />}>
-                  <Routes>
+                <EmergencyProvider>
+                  <DebugHUD />
+                  <Suspense fallback={<RouteFallback />}>
+                    <Routes>
                   {/* Onboarding — públicas */}
                   <Route path="/" element={<InitialSplash />} />
                   <Route path="/login" element={<LoginScreen />} />
@@ -295,6 +297,7 @@ function App() {
                   />
                 </Routes>
               </Suspense>
+              </EmergencyProvider>
             </BrowserRouter>
           </ReminderProvider>
         </GazeProvider>

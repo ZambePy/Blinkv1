@@ -58,6 +58,7 @@ interface GazeContextValue {
   isDwelling: boolean;
   isComposing: boolean;
   setIsComposing: (val: boolean) => void;
+  isDegraded: boolean;
 }
 
 const GazeContext = createContext<GazeContextValue | null>(null);
@@ -77,6 +78,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [l2csStatus, setL2csStatus] = useState<L2CSStatus>('loading');
   const [isDwelling, setIsDwelling] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
+  const [isDegraded, setIsDegraded] = useState(false);
+  const isDegradedRef = useRef(false);
   const wasDwellingRef = useRef(false);
 
   // Sub pool: subscribers can hook in and receive callbacks. We keep the callback
@@ -96,6 +99,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     dwellMsRef.current = DWELL_MS_BY_SPEED[settings.dwellSpeed];
   }, [settings.dwellSpeed]);
+
+  // Propaga a dominância ocular do usuário ao pipeline. Feito num useEffect
+  // separado para reagir a mudanças em tempo real (SettingsScreen troca
+  // sem recarregar). Se o engine ainda não montou, fica pendente até o
+  // primeiro chamado — o próprio calibration guarda o valor em módulo.
+  useEffect(() => {
+    engineRef.current?.calibration.setEyeDominance?.(settings.eyeDominance);
+  }, [settings.eyeDominance]);
 
   const subscribe = useCallback((cb: (s: GazeSample) => void) => {
     subscribersRef.current.add(cb);
@@ -178,6 +189,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const engineIsCalibrating = engineRef.current?.getState() === 'calibrating';
       // A1-4 — em degraded, só permite dwell em botões de emergência.
       const isDegraded = sample.degraded === true;
+      if (isDegraded !== isDegradedRef.current) {
+        isDegradedRef.current = isDegraded;
+        setIsDegraded(isDegraded);
+      }
       const gracePeriodMs = 300;
 
       if (!engineIsCalibrating && sample.hasFace && now >= refractoryUntilRef.current) {
@@ -471,6 +486,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setOnlineCalibrationEnabled: (enabled) =>
         engineRef.current?.calibration.setOnlineCalibrationEnabled(enabled),
       onlineSampleCount: () => engineRef.current?.calibration.onlineSampleCount() ?? 0,
+      setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
+      setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
+      resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
     }),
     [],
   );
@@ -505,8 +523,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isDwelling,
       isComposing,
       setIsComposing,
+      isDegraded,
     }),
-    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing],
+    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing, isDegraded],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

@@ -1,6 +1,5 @@
 import React from 'react';
-import { useNavigate } from 'react-router-dom';
-import { AlertOctagon, Bell } from 'lucide-react';
+import { Bell } from 'lucide-react';
 import { BackButton } from './BackButton';
 import { GazeButton } from './GazeButton';
 import { useReminders } from '../../context/ReminderContext';
@@ -15,10 +14,8 @@ interface GazePageLayoutProps {
 export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
   children,
   showBack = true,
-  showEmergency = true,
   backRoute,
 }) => {
-  const navigate = useNavigate();
   const { activeReminder, dismissActiveReminder } = useReminders();
 
   return (
@@ -79,20 +76,8 @@ export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
           👁 Zona de Descanso (Sem clique)
         </div>
 
-        {/* Emergência Canônica */}
-        {showEmergency ? (
-          <GazeButton
-            emergency
-            width={200}
-            height={64}
-            onClick={() => navigate('/emergency')}
-            aria-label="Disparar Emergência Médica"
-          >
-            <AlertOctagon size={24} /> Emergência
-          </GazeButton>
-        ) : (
-          <div style={{ width: 200 }} />
-        )}
+        {/* Emergência Canônica (Gerenciada globalmente pelo EmergencyProvider) */}
+        <div style={{ width: 200 }} />
       </div>
 
       {/* Conteúdo Principal */}

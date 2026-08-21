@@ -93,14 +93,14 @@ export const api = {
       body: JSON.stringify({ text, voice_profile_id: voiceProfileId }),
     }),
 
-  sendHelpAlert: (userId: string) =>
+  sendHelpAlert: (userId: string, priority: 'high' | 'critical' = 'high') =>
     apiFetch<{ ok: boolean }>('/alerts/help', {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({
         user_id: userId,
         timestamp: new Date().toISOString(),
-        priority: 'high',
+        priority,
       }),
     }),
 
