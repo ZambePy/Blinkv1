@@ -138,6 +138,11 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [isConfirming, countdown, navigate]);
 
   const showEmergencyButton = isPatientScreen() && location.pathname !== '/emergency';
+  const showDegradedBanner =
+    isPatientScreen() &&
+    location.pathname !== '/calibration-check' &&
+    location.pathname !== '/emergency' &&
+    isDegraded;
 
   return (
     <EmergencyContext.Provider
@@ -148,6 +153,43 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }}
     >
       {children}
+
+      {/* Indicador de Rastreamento Degradado (B4-2) */}
+      {showDegradedBanner && !isConfirming && (
+        <div
+          style={{
+            position: 'fixed',
+            top: '2rem',
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 99980,
+          }}
+        >
+          <GazeButton
+            onClick={() => navigate('/calibration-check')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              background: '#fef3c7',
+              border: '2px solid #f59e0b',
+              borderRadius: '2rem',
+              color: '#b45309',
+              padding: '0.65rem 1.5rem',
+              boxShadow: '0 10px 15px -3px rgba(245, 158, 11, 0.2)',
+              cursor: 'pointer',
+              height: 'auto',
+              width: 'auto',
+            }}
+            noWarn
+          >
+            <AlertOctagon size={20} color="#d97706" />
+            <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>
+              Rastreamento impreciso — Recalibre aqui
+            </span>
+          </GazeButton>
+        </div>
+      )}
 
       {/* Botão de Emergência Fixo Canônico */}
       {showEmergencyButton && !isConfirming && (

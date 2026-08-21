@@ -4,9 +4,10 @@ import React from 'react';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
 import { EmergencyProvider } from './EmergencyContext';
 
+let testIsDegraded = false;
 vi.mock('./GazeContext', () => ({
   useGaze: () => ({
-    isDegraded: false,
+    isDegraded: testIsDegraded,
   }),
 }));
 
@@ -19,6 +20,7 @@ vi.mock('./AuthContext', () => ({
 describe('EmergencyContext — Sistema de Emergência Canônica', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    testIsDegraded = false;
   });
 
   it('deve exibir o botão de emergência na tela do paciente e ocultar nas do cuidador', () => {
@@ -104,5 +106,76 @@ describe('EmergencyContext — Sistema de Emergência Canônica', () => {
     expect(screen.getByText('Tela de Escalabilidade de Emergência')).toBeInTheDocument();
 
     vi.useRealTimers();
+  });
+
+  it('deve exibir o aviso de rastreamento impreciso quando isDegraded for true, e ocultar se false', () => {
+    // 1. isDegraded = true
+    testIsDegraded = true;
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/menu']}>
+        <EmergencyProvider>
+          <div>Conteúdo</div>
+        </EmergencyProvider>
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText(/Rastreamento impreciso — Recalibre aqui/i)).toBeInTheDocument();
+    unmount();
+
+    // 2. isDegraded = false
+    testIsDegraded = false;
+    render(
+      <MemoryRouter initialEntries={['/menu']}>
+        <EmergencyProvider>
+          <div>Conteúdo</div>
+        </EmergencyProvider>
+      </MemoryRouter>
+    );
+
+    expect(screen.queryByText(/Rastreamento impreciso/i)).toBeNull();
+  });
+
+  it('deve ocultar o aviso de rastreamento impreciso mesmo se isDegraded for true nas rotas de calibração ou emergência', () => {
+    testIsDegraded = true;
+
+    // Rota de calibração
+    const { unmount } = render(
+      <MemoryRouter initialEntries={['/calibration-check']}>
+        <EmergencyProvider>
+          <div>Conteúdo</div>
+        </EmergencyProvider>
+      </MemoryRouter>
+    );
+    expect(screen.queryByText(/Rastreamento impreciso/i)).toBeNull();
+    unmount();
+
+    // Rota de emergência
+    render(
+      <MemoryRouter initialEntries={['/emergency']}>
+        <EmergencyProvider>
+          <div>Conteúdo</div>
+        </EmergencyProvider>
+      </MemoryRouter>
+    );
+    expect(screen.queryByText(/Rastreamento impreciso/i)).toBeNull();
+  });
+
+  it('deve redirecionar para a tela de calibração ao acionar o banner de rastreamento impreciso', () => {
+    testIsDegraded = true;
+    render(
+      <MemoryRouter initialEntries={['/menu']}>
+        <EmergencyProvider>
+          <Routes>
+            <Route path="/menu" element={<div>Menu</div>} />
+            <Route path="/calibration-check" element={<div>Tela de Calibração</div>} />
+          </Routes>
+        </EmergencyProvider>
+      </MemoryRouter>
+    );
+
+    const banner = screen.getByRole('button', { name: /Rastreamento impreciso — Recalibre aqui/i });
+    fireEvent.click(banner);
+
+    expect(screen.getByText('Tela de Calibração')).toBeInTheDocument();
   });
 });

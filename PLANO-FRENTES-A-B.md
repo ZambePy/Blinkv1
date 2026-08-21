@@ -781,7 +781,7 @@ Requisitos, todos verificáveis:
 
 **Teste manual obrigatório:** desconecte a webcam no meio de uma sessão e verifique que a emergência continua acionável por teclado/mouse pelo cuidador.
 
-### B4-2 🟡 Aviso de estado degradado
+### B4-2 ✅ FEITO - Aviso de estado degradado
 
 Contraparte de A1-4 no front: indicador discreto, persistente e acionável. Nunca modal.
 
