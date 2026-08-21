@@ -51,6 +51,13 @@ export interface ExtractorResult {
   featuresRight: number[];
   blinkDetected: boolean;
   advancedFeatures?: AdvancedFrameFeatures;
+  // EAR (Eye Aspect Ratio) por olho. Preenchidos por extractEyeFeatures.
+  // Usados pelo engine para ponderar a fusão binocular quando um olho está
+  // parcialmente fechado (piscadinha curta que passa pelo BlinkDetector,
+  // ptose unilateral, obstrução por franja, etc). Opcionais para compat
+  // com callers que não participam do pipeline live.
+  leftEAR?: number;
+  rightEAR?: number;
 }
 
 // EyeTrax Indices
@@ -127,6 +134,17 @@ export class BlinkDetector {
   private readonly thrMin: number;
   private readonly thrMax: number;
 
+  // Timestamps do INÍCIO de cada piscada (edge-detection: transição de
+  // "não piscando" para "piscando"). Sem edge-detection, uma piscada de
+  // 400ms a 30fps contaria como 12 piscadas — inflação inútil.
+  //
+  // Usado por getBlinkRatePerMinute() para a UI de conforto visual
+  // detectar fadiga (>20 piscadas/min é sinal de brilho excessivo ou
+  // olho seco; normal em repouso são ~17/min).
+  private blinkStartTimestamps: number[] = [];
+  private wasBlinking = false;
+  private static readonly TIMESTAMP_RETENTION_MS = 5 * 60 * 1000;   // 5 min basta pra sliding windows
+
   // thrMin/thrMax derivados da fisiologia: EAR mínimo do olho aberto
   // (0.10) e máximo prático para não confundir olho semi-fechado (ptose)
   // com piscada (0.22).
@@ -152,7 +170,11 @@ export class BlinkDetector {
 
   // Retorna true se o frame é piscada. Atualiza o histórico só com
   // frames de NÃO piscada (quebra a realimentação).
-  update(ear: number): boolean {
+  //
+  // `nowMs` opcional — quando ausente usa Date.now(). Injetável para
+  // testes determinísticos e para o caller cotar seu próprio relógio
+  // monótono (performance.now() no engine).
+  update(ear: number, nowMs: number = Date.now()): boolean {
     // Calcula threshold adaptativo sobre frames de não-piscada anteriores
     let thr = this.thrMax; // default conservador: só olho bem fechado conta
     if (this.nonBlinkHistory.length >= this.minHistory) {
@@ -160,6 +182,18 @@ export class BlinkDetector {
       thr = Math.max(this.thrMin, Math.min(this.thrMax, mean * this.blinkRatio));
     }
     const blink = ear < thr;
+
+    // Edge de "abriu → fechou": conta uma piscada nova.
+    if (blink && !this.wasBlinking) {
+      this.blinkStartTimestamps.push(nowMs);
+      // Poda entradas antigas — evita crescer indefinidamente numa
+      // sessão longa. Só mantém últimos 5 min (janela máxima suportada).
+      const cutoff = nowMs - BlinkDetector.TIMESTAMP_RETENTION_MS;
+      while (this.blinkStartTimestamps.length > 0 && this.blinkStartTimestamps[0] < cutoff) {
+        this.blinkStartTimestamps.shift();
+      }
+    }
+    this.wasBlinking = blink;
 
     // Só adiciona ao histórico quando não é piscada — garante que a média
     // representa o EAR de repouso, não a mistura com olho fechado.
@@ -174,6 +208,23 @@ export class BlinkDetector {
 
   reset(): void {
     this.nonBlinkHistory.length = 0;
+    this.blinkStartTimestamps.length = 0;
+    this.wasBlinking = false;
+  }
+
+  /**
+   * Piscadas por minuto na janela recente (padrão: últimos 60s).
+   * Ambulatorial de referência: 15-20/min em repouso; >25/min sustentado
+   * é indicativo de fadiga, brilho excessivo ou olho seco.
+   */
+  getBlinkRatePerMinute(windowMs: number = 60000, nowMs: number = Date.now()): number {
+    const cutoff = nowMs - windowMs;
+    let count = 0;
+    for (let i = this.blinkStartTimestamps.length - 1; i >= 0; i--) {
+      if (this.blinkStartTimestamps[i] >= cutoff) count++;
+      else break;                                     // array é ordenado — para no primeiro anterior à janela
+    }
+    return count * (60000 / windowMs);
   }
 
   /** Para testes: quantos frames de não-piscada estão no histórico. */
@@ -189,6 +240,15 @@ const _blinkDetector = new BlinkDetector();
 // Agora delega para BlinkDetector.reset().
 export function resetEarHistory(): void {
   _blinkDetector.reset();
+}
+
+/**
+ * Piscadas por minuto na janela recente. Delegado para o singleton do
+ * módulo. Usado pela UI de conforto visual (Camada 3) — brilho excessivo
+ * ou fadiga aumentam a taxa muito acima do repouso (~17/min).
+ */
+export function getRecentBlinkRatePerMinute(windowMs: number = 60000): number {
+  return _blinkDetector.getBlinkRatePerMinute(windowMs);
 }
 
 // A2-5 — versão do formato de calibração. Incrementar quando mudança de
@@ -404,7 +464,7 @@ export function extractEyeFeatures(
     quality
   };
 
-  return { featuresLeft, featuresRight, blinkDetected, advancedFeatures };
+  return { featuresLeft, featuresRight, blinkDetected, advancedFeatures, leftEAR, rightEAR };
 }
 
 // L2CS gaze data (E5/E6 do L2CS-NET.md). Interface local para evitar
@@ -528,6 +588,8 @@ export function extractCompactFeatures(
     featuresLeft: compLeft,
     featuresRight: compRight,
     blinkDetected: baseResult.blinkDetected,
-    advancedFeatures: baseResult.advancedFeatures
+    advancedFeatures: baseResult.advancedFeatures,
+    leftEAR: baseResult.leftEAR,
+    rightEAR: baseResult.rightEAR,
   };
 }

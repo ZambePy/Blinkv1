@@ -17,7 +17,7 @@ export interface RecordedSampleDecision {
   accepted: boolean;
   /** ms desde o início da coleta deste ponto. */
   elapsedMs: number;
-  reason?: 'acclimation' | 'quality' | 'pose_drift' | 'not_collecting';
+  reason?: 'acclimation' | 'quality' | 'pose_drift' | 'gaze_drift' | 'not_collecting';
 }
 
 // Cap de frames em memória. ~30k frames a ~4 KB cada ≈ 120 MB — teto seguro

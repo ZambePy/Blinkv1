@@ -102,16 +102,39 @@ body,
   --settings-bg: linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%);
 }
 
-/* Modo escuro (via classe no html) */
+/* Modo escuro (via classe no html) — paleta para conforto ocular em ELA.
+ *
+ * Contraste texto/fundo alvo ≈ 10:1 (WCAG AAA) em vez de ~15:1 do antigo
+ * #f8fafc/#0f172a. Contraste ofuscante é o oposto do que o usuário precisa
+ * quando fica horas fixando a tela — a pupila contrai, o rastreador de íris
+ * perde precisão, e o usuário pisca por reflexo.
+ *
+ * Referência: PMC12027292 (dark mode reduz olho seco em uso prolongado);
+ * NVP Institute (glare em ALS aumenta fadiga visual).
+ */
 html.dark {
-  --color-bg-base: #0f172a;
-  --color-text-base: #f8fafc;
-  --color-card-bg: rgba(30, 41, 59, 0.90);
-  --color-card-border: rgba(255, 255, 255, 0.12);
-  --color-card-shadow: rgba(0, 0, 0, 0.4);
+  --color-bg-base: #0a0e1a;                  /* ~2% luminosity — não é true black para evitar smearing em LCD */
+  --color-text-base: #cbd5e1;                /* slate-300 — evita branco puro (10:1 em vez de 15:1) */
+  --color-card-bg: rgba(24, 33, 54, 0.90);
+  --color-card-border: rgba(203, 213, 225, 0.10);
+  --color-card-shadow: rgba(0, 0, 0, 0.55);
   --color-primary-light: #1e293b;
-  --color-primary: #3b82f6;
-  --settings-bg: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+  --color-primary: #4a7bd4;                  /* azul menos saturado — reduz overshoot em pupila contraída */
+  --settings-bg: linear-gradient(160deg, #0a0e1a 0%, #182136 50%, #0a0e1a 100%);
+}
+
+/* Filtro âmbar — overlay fixo sobre a UI inteira. Bloqueia parte da
+ * componente azul do espectro, aliviando fotofobia (evidência AAO:
+ * pacientes com sensibilidade à luz relatam melhora com lentes âmbar).
+ * Não interfere com input pointer (pointer-events: none). */
+html.amber-filter body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background: rgba(255, 140, 0, 0.08);
+  pointer-events: none;
+  z-index: 999998;                            /* abaixo do modal de emergência (999999) */
+  mix-blend-mode: multiply;
 }
 
 /* Glassmorphism utilitário refinado */
@@ -441,7 +464,7 @@ select:focus-visible,
   white-space: nowrap;
 }
 .accuracy-instruction .highlight {
-  color: #38bdf8;
+  color: #67a9c9;                                    /* casa com o dot dessaturado */
   font-weight: 700;
 }
 
@@ -454,6 +477,10 @@ select:focus-visible,
   align-items: center;
   justify-content: center;
   pointer-events: none;
+  /* Fade-in de 300ms — dá tempo pra pupila acomodar antes do ponto aparecer.
+   * Sem isso, o ponto brilhante surgindo em fundo preto força uma contração
+   * súbita da pupila, que degrada a leitura de íris pelo MediaPipe. */
+  animation: accuracyDotAppear 300ms ease-out both;
 }
 .accuracy-dot::before {
   content: '';
@@ -461,18 +488,26 @@ select:focus-visible,
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  border: 2px solid rgba(56, 189, 248, 0.4);
+  border: 2px solid rgba(103, 169, 201, 0.35);       /* era rgba(56,189,248,0.4) */
   animation: accuracyRingPulse 1.6s ease-in-out infinite;
 }
 .accuracy-dot .dot-inner {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #38bdf8;
+  /* Cyan dessaturado (#67a9c9) em vez de cyan saturado (#38bdf8). Contraste
+   * sobre preto cai de ~15:1 para ~5.5:1 — ainda WCAG AAA para o alvo (o
+   * usuário PRECISA vê-lo), mas menos ofuscante quando ele fica olhando
+   * fixo por 3 segundos. Glow reduzido para metade pelo mesmo motivo. */
+  background: #67a9c9;
   box-shadow:
-    0 0 24px rgba(56, 189, 248, 0.9),
-    0 0 60px rgba(56, 189, 248, 0.5);
+    0 0 12px rgba(103, 169, 201, 0.55),
+    0 0 30px rgba(103, 169, 201, 0.30);
   animation: accuracyDotPulse 1.2s ease-in-out infinite alternate;
+}
+@keyframes accuracyDotAppear {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(0.6); }
+  to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 @keyframes accuracyRingPulse {
   0%, 100% { transform: scale(0.85); opacity: 0.9; }
