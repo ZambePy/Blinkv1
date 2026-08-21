@@ -787,7 +787,7 @@ Contraparte de A1-4 no front: indicador discreto, persistente e acionável. Nunc
 
 Linguagem para o cuidador, não para o desenvolvedor: *"Rastreamento impreciso — recalibre"*, não *"hull ratio 2.4"*.
 
-### B4-3 🟡 PIN para o modo cuidador
+### B4-3 ✅ FEITO - PIN para o modo cuidador
 
 Configurações, dashboard e dados clínicos atrás de PIN numérico, digitado por mouse ou teclado. Evita que o usuário altere parâmetros sensíveis por fixação prolongada acidental — e é requisito de proteção de dado de saúde.
 

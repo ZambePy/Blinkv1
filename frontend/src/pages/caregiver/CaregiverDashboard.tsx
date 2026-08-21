@@ -45,7 +45,7 @@ const loadState = (userId: string): CaregiverState => {
 };
 
 export const CaregiverDashboard: React.FC = () => {
-  const { currentProfile, isCaregiver } = useAuth();
+  const { currentProfile, isCaregiver, loginCaregiver } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
   const userId = currentProfile?.id ?? 'guest';
@@ -55,6 +55,9 @@ export const CaregiverDashboard: React.FC = () => {
   const [entries, setEntries] = useState<DiaryEntry[]>(initial.entries);
   const [painLevel, setPainLevel] = useState(0);
   const [mood, setMood] = useState<'good' | 'bad' | null>(null);
+
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
 
   useEffect(() => {
     localStorage.setItem(storageKey(userId), JSON.stringify({ tasks, entries }));
@@ -68,6 +71,17 @@ export const CaregiverDashboard: React.FC = () => {
     const entry: DiaryEntry = { timestamp: new Date().toISOString(), painLevel, mood };
     setEntries((e) => [entry, ...e].slice(0, 30));
     toast.success('Diário salvo.');
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginCaregiver(pin)) {
+      setPinError(null);
+      setPin('');
+    } else {
+      setPinError('PIN inválido');
+      setPin('');
+    }
   };
 
   if (!isCaregiver) {
@@ -92,32 +106,168 @@ export const CaregiverDashboard: React.FC = () => {
             padding: '3rem',
             borderRadius: '2rem',
             textAlign: 'center',
-            maxWidth: '500px',
+            maxWidth: '450px',
             width: '100%',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
           }}
         >
-          <h2 style={{ fontSize: '2rem', fontWeight: 800, color: '#ef4444', margin: '0 0 1rem 0' }}>
-            Acesso Restrito
+          <h2 style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc', margin: '0 0 0.5rem 0' }}>
+            Acesso Restrito ao Cuidador
           </h2>
-          <p style={{ fontSize: '1.1rem', color: '#94a3b8', lineHeight: 1.5, margin: '0 0 2rem 0' }}>
-            Por favor, autentique-se nas Configurações da plataforma para validar o acesso do cuidador.
+          <p style={{ fontSize: '1.1rem', color: '#94a3b8', lineHeight: 1.5, margin: '0 0 2.0rem 0' }}>
+            Por favor, digite o PIN numérico do cuidador para acessar o dashboard de atividades e dados clínicos.
           </p>
-          <button
-            onClick={() => navigate('/settings')}
-            style={{
-              padding: '1rem 2rem',
-              background: '#1B54A8',
-              border: 'none',
-              borderRadius: '0.75rem',
-              color: 'white',
-              fontSize: '1.1rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              boxShadow: '0 4px 16px rgba(27, 84, 168, 0.3)',
-            }}
+
+          <form
+            onSubmit={handleLogin}
+            style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
           >
-            Ir para Configurações
-          </button>
+            <input
+              id="caregiver-pin"
+              type="password"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              maxLength={8}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="••••"
+              aria-invalid={pinError ? true : undefined}
+              style={{
+                textAlign: 'center',
+                fontSize: '2.5rem',
+                letterSpacing: '0.8rem',
+                padding: '0.75rem',
+                borderRadius: '1rem',
+                border: pinError ? '2px solid #ef4444' : '2px solid #334155',
+                background: '#0f172a',
+                color: '#f8fafc',
+                outline: 'none',
+              }}
+            />
+            {pinError && (
+              <p role="alert" style={{ color: '#ef4444', fontSize: '0.95rem', fontWeight: 600, margin: '0.25rem 0' }}>
+                {pinError}
+              </p>
+            )}
+
+            {/* Teclado Numérico Virtual (B4-3) */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.75rem',
+                margin: '1.5rem 0',
+                width: '100%',
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => pin.length < 8 && setPin((p) => p + num)}
+                  style={{
+                    height: '55px',
+                    borderRadius: '0.75rem',
+                    background: '#334155',
+                    border: 'none',
+                    fontSize: '1.35rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    color: '#f8fafc',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  {num}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setPin('')}
+                style={{
+                  height: '55px',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: 'none',
+                  fontSize: '1.0rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#ef4444',
+                }}
+              >
+                Limpar
+              </button>
+              <button
+                type="button"
+                onClick={() => pin.length < 8 && setPin((p) => p + '0')}
+                style={{
+                  height: '55px',
+                  borderRadius: '0.75rem',
+                  background: '#334155',
+                  border: 'none',
+                  fontSize: '1.35rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#f8fafc',
+                }}
+              >
+                0
+              </button>
+              <button
+                type="button"
+                onClick={() => setPin((p) => p.slice(0, -1))}
+                style={{
+                  height: '55px',
+                  borderRadius: '0.75rem',
+                  background: '#475569',
+                  border: 'none',
+                  fontSize: '1.0rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#cbd5e1',
+                }}
+              >
+                Apagar
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => navigate('/menu')}
+                style={{
+                  flex: 1,
+                  padding: '0.85rem',
+                  background: '#334155',
+                  borderRadius: '0.75rem',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '1.0rem',
+                  fontWeight: 700,
+                  color: '#cbd5e1',
+                }}
+              >
+                Voltar
+              </button>
+              <button
+                type="submit"
+                style={{
+                  flex: 1,
+                  padding: '0.85rem',
+                  background: 'linear-gradient(135deg, #1B54A8, #2563eb)',
+                  borderRadius: '0.75rem',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '1.0rem',
+                  fontWeight: 700,
+                  color: 'white',
+                  boxShadow: '0 4px 16px rgba(27,84,168,0.3)',
+                }}
+              >
+                Entrar
+              </button>
+            </div>
+          </form>
         </div>
       </main>
     );

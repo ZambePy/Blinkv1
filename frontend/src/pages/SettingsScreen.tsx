@@ -366,6 +366,89 @@ export const SettingsScreen: React.FC = () => {
                 {pinError}
               </p>
             )}
+
+            {/* Teclado Numérico Virtual (B4-3) */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.75rem',
+                margin: '1.5rem 0',
+                maxWidth: '300px',
+                alignSelf: 'center',
+                width: '100%',
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => pin.length < 8 && setPin((p) => p + num)}
+                  style={{
+                    height: '60px',
+                    borderRadius: '1rem',
+                    background: '#f8fafc',
+                    border: '1px solid #e2e8f0',
+                    fontSize: '1.5rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    color: '#1e293b',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.02)',
+                  }}
+                >
+                  {num}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setPin('')}
+                style={{
+                  height: '60px',
+                  borderRadius: '1rem',
+                  background: '#fef2f2',
+                  border: '1px solid #fee2e2',
+                  fontSize: '1.1rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#ef4444',
+                }}
+              >
+                Limpar
+              </button>
+              <button
+                type="button"
+                onClick={() => pin.length < 8 && setPin((p) => p + '0')}
+                style={{
+                  height: '60px',
+                  borderRadius: '1rem',
+                  background: '#f8fafc',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '1.5rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#1e293b',
+                }}
+              >
+                0
+              </button>
+              <button
+                type="button"
+                onClick={() => setPin((p) => p.slice(0, -1))}
+                style={{
+                  height: '60px',
+                  borderRadius: '1rem',
+                  background: '#f1f5f9',
+                  border: '1px solid #e2e8f0',
+                  fontSize: '1.1rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#475569',
+                }}
+              >
+                Apagar
+              </button>
+            </div>
+
             <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
               <button
                 type="button"
