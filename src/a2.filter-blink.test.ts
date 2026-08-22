@@ -179,3 +179,56 @@ describe('A2-4: BlinkDetector', () => {
     expect(bd.update(0.23)).toBe(false);
   });
 });
+
+// ── Camada 3 do conforto visual: taxa de piscada por minuto ──────────────
+// Alimentando esse contador com timestamps injetados dá teste determinístico
+// (não depende de Date.now()). Cobre edge-detection e sliding window.
+describe('Camada 3: BlinkDetector.getBlinkRatePerMinute', () => {
+  let bd: BlinkDetector;
+  const BASE = 1_000_000;                             // t0 arbitrário
+
+  beforeEach(() => {
+    // minHistory baixo pra threshold ficar utilizável rápido nos testes.
+    bd = new BlinkDetector({ minHistory: 3, blinkRatio: 0.8, thrMin: 0.10, thrMax: 0.22 });
+    for (let i = 0; i < 5; i++) bd.update(0.35, BASE - 10000 + i);   // aquece histórico com "olho aberto"
+  });
+
+  it('conta uma piscada por evento, não por frame', () => {
+    // Uma piscada de 10 frames (~333ms a 30fps) deve contar como 1, não 10.
+    for (let i = 0; i < 10; i++) bd.update(0.05, BASE + i * 33);
+    // Reabre olho
+    for (let i = 0; i < 5; i++) bd.update(0.35, BASE + 400 + i * 33);
+    // Numa janela de 60s temos 1 piscada → 1 * (60000/60000) = 1.
+    expect(bd.getBlinkRatePerMinute(60000, BASE + 1000)).toBe(1);
+  });
+
+  it('sliding window esquece eventos antigos', () => {
+    // Piscada em t = BASE
+    bd.update(0.05, BASE);
+    bd.update(0.35, BASE + 200);
+    // 90s depois: janela de 60s não vê a piscada antiga.
+    expect(bd.getBlinkRatePerMinute(60000, BASE + 90000)).toBe(0);
+    // Janela de 120s vê: 1 piscada em 120s → 0.5/min.
+    expect(bd.getBlinkRatePerMinute(120000, BASE + 90000)).toBe(0.5);
+  });
+
+  it('escala para minuto conforme a janela', () => {
+    // 3 piscadas nos primeiros 10s
+    for (let i = 0; i < 3; i++) {
+      bd.update(0.05, BASE + i * 2000);
+      bd.update(0.35, BASE + i * 2000 + 100);
+    }
+    // Em janela de 10s temos 3 → 3 * (60000/10000) = 18/min
+    expect(bd.getBlinkRatePerMinute(10000, BASE + 5500)).toBe(18);
+  });
+
+  it('reset limpa o histórico de piscadas', () => {
+    for (let i = 0; i < 3; i++) {
+      bd.update(0.05, BASE + i * 1000);
+      bd.update(0.35, BASE + i * 1000 + 100);
+    }
+    expect(bd.getBlinkRatePerMinute(60000, BASE + 5000)).toBeGreaterThan(0);
+    bd.reset();
+    expect(bd.getBlinkRatePerMinute(60000, BASE + 5000)).toBe(0);
+  });
+});
