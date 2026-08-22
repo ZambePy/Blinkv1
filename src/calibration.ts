@@ -50,6 +50,30 @@ export function getEyeDominance(): EyeDominance {
   return eyeDominance;
 }
 
+// Correção de bias em sessão (drift compensation).
+// A cada dwell click bem-sucedido registramos um resíduo (alvo − predição)
+// e mantemos um EMA. O offset resultante é somado à predição do frame.
+// Diferente do RLS (feedOnlineSample), isto só corrige o VIÉS global (2 dofs),
+// nunca mexe nos coeficientes do Ridge — é seguro por default e útil já a
+// partir da primeira amostra.
+const SESSION_BIAS_ALPHA = 0.35;      // agressividade do EMA (0..1)
+const SESSION_BIAS_MAX_NORM = 0.08;   // clamp em 8% da tela (evita drift patológico)
+let biasX = 0;                        // em coord normalizada [0..1]
+let biasY = 0;
+let biasSamples = 0;
+let sessionBiasEnabled = true;
+
+export function setSessionBiasEnabled(enabled: boolean): void {
+  sessionBiasEnabled = enabled;
+  if (!enabled) resetSessionBias();
+}
+export function resetSessionBias(): void {
+  biasX = 0; biasY = 0; biasSamples = 0;
+}
+export function getSessionBias(): { x: number; y: number; samples: number } {
+  return { x: biasX, y: biasY, samples: biasSamples };
+}
+
 // Rampa de mistura base ↔ online. Peso online sobe linearmente até 1.0 após
 // ~50 amostras confirmadas — evita que um dwell acidental degrade o modelo
 // antes de acumular evidência suficiente.
@@ -226,6 +250,7 @@ export function clearCalibration() {
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
   pendingProfileMeta = null;
+  resetSessionBias();
 }
 
 export function getSampleCount(): number {
@@ -487,6 +512,7 @@ export function startCalibrationMode(
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
+  resetSessionBias();
 
   // A1-6 — meta para o perfil que resultar desta calibração. Default
   // `desconhecido` porque a UI que pergunta a condição óptica (B1-6/B2-1)
@@ -1124,8 +1150,13 @@ export function feedOnlineSample(
   targetXpx: number,
   targetYpx: number,
 ): boolean {
-  if (!USE_ONLINE_CALIBRATION) return false;
-  if (!onlineLeft || !onlineRight) return false;
+  // Dois caminhos, independentes:
+  //   1. Correção de bias em sessão (sempre ativa quando calibrado) — 2 dofs,
+  //      EMA sobre resíduo (alvo − predição base). Barato, sem risco de
+  //      degradar o modelo.
+  //   2. RLS binocular (feature completa, atrás da flag USE_ONLINE_CALIBRATION).
+  //      Atualiza os coeficientes β dos dois regressors incrementalmente.
+  // Ambos aplicam a mesma rejeição de outlier via predição base.
   if (!regressorLeft || !regressorRight) return false;
 
   const vw = document.documentElement.clientWidth;
@@ -1150,9 +1181,32 @@ export function feedOnlineSample(
     return false;
   }
 
-  onlineLeft.update(scaledLeft, targetX, targetY);
-  onlineRight.update(scaledRight, targetX, targetY);
-  return true;
+  let absorbed = false;
+
+  // (1) Bias EMA — leve, sempre ativo. `residuo = alvo − predição base` é
+  //     a correção que precisamos APLICAR à predição para acertar o alvo,
+  //     não subtrair.
+  if (sessionBiasEnabled) {
+    const rx = targetX - basePredX;
+    const ry = targetY - basePredY;
+    biasX = (1 - SESSION_BIAS_ALPHA) * biasX + SESSION_BIAS_ALPHA * rx;
+    biasY = (1 - SESSION_BIAS_ALPHA) * biasY + SESSION_BIAS_ALPHA * ry;
+    // Clamp defensivo — bias grande demais é sinal de calibração ruim, não
+    // deriva. Não corrigimos mais que 8% da tela via bias.
+    biasX = Math.max(-SESSION_BIAS_MAX_NORM, Math.min(SESSION_BIAS_MAX_NORM, biasX));
+    biasY = Math.max(-SESSION_BIAS_MAX_NORM, Math.min(SESSION_BIAS_MAX_NORM, biasY));
+    biasSamples++;
+    absorbed = true;
+  }
+
+  // (2) RLS, opt-in via flag.
+  if (USE_ONLINE_CALIBRATION && onlineLeft && onlineRight) {
+    onlineLeft.update(scaledLeft, targetX, targetY);
+    onlineRight.update(scaledRight, targetX, targetY);
+    absorbed = true;
+  }
+
+  return absorbed;
 }
 
 export function onlineSampleCount(): number {
@@ -1247,6 +1301,14 @@ export function mapGaze(
       baseX = (1 - w) * baseX + w * onlineX;
       baseY = (1 - w) * baseY + w * onlineY;
     }
+  }
+
+  // Correção de bias em sessão. Rampa linear em [0..1] evita salto ao juntar
+  // primeiras evidências (peso zero na 1ª amostra, cheio a partir de 5).
+  if (sessionBiasEnabled && biasSamples > 0) {
+    const rampW = Math.min(1, biasSamples / 5);
+    baseX += rampW * biasX;
+    baseY += rampW * biasY;
   }
 
   // BUG-4: Soft clamp nas bordas. O clamp abrupto anterior (Math.min/max) fazia

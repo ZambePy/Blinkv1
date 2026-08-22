@@ -98,6 +98,10 @@ export interface CalibrationApi {
   // 'left'/'right' aplica multiplicador ao olho escolhido. Setter refletido
   // no `mapGaze` no próximo frame. Não requer recalibração.
   setEyeDominance(dominance: 'left' | 'right' | 'both'): void;
+  // Correção de bias em sessão (drift EMA a partir de dwell clicks).
+  // Enabled por default; desligar volta ao comportamento pré-melhoria.
+  setSessionBiasEnabled(enabled: boolean): void;
+  resetSessionBias(): void;
 }
 
 // Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
@@ -845,6 +849,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       setEyeDominance(dominance: 'left' | 'right' | 'both'): void {
         calibration.setEyeDominance(dominance);
+      },
+      setSessionBiasEnabled(enabled: boolean): void {
+        calibration.setSessionBiasEnabled(enabled);
+      },
+      resetSessionBias(): void {
+        calibration.resetSessionBias();
       },
     },
 
