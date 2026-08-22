@@ -94,6 +94,10 @@ export interface CalibrationApi {
   feedOnlineSample(targetXpx: number, targetYpx: number): boolean;
   setOnlineCalibrationEnabled(enabled: boolean): void;
   onlineSampleCount(): number;
+  // Dominância ocular do usuário. 'both' = fusão puramente por qualidade;
+  // 'left'/'right' aplica multiplicador ao olho escolhido. Setter refletido
+  // no `mapGaze` no próximo frame. Não requer recalibração.
+  setEyeDominance(dominance: 'left' | 'right' | 'both'): void;
 }
 
 // Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
@@ -552,7 +556,22 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           latestFeaturesLeft = featuresLeft;
           latestFeaturesRight = featuresRight;
 
-          const calibrated = calibration.mapGaze(featuresLeft, featuresRight);
+          // Peso por olho para a fusão binocular. EAR "aberto" de referência
+          // ~0.25; abaixo disso o olho está fechando. Clamp em [0..1] transforma
+          // isso em confiança, que o `mapGaze` combina com a dominância
+          // ocular do usuário. Sem EARs (extractor antigo/parity test), o
+          // peso fica indefinido e `mapGaze` volta para a média simples.
+          const EAR_OPEN = 0.25;
+          const perEyeWeight =
+            typeof extractorResult.leftEAR === 'number' &&
+            typeof extractorResult.rightEAR === 'number'
+              ? {
+                  left:  Math.max(0, Math.min(1, extractorResult.leftEAR  / EAR_OPEN)),
+                  right: Math.max(0, Math.min(1, extractorResult.rightEAR / EAR_OPEN)),
+                }
+              : undefined;
+
+          const calibrated = calibration.mapGaze(featuresLeft, featuresRight, perEyeWeight);
           if (calibrated) {
             targetX = calibrated.x;
             targetY = calibrated.y;
@@ -823,6 +842,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       onlineSampleCount(): number {
         return calibration.onlineSampleCount();
+      },
+      setEyeDominance(dominance: 'left' | 'right' | 'both'): void {
+        calibration.setEyeDominance(dominance);
       },
     },
 

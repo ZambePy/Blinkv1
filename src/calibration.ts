@@ -29,6 +29,27 @@ export function setOnlineCalibrationEnabled(enabled: boolean): void {
   USE_ONLINE_CALIBRATION = enabled;
 }
 
+// ── Ponderação binocular ────────────────────────────────────────────────────
+// Antes: `mapGaze` fazia média simples (0.5 · L + 0.5 · R). Com um dos olhos
+// parcialmente fechado (piscadinha curta que não dispara o BlinkDetector,
+// ptose unilateral, franja, reflexo em uma das lentes), a média puxa a
+// predição para longe do alvo real. Agora o engine passa um peso por olho
+// derivado do EAR de cada olho — e o `mapGaze` mistura na razão desses pesos.
+// A dominância ocular do usuário (SettingsContext.eyeDominance) entra como
+// um multiplicador extra.
+export type EyeDominance = 'left' | 'right' | 'both';
+let eyeDominance: EyeDominance = 'both';
+// Ganho aplicado ao olho dominante. 1.5× é conservador — dá vantagem clara
+// mas não elimina o não-dominante em condições normais.
+const DOMINANCE_GAIN = 1.5;
+
+export function setEyeDominance(d: EyeDominance): void {
+  eyeDominance = d;
+}
+export function getEyeDominance(): EyeDominance {
+  return eyeDominance;
+}
+
 // Rampa de mistura base ↔ online. Peso online sobe linearmente até 1.0 após
 // ~50 amostras confirmadas — evita que um dwell acidental degrade o modelo
 // antes de acumular evidência suficiente.
@@ -1168,9 +1189,15 @@ export function getMapGazeErrorCount(): number {
   return _mapGazeConsecutiveErrors;
 }
 
+// Peso por olho (0..1) derivado do EAR relativo. Fica em escopo de módulo
+// para o `mapGaze` de assinatura simples continuar funcionando quando o
+// caller antigo (testes de regressão, replay) não passa `perEyeWeight`.
+const MIN_EYE_WEIGHT = 0.05;   // nunca zera um olho: mantém alguma contribuição
+
 export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
+  perEyeWeight?: { left: number; right: number },
 ): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
 
@@ -1195,8 +1222,16 @@ export function mapGaze(
     return null;
   }
 
-  let baseX = (predLeft.x + predRight.x) / 2;
-  let baseY = (predLeft.y + predRight.y) / 2;
+  // Fusão binocular ponderada. Sem `perEyeWeight` cai no caminho antigo
+  // (média simples), preservando os testes existentes. Com pesos, aplica
+  // também o multiplicador da dominância ocular do usuário.
+  let wL = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.left) : 1;
+  let wR = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.right) : 1;
+  if (eyeDominance === 'left')  wL *= DOMINANCE_GAIN;
+  if (eyeDominance === 'right') wR *= DOMINANCE_GAIN;
+  const wSum = wL + wR;
+  let baseX = (predLeft.x * wL + predRight.x * wR) / wSum;
+  let baseY = (predLeft.y * wL + predRight.y * wR) / wSum;
 
   // Sprint 4 — mistura com o modelo online (RLS) quando habilitado e após
   // acumular amostras suficientes. Rampa linear em [0,1] evita degradar o

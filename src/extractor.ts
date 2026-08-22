@@ -51,6 +51,13 @@ export interface ExtractorResult {
   featuresRight: number[];
   blinkDetected: boolean;
   advancedFeatures?: AdvancedFrameFeatures;
+  // EAR (Eye Aspect Ratio) por olho. Preenchidos por extractEyeFeatures.
+  // Usados pelo engine para ponderar a fusão binocular quando um olho está
+  // parcialmente fechado (piscadinha curta que passa pelo BlinkDetector,
+  // ptose unilateral, obstrução por franja, etc). Opcionais para compat
+  // com callers que não participam do pipeline live.
+  leftEAR?: number;
+  rightEAR?: number;
 }
 
 // EyeTrax Indices
@@ -404,7 +411,7 @@ export function extractEyeFeatures(
     quality
   };
 
-  return { featuresLeft, featuresRight, blinkDetected, advancedFeatures };
+  return { featuresLeft, featuresRight, blinkDetected, advancedFeatures, leftEAR, rightEAR };
 }
 
 // L2CS gaze data (E5/E6 do L2CS-NET.md). Interface local para evitar
@@ -528,6 +535,8 @@ export function extractCompactFeatures(
     featuresLeft: compLeft,
     featuresRight: compRight,
     blinkDetected: baseResult.blinkDetected,
-    advancedFeatures: baseResult.advancedFeatures
+    advancedFeatures: baseResult.advancedFeatures,
+    leftEAR: baseResult.leftEAR,
+    rightEAR: baseResult.rightEAR,
   };
 }
