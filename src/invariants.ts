@@ -31,11 +31,9 @@ export interface InvariantViolation {
 const violations = new Map<InvariantCode, InvariantViolation>();
 
 export class InvariantError extends Error {
-  public readonly code: InvariantCode;
-  constructor(code: InvariantCode, detail: string) {
+  constructor(public readonly code: InvariantCode, detail: string) {
     super(`[invariant:${code}] ${detail}`);
     this.name = 'InvariantError';
-    this.code = code;
   }
 }
 
@@ -52,10 +50,7 @@ export class InvariantError extends Error {
 export function assertInvariant(cond: boolean, code: InvariantCode, detail: string): void {
   if (cond) return;
 
-  // `process` só existe em Node/Vitest. No browser cai no ramo de produção.
-  // Cast local evita depender de @types/node (não instalado neste projeto).
-  const proc = (globalThis as unknown as { process?: { env?: Record<string, string | undefined> } }).process;
-  const isTest = proc?.env?.NODE_ENV === 'test';
+  const isTest = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
   if (isTest) {
     throw new InvariantError(code, detail);
   }

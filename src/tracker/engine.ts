@@ -12,7 +12,6 @@ import { EyeQualityAnalyzer } from '../qualityAnalyzer';
 import { createL2CSClient, type L2CSClient } from '../l2cs/client';
 import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/crop';
 import type { L2CSGazeInput } from '../extractor';
-import { getRecentBlinkRatePerMinute } from '../extractor';
 import * as recorder from '../telemetry/recorder';
 import type { RecordedQuality, RecordedTarget } from '../telemetry/types';
 import { EXPERIMENT } from '../config/experiment';
@@ -95,19 +94,6 @@ export interface CalibrationApi {
   feedOnlineSample(targetXpx: number, targetYpx: number): boolean;
   setOnlineCalibrationEnabled(enabled: boolean): void;
   onlineSampleCount(): number;
-  // Dominância ocular do usuário. 'both' = fusão puramente por qualidade;
-  // 'left'/'right' aplica multiplicador ao olho escolhido. Setter refletido
-  // no `mapGaze` no próximo frame. Não requer recalibração.
-  setEyeDominance(dominance: 'left' | 'right' | 'both'): void;
-  // Correção de bias em sessão (drift EMA a partir de dwell clicks).
-  // Enabled por default; desligar volta ao comportamento pré-melhoria.
-  setSessionBiasEnabled(enabled: boolean): void;
-  resetSessionBias(): void;
-  // Camada 3 do conforto visual — piscadas por minuto na janela recente.
-  // Consumido pela UI de calibração para alertar sobre fadiga/brilho
-  // excessivo. Default 60000 ms (1 min); janelas menores dão resposta
-  // mais rápida ao custo de variância maior.
-  getRecentBlinkRatePerMinute(windowMs?: number): number;
 }
 
 // Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
@@ -274,14 +260,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let lastVideoTime = -1;
   let running = false;
 
-  // Default é 'balanceado-v2' (espaço normalizado). Os presets v1 legados
-  // filtram em pixels e produzem alpha≈0.99 a 30fps — o filtro passa quase
-  // intacto e o cursor fica jittery. Ver FILTER_PRESETS_V2 em oneEuroFilter.ts.
-  // Trocável em tempo real via setFilterPreset.
-  let activePreset: FilterPreset | FilterPresetV2 = 'balanceado-v2';
-  let activeConfig = activePreset.endsWith('-v2')
-    ? FILTER_PRESETS_V2[activePreset as FilterPresetV2]
-    : FILTER_PRESETS[activePreset as FilterPreset];
+  // Sprint 5 — inicia no preset balanceado (equivalente aos parâmetros
+  // pré-Sprint 5, para não regredir a percepção de suavidade em quem já
+  // conhecia o app). Trocável em tempo real via setFilterPreset.
+  let activePreset: FilterPreset | FilterPresetV2 = 'balanceado';
+  let activeConfig = FILTER_PRESETS[activePreset as FilterPreset];
   const oneEuro = new OneEuroFilter2D(60, activeConfig.mincutoff, activeConfig.beta);
   const qualityAnalyzer = new EyeQualityAnalyzer();
   const bufferX: number[] = [];
@@ -306,11 +289,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let framesSeen = 0;
   let framesWithFace = 0;
   let framesEmitted = 0;
-  // Dois timers separados. Antes um único `lastStatMs` era usado por dois
-  // loggers concorrentes (o de 3s no topo do loop e o de 60 frames no ramo
-  // hasFace), o que resetava um pelo outro e fazia o print de 3s nunca sair.
-  let lastStatMs = 0;      // print de status a cada 3s (ver início do loop)
-  let lastFpsLogMs = 0;    // print de FPS a cada 60 frames com face
+  let lastStatMs = 0;
 
   // E6 do L2CS-NET.md — cliente + contexto de crop. L2CS é obrigatório no
   // pipeline atual (não há fallback A/B). O worker carrega uma única vez;
@@ -453,37 +432,33 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           });
         }
       } else {
-        // FPS agregado a cada 60 frames com face — usa timer próprio.
         if (framesSeen === 1) {
-          lastFpsLogMs = performance.now();
-        } else if (framesSeen % 60 === 0) {
-          const nowMs = performance.now();
-          const deltaSec = (nowMs - lastFpsLogMs) / 1000;
-          console.log(
-            `[IrisFlow] FPS: ${(60 / deltaSec).toFixed(1)} ` +
-            `| Face: ${(framesWithFace / framesSeen * 100).toFixed(0)}% ` +
-            `| L2CS: ${l2csFramesValid}/${l2csFramesSubmitted} (stale: ${l2csFramesStale})`,
-          );
-          lastFpsLogMs = nowMs;
-        }
+        lastStatMs = performance.now();
+      } else if (framesSeen % 60 === 0) {
+        const nowMs = performance.now();
+        const deltaSec = (nowMs - lastStatMs) / 1000;
+        console.log(
+          `[IrisFlow] FPS: ${(60 / deltaSec).toFixed(1)} ` +
+          `| Face: ${(framesWithFace / framesSeen * 100).toFixed(0)}% ` +
+          `| L2CS: ${l2csFramesValid}/${l2csFramesSubmitted} (stale: ${l2csFramesStale})`,
+        );
+        lastStatMs = nowMs;
+      }
 
-        // Atualização do painel de diagnóstico (4 Hz).
-        const now = performance.now();
-        if (now - diagLastUpdateMs >= 250) {
-          const deltaMs = now - diagLastUpdateMs;
-          diagRenderFps = (framesSeen - diagFramesSeen) * 1000 / deltaMs;
-          const l2csTotal = (l2csFramesValid + l2csFramesStale) - diagL2csTotalFrames;
-          const l2csValid = l2csFramesValid - diagL2csValidFrames;
-          diagL2csHz = l2csValid * 1000 / deltaMs;
-          diagL2csStalePct = l2csTotal > 0 ? ((l2csTotal - l2csValid) / l2csTotal) * 100 : 0;
-
-          diagFramesSeen = framesSeen;
-          diagL2csValidFrames = l2csFramesValid;
-          diagL2csTotalFrames = l2csFramesValid + l2csFramesStale;
-          diagLastUpdateMs = now;
-        }
-
-        const landmarks = results.faceLandmarks[0];
+      const now = performance.now();
+      if (now - diagLastUpdateMs >= 250) {
+        const deltaMs = now - diagLastUpdateMs;
+        diagRenderFps = (framesSeen - diagFramesSeen) * 1000 / deltaMs;
+        const l2csTotal = (l2csFramesValid + l2csFramesStale) - diagL2csTotalFrames;
+        const l2csValid = l2csFramesValid - diagL2csValidFrames;
+        diagL2csHz = l2csValid * 1000 / deltaMs;
+        diagL2csStalePct = l2csTotal > 0 ? ((l2csTotal - l2csValid) / l2csTotal) * 100 : 0;
+        
+        diagFramesSeen = framesSeen;
+        diagL2csValidFrames = l2csFramesValid;
+        diagL2csTotalFrames = l2csFramesValid + l2csFramesStale;
+        diagLastUpdateMs = now;
+      }  const landmarks = results.faceLandmarks[0];
         const rawIod = Math.sqrt(
           (landmarks[33].x - landmarks[263].x) ** 2 +
           (landmarks[33].y - landmarks[263].y) ** 2,
@@ -557,21 +532,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // baseline do ponto (fonte principal do colapso da coluna
           // esquerda observado no primeiro teste real).
           const face = extractorResult.advancedFeatures?.face;
-          // gazeYaw/gazePitch só entram quando o L2CS deu uma leitura fresh
-          // NESTE frame (não stale). O calibration.ts usa esses valores para
-          // rejeitar amostras cujo olhar se desviou do baseline do ponto —
-          // "usuário olhou pra outro lugar no meio da coleta". Em frames stale,
-          // o campo é omitido e o gate de gaze é pulado (pose + qualidade
-          // continuam ativos).
-          const gazeFresh = l2csGaze?.valid === true;
           const quality = {
             ...(extractorResult.advancedFeatures?.quality ?? {}),
             ...cropQuality,
             yaw:   face?.yaw,
             pitch: face?.pitch,
             roll:  face?.roll,
-            gazeYaw:   gazeFresh ? l2csGaze!.yaw   : undefined,
-            gazePitch: gazeFresh ? l2csGaze!.pitch : undefined,
           };
 
           if (face) {
@@ -583,22 +549,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           latestFeaturesLeft = featuresLeft;
           latestFeaturesRight = featuresRight;
 
-          // Peso por olho para a fusão binocular. EAR "aberto" de referência
-          // ~0.25; abaixo disso o olho está fechando. Clamp em [0..1] transforma
-          // isso em confiança, que o `mapGaze` combina com a dominância
-          // ocular do usuário. Sem EARs (extractor antigo/parity test), o
-          // peso fica indefinido e `mapGaze` volta para a média simples.
-          const EAR_OPEN = 0.25;
-          const perEyeWeight =
-            typeof extractorResult.leftEAR === 'number' &&
-            typeof extractorResult.rightEAR === 'number'
-              ? {
-                  left:  Math.max(0, Math.min(1, extractorResult.leftEAR  / EAR_OPEN)),
-                  right: Math.max(0, Math.min(1, extractorResult.rightEAR / EAR_OPEN)),
-                }
-              : undefined;
-
-          const calibrated = calibration.mapGaze(featuresLeft, featuresRight, perEyeWeight);
+          const calibrated = calibration.mapGaze(featuresLeft, featuresRight);
           if (calibrated) {
             targetX = calibrated.x;
             targetY = calibrated.y;
@@ -869,18 +820,6 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       onlineSampleCount(): number {
         return calibration.onlineSampleCount();
-      },
-      setEyeDominance(dominance: 'left' | 'right' | 'both'): void {
-        calibration.setEyeDominance(dominance);
-      },
-      setSessionBiasEnabled(enabled: boolean): void {
-        calibration.setSessionBiasEnabled(enabled);
-      },
-      resetSessionBias(): void {
-        calibration.resetSessionBias();
-      },
-      getRecentBlinkRatePerMinute(windowMs?: number): number {
-        return getRecentBlinkRatePerMinute(windowMs);
       },
     },
 

@@ -1,8 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle, SunDim } from 'lucide-react';
+import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
-import { useSettings } from '../../context/SettingsContext';
 import { BackButton } from '../../components/ui/BackButton';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { RunMeta } from '@tracker/accuracy';
@@ -23,27 +22,13 @@ const CALIBRATION_POINTS = [
 // ─── Paleta CAA — escura em todas as etapas ────────────────────────────────
 // Fundo preto reduz fadiga ocular e força menos a piscada, permitindo fixações
 // mais longas e estáveis. Contraste alto (branco/âmbar sobre preto) é o padrão CAA.
-//
-// Ajuste do plano de brilho (Camadas 1-3): as cores de PONTO DE FIXAÇÃO foram
-// dessaturadas — mesmo em tela escura, um alvo hipersaturado que o usuário
-// olha fixamente por 3s satura a pupila e induz piscada reflexa. Trocamos
-// azul cheio (#1B54A8) por um azul suave (#5B7FBF) SOMENTE no ponto de
-// fixação; o resto da UI mantém a marca (#1B54A8) para hierarquia visual.
-const BG           = '#050810';                     // era #000000 — quase-preto reduz smearing em LCD
-const TEXT_PRIMARY = '#E5E7EB';                     // era #FFFFFF — evita branco puro (contraste ~13:1)
-const TEXT_DIM     = 'rgba(229,231,235,0.60)';
-const ACCENT       = '#1B54A8';                     // Mantém IrisFlow Azul para UI (botões, tags)
+const BG           = '#000000';
+const TEXT_PRIMARY = '#FFFFFF';
+const TEXT_DIM     = 'rgba(255,255,255,0.65)';
+const ACCENT       = '#1B54A8';          // IrisFlow Azul
 const ACCENT_DIM   = 'rgba(27, 84, 168, 0.15)';
-const DOT_COLOR    = '#5B7FBF';                     // Ponto de fixação — azul dessaturado, menos ofuscante
-const DOT_GLOW     = 'rgba(91, 127, 191, 0.35)';    // Halo do ponto — 35% em vez de "puro"
 const SUCCESS      = '#22C55E';
 const DANGER       = '#EF4444';
-
-// Piscadas por minuto acima disso durante calibração = fadiga ou brilho
-// excessivo. Referência clínica: repouso ~17/min; >25/min sustentado é
-// sinal de irritação, dry eye ou glare. Usado só para AVISAR — nunca
-// interromper a calibração.
-const BLINK_ALERT_THRESHOLD = 25;
 
 const humanMessage: Record<string, string> = {
   singular_matrix: 'Não foi possível treinar o modelo (matriz singular). A causa mais comum é reflexo constante nos óculos ou desvio extremo do olhar.',
@@ -55,13 +40,6 @@ const humanMessage: Record<string, string> = {
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
   const { calibration, l2csStatus } = useGaze();
-  const { settings, updateSettings } = useSettings();
-
-  // Camada 3 do conforto visual — monitora taxa de piscada durante calibração.
-  // Alerta discreto (não bloqueia) quando > 25/min sustentado. Botão de ação
-  // baixa o brilho da UI 20 pontos percentuais imediatamente, sem sair da tela.
-  const [blinkRate, setBlinkRate] = useState(0);
-  const [blinkAlertDismissed, setBlinkAlertDismissed] = useState(false);
 
   const l2csReady  = l2csStatus === 'ready';
   const l2csFailed = l2csStatus === 'error';
@@ -77,7 +55,7 @@ export const CalibrationCheck: React.FC = () => {
   const [preparing, setPreparing]             = useState(false);
   const PREPARE_MS = 1500;
 
-  const orderRef                 = useRef<number[]>([]);
+  const shuffleOrderRef          = useRef<number[]>([]);
   const isMounted                = useRef(true);
   const retryCountRef            = useRef(0);
   const MAX_RETRIES_PER_POINT    = 3;
@@ -86,23 +64,6 @@ export const CalibrationCheck: React.FC = () => {
     isMounted.current = true;
     return () => { isMounted.current = false; };
   }, []);
-
-  // Amostra taxa de piscada a cada 2s durante calibração. Só ativo no stage
-  // 'calibrating' — em 'pre-calibration' e 'tutorial' o usuário está lendo
-  // texto e piscando normalmente, não é sinal de nada. Reset do dismissal
-  // toda vez que a calibração recomeça (novo alerta se persistir).
-  useEffect(() => {
-    if (stage !== 'calibrating') return;
-    setBlinkAlertDismissed(false);
-    const interval = setInterval(() => {
-      if (!isMounted.current) return;
-      // Janela curta (30s) — resposta mais rápida durante os ~25s de calibração.
-      const rate = calibration.getRecentBlinkRatePerMinute?.(30000) ?? 0;
-      setBlinkRate(rate);
-    }, 2000);
-    return () => clearInterval(interval);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stage]);
 
   const AUTO_TEST_META: RunMeta = {
     data: new Date().toISOString().slice(0, 10),
@@ -135,7 +96,7 @@ export const CalibrationCheck: React.FC = () => {
 
   const startNextPoint = (step: number) => {
     if (!isMounted.current) return;
-    const order = orderRef.current;
+    const order = shuffleOrderRef.current;
 
     if (step >= order.length) {
       setStage('testing');
@@ -188,13 +149,12 @@ export const CalibrationCheck: React.FC = () => {
     setStage('calibrating');
     setCompletedList([]);
 
-    // Ordem raster: superior-esquerdo → inferior-direito, linha por linha.
-    // CALIBRATION_POINTS já está declarado nessa ordem, então basta [0..8].
-    // Ordem previsível reduz carga cognitiva (usuário sabe pra onde olhar em
-    // seguida) e evita que o ponto mais difícil (inferior-direito, canto de
-    // rotação ocular extrema) caia no início antes do usuário estar acostumado.
     const order = CALIBRATION_POINTS.map((_, i) => i);
-    orderRef.current = order;
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    shuffleOrderRef.current = order;
     setCurrentIndex(order[0]);
     calibration.startCalibrationMode?.();
 
@@ -467,65 +427,6 @@ export const CalibrationCheck: React.FC = () => {
               </div>
             )}
 
-            {/* Alerta de piscada excessiva — Camada 3 do conforto visual.
-             * Aparece só quando taxa > 25/min E cuidador ainda não dispensou.
-             * Cor âmbar (não vermelho) — é sugestão, não erro. Ação inline
-             * reduz brilho 20 pp e re-arma o dismissal. Ficar no CANTO SUPERIOR
-             * DIREITO para não competir visualmente com o ponto de calibração
-             * no centro/embaixo. */}
-            {blinkRate > BLINK_ALERT_THRESHOLD && !blinkAlertDismissed && !errorMessage && !preparing && (
-              <div
-                role="status"
-                aria-live="polite"
-                style={{
-                  position: 'absolute', top: '1.5rem', right: '1.5rem',
-                  zIndex: 45,
-                  display: 'flex', alignItems: 'center', gap: '0.75rem',
-                  padding: '0.75rem 1rem',
-                  background: 'rgba(217, 119, 6, 0.15)',
-                  border: '1px solid rgba(217, 119, 6, 0.55)',
-                  borderRadius: '1rem',
-                  color: '#fbbf24',
-                  fontSize: '0.9rem', fontWeight: 600,
-                  maxWidth: 340,
-                  backdropFilter: 'blur(6px)',
-                }}
-              >
-                <SunDim size={22} color="#fbbf24" aria-hidden="true" />
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', minWidth: 0 }}>
-                  <span>Piscadas frequentes ({Math.round(blinkRate)}/min). O brilho pode estar alto.</span>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const next = Math.max(0.4, settings.brightnessLevel - 0.2);
-                        updateSettings({ brightnessLevel: next });
-                        setBlinkAlertDismissed(true);
-                      }}
-                      style={{
-                        padding: '0.35rem 0.75rem', borderRadius: '999px',
-                        background: '#d97706', color: '#fff',
-                        border: 'none', fontWeight: 700, fontSize: '0.8rem', cursor: 'pointer',
-                      }}
-                    >
-                      Baixar brilho
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBlinkAlertDismissed(true)}
-                      style={{
-                        padding: '0.35rem 0.75rem', borderRadius: '999px',
-                        background: 'transparent', color: 'rgba(251,191,36,0.85)',
-                        border: '1px solid rgba(251,191,36,0.35)', fontWeight: 600, fontSize: '0.8rem', cursor: 'pointer',
-                      }}
-                    >
-                      Ignorar
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-
             {/* Pontos de calibração */}
             {CALIBRATION_POINTS.map((pt, idx) => {
               const isCurrent      = idx === currentIndex;
@@ -547,27 +448,23 @@ export const CalibrationCheck: React.FC = () => {
                   {/* ── Ponto atual ── */}
                   {isCurrent && !isJustFinished && (
                     <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                      {/* Halo pulsante — "olhe aqui" (mesma cor dessaturada do ponto) */}
+                      {/* Halo pulsante — "olhe aqui" */}
                       <div style={{
                         position: 'absolute', width: 72, height: 72, borderRadius: '50%',
-                        background: `radial-gradient(circle, ${DOT_GLOW} 0%, transparent 70%)`,
+                        background: 'radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)',
                         animation: 'cfRadarPing 2.2s ease-out infinite',
                       }} />
                       {/* Anel rotativo de guia */}
                       <div style={{
                         position: 'absolute', width: 52, height: 52, borderRadius: '50%',
-                        border: '2px solid rgba(91, 127, 191, 0.30)',
+                        border: '2px solid rgba(27, 84, 168, 0.40)',
                         animation: 'cfHalo 3s linear infinite',
                       }} />
-                      {/* Ponto central — azul dessaturado, glow reduzido (Camada 1 do conforto)
-                       * Antes: #1B54A8 (cheio) + glow de 36px = alvo hipersaturado que
-                       * força contração pupilar constante durante os 3s de fixação.
-                       * Agora: #5B7FBF + glow de 18px = ainda WCAG AAA sobre fundo escuro
-                       * (contraste ~7:1) porém não ofuscante. */}
+                      {/* Ponto central — azul, limpo, sem elementos sobre ele */}
                       <div style={{
                         width: 34, height: 34, borderRadius: '50%',
-                        background: DOT_COLOR,
-                        boxShadow: `0 0 0 6px ${DOT_GLOW}, 0 0 18px rgba(91, 127, 191, 0.55)`,
+                        background: ACCENT,
+                        boxShadow: `0 0 0 8px rgba(27, 84, 168, 0.18), 0 0 36px ${ACCENT}`,
                         animation: 'cfPulse 1.2s infinite alternate',
                       }} />
                     </div>

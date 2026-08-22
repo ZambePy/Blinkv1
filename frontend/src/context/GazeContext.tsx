@@ -10,7 +10,7 @@ import React, {
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
-import type { FilterPreset, FilterPresetV2 } from '@tracker/oneEuroFilter';
+import type { FilterPreset } from '@tracker/oneEuroFilter';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import { useSettings } from './SettingsContext';
 
@@ -53,7 +53,7 @@ interface GazeContextValue {
   // querer um setInterval de ~500 ms enquanto ativo pra atualizar o
   // contador de frames.
   recording: RecordingApi;
-  setFilterPreset: (preset: FilterPreset | FilterPresetV2) => void;
+  setFilterPreset: (preset: FilterPreset) => void;
   getDiagnostics: () => EngineDiagnostics | null;
   isDwelling: boolean;
   isComposing: boolean;
@@ -489,8 +489,6 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
       setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
       resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
-      getRecentBlinkRatePerMinute: (windowMs) =>
-        engineRef.current?.calibration.getRecentBlinkRatePerMinute(windowMs) ?? 0,
     }),
     [],
   );
@@ -520,7 +518,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       l2csStatus,
       calibration,
       recording,
-      setFilterPreset: (preset: FilterPreset | FilterPresetV2) => engineRef.current?.setFilterPreset(preset),
+      setFilterPreset: (preset: FilterPreset) => engineRef.current?.setFilterPreset(preset),
       getDiagnostics: () => engineRef.current?.getDiagnostics() ?? null,
       isDwelling,
       isComposing,

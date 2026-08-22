@@ -6,10 +6,6 @@ export interface FeaturePipelineResult {
   featuresRight: number[];
   blinkDetected: boolean;
   advancedFeatures?: AdvancedFrameFeatures;
-  // Repassa EARs por olho (calculados no extractor) para o engine ponderar
-  // a fusão binocular durante a inferência live.
-  leftEAR?: number;
-  rightEAR?: number;
 }
 
 import { EXPERIMENT } from './config/experiment';
@@ -45,7 +41,5 @@ export function extractFeatures(
     featuresRight: [...geo.featuresRight],
     blinkDetected: geo.blinkDetected,
     advancedFeatures: geo.advancedFeatures,
-    leftEAR: geo.leftEAR,
-    rightEAR: geo.rightEAR,
   };
 }

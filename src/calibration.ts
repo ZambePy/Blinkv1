@@ -29,51 +29,6 @@ export function setOnlineCalibrationEnabled(enabled: boolean): void {
   USE_ONLINE_CALIBRATION = enabled;
 }
 
-// ── Ponderação binocular e correção de bias em sessão ───────────────────────
-// Antes: `mapGaze` fazia média simples (0.5 · L + 0.5 · R). Com um dos olhos
-// parcialmente fechado (piscadinha curta que não dispara o BlinkDetector,
-// ptose unilateral, franja, reflexo em uma das lentes), a média puxa a
-// predição para longe do alvo real. Agora o engine passa um peso por olho
-// derivado do EAR de cada olho — e o `mapGaze` mistura na razão desses pesos.
-// A dominância ocular do usuário (SettingsContext.eyeDominance) entra como
-// um multiplicador extra.
-export type EyeDominance = 'left' | 'right' | 'both';
-let eyeDominance: EyeDominance = 'both';
-// Ganho aplicado ao olho dominante. 1.5× é conservador — dá vantagem clara
-// mas não elimina o não-dominante em condições normais.
-const DOMINANCE_GAIN = 1.5;
-
-export function setEyeDominance(d: EyeDominance): void {
-  eyeDominance = d;
-}
-export function getEyeDominance(): EyeDominance {
-  return eyeDominance;
-}
-
-// Correção de bias em sessão (drift compensation).
-// A cada dwell click bem-sucedido registramos um resíduo (alvo − predição)
-// e mantemos um EMA. O offset resultante é somado à predição do frame.
-// Diferente do RLS (feedOnlineSample), isto só corrige o VIÉS global (2 dofs),
-// nunca mexe nos coeficientes do Ridge — é seguro por default e útil já a
-// partir da primeira amostra.
-const SESSION_BIAS_ALPHA = 0.35;      // agressividade do EMA (0..1)
-const SESSION_BIAS_MAX_NORM = 0.08;   // clamp em 8% da tela (evita drift patológico)
-let biasX = 0;                        // em coord normalizada [0..1]
-let biasY = 0;
-let biasSamples = 0;
-let sessionBiasEnabled = true;
-
-export function setSessionBiasEnabled(enabled: boolean): void {
-  sessionBiasEnabled = enabled;
-  if (!enabled) resetSessionBias();
-}
-export function resetSessionBias(): void {
-  biasX = 0; biasY = 0; biasSamples = 0;
-}
-export function getSessionBias(): { x: number; y: number; samples: number } {
-  return { x: biasX, y: biasY, samples: biasSamples };
-}
-
 // Rampa de mistura base ↔ online. Peso online sobe linearmente até 1.0 após
 // ~50 amostras confirmadas — evita que um dwell acidental degrade o modelo
 // antes de acumular evidência suficiente.
@@ -192,20 +147,8 @@ const POSE_DRIFT_YAW_MAX   = 0.087;
 const POSE_DRIFT_PITCH_MAX = 0.087;
 const POSE_DRIFT_ROLL_MAX  = 0.087;
 
-// Gate de deriva de OLHAR (não da cabeça). Rejeita frame quando o yaw/pitch
-// do L2CS-Net se afasta do baseline do ponto — sinal de que o usuário desviou
-// o olhar pra outro lugar no meio da janela de coleta. Threshold um pouco
-// mais frouxo que a pose (0.12 rad ≈ 7°) pra tolerar micro-sacadas dentro
-// de uma fixação normal, mas rejeitar "olhou pro botão pause / pro cuidador".
-// Só aplicado quando o L2CS entrega leitura fresh no frame (quality.gazeYaw
-// definido) — em frames stale o gate é pulado, pose+qualidade seguem ativos.
-const GAZE_DRIFT_YAW_MAX   = 0.12;
-const GAZE_DRIFT_PITCH_MAX = 0.12;
-
 let currentPointBaselinePose: { yaw: number; pitch: number; roll: number } | null = null;
-let currentPointBaselineGaze: { yaw: number; pitch: number } | null = null;
 let poseDriftRejects = 0;
-let gazeDriftRejects = 0;
 
 let profile: CalibrationPoint[] = [];
 export let isCalibrating = false;
@@ -262,7 +205,6 @@ export function clearCalibration() {
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
   pendingProfileMeta = null;
-  resetSessionBias();
 }
 
 export function getSampleCount(): number {
@@ -524,7 +466,6 @@ export function startCalibrationMode(
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
-  resetSessionBias();
 
   // A1-6 — meta para o perfil que resultar desta calibração. Default
   // `desconhecido` porque a UI que pergunta a condição óptica (B1-6/B2-1)
@@ -565,9 +506,7 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   collectedQualities = [];
   pointCompleteCallback = onDone;
   currentPointBaselinePose = null;
-  currentPointBaselineGaze = null;
   poseDriftRejects = 0;
-  gazeDriftRejects = 0;
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
 
@@ -736,31 +675,6 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
         }
       }
     }
-
-    // Gate de olhar. Simétrico ao gate de pose: o primeiro frame válido fixa
-    // o baseline de gaze do ponto; os seguintes são rejeitados se o L2CS
-    // reporta que o olhar se afastou disso. Cobre o caso "usuário olhou pra
-    // outro lugar sem mover a cabeça" — que a pose_drift não pega.
-    if (
-      typeof quality.gazeYaw === 'number' &&
-      typeof quality.gazePitch === 'number'
-    ) {
-      if (!currentPointBaselineGaze) {
-        currentPointBaselineGaze = {
-          yaw: quality.gazeYaw,
-          pitch: quality.gazePitch,
-        };
-      } else {
-        if (
-          Math.abs(quality.gazeYaw   - currentPointBaselineGaze.yaw)   > GAZE_DRIFT_YAW_MAX ||
-          Math.abs(quality.gazePitch - currentPointBaselineGaze.pitch) > GAZE_DRIFT_PITCH_MAX
-        ) {
-          gazeDriftRejects++;
-          lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'gaze_drift' };
-          return;
-        }
-      }
-    }
   }
 
   collectedFeaturesLeft.push(featuresLeft);
@@ -789,7 +703,7 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
 
 function processStaticPoint() {
   console.log(
-    `[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length} | poseDriftRejects=${poseDriftRejects} | gazeDriftRejects=${gazeDriftRejects}`,
+    `[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length} | poseDriftRejects=${poseDriftRejects}`,
   );
 
   // If no samples were collected at all (face not visible, all frames discarded
@@ -1175,23 +1089,22 @@ export function feedFaceMetrics(_detected: boolean, _iod: number): void {
 // Sprint 4 — hook de recalibração implícita. Chamado quando um dwell click é
 // confirmado sobre um botão da UI; alvo em pixels de tela (o centro do botão).
 //
-// Dois caminhos, independentes:
-//   1. Correção de bias em sessão (sempre ativa quando calibrado) — 2 dofs,
-//      EMA sobre resíduo (alvo − predição base). Barato, sem risco de
-//      degradar o modelo.
-//   2. RLS binocular (feature completa, atrás da flag USE_ONLINE_CALIBRATION).
-//      Atualiza os coeficientes β dos dois regressors incrementalmente.
+// Rejeita a amostra se:
+//   - Flag `USE_ONLINE_CALIBRATION` está desligada
+//   - Modelo offline não treinado
+//   - Predição atual está a mais de ONLINE_OUTLIER_THRESHOLD (em unidades
+//     normalizadas de tela) do alvo — provável falso positivo (o usuário
+//     estava olhando para outro elemento quando o dwell disparou).
 //
-// Ambos aplicam a mesma rejeição de outlier via predição base (evita "aprender"
-// falso positivo de dwell em elemento diferente do que o usuário olhava).
-//
-// Retorna `true` se pelo menos uma das duas absorveu a amostra.
+// Retorna `true` se a amostra foi aceita e usada.
 export function feedOnlineSample(
   featuresLeft: number[],
   featuresRight: number[],
   targetXpx: number,
   targetYpx: number,
 ): boolean {
+  if (!USE_ONLINE_CALIBRATION) return false;
+  if (!onlineLeft || !onlineRight) return false;
   if (!regressorLeft || !regressorRight) return false;
 
   const vw = document.documentElement.clientWidth;
@@ -1216,32 +1129,9 @@ export function feedOnlineSample(
     return false;
   }
 
-  let absorbed = false;
-
-  // (1) Bias EMA — leve, sempre ativo. `residuo = alvo − predição base` é
-  //     a correção que precisamos APLICAR à predição para acertar o alvo,
-  //     não subtrair.
-  if (sessionBiasEnabled) {
-    const rx = targetX - basePredX;
-    const ry = targetY - basePredY;
-    biasX = (1 - SESSION_BIAS_ALPHA) * biasX + SESSION_BIAS_ALPHA * rx;
-    biasY = (1 - SESSION_BIAS_ALPHA) * biasY + SESSION_BIAS_ALPHA * ry;
-    // Clamp defensivo — bias grande demais é sinal de calibração ruim, não
-    // deriva. Não corrigimos mais que 8% da tela via bias.
-    biasX = Math.max(-SESSION_BIAS_MAX_NORM, Math.min(SESSION_BIAS_MAX_NORM, biasX));
-    biasY = Math.max(-SESSION_BIAS_MAX_NORM, Math.min(SESSION_BIAS_MAX_NORM, biasY));
-    biasSamples++;
-    absorbed = true;
-  }
-
-  // (2) RLS, opt-in via flag.
-  if (USE_ONLINE_CALIBRATION && onlineLeft && onlineRight) {
-    onlineLeft.update(scaledLeft, targetX, targetY);
-    onlineRight.update(scaledRight, targetX, targetY);
-    absorbed = true;
-  }
-
-  return absorbed;
+  onlineLeft.update(scaledLeft, targetX, targetY);
+  onlineRight.update(scaledRight, targetX, targetY);
+  return true;
 }
 
 export function onlineSampleCount(): number {
@@ -1278,15 +1168,9 @@ export function getMapGazeErrorCount(): number {
   return _mapGazeConsecutiveErrors;
 }
 
-// Peso por olho (0..1) derivado do EAR relativo. Fica em escopo de módulo
-// para o `mapGaze` de assinatura simples continuar funcionando quando o
-// caller antigo (testes de regressão, replay) não passa `perEyeWeight`.
-const MIN_EYE_WEIGHT = 0.05;   // nunca zera um olho: mantém alguma contribuição
-
 export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
-  perEyeWeight?: { left: number; right: number },
 ): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
 
@@ -1311,16 +1195,8 @@ export function mapGaze(
     return null;
   }
 
-  // Fusão binocular ponderada. Sem `perEyeWeight` cai no caminho antigo
-  // (média simples), preservando os testes existentes. Com pesos, aplica
-  // também o multiplicador da dominância ocular do usuário.
-  let wL = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.left) : 1;
-  let wR = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.right) : 1;
-  if (eyeDominance === 'left')  wL *= DOMINANCE_GAIN;
-  if (eyeDominance === 'right') wR *= DOMINANCE_GAIN;
-  const wSum = wL + wR;
-  let baseX = (predLeft.x * wL + predRight.x * wR) / wSum;
-  let baseY = (predLeft.y * wL + predRight.y * wR) / wSum;
+  let baseX = (predLeft.x + predRight.x) / 2;
+  let baseY = (predLeft.y + predRight.y) / 2;
 
   // Sprint 4 — mistura com o modelo online (RLS) quando habilitado e após
   // acumular amostras suficientes. Rampa linear em [0,1] evita degradar o
@@ -1336,14 +1212,6 @@ export function mapGaze(
       baseX = (1 - w) * baseX + w * onlineX;
       baseY = (1 - w) * baseY + w * onlineY;
     }
-  }
-
-  // Correção de bias em sessão. Rampa linear em [0..1] evita salto ao juntar
-  // primeiras evidências (peso zero na 1ª amostra, cheio a partir de 5).
-  if (sessionBiasEnabled && biasSamples > 0) {
-    const rampW = Math.min(1, biasSamples / 5);
-    baseX += rampW * biasX;
-    baseY += rampW * biasY;
   }
 
   // BUG-4: Soft clamp nas bordas. O clamp abrupto anterior (Math.min/max) fazia

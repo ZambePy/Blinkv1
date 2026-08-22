@@ -19,9 +19,6 @@ import {
   Plus,
   Trash2,
   MessageSquare,
-  SunDim,
-  Droplet,
-  Monitor,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -43,7 +40,7 @@ import {
 import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
-import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
+import type { FilterPreset } from '@tracker/oneEuroFilter';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -54,73 +51,6 @@ const cardStyle: React.CSSProperties = {
   padding: '2rem',
   boxShadow: '0 8px 32px var(--color-card-shadow, rgba(27,84,168,0.08))',
   transition: 'background 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease',
-};
-
-// Slider de brilho do MONITOR — só aparece quando o Electron IPC está exposto
-// (Windows/WMI). No browser puro o hook detecta ausência e o componente
-// devolve null, então o cuidador não vê um controle que não faz nada.
-const MonitorBrightnessSlider: React.FC = () => {
-  const { settings, updateSettings } = useSettings();
-  const [available, setAvailable] = useState<boolean | null>(null);
-  const [current, setCurrent] = useState<number | null>(settings.monitorBrightness);
-
-  useEffect(() => {
-    const api = (window as unknown as {
-      electronBrightness?: {
-        get: () => Promise<{ ok: boolean; value?: number; error?: string }>;
-        set: (pct: number) => Promise<{ ok: boolean; error?: string }>;
-      };
-    }).electronBrightness;
-    if (!api) { setAvailable(false); return; }
-
-    api.get().then((r) => {
-      if (r.ok && typeof r.value === 'number') {
-        setAvailable(true);
-        // Preferência salva ganha do valor atual — o usuário já escolheu.
-        if (current == null) setCurrent(r.value);
-      } else {
-        // API existe mas driver não suporta (Windows sem WMI habilitado).
-        console.warn('[monitor-brightness] IPC disponível mas driver não respondeu:', r.error);
-        setAvailable(false);
-      }
-    }).catch((e) => {
-      console.warn('[monitor-brightness] erro no IPC get:', e);
-      setAvailable(false);
-    });
-    // Roda uma única vez no mount — não depender de `current` evita loop.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (available !== true) return null;
-
-  const value = current ?? 100;
-  return (
-    <div style={{ marginBottom: '1.5rem' }}>
-      <label htmlFor="brightness-monitor" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--color-text-base, #1e293b)' }}>
-        <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-          <Monitor size={16} /> Brilho do monitor (todo o sistema)
-        </span>
-        <span style={{ color: '#1B54A8' }}>{value}%</span>
-      </label>
-      <input
-        id="brightness-monitor"
-        type="range"
-        min={10}
-        max={100}
-        step={5}
-        value={value}
-        onChange={(e) => {
-          const v = parseInt(e.target.value, 10);
-          setCurrent(v);
-          updateSettings({ monitorBrightness: v });
-        }}
-        style={{ width: '100%', accentColor: '#1B54A8', height: '2rem', cursor: 'pointer' }}
-      />
-      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-base, #94a3b8)', opacity: 0.7, marginTop: '0.25rem' }}>
-        Escurece o monitor inteiro. Requer suporte do driver (WMI no Windows).
-      </div>
-    </div>
-  );
 };
 
 export const SettingsScreen: React.FC = () => {
@@ -140,7 +70,7 @@ export const SettingsScreen: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { calibration, recording, setFilterPreset } = useGaze();
-  const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
+  const [filterPreset, setFilterPresetState] = useState<FilterPreset>('balanceado');
 
   // Fase 0.1 — estado local do gravador de sessão. `active` é derivado do
   // singleton do recorder, mas mantido em state pra o botão trocar de rótulo
@@ -256,7 +186,7 @@ export const SettingsScreen: React.FC = () => {
   };
 
 
-  const chooseFilterPreset = (preset: FilterPresetV2) => {
+  const chooseFilterPreset = (preset: FilterPreset) => {
     setFilterPresetState(preset);
     setFilterPreset(preset);
   };
@@ -868,107 +798,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </section>
 
-        {/* Conforto Visual — Camadas 2 e 3 do plano de brilho.
-         *
-         * Um controle isolado por perfil. Slider de brilho da UI (CSS filter)
-         * funciona em qualquer plataforma; slider de brilho de MONITOR só
-         * aparece quando o Electron IPC está disponível (Windows via WMI).
-         * Toggle âmbar bloqueia parte do azul do espectro — evidência AAO
-         * de alívio de fotofobia. */}
-        <section aria-labelledby="visual-comfort-title" style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
-            <SunDim size={28} color="#1B54A8" aria-hidden="true" />
-            <h2 id="visual-comfort-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-base, #1e293b)' }}>
-              Conforto Visual
-            </h2>
-          </div>
-          <p style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', color: 'var(--color-text-base, #64748b)', opacity: 0.75, lineHeight: 1.5 }}>
-            Reduza o brilho e ative o filtro âmbar se o paciente piscar muito ou
-            reclamar de deslumbramento. Evidência clínica: brilho excessivo em
-            usuários com ALS aumenta fadiga visual e induz piscadas involuntárias.
-          </p>
-
-          {/* Slider de brilho da INTERFACE (CSS filter — funciona sempre) */}
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="brightness-ui" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--color-text-base, #1e293b)' }}>
-              <span>Brilho da tela do IrisFlow</span>
-              <span style={{ color: '#1B54A8' }}>{Math.round(settings.brightnessLevel * 100)}%</span>
-            </label>
-            <input
-              id="brightness-ui"
-              type="range"
-              min={40}
-              max={100}
-              step={5}
-              value={Math.round(settings.brightnessLevel * 100)}
-              onChange={(e) => updateSettings({ brightnessLevel: parseInt(e.target.value, 10) / 100 })}
-              aria-valuemin={40}
-              aria-valuemax={100}
-              aria-valuenow={Math.round(settings.brightnessLevel * 100)}
-              style={{ width: '100%', accentColor: '#1B54A8', height: '2rem', cursor: 'pointer' }}
-            />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--color-text-base, #94a3b8)', opacity: 0.7, marginTop: '0.25rem' }}>
-              <span>40% (muito escuro)</span>
-              <span>100% (normal)</span>
-            </div>
-          </div>
-
-          {/* Slider de brilho de MONITOR real — Camada 3 (opt-in, só Electron)
-           * Detecta o IPC no boot; se ausente (roda no browser), o slider some
-           * silenciosamente sem confundir o cuidador com botão que não faz nada. */}
-          <MonitorBrightnessSlider />
-
-          {/* Toggle Filtro Âmbar */}
-          <div style={{
-            marginTop: '1.25rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '1rem',
-            padding: '0.85rem 1rem',
-            background: 'var(--color-primary-light, #f1f5f9)',
-            borderRadius: '0.9rem',
-          }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-              <Droplet size={22} color="#d97706" aria-hidden="true" />
-              <div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text-base, #1e293b)' }}>Filtro âmbar</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-base, #64748b)', opacity: 0.75 }}>
-                  Reduz a componente azul da luz. Alivia sensibilidade à luz.
-                </div>
-              </div>
-            </div>
-            <button
-              type="button"
-              role="switch"
-              aria-checked={settings.amberFilter}
-              onClick={() => updateSettings({ amberFilter: !settings.amberFilter })}
-              style={{
-                width: 56, height: 30,
-                borderRadius: 999,
-                border: 'none',
-                cursor: 'pointer',
-                background: settings.amberFilter ? '#d97706' : '#cbd5e1',
-                position: 'relative',
-                transition: 'background 0.2s',
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  position: 'absolute',
-                  top: 3, left: settings.amberFilter ? 29 : 3,
-                  width: 24, height: 24,
-                  borderRadius: '50%',
-                  background: 'white',
-                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
-                  transition: 'left 0.2s',
-                }}
-              />
-            </button>
-          </div>
-        </section>
-
         {/* Idioma */}
         <section aria-labelledby="language-title" style={cardStyle}>
           <div
@@ -1118,9 +947,9 @@ export const SettingsScreen: React.FC = () => {
             para teclado virtual e jogos.
           </p>
           <div role="radiogroup" aria-labelledby="filter-title" style={{ display: 'flex', gap: '1rem' }}>
-            {(['estavel-v2', 'balanceado-v2', 'responsivo-v2'] as FilterPresetV2[]).map((preset) => {
+            {(['estavel', 'balanceado', 'responsivo'] as FilterPreset[]).map((preset) => {
               const active = filterPreset === preset;
-              const label = preset === 'estavel-v2' ? 'Estável' : preset === 'balanceado-v2' ? 'Balanceado' : 'Responsivo';
+              const label = preset === 'estavel' ? 'Estável' : preset === 'balanceado' ? 'Balanceado' : 'Responsivo';
               return (
                 <button
                   key={preset}
