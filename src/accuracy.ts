@@ -181,7 +181,15 @@ export function startAccuracyTest(
       // Só contabiliza amostras após a fase de acomodação — assim o jitter
       // reportado reflete a fixação, não a sacada de entrada no ponto.
       if (elapsed >= ACCLIMATION_MS) {
-        const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight, currentPerEyeWeight);
+        // Passamos `undefined` de propósito. O accuracy test mede a QUALIDADE
+        // DO RIDGE (o modelo treinado), não a estratégia de fusão binocular.
+        // Passar perEyeWeight ativa a heurística ponderada por EAR (D1-2), que
+        // pode degradar o número em usuários com EAR crônico assimétrico entre
+        // os olhos — porque a calibração treina os dois regressors com peso
+        // igual, sem saber que a inferência vai ponderar. Isolar a heurística
+        // aqui devolve o comportamento medido pela tag v0-menor-erro-oculos.
+        // A fusão binocular segue ativa no cursor live (para semiptose/oclusão).
+        const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
         if (gaze) {
           predictedX.push(gaze.x);
           predictedY.push(gaze.y);
