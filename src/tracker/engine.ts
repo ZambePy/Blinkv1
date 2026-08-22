@@ -12,6 +12,7 @@ import { EyeQualityAnalyzer } from '../qualityAnalyzer';
 import { createL2CSClient, type L2CSClient } from '../l2cs/client';
 import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/crop';
 import type { L2CSGazeInput } from '../extractor';
+import { getRecentBlinkRatePerMinute } from '../extractor';
 import * as recorder from '../telemetry/recorder';
 import type { RecordedQuality, RecordedTarget } from '../telemetry/types';
 import { EXPERIMENT } from '../config/experiment';
@@ -102,6 +103,11 @@ export interface CalibrationApi {
   // Enabled por default; desligar volta ao comportamento pré-melhoria.
   setSessionBiasEnabled(enabled: boolean): void;
   resetSessionBias(): void;
+  // Camada 3 do conforto visual — piscadas por minuto na janela recente.
+  // Consumido pela UI de calibração para alertar sobre fadiga/brilho
+  // excessivo. Default 60000 ms (1 min); janelas menores dão resposta
+  // mais rápida ao custo de variância maior.
+  getRecentBlinkRatePerMinute(windowMs?: number): number;
 }
 
 // Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
@@ -855,6 +861,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       resetSessionBias(): void {
         calibration.resetSessionBias();
+      },
+      getRecentBlinkRatePerMinute(windowMs?: number): number {
+        return getRecentBlinkRatePerMinute(windowMs);
       },
     },
 
