@@ -562,7 +562,6 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           }
 
           calibration.feedRawData(featuresLeft, featuresRight, quality);
-          feedAccuracyRaw(featuresLeft, featuresRight);
           latestFeaturesLeft = featuresLeft;
           latestFeaturesRight = featuresRight;
 
@@ -580,6 +579,13 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
                   right: Math.max(0, Math.min(1, extractorResult.rightEAR / EAR_OPEN)),
                 }
               : undefined;
+
+          feedAccuracyRaw(
+            featuresLeft,
+            featuresRight,
+            perEyeWeight,
+            face ? { yaw: face.yaw, pitch: face.pitch, roll: face.roll } : undefined,
+          );
 
           const calibrated = calibration.mapGaze(featuresLeft, featuresRight, perEyeWeight);
           if (calibrated) {

@@ -32,6 +32,16 @@ export interface AccuracyResult {
   /** % de amostras dentro de um alvo de raio R centrado no ponto.
    *  Preditor direto da taxa de sucesso do dwell. */
   hitRateByRadius: { radiusPx: number; pct: number }[];
+  /** Deriva de pose entre início do teste e ponto de maior desvio. Assinatura
+   *  do bug "cursor com viés grande": shift uniforme nos 9 pontos que
+   *  correlaciona com cabeça inclinando alguns graus entre calibração e teste.
+   *  Delta em radianos. Todos zerados se a pose não estava disponível. */
+  poseDrift?: {
+    baseline: { yaw: number; pitch: number; roll: number };
+    maxDelta: { yaw: number; pitch: number; roll: number };
+    // Delta médio da pose durante o teste (média dos deltas por ponto).
+    meanDelta: { yaw: number; pitch: number; roll: number };
+  };
 }
 
 // Metadata sobre a condição em que o teste foi rodado. Preenchida pela UI
@@ -63,6 +73,10 @@ interface PointDiagnostic {
   jitterRMS: number;
   name: string;
   samplesError: number[];
+  /** Pose média da cabeça durante a janela útil deste ponto (rad).
+   *  Diff contra o baseline (capturado no início do teste) diz se a cabeça
+   *  moveu — explicação mais comum para viés grande e uniforme. */
+  meanPose?: { yaw: number; pitch: number; roll: number };
 }
 
 // Grade 3×3 disjunta da calibração — calibração usa 10/50/90, precisão usa
@@ -96,6 +110,12 @@ const ASSUMED_DIST_PX = 2268;
 let currentFeaturesLeft: number[] = [];
 let currentFeaturesRight: number[] = [];
 let currentPerEyeWeight: { left: number; right: number } | undefined;
+// Pose da cabeça no frame atual (rad). Alimentado pelo engine a cada frame
+// junto com as features. Usado pelo accuracy test para detectar deriva de
+// pose entre calibração e teste — a assinatura mais comum de "cursor com
+// viés grande" (2026-08-22: shift uniforme de +200 px em Y correlacionado
+// com cabeça abaixando ~5°).
+let currentPose: { yaw: number; pitch: number; roll: number } | undefined;
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
@@ -115,10 +135,12 @@ export function feedAccuracyRaw(
   featuresLeft: number[],
   featuresRight: number[],
   perEyeWeight?: { left: number; right: number },
+  pose?: { yaw: number; pitch: number; roll: number },
 ) {
   currentFeaturesLeft = featuresLeft;
   currentFeaturesRight = featuresRight;
   currentPerEyeWeight = perEyeWeight;
+  currentPose = pose;
 }
 
 // Inicia o teste de validação de precisão pós-calibração.
@@ -146,6 +168,12 @@ export function startAccuracyTest(
   const diagnostics: PointDiagnostic[] = [];
   const runMeta: RunMeta | undefined = meta;
 
+  // Baseline de pose. Capturado no primeiro frame com pose disponível dentro
+  // dos 1.5s de preparação — represents a pose "no momento em que o teste
+  // começa", que deveria ser ~igual à pose no momento da calibração.
+  // Todos os deltas por ponto e o agregado poseDrift são relativos a ele.
+  let poseBaseline: { yaw: number; pitch: number; roll: number } | null = null;
+
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
@@ -153,7 +181,7 @@ export function startAccuracyTest(
     if (pointIndex >= VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
       currentValidationTarget = null;
-      finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta);
+      finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta, poseBaseline);
       return;
     }
 
@@ -163,6 +191,11 @@ export function startAccuracyTest(
     const startTime = performance.now();
     const predictedX: number[] = [];
     const predictedY: number[] = [];
+    // Samples de pose durante a janela útil (pós-acclimation) deste ponto,
+    // agregados na média no fim para o PointDiagnostic.
+    const poseSamplesYaw: number[] = [];
+    const poseSamplesPitch: number[] = [];
+    const poseSamplesRoll: number[] = [];
 
     const targetScreenX = vp.screenX * vw;
     const targetScreenY = vp.screenY * vh;
@@ -178,9 +211,21 @@ export function startAccuracyTest(
     function collect() {
       const elapsed = performance.now() - startTime;
 
+      // Fixa o baseline de pose no primeiro frame válido do teste (ainda na
+      // janela de acomodação está OK — o usuário acabou de calibrar e a pose
+      // é considerada "de referência").
+      if (!poseBaseline && currentPose) {
+        poseBaseline = { ...currentPose };
+      }
+
       // Só contabiliza amostras após a fase de acomodação — assim o jitter
       // reportado reflete a fixação, não a sacada de entrada no ponto.
       if (elapsed >= ACCLIMATION_MS) {
+        if (currentPose) {
+          poseSamplesYaw.push(currentPose.yaw);
+          poseSamplesPitch.push(currentPose.pitch);
+          poseSamplesRoll.push(currentPose.roll);
+        }
         // Passamos `undefined` de propósito. O accuracy test mede a QUALIDADE
         // DO RIDGE (o modelo treinado), não a estratégia de fusão binocular.
         // Passar perEyeWeight ativa a heurística ponderada por EAR (D1-2), que
@@ -234,6 +279,11 @@ export function startAccuracyTest(
       }
 
       pointErrors.push(error);
+      const meanPose = poseSamplesYaw.length > 0 ? {
+        yaw:   poseSamplesYaw.reduce((s, v) => s + v, 0) / poseSamplesYaw.length,
+        pitch: poseSamplesPitch.reduce((s, v) => s + v, 0) / poseSamplesPitch.length,
+        roll:  poseSamplesRoll.reduce((s, v) => s + v, 0) / poseSamplesRoll.length,
+      } : undefined;
       diagnostics.push({
         groundX: targetScreenX,
         groundY: targetScreenY,
@@ -245,6 +295,7 @@ export function startAccuracyTest(
         jitterRMS,
         name: vp.name,
         samplesError,
+        meanPose,
       });
 
       pointIndex++;
@@ -303,6 +354,7 @@ function finishTest(
   diagnostics: PointDiagnostic[],
   onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
   meta?: RunMeta,
+  poseBaseline?: { yaw: number; pitch: number; roll: number } | null,
 ) {
   overlay.remove();
 
@@ -368,10 +420,44 @@ function finishTest(
     colorClass = "accuracy-poor";
   }
 
+  // Deriva de pose: quanto a cabeça se afastou do baseline capturado no
+  // início do teste. Se maxDelta.pitch > 0.05 rad (~3°), esse é o suspeito
+  // número 1 para viés uniforme grande no relatório — o Ridge foi treinado
+  // com uma pose e está sendo consultado com outra. Ver 2026-08-22, shift
+  // de +200 px em Y correlacionou com cabeça abaixando ~5°.
+  let poseDrift: AccuracyResult['poseDrift'] = undefined;
+  if (poseBaseline) {
+    const deltas = diagnostics
+      .filter(d => d.meanPose)
+      .map(d => ({
+        yaw:   (d.meanPose!.yaw   - poseBaseline.yaw),
+        pitch: (d.meanPose!.pitch - poseBaseline.pitch),
+        roll:  (d.meanPose!.roll  - poseBaseline.roll),
+      }));
+    if (deltas.length > 0) {
+      const absMax = (arr: number[]) => arr.reduce((m, v) => Math.abs(v) > Math.abs(m) ? v : m, 0);
+      const mean = (arr: number[]) => arr.reduce((s, v) => s + v, 0) / arr.length;
+      poseDrift = {
+        baseline: poseBaseline,
+        maxDelta: {
+          yaw:   absMax(deltas.map(d => d.yaw)),
+          pitch: absMax(deltas.map(d => d.pitch)),
+          roll:  absMax(deltas.map(d => d.roll)),
+        },
+        meanDelta: {
+          yaw:   mean(deltas.map(d => d.yaw)),
+          pitch: mean(deltas.map(d => d.pitch)),
+          roll:  mean(deltas.map(d => d.roll)),
+        },
+      };
+    }
+  }
+
   const result: AccuracyResult = {
     meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
     jitterRMS, score, colorClass, pointErrors, pointJitters,
     sampleMeanError, sampleMedianError, sampleP90Error, hitRateByRadius,
+    poseDrift,
   };
 
   try {
