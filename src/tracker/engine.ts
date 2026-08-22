@@ -260,11 +260,14 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let lastVideoTime = -1;
   let running = false;
 
-  // Sprint 5 — inicia no preset balanceado (equivalente aos parâmetros
-  // pré-Sprint 5, para não regredir a percepção de suavidade em quem já
-  // conhecia o app). Trocável em tempo real via setFilterPreset.
-  let activePreset: FilterPreset | FilterPresetV2 = 'balanceado';
-  let activeConfig = FILTER_PRESETS[activePreset as FilterPreset];
+  // Default é 'balanceado-v2' (espaço normalizado). Os presets v1 legados
+  // filtram em pixels e produzem alpha≈0.99 a 30fps — o filtro passa quase
+  // intacto e o cursor fica jittery. Ver FILTER_PRESETS_V2 em oneEuroFilter.ts.
+  // Trocável em tempo real via setFilterPreset.
+  let activePreset: FilterPreset | FilterPresetV2 = 'balanceado-v2';
+  let activeConfig = activePreset.endsWith('-v2')
+    ? FILTER_PRESETS_V2[activePreset as FilterPresetV2]
+    : FILTER_PRESETS[activePreset as FilterPreset];
   const oneEuro = new OneEuroFilter2D(60, activeConfig.mincutoff, activeConfig.beta);
   const qualityAnalyzer = new EyeQualityAnalyzer();
   const bufferX: number[] = [];

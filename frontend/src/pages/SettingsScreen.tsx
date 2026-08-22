@@ -40,7 +40,7 @@ import {
 import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
-import type { FilterPreset } from '@tracker/oneEuroFilter';
+import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -70,7 +70,7 @@ export const SettingsScreen: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const { calibration, recording, setFilterPreset } = useGaze();
-  const [filterPreset, setFilterPresetState] = useState<FilterPreset>('balanceado');
+  const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
 
   // Fase 0.1 — estado local do gravador de sessão. `active` é derivado do
   // singleton do recorder, mas mantido em state pra o botão trocar de rótulo
@@ -186,7 +186,7 @@ export const SettingsScreen: React.FC = () => {
   };
 
 
-  const chooseFilterPreset = (preset: FilterPreset) => {
+  const chooseFilterPreset = (preset: FilterPresetV2) => {
     setFilterPresetState(preset);
     setFilterPreset(preset);
   };
@@ -947,9 +947,9 @@ export const SettingsScreen: React.FC = () => {
             para teclado virtual e jogos.
           </p>
           <div role="radiogroup" aria-labelledby="filter-title" style={{ display: 'flex', gap: '1rem' }}>
-            {(['estavel', 'balanceado', 'responsivo'] as FilterPreset[]).map((preset) => {
+            {(['estavel-v2', 'balanceado-v2', 'responsivo-v2'] as FilterPresetV2[]).map((preset) => {
               const active = filterPreset === preset;
-              const label = preset === 'estavel' ? 'Estável' : preset === 'balanceado' ? 'Balanceado' : 'Responsivo';
+              const label = preset === 'estavel-v2' ? 'Estável' : preset === 'balanceado-v2' ? 'Balanceado' : 'Responsivo';
               return (
                 <button
                   key={preset}
