@@ -7,7 +7,7 @@
 //   • Erro em pixels ao lado de cada par
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
-import { mapGaze, setGazeCorrections } from './calibration';
+import { mapGaze, setGazeCorrections, resetSessionBias } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { EXPERIMENT } from './config/experiment';
 
@@ -95,6 +95,7 @@ const ASSUMED_DIST_PX = 2268;
 
 let currentFeaturesLeft: number[] = [];
 let currentFeaturesRight: number[] = [];
+let currentPerEyeWeight: { left: number; right: number } | undefined;
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
@@ -109,13 +110,15 @@ export function getCurrentTargetPx(): { xPx: number; yPx: number; label: string 
   return currentValidationTarget;
 }
 
-// Recebe a posição crua do olhar a cada frame — chamado por main.ts
+// Recebe a posição crua do olhar a cada frame — chamado por main.ts / engine.ts
 export function feedAccuracyRaw(
   featuresLeft: number[],
   featuresRight: number[],
+  perEyeWeight?: { left: number; right: number },
 ) {
   currentFeaturesLeft = featuresLeft;
   currentFeaturesRight = featuresRight;
+  currentPerEyeWeight = perEyeWeight;
 }
 
 // Inicia o teste de validação de precisão pós-calibração.
@@ -130,6 +133,13 @@ export function startAccuracyTest(
   meta?: RunMeta,
 ) {
   isAccuracyTesting = true;
+  // O accuracy test mede o Ridge CRU. Se o bias EMA da sessão (D1-3) tiver
+  // acumulado resíduos de dwells em botões arbitrários da UI (ex: dwell no
+  // botão "Refazer teste" entre rodadas), medir com o bias aplicado enviesa o
+  // relatório e não reflete a qualidade real do modelo. Reset defensivo aqui
+  // faz o accuracy test ser sempre uma medida limpa do regressor, mesmo se
+  // alguém religar a feature no futuro.
+  resetSessionBias();
   const overlay = createAccuracyOverlay();
   let pointIndex = 0;
   const pointErrors: number[] = [];
@@ -171,7 +181,7 @@ export function startAccuracyTest(
       // Só contabiliza amostras após a fase de acomodação — assim o jitter
       // reportado reflete a fixação, não a sacada de entrada no ponto.
       if (elapsed >= ACCLIMATION_MS) {
-        const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
+        const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight, currentPerEyeWeight);
         if (gaze) {
           predictedX.push(gaze.x);
           predictedY.push(gaze.y);

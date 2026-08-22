@@ -54,14 +54,20 @@ export function getEyeDominance(): EyeDominance {
 // A cada dwell click bem-sucedido registramos um resíduo (alvo − predição)
 // e mantemos um EMA. O offset resultante é somado à predição do frame.
 // Diferente do RLS (feedOnlineSample), isto só corrige o VIÉS global (2 dofs),
-// nunca mexe nos coeficientes do Ridge — é seguro por default e útil já a
-// partir da primeira amostra.
+// nunca mexe nos coeficientes do Ridge.
+//
+// Default DESLIGADO. `feedOnlineSample` é disparado em todo dwell click da UI
+// (ver GazeContext.tsx:255), não só em contextos onde faz sentido "aprender"
+// deriva. Cada dwell num botão arbitrário injeta um resíduo no EMA — em teste
+// controlado (2 rodadas de accuracy sem recalibrar, 2026-08-22) o bias saturou
+// no clamp e degradou o meanError de 184 px para 521 px. Feature fica pronta,
+// mas exige opt-in explícito via setSessionBiasEnabled(true).
 const SESSION_BIAS_ALPHA = 0.35;      // agressividade do EMA (0..1)
 const SESSION_BIAS_MAX_NORM = 0.08;   // clamp em 8% da tela (evita drift patológico)
 let biasX = 0;                        // em coord normalizada [0..1]
 let biasY = 0;
 let biasSamples = 0;
-let sessionBiasEnabled = true;
+let sessionBiasEnabled = false;
 
 export function setSessionBiasEnabled(enabled: boolean): void {
   sessionBiasEnabled = enabled;
