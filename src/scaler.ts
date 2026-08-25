@@ -30,9 +30,9 @@ export class StandardScaler {
       }
     }
 
-    // Desvio padrão
+    // Desvio padrão (variância amostral: N-1, alinhado com scikit-learn)
     for (let j = 0; j < numFeatures; j++) {
-      this.stds[j] = Math.sqrt(this.stds[j] / numSamples);
+      this.stds[j] = Math.sqrt(this.stds[j] / Math.max(1, numSamples - 1));
       // Evita divisão por zero (feature constante) ou NaN/Infinity herdado de amostras ruins
       if (!isFinite(this.stds[j]) || this.stds[j] < 1e-8) {
         this.stds[j] = 1.0;

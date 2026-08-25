@@ -439,6 +439,11 @@ export function setGazeCorrections(corrections: GazeCorrection[]): void {
   console.log(`[calib] mapa de correção: ${corrections.length} pontos de referência aplicados`);
 }
 
+// BUG-7: sigma² anterior (1e-4) fazia w ≈ 1/distância⁴ — quase-nearest-neighbor
+// (razão de pesos 20000:1 entre vizinho e diagonal). σ²=0.04 (σ≈20% da tela)
+// produz razão ~25:1 — interpolação suave real entre pontos de correção.
+const RBF_SIGMA_SQ = 0.04;
+
 function applyGazeCorrection(x: number, y: number): { x: number; y: number } {
   if (!EXPERIMENT.applyGazeCorrection) return { x, y };
   if (_gazeCorrections.length < 3) return { x, y };
@@ -448,13 +453,9 @@ function applyGazeCorrection(x: number, y: number): { x: number; y: number } {
 
   let sumW = 0, cx = 0, cy = 0;
   for (const c of _gazeCorrections) {
-    // BUG-6: antes as distâncias estavam em pixels (dx ~ centenas), então
-    // o +1.0 era irrisório (w = 1/(dist²+1) ≈ 1/10000 para 100px).
-    // Na prática só o ponto mais próximo influenciava. Normalizar por vw/vh
-    // garante que dx ∈ [0..1] e o kernel RBF opera em escala correta.
     const dx = (x - c.refX) / vw;
     const dy = (y - c.refY) / vh;
-    const w = 1.0 / (dx * dx + dy * dy + 1e-4);
+    const w = 1.0 / (dx * dx + dy * dy + RBF_SIGMA_SQ);
     cx += c.offsetX * w;
     cy += c.offsetY * w;
     sumW += w;
@@ -521,14 +522,17 @@ export function exportGazeDistanceLog(): void {
 // pontos → ~3,2–3,3° em outro sistema webcam). Centro é omitido de propósito
 // — os 4 cantos dão exatamente 4 restrições independentes na média binocular,
 // que é o mínimo pra estimar bias + escala em x e y sem singularidade.
+// BUG-8: targets em 10%/90% deixam 10% de cada borda em zona de extrapolação
+// pura do Ridge linear — erro sistematicamente alto. Com 5%/95% a zona de
+// extrapolação cai para ~5% e o Ridge interpola melhor nas bordas reais.
 export const CALIBRATION_TARGETS_FULL: readonly { x: number; y: number }[] = [
-  { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
-  { x: 0.1, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.9, y: 0.5 },
-  { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
+  { x: 0.05, y: 0.05 }, { x: 0.5, y: 0.05 }, { x: 0.95, y: 0.05 },
+  { x: 0.05, y: 0.5 },  { x: 0.5, y: 0.5 },  { x: 0.95, y: 0.5 },
+  { x: 0.05, y: 0.95 }, { x: 0.5, y: 0.95 }, { x: 0.95, y: 0.95 },
 ];
 export const CALIBRATION_TARGETS_QUICK: readonly { x: number; y: number }[] = [
-  { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 },
-  { x: 0.1, y: 0.9 }, { x: 0.9, y: 0.9 },
+  { x: 0.05, y: 0.05 }, { x: 0.95, y: 0.05 },
+  { x: 0.05, y: 0.95 }, { x: 0.95, y: 0.95 },
 ];
 
 // D6.1 — modo em execução. `null` quando não está calibrando.
@@ -1692,31 +1696,32 @@ export function mapGaze(
     baseY += rampW * biasY;
   }
 
-  // BUG-4: Soft clamp nas bordas. O clamp abrupto anterior (Math.min/max) fazia
-  // o cursor "travar" na borda quando o Ridge extrapolava além dos pontos de
-  // calibração (ex.: x=1.15 → x=1.0 instantaneamente). Para o usuário ELA,
-  // elementos nas extremas bordas da tela pareciam inacessíveis.
+  // BUG-4 → BUG-9: o softClamp anterior (cos/sin) tinha descontinuidade de
+  // derivada f'(MARGIN) ≈ π/2 ≈ 1.57 vs f'(MARGIN+ε) = 1 — o cursor
+  // "desacelerava" abruptamente ao entrar na faixa de borda. Com targets
+  // agora em 5%/95% e Ridge extrapolando menos, a margem pode ser menor.
   //
-  // Solução: soft clamp — dentro de SOFT_MARGIN (5%) da borda, o movimento é
-  // amortecido progressivamente por uma curva sigmoide em vez de cortado abruptamente.
-  // Isso preserva a capacidade de alcançar a borda enquanto evita que o cursor
-  // "bounce" violentamente fora dos limites da tela.
-  //
-  // softClamp(v, margin):
-  //   - Para v em [margin, 1-margin]: identidade (sem alteração)
-  //   - Para v < margin ou v > 1-margin: amortecimento suave até 0 ou 1
-  const SOFT_MARGIN = 0.05;
+  // Novo softClamp: Hermite smoothstep cúbico, derivada contínua em ambas
+  // junções (C¹). f(0)=0, f(m)=m, f'(m)=1, f(1-m)=1-m, f'(1-m)=1.
+  // Dentro de [m, 1-m]: identidade pura (sem distorção nenhuma).
+  // Nas bordas [0,m] e [1-m,1]: curva suave com slope 0→1 (sem "salto" de
+  // velocidade). Margem reduzida de 5% para 2% — menos compressão, mais
+  // alcance real de bordas. Em 1920px, afeta apenas ~38px de cada lado.
+  const SOFT_MARGIN = 0.02;
   function softClamp(v: number): number {
     if (v <= 0) return 0;
     if (v >= 1) return 1;
     if (v < SOFT_MARGIN) {
-      // Borda esquerda/topo: amortece de 0 até MARGIN
-      return SOFT_MARGIN * (1 - Math.cos((v / SOFT_MARGIN) * Math.PI / 2));
+      // Hermite cúbico: t = v/m ∈ [0,1], f(v) = m · t²(2-t).
+      // Verificação: f(0)=0 ✓, f(m)=m·1·1=m ✓, f'(0)=0 ✓,
+      // f'(v) = (1/m)·m·(4t-3t²) = t(4-3t), f'(m) = 1·(4-3)=1 ✓
+      const t = v / SOFT_MARGIN;
+      return SOFT_MARGIN * t * t * (2 - t);
     }
     if (v > 1 - SOFT_MARGIN) {
-      // Borda direita/baixo: amortece de (1-MARGIN) até 1
-      const t = (v - (1 - SOFT_MARGIN)) / SOFT_MARGIN;
-      return (1 - SOFT_MARGIN) + SOFT_MARGIN * Math.sin(t * Math.PI / 2);
+      // Espelha: t = (1-v)/m ∈ [0,1], f = 1 - m · t²(2-t)
+      const t = (1 - v) / SOFT_MARGIN;
+      return 1 - SOFT_MARGIN * t * t * (2 - t);
     }
     return v;
   }

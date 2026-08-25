@@ -12,6 +12,11 @@ export interface FeaturePipelineResult {
   rightEAR?: number;
 }
 
+// BUG-10: A correção de isotropicLandmarks era aplicada DUAS VEZES quando a
+// flag estava ligada — uma aqui e outra dentro de extractEyeFeatures (chamado
+// por extractCompactFeatures). O resultado: x *= aspectRatio², z *= aspectRatio².
+// Isso impedia que a flag funcionasse corretamente. A correção fica APENAS
+// dentro de extractEyeFeatures, que recebe videoWidth/videoHeight do caller.
 import { EXPERIMENT } from './config/experiment';
 
 export const USE_COMPACT_FEATURES = true;
@@ -23,22 +28,16 @@ export function extractFeatures(
   videoWidth?: number,
   videoHeight?: number,
 ): FeaturePipelineResult {
-  let workingLandmarks = landmarks;
-  if (EXPERIMENT.isotropicLandmarks && videoWidth && videoHeight && videoHeight > 0) {
-    const aspectRatio = videoWidth / videoHeight;
-    workingLandmarks = landmarks.map(p => ({
-      ...p,
-      x: p.x * aspectRatio,
-      z: p.z * aspectRatio,
-    }));
-  }
-
   // extractEyeFeatures (path legado, USE_COMPACT_FEATURES=false) não recebe
   // L2CS por design — só o compact expõe o extension point; se um dia quiser
   // suportar no path full, adicionar aqui.
+  //
+  // A correção de aspect ratio (isotropicLandmarks) é feita DENTRO de
+  // extractEyeFeatures, que recebe videoWidth/videoHeight e aplica a
+  // transformação uma única vez. NÃO duplicar aqui.
   const geo = USE_COMPACT_FEATURES
-    ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze)
-    : extractEyeFeatures(workingLandmarks, faceMatrix);
+    ? extractCompactFeatures(landmarks, faceMatrix, l2csGaze)
+    : extractEyeFeatures(landmarks, faceMatrix, videoWidth, videoHeight);
 
   return {
     featuresLeft: [...geo.featuresLeft],

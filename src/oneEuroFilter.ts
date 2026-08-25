@@ -154,11 +154,13 @@ export type FilterPresetV2 = 'estavel-v2' | 'balanceado-v2' | 'responsivo-v2';
 
 export const FILTER_PRESETS_V2: Record<FilterPresetV2, FilterConfig> = {
   // mincutoff ≈ 0.5 Hz em normalizado produz alpha≈0.50 a 30fps — filtra de verdade.
-  // beta ≈ 2.0 em normalizado: aumenta cutoff quando o cursor se move mais
-  // que ~0.02 unidades/frame (~20px em 1920px) por segundo — responsivo em sacadas.
-  'estavel-v2':    { mincutoff: 0.30, beta: 1.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
-  'balanceado-v2': { mincutoff: 0.50, beta: 2.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
-  'responsivo-v2': { mincutoff: 1.00, beta: 5.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
+  // BUG-11: beta anterior era muito baixo para espaço normalizado — velocidades de
+  // sacada (~0.02-0.05 unid/frame a 30fps) não elevavam cutoff o suficiente, causando
+  // alpha≈0.50 mesmo durante movimento rápido → undershoot de 20-50% na amplitude.
+  // Betas ajustados para que sacada rápida eleve cutoff além de 3Hz → alpha>0.85.
+  'estavel-v2':    { mincutoff: 0.30, beta: 2.5,   useRollingBuffer: false, filterInNormalizedSpace: true },
+  'balanceado-v2': { mincutoff: 0.50, beta: 5.0,   useRollingBuffer: false, filterInNormalizedSpace: true },
+  'responsivo-v2': { mincutoff: 1.00, beta: 12.0,  useRollingBuffer: false, filterInNormalizedSpace: true },
 };
 
 export class OneEuroFilter2D {

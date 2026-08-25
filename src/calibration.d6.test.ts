@@ -43,13 +43,14 @@ describe('D6.1 — modo rápido de calibração', () => {
     expect(getCalibrationTargets()).toHaveLength(4);
   });
 
-  it('modo quick: os 4 alvos são exatamente os cantos da tela (10%/90%)', () => {
+  it('modo quick: os 4 alvos são exatamente os cantos da tela (5%/95%)', () => {
     startCalibrationMode({ quick: true });
     const targets = getCalibrationTargets();
-    // Cada alvo tem coordenada 0.1 ou 0.9 em x E y — nenhum centro.
+    // BUG-8: targets movidos de 10%/90% para 5%/95% para reduzir zona de
+    // extrapolação do Ridge nas bordas. Cada alvo tem coordenada 0.05 ou 0.95.
     for (const t of targets) {
-      expect([0.1, 0.9]).toContain(t.x);
-      expect([0.1, 0.9]).toContain(t.y);
+      expect([0.05, 0.95]).toContain(t.x);
+      expect([0.05, 0.95]).toContain(t.y);
     }
     // 4 combinações distintas → cobre os 4 cantos exatos.
     const keys = new Set(targets.map((t) => `${t.x},${t.y}`));
@@ -60,11 +61,11 @@ describe('D6.1 — modo rápido de calibração', () => {
     startCalibrationMode();
     const targets = getCalibrationTargets();
     const keys = new Set(targets.map((t) => `${t.x},${t.y}`));
-    // 4 cantos + centro + 4 arestas medianas
+    // 4 cantos + centro + 4 arestas medianas (5%/95% para bordas)
     for (const key of [
-      '0.1,0.1', '0.9,0.1', '0.1,0.9', '0.9,0.9',
+      '0.05,0.05', '0.95,0.05', '0.05,0.95', '0.95,0.95',
       '0.5,0.5',
-      '0.5,0.1', '0.5,0.9', '0.1,0.5', '0.9,0.5',
+      '0.5,0.05', '0.5,0.95', '0.05,0.5', '0.95,0.5',
     ]) {
       expect(keys.has(key), `alvo ${key} ausente na grade full`).toBe(true);
     }
