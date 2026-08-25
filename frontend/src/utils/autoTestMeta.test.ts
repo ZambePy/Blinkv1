@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { buildAutoTestMeta, opticalConditionToOculos } from './autoTestMeta';
+import { buildAutoTestMeta, opticalConditionToOculos, applyUptimeToRunMetaIfDefault } from './autoTestMeta';
+import type { RunMeta } from '@tracker/accuracy';
 
 // D2 (ROADMAP.md) — critério de aceite: "teste unitário garantindo que
 // `RunMeta` não usa mais valores hardcoded para `minutosDeSessao`". A regressão
@@ -110,6 +111,69 @@ describe('buildAutoTestMeta', () => {
       opticalCondition: 'desconhecido',
     });
     expect(meta.data).toBe('2020-01-01');
+  });
+});
+
+// D7.2 (ROADMAP §5) — o fluxo de accuracy test MANUAL do SettingsScreen mantém
+// um select "Sessão (min)" com default 0. Estes testes garantem que:
+//   (i)  se o valor for 0 (default do state), aplyUptimeToRunMetaIfDefault
+//        substitui pelo uptime real, e anota o `observacoes`;
+//   (ii) se o cuidador escolheu manualmente 20 ou 40, a escolha é preservada
+//        — override manual sempre vence (regra: nunca sobrescrever dado
+//        que o humano digitou expressamente);
+//   (iii) uptime < 30s (autoMinutos == 0) não polui o observacoes.
+describe('applyUptimeToRunMetaIfDefault (D7.2)', () => {
+  const baseMeta: RunMeta = {
+    data: '2026-08-25',
+    iluminacao: 'boa',
+    oculos: false,
+    movimentoCabeca: 'parada',
+    minutosDeSessao: 0,
+    distanciaCm: 60,
+    telaPolegadas: 15.6,
+  };
+
+  it('substitui minutosDeSessao=0 pelo uptime real em minutos', () => {
+    const result = applyUptimeToRunMetaIfDefault(baseMeta, 22 * 60_000);
+    expect(result.minutosDeSessao).toBe(22);
+  });
+
+  it('preserva escolha manual do cuidador (20) mesmo com uptime diferente', () => {
+    const result = applyUptimeToRunMetaIfDefault({ ...baseMeta, minutosDeSessao: 20 }, 42 * 60_000);
+    expect(result.minutosDeSessao).toBe(20);
+  });
+
+  it('preserva escolha manual do cuidador (40)', () => {
+    const result = applyUptimeToRunMetaIfDefault({ ...baseMeta, minutosDeSessao: 40 }, 5 * 60_000);
+    expect(result.minutosDeSessao).toBe(40);
+  });
+
+  it('anota observacoes com sufixo "(auto: uptime N min)" quando aplica', () => {
+    const result = applyUptimeToRunMetaIfDefault(baseMeta, 15 * 60_000);
+    expect(result.observacoes).toContain('auto');
+    expect(result.observacoes).toContain('15 min');
+  });
+
+  it('não anota observacoes quando escolha manual é preservada', () => {
+    const original = { ...baseMeta, minutosDeSessao: 20, observacoes: 'teste manual' };
+    const result = applyUptimeToRunMetaIfDefault(original, 42 * 60_000);
+    expect(result.observacoes).toBe('teste manual');
+  });
+
+  it('uptime < 30s (arredonda para 0 min) não muda nada — nem observacoes', () => {
+    const result = applyUptimeToRunMetaIfDefault(baseMeta, 20_000);
+    expect(result.minutosDeSessao).toBe(0);
+    expect(result.observacoes).toBeUndefined();
+  });
+
+  it('não toca em outros campos do RunMeta', () => {
+    const result = applyUptimeToRunMetaIfDefault(baseMeta, 22 * 60_000);
+    expect(result.distanciaCm).toBe(60);
+    expect(result.telaPolegadas).toBe(15.6);
+    expect(result.iluminacao).toBe('boa');
+    expect(result.oculos).toBe(false);
+    expect(result.movimentoCabeca).toBe('parada');
+    expect(result.data).toBe('2026-08-25');
   });
 });
 

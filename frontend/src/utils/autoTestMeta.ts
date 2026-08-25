@@ -78,3 +78,33 @@ export function buildAutoTestMeta(input: AutoTestMetaInput): RunMeta {
     telaPolegadas: input.telaPolegadas,
   };
 }
+
+// D7.2 (ROADMAP §5) — no fluxo de accuracy test MANUAL (SettingsScreen),
+// o `RunMeta` que a UI monta vinha com `minutosDeSessao: 0` hardcoded. O
+// cuidador tinha que editar o select "Sessão (min)" toda vez para o
+// relatório refletir a realidade. Isso viola a mesma regra 3 que D2 já
+// resolveu no auto-test: se ninguém mexer, o número mente.
+//
+// Contrato desta função:
+//   - Se `meta.minutosDeSessao` for `0` (o default do state), substitui
+//     pelo uptime real do engine. Anota o `observacoes` para o leitor do
+//     relatório saber a origem.
+//   - Se o cuidador escolheu manualmente 20 ou 40 no select (para simular
+//     deriva ou testar curva de fadiga), a escolha manual é preservada —
+//     override manual do cuidador SEMPRE vence auto (regra: nunca sobrescrever
+//     dado que o humano digitou).
+//   - Não toca em outros campos do meta (iluminação, óculos, distância, tela).
+export function applyUptimeToRunMetaIfDefault(
+  meta: RunMeta,
+  sessionUptimeMs: number,
+): RunMeta {
+  if (meta.minutosDeSessao !== 0) return meta;
+  const autoMinutos = Math.max(0, Math.round(sessionUptimeMs / 60_000));
+  if (autoMinutos === 0) return meta; // uptime também é 0 — nada a preencher
+  const suffix = ` (auto: uptime ${autoMinutos} min)`;
+  return {
+    ...meta,
+    minutosDeSessao: autoMinutos,
+    observacoes: (meta.observacoes ?? '') + suffix,
+  };
+}

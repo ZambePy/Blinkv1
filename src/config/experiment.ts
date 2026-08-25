@@ -75,14 +75,53 @@ const DEFAULTS: ExperimentConfig = {
 
 const STORAGE_KEY = 'irisflow.experiment';
 
+// D7.1 (ROADMAP §5) — override por env-var no ambiente Node.
+//
+// Motivação: `measure_baseline.mjs` precisa varrer a flag `isotropicLandmarks`
+// entre variantes do replay para responder "isso melhora ou piora contra a
+// mesma gravação?". Em browser, o override vem de localStorage (linha
+// abaixo); em Node, localStorage não existe, então o sweep tem que ser
+// resolvido antes deste módulo ser importado — logo, via env-var passada ao
+// spawn do processo filho.
+//
+// Convenção: `IRISFLOW_EXP_<key>=<value>`. Booleans como "true"/"false" (ou
+// "1"/"0"); números como decimais. Chaves desconhecidas são ignoradas em
+// silêncio para não travar rodadas com typo em CLI.
+//
+// LIMITAÇÃO HONESTA (regra 3 do projeto): `lockCameraExposure` afeta APENAS
+// a câmera ao vivo (`ImageCapture.applyConstraints`). O replay lê de JSONL
+// gravado; sweepar essa flag em replay é NO-OP e o `measure_baseline` NÃO
+// oferece essa variante. A decisão de ligar/desligar `lockCameraExposure`
+// só pode vir de medição AO VIVO — pendência humana registrada no ROADMAP.
+function loadEnvOverrides(): Partial<ExperimentConfig> {
+  if (typeof process === 'undefined' || !process.env) return {};
+  const overrides: Partial<ExperimentConfig> = {};
+  const prefix = 'IRISFLOW_EXP_';
+  for (const [envKey, rawValue] of Object.entries(process.env)) {
+    if (!envKey.startsWith(prefix) || rawValue === undefined) continue;
+    const key = envKey.slice(prefix.length) as keyof ExperimentConfig;
+    if (!(key in DEFAULTS)) continue; // chave inválida — ignora sem quebrar
+    const defaultValue = DEFAULTS[key];
+    if (typeof defaultValue === 'boolean') {
+      const lower = rawValue.toLowerCase();
+      (overrides as Record<string, unknown>)[key] = lower === 'true' || lower === '1';
+    } else if (typeof defaultValue === 'number') {
+      const n = Number(rawValue);
+      if (!Number.isNaN(n)) (overrides as Record<string, unknown>)[key] = n;
+    }
+  }
+  return overrides;
+}
+
 function load(): ExperimentConfig {
-  if (typeof localStorage === 'undefined') return { ...DEFAULTS };
+  const envOverrides = loadEnvOverrides();
+  if (typeof localStorage === 'undefined') return { ...DEFAULTS, ...envOverrides };
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { ...DEFAULTS };
-    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ExperimentConfig>) };
+    if (!raw) return { ...DEFAULTS, ...envOverrides };
+    return { ...DEFAULTS, ...(JSON.parse(raw) as Partial<ExperimentConfig>), ...envOverrides };
   } catch {
-    return { ...DEFAULTS };
+    return { ...DEFAULTS, ...envOverrides };
   }
 }
 

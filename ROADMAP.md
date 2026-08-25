@@ -304,7 +304,37 @@ O repositório (`main`, commit `5503091`, 22/08/2026) já passou por dois ciclos
 
 ---
 
-### D7 — Robustez em sessões longas: drift, fadiga, iluminação
+### D7 — Robustez em sessões longas: drift, fadiga, iluminação ✅ FEITO (2026-08-25)
+
+> **Status:** infraestrutura ligada. Nenhuma flag foi ligada por default — a decisão final (`isotropicLandmarks` on/off) depende de fixture de 20-40min que ainda não existe (pendência humana, ver abaixo).
+>
+> **Entregas por tarefa:**
+>
+> **D7.1 — sweep A2 no `measure_baseline`.** Adicionado suporte a override de `EXPERIMENT` via env-var em `src/config/experiment.ts` (`IRISFLOW_EXP_<key>=<value>` — booleanos como "true"/"1"/"false" ou "0"; números via `Number()`; chaves desconhecidas ou não-parseáveis silenciam sem trava). O `measure_baseline.mjs` ganhou `--a2-flags` (2 variantes: isotropicLandmarks OFF vs ON, ambas com `--recompute-features` — sem isso, o sweep seria no-op silencioso porque os features gravados foram calculados com a flag da sessão original). **Limitação honesta declarada em código**: `lockCameraExposure` NÃO tem variante no sweep — afeta apenas `ImageCapture.applyConstraints` da câmera ao vivo, e replay lê JSONL sem pixels. A decisão de ligar essa flag por default fica como medição humana ao vivo, não sai do sweep.
+>
+> **D7.2 — `minutosDeSessao` automático no fluxo manual.** Nova função pura `applyUptimeToRunMetaIfDefault` em `frontend/src/utils/autoTestMeta.ts`: se o `RunMeta` do `SettingsScreen` sair com `minutosDeSessao === 0` (default do state), substitui pelo uptime real do engine (via `GazeContext.getSessionUptimeMs`); se o cuidador escolheu manualmente 20 ou 40 no select "Sessão (min)" (para simular teste de deriva), a escolha manual vence — override manual do humano SEMPRE ganha. Anota `observacoes` com sufixo `(auto: uptime N min)` para o leitor do relatório distinguir origem.
+>
+> **D7.3 — curva de drift no `measure_baseline`.** Adicionado `--time-window <startSec,endSec>` no `scripts/_replay_impl.ts`: filtra APENAS frames de accuracy (calibração sempre preservada, pois é pré-requisito do modelo — janelas de 20-40min cortariam a calibração inteira e o replay falharia). Offsets desde o primeiro `captureTs` do JSONL. Adicionado `--drift-curve <windows>` no `measure_baseline.mjs`: aceita `startMin-endMin,...` (default `0-5,20-25,40-45`, o preset do plano original), dispara N replays sobre a mesma gravação, produz tabela erro×tempo. A lógica de parse foi extraída para `frontend/scripts/driftWindows.mjs` para permitir teste sem I/O.
+>
+> **D7.4 — aviso de fadiga não-bloqueante.** Novo componente `frontend/src/components/FatigueIndicator.tsx` seguindo exato padrão do `DriftIndicator` (D6.3) e do banner degraded (B4-2): polling de 10s do `getRecentBlinkRatePerMinute` (já existia em `extractor.ts` mas não estava conectado a nenhuma ação — resolveu o pedido "hoje só exibida"); mostra banner verde convidando para `/rest` (Modo Descanso, B3-3) quando taxa >= 25/min sustenta por 3 polls consecutivos (~30s); histerese de 5/min impede piscar in-and-out na zona 20-25/min; suprimido em `/calibration-check`, `/emergency`, rotas do cuidador (settings/caregiver), e rotas públicas (/, /login); cede prioridade ao banner `isDegraded` da B4-2 (nunca empilha dois avisos). Montado em `App.tsx` ao lado do `DriftIndicator`.
+>
+> **Testes novos:**
+> - `src/config/experiment.test.ts` — 8 casos: default sem env-var, override booleano "true"/"1"/"false", override numérico, chave desconhecida ignorada, número não-parseável ignorado, múltiplas env-vars simultâneas.
+> - `frontend/src/utils/autoTestMeta.test.ts` — +7 casos cobrindo `applyUptimeToRunMetaIfDefault`: substitui default 0 pelo uptime, preserva 20/40 manual, anota `observacoes`, uptime < 30s não polui, preserva outros campos.
+> - `frontend/src/utils/driftWindows.test.ts` — 13 casos cobrindo `parseDriftWindows` e `buildDriftCurveVariants`: default preset, custom single/multi janela, erros em malformação/inversão/negativo/não-numérico, chunks vazios, conversão min→sec correta.
+> - `frontend/src/components/FatigueIndicator.test.tsx` — 10 casos cobrindo: repouso normal não aciona; pico isolado não aciona (< MIN_CONSECUTIVE_ABOVE); sustentado aciona; histerese permanece na zona limiar; cai claramente abaixo esconde; suprimido em `/calibration-check`, `/emergency`, `/settings`, `/caregiver/*`, `/`, `/login`; cede ao `isDegraded`.
+>
+> **Métricas atuais / pendências humanas:** o sweep A2 e a curva de drift PRODUZEM os números pedidos (delta de erro `isotropicLandmarks` on/off; erro em 0-5/20-25/40-45 min) **quando** o JSONL de 20-40min existir. Sem essa gravação, esta sprint entrega a infraestrutura completa mas não o valor numérico final. Pendências humanas:
+>   - Gravar 1 sessão contínua ~40min via `SettingsScreen > Gravador de sessão` (fixture única serve as duas medições).
+>   - Rodar `node frontend/scripts/measure_baseline.mjs --jsonl <path> --a2-flags` e registrar delta.
+>   - Rodar `node frontend/scripts/measure_baseline.mjs --jsonl <path> --drift-curve` e registrar curva erro×tempo.
+>   - Medição ao vivo de `lockCameraExposure` (essa flag não passa pelo replay).
+>
+> **Regras respeitadas:** aviso de fadiga nunca aparece em emergência/calibração (regra 2); indicador cede quando `isDegraded` (evita empilhar avisos, regra 3 — UI não mente sobre estado); nenhuma flag foi ligada por default sem número (regra 4, mantida — a infraestrutura de decisão foi ligada, a decisão em si aguarda gravação).
+>
+> **Compatibilidade:** todas as mudanças em CLI são aditivas (`--a2-flags`, `--drift-curve`, `--time-window` opcionais); env-var em `EXPERIMENT` só ativa em Node com `IRISFLOW_EXP_*` presente (browser ignora); `applyUptimeToRunMetaIfDefault` preserva `minutosDeSessao` manual do cuidador — comportamento anterior do SettingsScreen é preservado quando ele edita o select.
+>
+> **Ordem de execução real:** D7.2 (mais simples, wiring puro) → D7.4 (padrão DriftIndicator reaproveitado) → D7.1 (env-var + variantes sweep) → D7.3 (time-window no replay + curva no measure_baseline).
 
 **Objetivo:** produzir a primeira medição real (mesmo que preliminar) de como a precisão se comporta ao longo de uma sessão longa, e decidir com dado se as flags de A2 relevantes (`isotropicLandmarks`, `lockCameraExposure`) devem ligar por padrão.
 

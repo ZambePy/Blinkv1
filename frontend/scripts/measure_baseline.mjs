@@ -43,6 +43,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve as resolvePath, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
+import { DEFAULT_DRIFT_WINDOWS_MIN, buildDriftCurveVariants } from './driftWindows.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = resolvePath(__dirname, '..', '..');
@@ -94,12 +95,47 @@ const ABLATION_VARIANTS = [
   { name: 'ablation: sem pose alguma (linear + cross + quadratic)', filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-linear,pose-cross,pose-quadratic' },
 ];
 
+// D7.1 (ROADMAP §5) — variantes de sweep das flags A2 relevantes para
+// decidir "essas flags devem ligar por padrão?".
+//
+// EXIGE --recompute-features. Motivo: `isotropicLandmarks` altera o vetor
+// de features antes do StandardScaler (multiplicando x por videoW/videoH).
+// Se usarmos os features gravados (que foram calculados com a flag AO VIVO
+// na sessão original), a variante sweeped estaria comparando "features
+// gravados sob a flag da sessão" vs "features gravados sob a flag da
+// sessão" — o sweep seria NO-OP silencioso. Com --recompute-features, o
+// replay reconstrói o vetor a partir dos landmarks obedecendo a env-var
+// (IRISFLOW_EXP_isotropicLandmarks) que setamos abaixo. Isso torna o
+// sweep genuíno.
+//
+// LIMITAÇÃO: `lockCameraExposure` NÃO tem variante aqui — ela afeta apenas
+// `ImageCapture.applyConstraints` na câmera ao vivo, e o replay não puxa
+// pixels do sensor. Comentário no `experiment.ts:loadEnvOverrides` explica
+// a decisão. A escolha de ligar/desligar essa flag por padrão fica como
+// pendência humana (medição ao vivo), não como número do sweep.
+const A2_FLAG_VARIANTS = [
+  {
+    name: 'A2-5: isotropicLandmarks=OFF (baseline reforçado com recompute)',
+    filter: 'balanceado-v2',
+    recomputeFeatures: true,
+    env: { IRISFLOW_EXP_isotropicLandmarks: 'false' },
+  },
+  {
+    name: 'A2-5: isotropicLandmarks=ON  (candidato a ligar por default)',
+    filter: 'balanceado-v2',
+    recomputeFeatures: true,
+    env: { IRISFLOW_EXP_isotropicLandmarks: 'true' },
+  },
+];
+
 function parseArgs(argv) {
   const args = {
     jsonl: null,
     out: null,
     variants: null,          // se null, usa DEFAULT_VARIANTS
     ablation: false,         // D4.3 — adiciona ABLATION_VARIANTS
+    a2Flags: false,          // D7.1 — adiciona A2_FLAG_VARIANTS
+    driftCurve: null,        // D7.3 — array de janelas (em minutos)
     verbose: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -108,6 +144,8 @@ function parseArgs(argv) {
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--variants') args.variants = argv[++i];
     else if (a === '--ablation') args.ablation = true;
+    else if (a === '--a2-flags') args.a2Flags = true;
+    else if (a === '--drift-curve') args.driftCurve = argv[++i];
     else if (a === '--verbose' || a === '-v') args.verbose = true;
     else if (a === '--help' || a === '-h') { printHelp(); process.exit(0); }
     else throw new Error(`Argumento desconhecido: ${a}. Use --help.`);
@@ -118,6 +156,9 @@ function parseArgs(argv) {
   }
   return args;
 }
+
+// D7.3 (ROADMAP §5) — a lógica de parse foi extraída para
+// `driftWindows.mjs` para permitir teste unitário sem I/O.
 
 function printHelp() {
   process.stdout.write(`
@@ -135,6 +176,19 @@ Argumentos:
                      sem pose linear; sem pose×offset; sem pose quadrática;
                      sem bloco L2CS. Comparar contra o baseline v2 do topo.
                      Preserva N=1 gravação — achado preliminar, não conclusivo.
+  --a2-flags         D7.1 — adiciona 2 variantes sweeping isotropicLandmarks
+                     (OFF vs ON) via env-var IRISFLOW_EXP_isotropicLandmarks
+                     e --recompute-features. NÃO sweepa lockCameraExposure
+                     (afeta apenas câmera ao vivo, no-op em replay — pendência
+                     humana em medição real).
+  --drift-curve <w>  D7.3 — produz a curva erro×tempo rodando o replay em
+                     múltiplas janelas temporais da MESMA gravação. Formato:
+                     "startMin-endMin,..." em minutos. Ex.: "0-5,20-25,40-45"
+                     (default: ${DEFAULT_DRIFT_WINDOWS_MIN}). A calibração é
+                     preservada em todas as janelas — só os frames de accuracy
+                     são filtrados. Pré-requisito: JSONL com frames de accuracy
+                     ao longo dos intervalos pedidos, senão as janelas vazias
+                     aparecem com "—" na tabela.
   -v, --verbose      Ecoa o comando de cada replay antes de rodar.
   -h, --help         Mostra esta ajuda.
 
@@ -153,13 +207,20 @@ async function runReplay(fixturePath, variant, verbose) {
   ];
   if (variant.recomputeFeatures) args.push('--recompute-features');
   if (variant.drop) args.push('--drop-features', variant.drop);
+  if (variant.timeWindow) args.push('--time-window', variant.timeWindow);
+
+  // D7.1 — env-vars para override de EXPERIMENT no child. Herda o env do pai
+  // e sobrepõe com o que a variante pede. Vazio (variant.env indefinido)
+  // preserva comportamento anterior — variantes de D2-D5 não usam env.
+  const childEnv = { ...process.env, ...(variant.env ?? {}) };
 
   if (verbose) {
-    process.stderr.write(`\n[measure_baseline] $ node ${args.join(' ')}\n`);
+    const envDump = variant.env ? ` env=${JSON.stringify(variant.env)}` : '';
+    process.stderr.write(`\n[measure_baseline]${envDump} $ node ${args.join(' ')}\n`);
   }
 
   return new Promise((resolveP, rejectP) => {
-    const child = spawn(process.execPath, args, { cwd: REPO_ROOT });
+    const child = spawn(process.execPath, args, { cwd: REPO_ROOT, env: childEnv });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk.toString('utf8'); });
@@ -245,6 +306,20 @@ async function main() {
   // já ver a linha de referência antes das variantes reduzidas.
   if (args.ablation) {
     variants = [...variants, ...ABLATION_VARIANTS];
+  }
+  // D7.1 — anexa sweep de flags A2 ao final. Ordem intencional: baseline
+  // primeiro, ablação depois (se pedido), e A2 flags no fim — o leitor da
+  // tabela lê da esquerda pra direita (linha por linha) e a comparação
+  // OFF vs ON fica agrupada visualmente.
+  if (args.a2Flags) {
+    variants = [...variants, ...A2_FLAG_VARIANTS];
+  }
+  // D7.3 — se `--drift-curve` foi passado, substitui completamente as
+  // variantes por janelas temporais. Não faz sentido misturar drift-curve
+  // com sweep A2 na mesma tabela (colunas comparariam coisas incomparáveis).
+  if (args.driftCurve !== null) {
+    variants = buildDriftCurveVariants(args.driftCurve);
+    process.stderr.write(`[measure_baseline] modo drift-curve — ${variants.length} janela(s) temporais\n`);
   }
 
   process.stderr.write(`[measure_baseline] fixture: ${jsonlAbs}\n`);

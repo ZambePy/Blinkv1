@@ -44,6 +44,7 @@ import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
+import { applyUptimeToRunMetaIfDefault } from '../utils/autoTestMeta';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -139,7 +140,7 @@ export const SettingsScreen: React.FC = () => {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { calibration, recording, setFilterPreset } = useGaze();
+  const { calibration, recording, setFilterPreset, getSessionUptimeMs } = useGaze();
   const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
 
   // Fase 0.1 — estado local do gravador de sessão. `active` é derivado do
@@ -284,6 +285,10 @@ export const SettingsScreen: React.FC = () => {
       toast.error('Calibre primeiro para rodar o teste de precisão.');
       return;
     }
+    // D7.2 (ROADMAP §5) — se o cuidador não editou "Sessão (min)" (segue 0),
+    // preenche com o uptime real do engine. Se ele escolheu 20/40 no select
+    // (para simular um teste de deriva), a escolha manual é preservada.
+    const metaWithUptime = applyUptimeToRunMetaIfDefault(accuracyMeta, getSessionUptimeMs());
     setAccuracyRunning(true);
     startAccuracyTest((r) => {
       setAccuracyRunning(false);
@@ -293,7 +298,7 @@ export const SettingsScreen: React.FC = () => {
       toast.success(
         `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
       );
-    }, accuracyMeta);
+    }, metaWithUptime);
   };
 
   const handleLogin = (e: React.FormEvent) => {

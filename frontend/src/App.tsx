@@ -8,6 +8,7 @@ import { ReminderProvider } from './context/ReminderContext';
 import { EmergencyProvider } from './context/EmergencyContext';
 import { DebugHUD } from './components/DebugHUD';
 import { DriftIndicator } from './components/DriftIndicator';
+import { FatigueIndicator } from './components/FatigueIndicator';
 
 // Ondas de onboarding carregadas cedo — poucas telas, alta chance de uso imediato
 import { InitialSplash } from './pages/onboarding/InitialSplash';
@@ -114,6 +115,10 @@ function App() {
                        regras de rota: skip em /calibration-check e /emergency,
                        skip em rotas do cuidador). */}
                   <DriftIndicator />
+                  {/* D7.4 — aviso de fadiga não-bloqueante. Mesmas regras
+                       de rota do DriftIndicator. Convida para /rest quando a
+                       taxa de piscadas sustentada passa de 25/min (>30s). */}
+                  <FatigueIndicator />
                   <Suspense fallback={<RouteFallback />}>
                     <Routes>
                   {/* Onboarding — públicas */}

@@ -99,6 +99,11 @@ interface CliArgs {
   verbose: boolean;
   recomputeFeatures: boolean;
   dropFeatures: FeatureGroup[];
+  // D7.3 — janela temporal aplicada APENAS aos frames de accuracy (calibração
+  // sempre é preservada integralmente, ela é pré-requisito do modelo). Formato
+  // do CLI: `--time-window <startSec>,<endSec>`, offsets desde o primeiro
+  // captureTs do JSONL. Undefined = sem filtro (comportamento anterior).
+  timeWindow?: { startSec: number; endSec: number };
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -119,6 +124,14 @@ function parseArgs(argv: string[]): CliArgs {
         groups.push(p);
       }
       args.dropFeatures = groups;
+    }
+    else if (a === '--time-window') {
+      const raw = argv[++i];
+      const parts = raw.split(',').map((s) => Number(s.trim()));
+      if (parts.length !== 2 || parts.some((n) => !Number.isFinite(n)) || parts[0] < 0 || parts[1] <= parts[0]) {
+        throw new Error(`--time-window espera formato "startSec,endSec" com 0 <= start < end. Recebi "${raw}"`);
+      }
+      args.timeWindow = { startSec: parts[0], endSec: parts[1] };
     }
     else if (a === '--help' || a === '-h') {
       printHelp();
@@ -163,6 +176,12 @@ Argumentos:
                       pose-quadratic  — pose²/pose×scale (6 dims/olho)
                       l2cs            — bloco L2CS inteiro (7 dims/olho)
                     Ex.: --drop-features pose-quadratic,l2cs
+  --time-window <startSec,endSec>
+                    D7.3 — janela temporal aplicada APENAS aos frames de
+                    accuracy (calibração é preservada integralmente pois é
+                    pré-requisito do modelo). Offsets em segundos desde o
+                    primeiro captureTs. Ex.: --time-window 1200,1500 mede
+                    erro no intervalo 20-25min da sessão.
   -v, --verbose     Loga cada frame de precisao com erro por frame.
   -h, --help        Mostra esta ajuda.
 `);
@@ -249,13 +268,25 @@ function getFeatures(
 
 // Split canonico dos frames em calibracao, precisao e uso livre. Descarta
 // frames sem face, sem features utilizaveis, ou com blink.
-function splitFrames(rec: Recording, recomputeFeatures: boolean, dropFeatures: readonly FeatureGroup[]): {
+//
+// D7.3 — `timeWindow` (se passado) filtra APENAS os frames de `accuracy`,
+// deixando calibração intocada. Motivo: calibração é normalmente feita no
+// início da sessão (~primeiros minutos); janelas de 20-25min ou 40-45min
+// cortariam a calibração inteira e o replay falharia com "faltam amostras".
+// A janela é aplicada em segundos-desde-primeiro-captureTs.
+function splitFrames(
+  rec: Recording,
+  recomputeFeatures: boolean,
+  dropFeatures: readonly FeatureGroup[],
+  timeWindow?: { startSec: number; endSec: number },
+): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
   live: number; // apenas contagem
   discarded: number;
   rejectedByDecision: number;
   legacyNoDecision: number;
+  timeWindow?: { startSec: number; endSec: number; filteredOut: number; firstCaptureTs: number };
 } {
   const vw = rec.header.resolution.w;
   const vh = rec.header.resolution.h;
@@ -265,6 +296,18 @@ function splitFrames(rec: Recording, recomputeFeatures: boolean, dropFeatures: r
   let discarded = 0;
   let rejectedByDecision = 0;
   let legacyNoDecision = 0;
+  let accuracyFilteredOutByWindow = 0;
+
+  // D7.3 — resolvemos o "tempo zero" da gravação lazy: primeiro captureTs de
+  // qualquer frame (não só accuracy) — reflete o momento em que o gravador
+  // começou, alinhando os offsets absolutos do usuário (`--time-window 0,300`
+  // = "primeiros 5 min da sessão inteira", intuitivo) com o timeline gravado.
+  let firstCaptureTs: number | null = null;
+  if (timeWindow) {
+    for (const f of rec.frames) {
+      if (Number.isFinite(f.captureTs)) { firstCaptureTs = f.captureTs; break; }
+    }
+  }
 
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
@@ -290,6 +333,17 @@ function splitFrames(rec: Recording, recomputeFeatures: boolean, dropFeatures: r
         targetYPx: f.target.yPx,
       });
     } else if (f.target?.kind === 'accuracy') {
+      // D7.3 — aplica janela temporal aos frames de accuracy. Frames fora
+      // da janela são contados em `accuracyFilteredOutByWindow` para o
+      // relatório mostrar honestamente quantos foram descartados por essa
+      // razão (separado dos descartes por qualidade).
+      if (timeWindow && firstCaptureTs !== null) {
+        const offsetSec = (f.captureTs - firstCaptureTs) / 1000;
+        if (offsetSec < timeWindow.startSec || offsetSec >= timeWindow.endSec) {
+          accuracyFilteredOutByWindow++;
+          continue;
+        }
+      }
       accuracy.push({
         featuresLeft: feats.left,
         featuresRight: feats.right,
@@ -301,7 +355,12 @@ function splitFrames(rec: Recording, recomputeFeatures: boolean, dropFeatures: r
       live++;
     }
   }
-  return { calibration, accuracy, live, discarded, rejectedByDecision, legacyNoDecision };
+  return {
+    calibration, accuracy, live, discarded, rejectedByDecision, legacyNoDecision,
+    timeWindow: timeWindow && firstCaptureTs !== null
+      ? { startSec: timeWindow.startSec, endSec: timeWindow.endSec, filteredOut: accuracyFilteredOutByWindow, firstCaptureTs }
+      : undefined,
+  };
 }
 
 // Espelha a matematica de calibration.trainScalersAndRegressors + mapGaze
@@ -404,6 +463,8 @@ interface Report {
     featuresSource: 'recorded' | 'recomputed';
     // D4.3 — grupos zerados. Vazio = vetor completo.
     droppedFeatureGroups: FeatureGroup[];
+    // D7.3 — janela temporal aplicada aos frames de accuracy (undefined = sem filtro).
+    timeWindow?: { startSec: number; endSec: number; framesFilteredOut: number };
   };
 }
 
@@ -454,7 +515,15 @@ async function runInner(args: CliArgs): Promise<number> {
     return 2;
   }
 
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow);
+  // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
+  // de amostras retido é insumo direto para interpretar a curva de drift.
+  if (split.timeWindow) {
+    process.stderr.write(
+      `[replay] time-window ${split.timeWindow.startSec}s..${split.timeWindow.endSec}s → ` +
+      `${split.accuracy.length} frames de accuracy retidos, ${split.timeWindow.filteredOut} filtrados.\n`,
+    );
+  }
   
   if (split.legacyNoDecision > 0) {
     process.stderr.write(
@@ -584,6 +653,13 @@ async function runInner(args: CliArgs): Promise<number> {
       source: 'src/',
       featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded',
       droppedFeatureGroups: args.dropFeatures,
+      timeWindow: split.timeWindow
+        ? {
+            startSec: split.timeWindow.startSec,
+            endSec: split.timeWindow.endSec,
+            framesFilteredOut: split.timeWindow.filteredOut,
+          }
+        : undefined,
     },
   };
 
