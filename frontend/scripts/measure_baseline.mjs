@@ -75,11 +75,25 @@ const DEFAULT_VARIANTS = [
   { name: 'balanceado (v1, pixel space)',                filter: 'balanceado',    recomputeFeatures: false },
 ];
 
+// D4.3 (ROADMAP §5) — variantes de ablação de features. Rodam sobre a mesma
+// gravação com `--drop-features <grupo>` para responder "esses termos ajudam?".
+// Comparação relevante: cada variante vs. baseline v2 do topo. Se uma reduzida
+// EMPATA ou VENCE a completa, o campo do relatório vira insumo pra decidir se
+// aquele grupo é ruído — mas só como achado preliminar (N=1 gravação, ver
+// riscos do D4). Não removemos feature nenhuma com base em 1 sessão.
+const ABLATION_VARIANTS = [
+  { name: 'ablation: sem pose linear (yaw/pitch/roll isoladas)', filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-linear' },
+  { name: 'ablation: sem pose×offset 1ª ordem (pose-cross)',     filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-cross' },
+  { name: 'ablation: sem pose quadrática (pose²/pose×scale)',    filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-quadratic' },
+  { name: 'ablation: sem bloco L2CS inteiro',                    filter: 'balanceado-v2', recomputeFeatures: false, drop: 'l2cs' },
+];
+
 function parseArgs(argv) {
   const args = {
     jsonl: null,
     out: null,
     variants: null,          // se null, usa DEFAULT_VARIANTS
+    ablation: false,         // D4.3 — adiciona ABLATION_VARIANTS
     verbose: false,
   };
   for (let i = 0; i < argv.length; i++) {
@@ -87,6 +101,7 @@ function parseArgs(argv) {
     if (a === '--jsonl') args.jsonl = argv[++i];
     else if (a === '--out') args.out = argv[++i];
     else if (a === '--variants') args.variants = argv[++i];
+    else if (a === '--ablation') args.ablation = true;
     else if (a === '--verbose' || a === '-v') args.verbose = true;
     else if (a === '--help' || a === '-h') { printHelp(); process.exit(0); }
     else throw new Error(`Argumento desconhecido: ${a}. Use --help.`);
@@ -101,7 +116,7 @@ function parseArgs(argv) {
 function printHelp() {
   process.stdout.write(`
 Uso:
-  node frontend/scripts/measure_baseline.mjs --jsonl <path> [--out <path>] [--variants a,b,c] [-v]
+  node frontend/scripts/measure_baseline.mjs --jsonl <path> [--out <path>] [--variants a,b,c] [--ablation] [-v]
 
 Argumentos:
   --jsonl <path>     Gravação (JSONL v2) em fixtures/replay/. Obrigatório.
@@ -109,7 +124,11 @@ Argumentos:
                      este flag, só imprime a tabela em stdout.
   --variants <lista> Lista separada por vírgula de nomes de preset do filtro
                      temporal (ex.: "balanceado-v2,estavel-v2"). Se omitido,
-                     roda o conjunto padrão de 4 variantes.
+                     roda o conjunto padrão de 5 variantes.
+  --ablation         D4.3 — adiciona 4 variantes de ablação de features:
+                     sem pose linear; sem pose×offset; sem pose quadrática;
+                     sem bloco L2CS. Comparar contra o baseline v2 do topo.
+                     Preserva N=1 gravação — achado preliminar, não conclusivo.
   -v, --verbose      Ecoa o comando de cada replay antes de rodar.
   -h, --help         Mostra esta ajuda.
 
@@ -127,6 +146,7 @@ async function runReplay(fixturePath, variant, verbose) {
     '--filter', variant.filter,
   ];
   if (variant.recomputeFeatures) args.push('--recompute-features');
+  if (variant.drop) args.push('--drop-features', variant.drop);
 
   if (verbose) {
     process.stderr.write(`\n[measure_baseline] $ node ${args.join(' ')}\n`);
@@ -214,6 +234,11 @@ async function main() {
       filter: name.trim(),
       recomputeFeatures: false,
     }));
+  }
+  // D4.3 — anexa ablações ao final; sempre depois do baseline para o leitor
+  // já ver a linha de referência antes das variantes reduzidas.
+  if (args.ablation) {
+    variants = [...variants, ...ABLATION_VARIANTS];
   }
 
   process.stderr.write(`[measure_baseline] fixture: ${jsonlAbs}\n`);

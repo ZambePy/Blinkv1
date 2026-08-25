@@ -55,6 +55,26 @@ export interface StoredCalibrationProfile {
     lambdaRatio: number;
     deadFeaturesLeftPct: number;
     deadFeaturesRightPct: number;
+    // D4.2 (ROADMAP §5) — alvos detectados como candidatos a outlier na
+    // calibração (LOO + MAD, ver detectOutlierPoints em calibration.ts).
+    // Opcional para compat com perfis pré-D4. Só SINALIZA (regra 4): não é
+    // usado para retreinar automaticamente sem o ponto. UI/log deve chamar
+    // este número de "indicativo" — com N~9 alvos, MAD é frágil.
+    outlierTargets?: {
+      count: number;                 // quantos alvos únicos marcados como outlier
+      indices: number[];             // índices em `perTarget` que passaram do threshold
+      medianResidual: number;        // erro LOO mediano (referência)
+      madThreshold: number;          // 3 × MAD × 1.4826 — o corte aplicado
+      // Lista compacta para o log/HUD: alvo (x,y) + zScore + isOutlier.
+      // Deixa Renderizar visualmente qual ponto é o culpado.
+      perTarget: {
+        screenX: number;
+        screenY: number;
+        residualNorm: number;
+        zScore: number;
+        isOutlier: boolean;
+      }[];
+    };
   };
 }
 

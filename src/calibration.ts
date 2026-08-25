@@ -9,6 +9,7 @@ import { StandardScaler } from './scaler';
 import { isAccuracyTesting } from './accuracy';
 import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
+import { trainRidgeModel, predictRidge } from './ridge';
 import { EXPERIMENT } from './config/experiment';
 import type { RecordedSampleDecision } from './telemetry/types';
 import { resetEarHistory } from './extractor';
@@ -917,6 +918,222 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
 }
 
+// D4.1 (ROADMAP §5) — detecção de ponto outlier na calibração.
+//
+// Motivação: hoje só existe rejeição de outlier DENTRO de um ponto (variância
+// intra-ponto → warn; deriva de pose → rejeita frame). Um ponto INTEIRO mal
+// coletado (usuário olhou pro lado durante os 3 s de coleta) entra no treino
+// sem sinalização, empurra o Ridge por muitos px, e o único aviso é o erro
+// grande depois do accuracy test — tarde demais.
+//
+// Algoritmo — variante robusta baseada em MAD (median absolute deviation),
+// adequada a N pequeno (~9) onde RANSAC clássico não é estatisticamente
+// estável. Mesmo agrupamento por `(screenX,screenY)` que `selectLambdaCV`
+// já usa em `ridge.ts` (leave-one-target-out).
+//
+//   Para cada alvo único k:
+//     1. Treina scaler + Ridge sobre TODOS os pontos EXCETO k (LOO por alvo).
+//     2. Prediz cada amostra de k, mede erro (px normalizado) da média.
+//     3. Registra o resíduo médio r_k daquele alvo.
+//   Calcula MAD = mediana(|r_k - mediana(r)|).
+//   Marca k como candidato a outlier se |r_k - mediana(r)| > 3 × MAD × 1.4826.
+//   (O 1.4826 é o fator que faz MAD ~ σ para distribuição normal.)
+//
+// SAÍDA — só sinaliza (regra 4). O caller decide se avisa o cuidador ou não.
+// Não bloqueia, não retreina automaticamente sem o ponto.
+//
+// ⚠️ N pequeno (~9 alvos): o próprio ROADMAP §5 (D4, "Riscos") pede que este
+// sinal seja tratado como INDICATIVO, não conclusivo. O log/UI que consumir
+// este resultado deve incluir essa ressalva — não criar falsa confiança num
+// número pequeno de amostras.
+export interface OutlierPointsReport {
+  /** Índices em `points` (não em `targets únicos`) — pode conter várias
+   *  amostras do mesmo alvo se ele foi marcado como outlier. */
+  outlierIndices: number[];
+  /** Um item por alvo único, ordenado pela ordem de aparição em `points`. */
+  perTarget: {
+    screenX: number;
+    screenY: number;
+    sampleCount: number;
+    residualNorm: number;   // erro médio normalizado da predição LOO neste alvo
+    zScore: number;         // (residualNorm - mediana) / (MAD × 1.4826)
+    isOutlier: boolean;
+  }[];
+  medianResidual: number;
+  mad: number;               // median absolute deviation (bruto, sem escalar)
+  madThreshold: number;      // 3 × MAD × 1.4826 — o corte usado
+  targetCount: number;
+  reason?: 'insufficient_targets' | 'training_failed';
+}
+
+// Ridge mínimo local para o LOO — reutiliza `trainRidgeModel` e `predictRidge`
+// do módulo `ridge` (mesma fórmula do CV de λ ali dentro), mas evita o CV de
+// λ (que é caro e não muda a *dominância* do resíduo). Usa λ=1 fixo — o alvo
+// não é achar o modelo ótimo, é comparar RESÍDUOS entre alvos deixados de fora
+// com o mesmo λ, isolando o efeito do alvo.
+const OUTLIER_LOO_LAMBDA = 1.0;
+const OUTLIER_MAD_SCALE = 1.4826;      // MAD → σ para distribuição normal
+const OUTLIER_ZSCORE_THRESHOLD = 3.0;  // ~conservador; ver ROADMAP D4 riscos
+// Piso absoluto do threshold em unidades normalizadas de tela (15% da tela).
+// Duas razões pra este piso ser alto:
+//   1. Quando o modelo é bom e os resíduos LOO são todos pequenos e parecidos,
+//      o MAD encolhe até quase zero e o critério 3×MAD marca variação de
+//      ruído normal como outlier — false positives que confundem o cuidador.
+//   2. Ridge regularizado extrapola pior nos CANTOS da grade que no centro,
+//      mesmo sem ruído. Sem este piso, os 4 alvos de canto viravam outlier
+//      falsos sistematicamente com N=9 (efeito 3×3). Um alvo só é outlier
+//      se seu resíduo é 3×MAD ACIMA da mediana **e** passa deste piso
+//      absoluto. Um resíduo >15% da tela é claramente "algo deu errado".
+//   Comparação: baseline atual é ~5% da tela (57 px em 1080 = 5.3%). 15%
+//   é 3× o baseline — margem confortável pra não gerar falso alerta.
+const OUTLIER_ABS_FLOOR = 0.15;
+
+export function detectOutlierPoints(
+  points: readonly CalibrationPoint[],
+): OutlierPointsReport {
+  const empty: OutlierPointsReport = {
+    outlierIndices: [],
+    perTarget: [],
+    medianResidual: 0,
+    mad: 0,
+    madThreshold: 0,
+    targetCount: 0,
+  };
+
+  // Agrupamento por (screenX, screenY) com a MESMA chave (4 casas decimais)
+  // que ridge.ts usa em selectLambdaCV. Mesma chave = mesma comparabilidade.
+  const groups = new Map<string, number[]>(); // key → índices em `points`
+  const orderedKeys: string[] = [];
+  const keyCoords = new Map<string, { x: number; y: number }>();
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const key = `${p.screenX.toFixed(4)},${p.screenY.toFixed(4)}`;
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      orderedKeys.push(key);
+      keyCoords.set(key, { x: p.screenX, y: p.screenY });
+    }
+    groups.get(key)!.push(i);
+  }
+
+  if (orderedKeys.length < 3) {
+    // < 3 alvos: MAD degenera (mediana de 1 ou 2 valores é o próprio dado).
+    return { ...empty, targetCount: orderedKeys.length, reason: 'insufficient_targets' };
+  }
+
+  // Verifica dims consistentes (o treino real já valida, mas queremos falhar
+  // limpo aqui em vez de propagar exceção).
+  const dimL = points[0].featuresLeft.length;
+  const dimR = points[0].featuresRight.length;
+  if (dimL === 0 || dimR === 0) {
+    return { ...empty, targetCount: orderedKeys.length, reason: 'training_failed' };
+  }
+
+  // Para cada alvo k, treina em ALL - k e mede resíduo médio nos frames de k.
+  const residualsByKey = new Map<string, number>();
+  for (const heldOutKey of orderedKeys) {
+    const trainIdx: number[] = [];
+    for (const [k, idxs] of groups) {
+      if (k === heldOutKey) continue;
+      trainIdx.push(...idxs);
+    }
+    const testIdx = groups.get(heldOutKey)!;
+
+    const trainFL = trainIdx.map((i) => points[i].featuresLeft);
+    const trainFR = trainIdx.map((i) => points[i].featuresRight);
+    const trainTgt = trainIdx.map((i) => ({
+      screenX: points[i].screenX,
+      screenY: points[i].screenY,
+    }));
+
+    let residualSum = 0;
+    let residualCount = 0;
+    try {
+      const scL = new StandardScaler(); scL.fit(trainFL);
+      const scR = new StandardScaler(); scR.fit(trainFR);
+      const modelL = trainRidgeModel(scL.transform(trainFL), trainTgt, OUTLIER_LOO_LAMBDA);
+      const modelR = trainRidgeModel(scR.transform(trainFR), trainTgt, OUTLIER_LOO_LAMBDA);
+      for (const ti of testIdx) {
+        const p = points[ti];
+        const pL = predictRidge(modelL, scL.transformSingle(p.featuresLeft));
+        const pR = predictRidge(modelR, scR.transformSingle(p.featuresRight));
+        const px = (pL.x + pR.x) / 2;
+        const py = (pL.y + pR.y) / 2;
+        const dx = px - p.screenX;
+        const dy = py - p.screenY;
+        residualSum += Math.hypot(dx, dy);
+        residualCount += 1;
+      }
+    } catch {
+      // Se o LOO falhar num alvo específico (matriz singular sem esse ponto),
+      // marcamos com residual = +Infinity para o alvo entrar como candidato
+      // óbvio a outlier — remover o ponto degenera o problema.
+      residualSum = Infinity;
+      residualCount = 1;
+    }
+
+    residualsByKey.set(heldOutKey, residualCount > 0 ? residualSum / residualCount : 0);
+  }
+
+  // MAD sobre os resíduos por alvo.
+  const residualsArr = orderedKeys
+    .map((k) => residualsByKey.get(k) ?? 0)
+    .filter((v) => Number.isFinite(v));
+  const finiteMedian = residualsArr.length > 0 ? medianOf(residualsArr) : 0;
+  const absDeviations = residualsArr.map((r) => Math.abs(r - finiteMedian));
+  const madBase = absDeviations.length > 0 ? medianOf(absDeviations) : 0;
+
+  // Fallback quando todos os resíduos são iguais (MAD = 0): usa desvio médio
+  // simples em vez de zero, senão o threshold vira 0 e tudo vira outlier.
+  const madEffective = madBase > 0
+    ? madBase
+    : absDeviations.reduce((a, b) => a + b, 0) / Math.max(absDeviations.length, 1);
+  // Threshold combina MAD (relativo) com o piso ABSOLUTO — o maior dos dois é
+  // o corte real. Em N=9 alvos, MAD pode ser enganosamente pequeno; o piso é
+  // o "isso não é grande o suficiente pra chamar de outlier de qualquer jeito".
+  const madThreshold = OUTLIER_ZSCORE_THRESHOLD * madEffective * OUTLIER_MAD_SCALE;
+  const threshold = Math.max(madThreshold, OUTLIER_ABS_FLOOR);
+
+  const perTarget: OutlierPointsReport['perTarget'] = [];
+  const outlierIndices: number[] = [];
+  for (const key of orderedKeys) {
+    const residual = residualsByKey.get(key) ?? 0;
+    const coords = keyCoords.get(key)!;
+    const sampleCount = groups.get(key)!.length;
+    const zScore = madEffective > 0
+      ? (residual - finiteMedian) / (madEffective * OUTLIER_MAD_SCALE)
+      : 0;
+    // Resíduos infinitos (treino falhou sem esse alvo) sempre viram outlier.
+    const isOutlier = !Number.isFinite(residual)
+      || (threshold > 0 && Math.abs(residual - finiteMedian) > threshold);
+    perTarget.push({
+      screenX: coords.x,
+      screenY: coords.y,
+      sampleCount,
+      residualNorm: Number.isFinite(residual) ? residual : Number.MAX_SAFE_INTEGER,
+      zScore: Number.isFinite(zScore) ? zScore : Number.MAX_SAFE_INTEGER,
+      isOutlier,
+    });
+    if (isOutlier) outlierIndices.push(...groups.get(key)!);
+  }
+
+  return {
+    outlierIndices,
+    perTarget,
+    medianResidual: finiteMedian,
+    mad: madBase,
+    madThreshold: threshold,
+    targetCount: orderedKeys.length,
+  };
+}
+
+function medianOf(values: readonly number[]): number {
+  if (values.length === 0) return 0;
+  const s = [...values].sort((a, b) => a - b);
+  const m = Math.floor(s.length / 2);
+  return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
+}
+
 // A1-1 — outcome tipado. O chamador agora sabe se a UI deve mostrar
 // "Calibração Concluída" (só se ok=true) ou uma tela de falha com a razão
 // específica. Regra 3 do plano: o que a tela afirma tem que ser verdade.
@@ -1000,6 +1217,51 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
   pendingProfileMeta = null;
 
   const diag = getLambdaDiagnostics();
+
+  // D4.2 — corre o detector de outlier ANTES de salvar o perfil, para o campo
+  // quality.outlierTargets nascer preenchido. É diagnóstico puro (não muda o
+  // treino). Se algo dá errado, log claro mas segue salvando — regra 1 do
+  // projeto (falhar alto, não silenciar) sem deixar o perfil sem quality.
+  let outlierSummary: NonNullable<StoredCalibrationProfile['quality']>['outlierTargets'] | undefined;
+  try {
+    const rep = detectOutlierPoints(profile);
+    if (rep.reason) {
+      console.log(`[calib] outlier detection SKIPPED (${rep.reason}, N=${rep.targetCount} alvos)`);
+    } else {
+      const outlierIndicesInPerTarget: number[] = [];
+      for (let i = 0; i < rep.perTarget.length; i++) if (rep.perTarget[i].isOutlier) outlierIndicesInPerTarget.push(i);
+      outlierSummary = {
+        count: outlierIndicesInPerTarget.length,
+        indices: outlierIndicesInPerTarget,
+        medianResidual: rep.medianResidual,
+        madThreshold: rep.madThreshold,
+        perTarget: rep.perTarget.map((t) => ({
+          screenX: t.screenX,
+          screenY: t.screenY,
+          residualNorm: t.residualNorm,
+          zScore: t.zScore,
+          isOutlier: t.isOutlier,
+        })),
+      };
+      // Log honesto e indicativo — ver riscos do D4 no ROADMAP: MAD com N~9
+      // é frágil, então nunca chamamos disso "conclusivo".
+      if (outlierIndicesInPerTarget.length > 0) {
+        const worst = rep.perTarget
+          .filter((t) => t.isOutlier)
+          .map((t) => `(${t.screenX.toFixed(2)},${t.screenY.toFixed(2)}) z=${t.zScore.toFixed(1)}`)
+          .join('; ');
+        console.warn(
+          `[calib] ⚠ outlier indicativo em ${outlierIndicesInPerTarget.length}/${rep.perTarget.length} alvo(s): ` +
+          `${worst}. MAD com N=${rep.targetCount} é frágil — sinal indicativo, não conclusivo.`,
+        );
+      } else {
+        console.log(`[calib] outlier detection: 0/${rep.perTarget.length} alvos acima do corte (mediana=${rep.medianResidual.toFixed(4)}).`);
+      }
+    }
+  } catch (e) {
+    console.warn('[calib] detectOutlierPoints falhou (não afeta salvar perfil):', e);
+  }
+
   const stored: StoredCalibrationProfile = {
     meta,
     modelLeft: modelL,
@@ -1016,6 +1278,7 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
       lambdaRatio: diag?.ratio ?? 1,
       deadFeaturesLeftPct:  summary.deadFeaturesLeftPct,
       deadFeaturesRightPct: summary.deadFeaturesRightPct,
+      outlierTargets: outlierSummary,
     },
   };
   profileRegistry.save(stored);
@@ -1131,6 +1394,16 @@ export function init() {
         right: { count: right.deadCount, total: right.totalDims, pct: right.totalDims ? right.deadCount / right.totalDims : 0 },
         maxAllowed: DEAD_FEATURE_MAX_RATIO,
       };
+    },
+    // D4.2 (ROADMAP §5) — hook para o cuidador/dev ver, no console, quais
+    // alvos da última calibração passaram do corte MAD. Roda sob demanda:
+    // `__irisflowDebug.outlierTargets()`. Recomputa em cima do `profile`
+    // atual (a mesma coisa que persistActiveProfileToRegistry usou), então
+    // reflete o estado real do modelo em memória. Retorna null se ainda não
+    // há amostras suficientes.
+    outlierTargets: () => {
+      if (profile.length === 0) return null;
+      return detectOutlierPoints(profile);
     },
   };
 }

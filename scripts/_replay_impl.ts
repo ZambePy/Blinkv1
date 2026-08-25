@@ -50,16 +50,59 @@ function isV1Preset(name: string): name is FilterPreset {
   return name in FILTER_PRESETS;
 }
 
+// D4.3 (ROADMAP §5) — ablação de features via replay.
+//
+// Layout FIXO do vetor de features por olho produzido por
+// `extractCompactFeatures` (src/extractor.ts:486). Se a ordem lá mudar, este
+// mapa mente silenciosamente — mantê-los em sincronia é responsabilidade de
+// quem editar o extractor. Testes de ablação abaixo cobrem o caso "vetor sem
+// L2CS = 37 dims", ancorando o limite entre base+pose e L2CS.
+//
+//   [0..3]    offsetX, offsetY, relX, relY           (4 dims — geometria de íris)
+//   [4..11]   irisContour x/y × 4 pontos              (8 dims)
+//   [12..19]  eyelid corners x/y × 4                  (8 dims)
+//   [20..21]  ear, irisRadius                         (2 dims)
+//   [22..24]  pose.yaw, pose.pitch, pose.roll         (3 dims — POSE LINEAR ISOLADA)
+//   [25..30]  offset×pose 1ª ordem (6 termos)         (6 dims — INTERAÇÕES LINEARES pose×offset)
+//   [31..36]  interações quadráticas/×scale           (6 dims — POSE×POSE / pose×scale)
+//   [37..43]  bloco L2CS (7 dims) — só se presente
+export type FeatureGroup = 'pose-linear' | 'pose-cross' | 'pose-quadratic' | 'l2cs';
+const FEATURE_LAYOUT: Record<FeatureGroup, [number, number]> = {
+  'pose-linear':    [22, 25],   // 3 dims — yaw/pitch/roll isolados
+  'pose-cross':     [25, 31],   // 6 dims — offset×pose 1ª ordem
+  'pose-quadratic': [31, 37],   // 6 dims — pose×pose e pose×scale
+  'l2cs':           [37, 44],   // 7 dims — bloco L2CS (buildL2CSBlock)
+};
+
+function isFeatureGroup(s: string): s is FeatureGroup {
+  return s === 'pose-linear' || s === 'pose-cross' || s === 'pose-quadratic' || s === 'l2cs';
+}
+
+/** Zera dimensões dos grupos pedidos IN-PLACE numa cópia — o Ridge treinado
+ *  com essas dims == 0 não pode aprender β != 0 nelas, o que é equivalente
+ *  a "remover a feature" para o treino (só que sem mudar `numFeatures`, o
+ *  que evita mexer no shape do modelo). */
+function applyDropGroups(vec: number[], drops: readonly FeatureGroup[]): number[] {
+  if (drops.length === 0) return vec;
+  const out = vec.slice();
+  for (const g of drops) {
+    const [start, end] = FEATURE_LAYOUT[g];
+    for (let i = start; i < end && i < out.length; i++) out[i] = 0;
+  }
+  return out;
+}
+
 interface CliArgs {
   jsonl: string;
   report?: string;
   filter: AnyFilterPreset;
   verbose: boolean;
   recomputeFeatures: boolean;
+  dropFeatures: FeatureGroup[];
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: false };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: false, dropFeatures: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -67,6 +110,16 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === '--filter') args.filter = argv[++i] as AnyFilterPreset;
     else if (a === '--verbose' || a === '-v') args.verbose = true;
     else if (a === '--recompute-features') args.recomputeFeatures = true;
+    else if (a === '--drop-features') {
+      const raw = argv[++i];
+      const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
+      const groups: FeatureGroup[] = [];
+      for (const p of parts) {
+        if (!isFeatureGroup(p)) throw new Error(`--drop-features grupo desconhecido: '${p}'. Válidos: pose-linear, pose-cross, pose-quadratic, l2cs`);
+        groups.push(p);
+      }
+      args.dropFeatures = groups;
+    }
     else if (a === '--help' || a === '-h') {
       printHelp();
       process.exit(0);
@@ -89,7 +142,7 @@ function parseArgs(argv: string[]): CliArgs {
 function printHelp(): void {
   process.stdout.write(`
 Uso:
-  npm run replay -- --jsonl <path> [--report <path>] [--filter <preset>] [-v] [--recompute-features]
+  npm run replay -- --jsonl <path> [--report <path>] [--filter <preset>] [-v] [--recompute-features] [--drop-features <grupos>]
 
 Argumentos:
   --jsonl <path>    Arquivo .jsonl produzido pelo gravador (Fase 0.1). Obrigatorio.
@@ -101,6 +154,15 @@ Argumentos:
                     Default do engine desde D1-1 é balanceado-v2 — use v2 para
                     baseline comparável com o accuracy test ao vivo.
   --recompute-features Ignora features gravados e recomputa a partir de landmarks.
+  --drop-features <grupos>
+                    Ablação (D4.3): zera dimensões dos grupos indicados no
+                    vetor de features ANTES do treino/predição. Lista separada
+                    por vírgula. Grupos:
+                      pose-linear     — yaw/pitch/roll isolados (3 dims/olho)
+                      pose-cross      — offset×pose 1ª ordem (6 dims/olho)
+                      pose-quadratic  — pose²/pose×scale (6 dims/olho)
+                      l2cs            — bloco L2CS inteiro (7 dims/olho)
+                    Ex.: --drop-features pose-quadratic,l2cs
   -v, --verbose     Loga cada frame de precisao com erro por frame.
   -h, --help        Mostra esta ajuda.
 `);
@@ -151,22 +213,43 @@ interface AccuracySample {
 // usa direto — economiza CPU e garante paridade com a gravacao. Se nao tem,
 // tenta re-computar a partir de landmarks; se tambem nao tem landmarks, retorna
 // null (frame descartado). O replay reporta a contagem de frames descartados.
-function getFeatures(f: RecordedFrame, recomputeFeatures: boolean): { left: number[]; right: number[] } | null {
+//
+// D4.3 — quando `dropFeatures` é passado, zera as dimensões dos grupos
+// indicados no vetor (tanto no path "usar features gravadas" quanto no path
+// "recomputar"). Zerar é equivalente a "sem essa feature" para o Ridge:
+// StandardScaler.fit vê variância 0 e trata a dim como constante; β acaba
+// preso a 0 na inversão. O shape do vetor NÃO muda, então o modelo do
+// replay continua comparável frame a frame com a variante completa.
+function getFeatures(
+  f: RecordedFrame,
+  recomputeFeatures: boolean,
+  dropFeatures: readonly FeatureGroup[],
+): { left: number[]; right: number[] } | null {
+  let left: number[];
+  let right: number[];
   if (!recomputeFeatures && f.featuresLeft && f.featuresRight
       && f.featuresLeft.length > 0 && f.featuresRight.length > 0
       && f.featuresLeft.length === f.featuresRight.length) {
-    return { left: f.featuresLeft, right: f.featuresRight };
+    left = f.featuresLeft;
+    right = f.featuresRight;
+  } else {
+    const lm = unflattenLandmarks(f.landmarks);
+    if (!lm) return null;
+    const geo = extractFeatures(lm, toFloat32(f.faceMatrix), toL2CSInput(f.l2cs));
+    if (geo.blinkDetected) return null;
+    left = geo.featuresLeft;
+    right = geo.featuresRight;
   }
-  const lm = unflattenLandmarks(f.landmarks);
-  if (!lm) return null;
-  const geo = extractFeatures(lm, toFloat32(f.faceMatrix), toL2CSInput(f.l2cs));
-  if (geo.blinkDetected) return null;
-  return { left: geo.featuresLeft, right: geo.featuresRight };
+  if (dropFeatures.length > 0) {
+    left = applyDropGroups(left, dropFeatures);
+    right = applyDropGroups(right, dropFeatures);
+  }
+  return { left, right };
 }
 
 // Split canonico dos frames em calibracao, precisao e uso livre. Descarta
 // frames sem face, sem features utilizaveis, ou com blink.
-function splitFrames(rec: Recording, recomputeFeatures: boolean): {
+function splitFrames(rec: Recording, recomputeFeatures: boolean, dropFeatures: readonly FeatureGroup[]): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
   live: number; // apenas contagem
@@ -186,7 +269,7 @@ function splitFrames(rec: Recording, recomputeFeatures: boolean): {
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
-    const feats = getFeatures(f, recomputeFeatures);
+    const feats = getFeatures(f, recomputeFeatures, dropFeatures);
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {
@@ -313,7 +396,15 @@ interface Report {
     p90ErrorDeg: number;
     perPoint: PerPointStat[];
   } | null;
-  config: { assumedDistPx: number; rbfApplied: false; onlineRls: false; source: 'src/'; featuresSource: 'recorded' | 'recomputed' };
+  config: {
+    assumedDistPx: number;
+    rbfApplied: false;
+    onlineRls: false;
+    source: 'src/';
+    featuresSource: 'recorded' | 'recomputed';
+    // D4.3 — grupos zerados. Vazio = vetor completo.
+    droppedFeatureGroups: FeatureGroup[];
+  };
 }
 
 function median(values: number[]): number {
@@ -363,7 +454,7 @@ async function runInner(args: CliArgs): Promise<number> {
     return 2;
   }
 
-  const split = splitFrames(rec, args.recomputeFeatures);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures);
   
   if (split.legacyNoDecision > 0) {
     process.stderr.write(
@@ -486,7 +577,14 @@ async function runInner(args: CliArgs): Promise<number> {
     },
     calibration: { uniqueTargets },
     accuracy: accSection,
-    config: { assumedDistPx: ASSUMED_DIST_PX, rbfApplied: false, onlineRls: false, source: 'src/', featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded' },
+    config: {
+      assumedDistPx: ASSUMED_DIST_PX,
+      rbfApplied: false,
+      onlineRls: false,
+      source: 'src/',
+      featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded',
+      droppedFeatureGroups: args.dropFeatures,
+    },
   };
 
   const output = JSON.stringify(report, null, 2);
