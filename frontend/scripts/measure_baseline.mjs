@@ -86,6 +86,12 @@ const ABLATION_VARIANTS = [
   { name: 'ablation: sem pose×offset 1ª ordem (pose-cross)',     filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-cross' },
   { name: 'ablation: sem pose quadrática (pose²/pose×scale)',    filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-quadratic' },
   { name: 'ablation: sem bloco L2CS inteiro',                    filter: 'balanceado-v2', recomputeFeatures: false, drop: 'l2cs' },
+  // D5.1 (ROADMAP §5) — variante combinada: nenhum termo de pose (nem linear
+  // isolado, nem interação com offset). Herda de D4 mas é o número específico
+  // que D5 pede pra decidir "os termos de pose ajudam? por quanto?". Se essa
+  // linha empatar/vencer o baseline sobre a mesma gravação, é evidência
+  // preliminar de que o Ridge já compensa pose implicitamente via offsets.
+  { name: 'ablation: sem pose alguma (linear + cross + quadratic)', filter: 'balanceado-v2', recomputeFeatures: false, drop: 'pose-linear,pose-cross,pose-quadratic' },
 ];
 
 function parseArgs(argv) {

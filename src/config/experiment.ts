@@ -44,6 +44,21 @@ export interface ExperimentConfig {
    * DEFAULT false — nem toda webcam exposes essas capabilities.
    */
   lockCameraExposure: boolean;
+  /**
+   * D5.2 (ROADMAP §5) — correção geométrica de distância câmera-rosto.
+   *
+   * `cameraDistanceEstimate` já é calculada em `extractor.ts` mas só alimenta
+   * o bloco L2CS. Esta flag, quando LIGADA, escala as dims de offset de íris
+   * do vetor de features por `(currentDistance / calibrationRefDistance)`
+   * ANTES do StandardScaler.transformSingle — reduzindo a discrepância
+   * quando o usuário se afasta/aproxima da câmera após calibrar.
+   *
+   * DEFAULT false. O ROADMAP prevê medição em cenário de movimento
+   * controlado antes de ligar por default (regra 4). Quando desligada, a
+   * função pura `applyDistanceCorrectionToFeatures` continua exportada e
+   * testável, mas mapGaze passa direto sem tocar no vetor.
+   */
+  applyDistanceCorrection: boolean;
 }
 
 const DEFAULTS: ExperimentConfig = {
@@ -55,6 +70,7 @@ const DEFAULTS: ExperimentConfig = {
   dwellSnapPx: 0,
   isotropicLandmarks: false,  // A2-5 — desligado até medição confirmar melhora
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
+  applyDistanceCorrection: false, // D5.2 — desligado até gravação com aproximação/afastamento comprovar ganho
 };
 
 const STORAGE_KEY = 'irisflow.experiment';

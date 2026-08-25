@@ -10,6 +10,10 @@ import { isAccuracyTesting } from './accuracy';
 import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
 import { trainRidgeModel, predictRidge } from './ridge';
+import {
+  applyDistanceCorrectionToFeatures,
+  computeDistanceCorrectionRatio,
+} from './distanceCorrection';
 import { EXPERIMENT } from './config/experiment';
 import type { RecordedSampleDecision } from './telemetry/types';
 import { resetEarHistory } from './extractor';
@@ -227,6 +231,17 @@ let regressorLeft: GazeRegressor | null = null;
 let regressorRight: GazeRegressor | null = null;
 export const featureScalerLeft = new StandardScaler();
 export const featureScalerRight = new StandardScaler();
+
+// D5.2 — `cameraDistanceEstimate` médio durante a calibração. Serve de
+// distância de REFERÊNCIA para a correção geométrica em mapGaze. Null
+// enquanto não houver calibração treinada, e null se nenhum `quality`
+// dos pontos carregou o valor (compat com callers antigos). O que
+// mapGaze faz com null: sem correção (comportamento pré-D5.2).
+let calibrationRefDistance: number | null = null;
+
+export function getCalibrationRefDistance(): number | null {
+  return calibrationRefDistance;
+}
 
 // A1-6 — meta da sessão de calibração em curso. Setada por startCalibrationMode
 // (default: `desconhecido`), consumida por completeCalibration para salvar o
@@ -845,6 +860,20 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   const trainFeaturesLeft  = trainingProfile.map(p => p.featuresLeft);
   const trainFeaturesRight = trainingProfile.map(p => p.featuresRight);
   const trainTargets = trainingProfile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
+
+  // D5.2 — média de `cameraDistanceEstimate` durante a calibração. Fica
+  // como a distância de REFERÊNCIA para a correção geométrica opcional
+  // em mapGaze. Se nenhum ponto carregou o campo (caller antigo), fica
+  // null e mapGaze pula a correção — comportamento pré-D5.2 preservado.
+  const camDists = trainingProfile
+    .map((p) => (p.quality as { cameraDistanceEstimate?: number } | null | undefined)?.cameraDistanceEstimate)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0);
+  calibrationRefDistance = camDists.length > 0
+    ? camDists.reduce((a, b) => a + b, 0) / camDists.length
+    : null;
+  if (calibrationRefDistance !== null) {
+    console.log(`[calib] distância câmera-rosto de referência (D5.2): ${calibrationRefDistance.toFixed(4)} (N=${camDists.length} amostras com quality preenchida)`);
+  }
 
   // A1-2 — preflight: aborta antes do solveLinear se mais de 30% das dims
   // não variam entre alvos diferentes. Falha barata com diagnóstico claro,
@@ -1531,11 +1560,28 @@ export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
   perEyeWeight?: { left: number; right: number },
+  currentCameraDistance?: number | null,
 ): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
 
-  const scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
-  const scaledRight = featureScalerRight.transformSingle(featuresRight);
+  // D5.2 — correção geométrica de distância câmera-rosto. NO-OP quando:
+  //   - flag EXPERIMENT.applyDistanceCorrection = false (default);
+  //   - caller não passou currentCameraDistance;
+  //   - calibrationRefDistance ainda não foi capturada (perfis pré-D5.2);
+  //   - ratio computado sai fora de [1/3, 3] (rejeitado pelo helper).
+  // Em qualquer um desses casos, a função pura devolve o vetor idêntico.
+  let correctedLeft = featuresLeft;
+  let correctedRight = featuresRight;
+  if (EXPERIMENT.applyDistanceCorrection) {
+    const ratio = computeDistanceCorrectionRatio(currentCameraDistance, calibrationRefDistance);
+    if (ratio !== 1) {
+      correctedLeft = applyDistanceCorrectionToFeatures(featuresLeft, ratio);
+      correctedRight = applyDistanceCorrectionToFeatures(featuresRight, ratio);
+    }
+  }
+
+  const scaledLeft  = featureScalerLeft.transformSingle(correctedLeft);
+  const scaledRight = featureScalerRight.transformSingle(correctedRight);
 
   let predLeft: { x: number; y: number };
   let predRight: { x: number; y: number };

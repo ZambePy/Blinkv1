@@ -572,6 +572,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             yaw:   face?.yaw,
             pitch: face?.pitch,
             roll:  face?.roll,
+            // D5.2 — proxy de distância câmera-rosto para `mapGaze` computar
+            // ratio de correção geométrica (flag off por default). Viaja
+            // junto do `quality` pra não exigir um novo canal só pra isso.
+            cameraDistanceEstimate: face?.cameraDistanceEstimate,
           };
 
           if (face) {
@@ -604,7 +608,16 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             face ? { yaw: face.yaw, pitch: face.pitch, roll: face.roll } : undefined,
           );
 
-          const calibrated = calibration.mapGaze(featuresLeft, featuresRight, perEyeWeight);
+          // D5.2 — passa currentCameraDistance para mapGaze aplicar a
+          // correção geométrica se `EXPERIMENT.applyDistanceCorrection`
+          // estiver ligado. Undefined quando não há advancedFeatures (ex.:
+          // frame antes do face landmarker acordar) → mapGaze pula correção.
+          const calibrated = calibration.mapGaze(
+            featuresLeft,
+            featuresRight,
+            perEyeWeight,
+            face?.cameraDistanceEstimate ?? null,
+          );
           if (calibrated) {
             targetX = calibrated.x;
             targetY = calibrated.y;
