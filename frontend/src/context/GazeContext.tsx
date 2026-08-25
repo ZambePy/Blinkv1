@@ -481,7 +481,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // though the object identity never changes.
   const calibration = useMemo<CalibrationApi>(
     () => ({
-      startCalibrationMode: () => engineRef.current?.calibration.startCalibrationMode(),
+      // D6 — opts opcional: `quick` (4 cantos) e `opticalCondition` (persistida no perfil).
+      startCalibrationMode: (opts) => engineRef.current?.calibration.startCalibrationMode(opts),
+      getCalibrationTargets: () => engineRef.current?.calibration.getCalibrationTargets() ?? [],
+      getCalibrationMode: () => engineRef.current?.calibration.getCalibrationMode() ?? null,
       startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
       completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
       clear: () => engineRef.current?.calibration.clear(),
@@ -493,6 +496,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
       setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
       resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
+      // D6.3 — indicador de drift consulta este valor a cada tick para
+      // decidir se mostra o aviso "recalibração recomendada".
+      getSessionBias: () => engineRef.current?.calibration.getSessionBias() ?? { x: 0, y: 0, samples: 0 },
+      getRecentBlinkRatePerMinute: (windowMs) => engineRef.current?.calibration.getRecentBlinkRatePerMinute(windowMs) ?? 0,
       getActiveOpticalCondition: () => engineRef.current?.calibration.getActiveOpticalCondition() ?? 'desconhecido',
     }),
     [],

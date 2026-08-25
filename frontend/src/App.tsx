@@ -7,6 +7,7 @@ import { ToastProvider } from './context/ToastContext';
 import { ReminderProvider } from './context/ReminderContext';
 import { EmergencyProvider } from './context/EmergencyContext';
 import { DebugHUD } from './components/DebugHUD';
+import { DriftIndicator } from './components/DriftIndicator';
 
 // Ondas de onboarding carregadas cedo — poucas telas, alta chance de uso imediato
 import { InitialSplash } from './pages/onboarding/InitialSplash';
@@ -108,6 +109,11 @@ function App() {
               <BrowserRouter>
                 <EmergencyProvider>
                   <DebugHUD />
+                  {/* D6.3 — indicador de drift ao cuidador. Componente
+                       independente do EmergencyProvider (respeita as mesmas
+                       regras de rota: skip em /calibration-check e /emergency,
+                       skip em rotas do cuidador). */}
+                  <DriftIndicator />
                   <Suspense fallback={<RouteFallback />}>
                     <Routes>
                   {/* Onboarding — públicas */}

@@ -513,8 +513,42 @@ export function exportGazeDistanceLog(): void {
 
 // ── Headless Calibration API ──────────────────────────────────────────────────
 
+// D6.1 (ROADMAP §5) — coordenadas dos alvos de calibração, exportadas para
+// a UI consumir a MESMA lista canônica. Cada entrada é fração da tela
+// [0..1]. Grade 3×3 nas margens de 10/50/90% é a mesma histórica (ver
+// `CalibrationCheck.tsx:CALIBRATION_POINTS`). O modo rápido usa APENAS os 4
+// cantos: coerente com o achado Frontiers 2024 citado no §3 do ROADMAP (4
+// pontos → ~3,2–3,3° em outro sistema webcam). Centro é omitido de propósito
+// — os 4 cantos dão exatamente 4 restrições independentes na média binocular,
+// que é o mínimo pra estimar bias + escala em x e y sem singularidade.
+export const CALIBRATION_TARGETS_FULL: readonly { x: number; y: number }[] = [
+  { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
+  { x: 0.1, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.9, y: 0.5 },
+  { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
+];
+export const CALIBRATION_TARGETS_QUICK: readonly { x: number; y: number }[] = [
+  { x: 0.1, y: 0.1 }, { x: 0.9, y: 0.1 },
+  { x: 0.1, y: 0.9 }, { x: 0.9, y: 0.9 },
+];
+
+// D6.1 — modo em execução. `null` quando não está calibrando.
+let currentCalibrationMode: 'full' | 'quick' | null = null;
+
+export function getCalibrationMode(): 'full' | 'quick' | null {
+  return currentCalibrationMode;
+}
+
+/** Alvos ativos para a sessão de calibração em curso. Se nenhuma calibração
+ *  está ativa, retorna a lista FULL (default histórico) — útil para a UI
+ *  renderizar a grade antes de decidir o modo. */
+export function getCalibrationTargets(): readonly { x: number; y: number }[] {
+  return currentCalibrationMode === 'quick'
+    ? CALIBRATION_TARGETS_QUICK
+    : CALIBRATION_TARGETS_FULL;
+}
+
 export function startCalibrationMode(
-  opts?: { opticalCondition?: OpticalCondition; label?: string },
+  opts?: { opticalCondition?: OpticalCondition; label?: string; quick?: boolean },
 ) {
   // BUG-1: reset earHistory para que o threshold adaptativo de piscada
   // não venha enviesado de sessões anteriores.
@@ -535,6 +569,26 @@ export function startCalibrationMode(
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
   resetSessionBias();
+
+  // D6.1 — modo ativo. Consulta pública via getCalibrationTargets() para a UI
+  // renderizar 4 cantos (quick) ou grade 3×3 (full). Comportamento default
+  // permanece 'full' quando `quick` não é passado — perfis pré-D6 seguem iguais.
+  currentCalibrationMode = opts?.quick ? 'quick' : 'full';
+  if (currentCalibrationMode === 'quick') {
+    // ⚠️ RISCO RECONHECIDO (ROADMAP §5 D6, "Riscos"): 4 alvos × ~44 dims/olho
+    // é razão amostra:dim de ~0.09 no vetor bruto. Cada alvo contribui ~50-65
+    // amostras aceitas → ~200-260 amostras totais, o que TÓRICAMENTE fecha o
+    // sistema, mas os termos quadráticos de pose (extractor [31..36]) ficam
+    // pouco restringidos. Contramedida: o CV de λ em ridge.ts já escolhe
+    // regularização mais forte se detectar overfit; e detectOutlierPoints
+    // (D4.2) só emite `insufficient_targets` para < 3 alvos — o que N=4
+    // não dispara. Se a decisão pós-medição mostrar que a precisão do modo
+    // rápido é sistematicamente pior, a solução mais defensável não é reduzir
+    // o vetor (isso força invalidar todos os perfis salvos), é considerar
+    // uma variante do modo rápido com 5 pontos (4 cantos + centro). Preserva
+    // essa opção como backlog explícito neste comentário.
+    console.log('[calib] Modo RÁPIDO (D6.1) — 4 cantos, sem termos quadráticos garantidos.');
+  }
 
   // A1-6 — meta para o perfil que resultar desta calibração. Default
   // `desconhecido` porque a UI que pergunta a condição óptica (B1-6/B2-1)
@@ -1228,6 +1282,8 @@ export function completeCalibration(
     }
   } finally {
     isCalibrating = false;
+    // D6.1 — libera o modo. `getCalibrationTargets()` volta ao default 'full'.
+    currentCalibrationMode = null;
     if (onComplete) onComplete(outcome!);
   }
 }

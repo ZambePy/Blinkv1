@@ -81,7 +81,20 @@ export function updateDegradedTimer(input: {
 export type { CalibrationOutcome } from '../calibration';
 
 export interface CalibrationApi {
-  startCalibrationMode(): void;
+  // D6 (ROADMAP §5) — `opts` opcional. `quick=true` reduz a calibração para
+  // 4 cantos (recalibração rápida do cuidador, sem repetir 9 pontos completos).
+  // `opticalCondition` grava a condição do usuário no perfil salvo — antes
+  // de D6.2, a UI nunca passava e todo perfil ficava como `desconhecido`.
+  startCalibrationMode(opts?: {
+    quick?: boolean;
+    opticalCondition?: import('../calibrationProfiles').OpticalCondition;
+    label?: string;
+  }): void;
+  // D6.1 — alvos ativos para renderização na UI. Reflete a lista de 4 cantos
+  // (quick) ou grade 3×3 (full) da sessão em curso. Antes de iniciar, retorna
+  // a lista full por default.
+  getCalibrationTargets(): readonly { x: number; y: number }[];
+  getCalibrationMode(): 'full' | 'quick' | null;
   startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void;
   // A1-1 — outcome tipado. Callback opcional; se fornecido, recebe { ok: true }
   // no sucesso ou { ok: false, reason, detail } em qualquer falha do treino
@@ -103,6 +116,10 @@ export interface CalibrationApi {
   // Enabled por default; desligar volta ao comportamento pré-melhoria.
   setSessionBiasEnabled(enabled: boolean): void;
   resetSessionBias(): void;
+  // D6.3 (ROADMAP §5) — o valor do bias EMA acumulado na sessão + contagem de
+  // amostras. Consumido pelo indicador de drift que sugere recalibração
+  // quando |bias| ultrapassa ~5–6% da tela. Reset em cada calibração nova.
+  getSessionBias(): { x: number; y: number; samples: number };
   // Camada 3 do conforto visual — piscadas por minuto na janela recente.
   // Consumido pela UI de calibração para alertar sobre fadiga/brilho
   // excessivo. Default 60000 ms (1 min); janelas menores dão resposta
@@ -863,8 +880,18 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     },
 
     calibration: {
-      startCalibrationMode(): void {
-        calibration.startCalibrationMode();
+      startCalibrationMode(opts?: {
+        quick?: boolean;
+        opticalCondition?: import('../calibrationProfiles').OpticalCondition;
+        label?: string;
+      }): void {
+        calibration.startCalibrationMode(opts);
+      },
+      getCalibrationTargets(): readonly { x: number; y: number }[] {
+        return calibration.getCalibrationTargets();
+      },
+      getCalibrationMode(): 'full' | 'quick' | null {
+        return calibration.getCalibrationMode();
       },
       startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void {
         calibration.startCollectingPoint(x, y, onDone);
@@ -903,6 +930,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       resetSessionBias(): void {
         calibration.resetSessionBias();
+      },
+      getSessionBias(): { x: number; y: number; samples: number } {
+        return calibration.getSessionBias();
       },
       getRecentBlinkRatePerMinute(windowMs?: number): number {
         return getRecentBlinkRatePerMinute(windowMs);

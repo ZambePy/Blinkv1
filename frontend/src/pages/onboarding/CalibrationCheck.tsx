@@ -1,22 +1,47 @@
-import React, { useRef, useState, useEffect } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 import { BackButton } from '../../components/ui/BackButton';
 import { startAccuracyTest } from '@tracker/accuracy';
 import { buildAutoTestMeta } from '../../utils/autoTestMeta';
+import type { OpticalCondition } from '@tracker/calibrationProfiles';
 
-// Grade 3×3 (10/50/90). Mantida local para evitar dependência de API ainda não exportada.
-const CALIBRATION_POINTS = [
-  { x: 10, y: 10, name: 'Superior Esquerdo' },
-  { x: 50, y: 10, name: 'Superior Central' },
-  { x: 90, y: 10, name: 'Superior Direito' },
-  { x: 10, y: 50, name: 'Meio Esquerdo' },
-  { x: 50, y: 50, name: 'Centro' },
-  { x: 90, y: 50, name: 'Meio Direito' },
-  { x: 10, y: 90, name: 'Inferior Esquerdo' },
-  { x: 50, y: 90, name: 'Inferior Central' },
-  { x: 90, y: 90, name: 'Inferior Direito' },
+// D6.1 — a lista canônica de alvos passou a viver em `src/calibration.ts`
+// (CALIBRATION_TARGETS_FULL). A UI consulta pelo context após chamar
+// startCalibrationMode(opts) — a lista muda entre full (9 alvos) e quick
+// (4 cantos) conforme `opts.quick`. Enquanto nada é iniciado, a lista default
+// é a full pra a tela de tutorial mostrar "9 pontos" com honestidade.
+interface CalibrationPointUI { x: number; y: number; name: string; }
+const POINT_NAME: Record<string, string> = {
+  '0.1,0.1': 'Superior Esquerdo',
+  '0.5,0.1': 'Superior Central',
+  '0.9,0.1': 'Superior Direito',
+  '0.1,0.5': 'Meio Esquerdo',
+  '0.5,0.5': 'Centro',
+  '0.9,0.5': 'Meio Direito',
+  '0.1,0.9': 'Inferior Esquerdo',
+  '0.5,0.9': 'Inferior Central',
+  '0.9,0.9': 'Inferior Direito',
+};
+
+// D6.2 — opções de condição óptica expostas ao cuidador. `desconhecido` é o
+// default de compat (perfil pré-D6). Progressivos ganham warn no console
+// via shouldWarnPrecisionForCondition — não é mentira dizer que a precisão
+// vai ser pior. A UI mostra o rótulo em português.
+const OPTICAL_LABELS: Record<OpticalCondition, string> = {
+  sem_oculos:          'Sem óculos',
+  oculos_simples:      'Óculos comuns (leitura, míopia)',
+  oculos_progressivo:  'Óculos progressivos (multifocais)',
+  lentes_contato:      'Lentes de contato',
+  desconhecido:        'Prefiro não dizer',
+};
+const OPTICAL_OPTIONS: OpticalCondition[] = [
+  'sem_oculos',
+  'oculos_simples',
+  'oculos_progressivo',
+  'lentes_contato',
+  'desconhecido',
 ];
 
 // ─── Paleta CAA — escura em todas as etapas ────────────────────────────────
@@ -54,6 +79,36 @@ export const CalibrationCheck: React.FC = () => {
   const [lastCompletedPoint, setLastCompletedPoint] = useState<number | null>(null);
   const [preparing, setPreparing]             = useState(false);
   const PREPARE_MS = 1500;
+
+  // D6.2 — seleção da condição óptica antes de iniciar. Default `desconhecido`
+  // preserva o comportamento antes de D6 (perfil salvo como desconhecido).
+  const [opticalCondition, setOpticalCondition] = useState<OpticalCondition>('desconhecido');
+  // D6.1 — modo em curso; controla renderização de "4/4" vs "9/9" e a lista
+  // de alvos consultada para display. Nulo enquanto nada iniciou.
+  const [calibrationMode, setCalibrationMode] = useState<'full' | 'quick' | null>(null);
+
+  // Lista de alvos ATUALMENTE usada pela sessão em curso (ou full por default).
+  // useMemo por segurança contra rerenders desnecessários — a lista muda só
+  // quando calibrationMode muda.
+  const activePoints: CalibrationPointUI[] = useMemo(() => {
+    const targets = calibrationMode === 'quick'
+      ? calibration.getCalibrationTargets?.() ?? []
+      : calibration.getCalibrationTargets?.() ?? [];
+    if (targets.length === 0) {
+      // Fallback: se o engine ainda não subiu, hardcode a grade full para
+      // não quebrar a tela de tutorial. Idêntico ao layout pré-D6.
+      return [
+        { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
+        { x: 0.1, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.9, y: 0.5 },
+        { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
+      ].map((t) => ({ x: t.x * 100, y: t.y * 100, name: POINT_NAME[`${t.x},${t.y}`] ?? '' }));
+    }
+    return targets.map((t) => ({
+      x: t.x * 100,
+      y: t.y * 100,
+      name: POINT_NAME[`${t.x},${t.y}`] ?? '',
+    }));
+  }, [calibrationMode, calibration]);
 
   const shuffleOrderRef          = useRef<number[]>([]);
   const isMounted                = useRef(true);
@@ -124,7 +179,7 @@ export const CalibrationCheck: React.FC = () => {
     setErrorMessage(null);
     setLastCompletedPoint(null);
 
-    const pt = CALIBRATION_POINTS[pointIdx];
+    const pt = activePoints[pointIdx];
     calibration.startCollectingPoint?.(pt.x / 100, pt.y / 100, (success: boolean) => {
       if (!isMounted.current) return;
       if (success) {
@@ -146,19 +201,31 @@ export const CalibrationCheck: React.FC = () => {
     });
   };
 
-  const handleStart = () => {
+  // D6.1/D6.2 — inicia calibração. `quick=true` reduz para 4 cantos e passa
+  // opts.quick para o backend. `opticalCondition` grava o perfil sob a
+  // condição escolhida — antes de D6.2, todo perfil ficava como `desconhecido`
+  // silenciosamente.
+  const handleStart = (quick: boolean = false) => {
     if (!l2csReady) return;
+    setCalibrationMode(quick ? 'quick' : 'full');
     setStage('calibrating');
     setCompletedList([]);
 
-    const order = CALIBRATION_POINTS.map((_, i) => i);
+    // startCalibrationMode ANTES do useMemo reagir — chamamos aqui e a lista
+    // ativa vem via getCalibrationTargets() na hora do startNextPoint.
+    calibration.startCalibrationMode?.({ quick, opticalCondition });
+
+    // Ordem embaralhada em cima do TAMANHO REAL da lista ativa após o setState
+    // (que ainda não propagou). Como `getCalibrationTargets` já retorna a
+    // lista certa depois de startCalibrationMode, usamos ela direto.
+    const targets = calibration.getCalibrationTargets?.() ?? [];
+    const order = targets.map((_, i) => i);
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
     }
     shuffleOrderRef.current = order;
     setCurrentIndex(order[0]);
-    calibration.startCalibrationMode?.();
 
     setPreparing(true);
     setTimeout(() => {
@@ -168,7 +235,9 @@ export const CalibrationCheck: React.FC = () => {
     }, PREPARE_MS);
   };
 
-  const progressPct = (completedList.length / CALIBRATION_POINTS.length) * 100;
+  const progressPct = activePoints.length > 0
+    ? (completedList.length / activePoints.length) * 100
+    : 0;
 
   // ─── TRANSIÇÃO ────────────────────────────────────────────────────────────
   if (stage === 'transitioning') {
@@ -357,11 +426,54 @@ export const CalibrationCheck: React.FC = () => {
                 </div>
               )}
 
+              {/* D6.2 — seleção da condição óptica ANTES de iniciar. Persiste no
+                   perfil salvo (StoredCalibrationProfile.meta.opticalCondition).
+                   Antes de D6.2 todo perfil ficava como 'desconhecido' — o
+                   default aqui preserva esse fallback caso o cuidador não escolha. */}
+              <label
+                htmlFor="opticalConditionSelect"
+                data-testid="optical-condition-label"
+                style={{
+                  fontSize: '0.9rem',
+                  color: TEXT_DIM,
+                  alignSelf: 'stretch',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                }}
+              >
+                Condição óptica do usuário:
+              </label>
+              <select
+                id="opticalConditionSelect"
+                data-testid="optical-condition-select"
+                value={opticalCondition}
+                onChange={(e) => setOpticalCondition(e.target.value as OpticalCondition)}
+                data-no-dwell="true"
+                style={{
+                  alignSelf: 'stretch',
+                  padding: '0.75rem 1rem',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '0.75rem',
+                  color: TEXT_PRIMARY,
+                  fontSize: '1rem',
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
+                }}
+              >
+                {OPTICAL_OPTIONS.map((cond) => (
+                  <option key={cond} value={cond} style={{ background: '#111' }}>
+                    {OPTICAL_LABELS[cond]}
+                  </option>
+                ))}
+              </select>
+
               <button
                 type="button"
-                onClick={handleStart}
+                onClick={() => handleStart(false)}
                 disabled={!l2csReady}
                 data-no-dwell="true"
+                data-testid="start-calibration-full"
                 aria-disabled={!l2csReady}
                 aria-describedby="l2cs-status-message"
                 style={{
@@ -380,10 +492,37 @@ export const CalibrationCheck: React.FC = () => {
                 onMouseOver={e => { if (l2csReady) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } }}
                 onMouseOut={e => { if (l2csReady) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; } }}
               >
-                {l2csReady && '👁  Começar'}
+                {l2csReady && '👁  Começar (9 pontos)'}
                 {l2csStatus === 'loading' && (<><Loader2 size={20} style={{ animation: 'cfSpin 1s linear infinite' }} />Carregando...</>)}
                 {l2csFailed && (<><AlertTriangle size={20} />Modelo indisponível</>)}
               </button>
+
+              {/* D6.1 — modo rápido: 4 cantos, sem centro. Coerente com o
+                   achado Frontiers 2024 (§3 do ROADMAP). Meta de tempo: <15s
+                   contra ~19-29s do modo completo. Botão SECUNDÁRIO — o full
+                   continua sendo a via principal para usuário novo. */}
+              {l2csReady && (
+                <button
+                  type="button"
+                  onClick={() => handleStart(true)}
+                  data-no-dwell="true"
+                  data-testid="start-calibration-quick"
+                  style={{
+                    background: 'transparent',
+                    color: TEXT_PRIMARY,
+                    border: `1px solid rgba(255,255,255,0.35)`,
+                    padding: '0.7rem 2.2rem',
+                    borderRadius: '2rem',
+                    fontSize: '0.95rem', fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
+                  }}
+                  onMouseOver={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                  onMouseOut={e => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  Recalibração rápida (4 pontos)
+                </button>
+              )}
 
               <div
                 id="l2cs-status-message"
@@ -410,7 +549,7 @@ export const CalibrationCheck: React.FC = () => {
                 <div style={{ width: `${progressPct}%`, height: '100%', background: ACCENT, transition: 'width 0.5s ease-out', borderRadius: 2 }} />
               </div>
               <span style={{ fontSize: '0.8rem', color: TEXT_DIM, fontVariantNumeric: 'tabular-nums' }}>
-                {completedList.length} / {CALIBRATION_POINTS.length}
+                {completedList.length} / {activePoints.length}
               </span>
             </div>
 
@@ -430,7 +569,7 @@ export const CalibrationCheck: React.FC = () => {
             )}
 
             {/* Pontos de calibração */}
-            {CALIBRATION_POINTS.map((pt, idx) => {
+            {activePoints.map((pt, idx) => {
               const isCurrent      = idx === currentIndex;
               const isDone         = completedList.includes(idx);
               const isJustFinished = idx === lastCompletedPoint;
