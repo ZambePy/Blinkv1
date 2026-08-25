@@ -80,14 +80,44 @@ node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<seu-arquivo>
 
 Com `--out relatorio.json` também salva o agregado em disco para diff futuro.
 
-## Estado atual da pasta (2026-08-23, D2)
+## Estado atual da pasta (2026-08-25, D8)
 
-Nenhum arquivo `.jsonl` real ainda. O D2 estabeleceu a infraestrutura de
-medição (script + wiring + `PONTO-DE-REFERENCIA.md` consolidado), mas **a
-gravação em si depende de uma sessão física com webcam** — o agente que
-implementou D2 não tem acesso à câmera. É a única tarefa manual do D2 que
-precisa ser feita pelo operador humano antes de iniciar D3.
+Nenhum arquivo `.jsonl` real ainda. D2 estabeleceu a infraestrutura de
+medição, e D3-D7 estenderam-na (sweep de filtro, ablação de features,
+sweep de `isotropicLandmarks`, curva de deriva temporal) — mas **a
+gravação em si depende de uma sessão física com webcam**. É a única
+tarefa manual persistente desde o D2, e continua sendo o gargalo desta
+semana.
 
-Ao produzir a fixture, atualizar este README para listar o arquivo, incluir
-o link para o primeiro relatório do `measure_baseline.mjs` como snapshot
-inicial, e commitar `*.report.json` (o gitignore permite via `!*.report.json`).
+## Gate de regressão em CI (D8.1)
+
+Quando a fixture existir, o CI passa a gate-ar regressões automaticamente.
+Nomes esperados pelo `.github/workflows/ci.yml` (step `Baseline regression gate`):
+
+- **`fixtures/replay/ci-baseline.jsonl`** — a gravação de referência (não
+  vai para o Git por padrão; adicionar com `git add -f` quando produzida,
+  ou publicar via LFS/artefato se o tamanho for grande).
+- **`fixtures/replay/ci-baseline.report.json`** — snapshot esperado
+  produzido por `node frontend/scripts/measure_baseline.mjs --jsonl
+  ci-baseline.jsonl --out ci-baseline.report.json`. Este arquivo **VAI**
+  para o Git — é o "esperado" contra o qual cada PR será comparado.
+
+Enquanto essa dupla não estiver commitada, o step de gate no CI vira
+no-op e apenas loga "pulando gate — pendência humana". O smoke test da
+CLI continua rodando em toda execução (garante que os scripts não
+regridem por conta própria).
+
+Para regravar o baseline (regressão intencional/melhoria esperada):
+
+```bash
+node frontend/scripts/measure_baseline.mjs \
+  --jsonl fixtures/replay/ci-baseline.jsonl \
+  --out fixtures/replay/ci-baseline.report.json
+git add fixtures/replay/ci-baseline.report.json
+git commit -m "chore(baseline): atualizar snapshot — <razão>"
+```
+
+A tolerância default é **15%** — chutada, não medida. Recalibrar com
+`--tolerance-pct` quando houver histórico de N execuções da mesma
+fixture com variância mensurada (ver comentário no topo de
+`check_baseline_regression.mjs`).

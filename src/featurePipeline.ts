@@ -32,12 +32,19 @@ export function extractFeatures(
   // L2CS por design — só o compact expõe o extension point; se um dia quiser
   // suportar no path full, adicionar aqui.
   //
-  // A correção de aspect ratio (isotropicLandmarks) é feita DENTRO de
-  // extractEyeFeatures, que recebe videoWidth/videoHeight e aplica a
-  // transformação uma única vez. NÃO duplicar aqui.
+  let workingLandmarks = landmarks;
+  if (EXPERIMENT.isotropicLandmarks && videoWidth && videoHeight && videoHeight > 0) {
+    const aspectRatio = videoWidth / videoHeight;
+    workingLandmarks = landmarks.map(p => ({
+      ...p,
+      x: p.x * aspectRatio,
+      z: p.z * aspectRatio,
+    }));
+  }
+
   const geo = USE_COMPACT_FEATURES
-    ? extractCompactFeatures(landmarks, faceMatrix, l2csGaze)
-    : extractEyeFeatures(landmarks, faceMatrix, videoWidth, videoHeight);
+    ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze)
+    : extractEyeFeatures(workingLandmarks, faceMatrix);
 
   return {
     featuresLeft: [...geo.featuresLeft],

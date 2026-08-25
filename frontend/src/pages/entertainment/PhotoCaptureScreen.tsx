@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Camera, Sparkles, Image as ImageIcon, Download, Trash2, Check, RefreshCw, ArrowLeft, Clock } from 'lucide-react';
+import { Camera, Sparkles, Image as ImageIcon, Download, Check, RefreshCw, ArrowLeft, Clock } from 'lucide-react';
 import { GazeButton } from '../../components/ui/GazeButton';
 
 export interface CapturedPhoto {
@@ -23,9 +23,8 @@ const FILTERS = [
 export const PhotoCaptureScreen: React.FC = () => {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [filterIndex, setFilterIndex] = useState(0);
   const [countdown, setCountdown] = useState<number | null>(null);

@@ -93,11 +93,28 @@ const STORAGE_KEY = 'irisflow.experiment';
 // gravado; sweepar essa flag em replay é NO-OP e o `measure_baseline` NÃO
 // oferece essa variante. A decisão de ligar/desligar `lockCameraExposure`
 // só pode vir de medição AO VIVO — pendência humana registrada no ROADMAP.
-function loadEnvOverrides(): Partial<ExperimentConfig> {
-  if (typeof process === 'undefined' || !process.env) return {};
+// Ambiente do consumidor: Node passa `process.env`; browser passa `{}`
+// (localStorage é a via de override lá). Tipagem explícita sem depender de
+// @types/node — o frontend tsconfig NÃO inclui esse pacote, então referenciar
+// `NodeJS.ProcessEnv` aqui quebra `npm run build` do frontend.
+type EnvLike = Record<string, string | undefined>;
+
+// Guard defensivo: em Node há `process`; em browser não. Fazemos cast via
+// `globalThis` para escapar da falta de @types/node no ambiente do frontend.
+function getProcessEnvOrEmpty(): EnvLike {
+  const proc = (globalThis as { process?: { env?: EnvLike } }).process;
+  return proc?.env ?? {};
+}
+
+// Exportado para permitir teste unitário sem `vi.resetModules()` (o snapshot
+// `EXPERIMENT` é resolvido em module-load, então testar variação de env exige
+// reimport do módulo; testar essa função pura tem o mesmo alcance sem o custo
+// de pool que o resetModules impõe sobre outros testes concorrentes).
+export function loadEnvOverrides(env: EnvLike = getProcessEnvOrEmpty()): Partial<ExperimentConfig> {
+  if (!env) return {};
   const overrides: Partial<ExperimentConfig> = {};
   const prefix = 'IRISFLOW_EXP_';
-  for (const [envKey, rawValue] of Object.entries(process.env)) {
+  for (const [envKey, rawValue] of Object.entries(env)) {
     if (!envKey.startsWith(prefix) || rawValue === undefined) continue;
     const key = envKey.slice(prefix.length) as keyof ExperimentConfig;
     if (!(key in DEFAULTS)) continue; // chave inválida — ignora sem quebrar

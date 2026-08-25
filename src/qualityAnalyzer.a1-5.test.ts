@@ -44,6 +44,12 @@ beforeAll(() => {
   Object.defineProperty(document.documentElement, 'clientHeight', { value: 720, configurable: true });
 });
 
+// Timeout maior no primeiro teste — ele monta jsdom+canvas do zero, e a
+// carga desse setup fica >5s intermitente sob load pesado do pool (D2-D8
+// adicionou +145 testes, aumentando concorrência). Runs isolados
+// consistentemente <500ms; sob suite completa, ~33% dos runs excedem 5s.
+// Ampliar o teto NÃO relaxa a asserção (specularRatio precisa continuar 0);
+// só evita false-positive de flake em D8.3.
 describe('A1-5: specularRatio em qualityAnalyzer', () => {
   it('crop uniformemente cinza (mid-luma) devolve specularRatio ≈ 0', () => {
     const video = makeFakeVideo([128, 128, 128]); // luma = 0.5
@@ -52,7 +58,7 @@ describe('A1-5: specularRatio em qualityAnalyzer', () => {
     const q = analyzer.analyze(video, landmarks);
     expect(q.specularRatio).toBeDefined();
     expect(q.specularRatio!).toBeCloseTo(0, 6);
-  });
+  }, 15_000);
 
   it('crop totalmente branco devolve specularRatio ≈ 1', () => {
     const video = makeFakeVideo([255, 255, 255]);

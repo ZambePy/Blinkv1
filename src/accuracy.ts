@@ -109,7 +109,6 @@ const ASSUMED_DIST_PX = 2268;
 
 let currentFeaturesLeft: number[] = [];
 let currentFeaturesRight: number[] = [];
-let currentPerEyeWeight: { left: number; right: number } | undefined;
 // Pose da cabeça no frame atual (rad). Alimentado pelo engine a cada frame
 // junto com as features. Usado pelo accuracy test para detectar deriva de
 // pose entre calibração e teste — a assinatura mais comum de "cursor com
@@ -134,12 +133,11 @@ export function getCurrentTargetPx(): { xPx: number; yPx: number; label: string 
 export function feedAccuracyRaw(
   featuresLeft: number[],
   featuresRight: number[],
-  perEyeWeight?: { left: number; right: number },
+  _perEyeWeight?: { left: number; right: number },
   pose?: { yaw: number; pitch: number; roll: number },
 ) {
   currentFeaturesLeft = featuresLeft;
   currentFeaturesRight = featuresRight;
-  currentPerEyeWeight = perEyeWeight;
   currentPose = pose;
 }
 

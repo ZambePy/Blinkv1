@@ -358,6 +358,32 @@ O repositório (`main`, commit `5503091`, 22/08/2026) já passou por dois ciclos
 
 ---
 
+### D8 — Consolidação ✅ FEITO (2026-08-25)
+
+> **Executado em 2026-08-25** sobre o commit `1dbe501`. Testes finais:
+> 26/26 arquivos · 228/228 testes na raiz; 19/19 · 105/105 no frontend
+> (**333 no total**). Build (`npm run build`) e electron:compile
+> (`npm run electron:compile`) limpos. **Tag git NÃO criada** — operação
+> hard-to-reverse, aguarda autorização explícita do operador.
+>
+> **Entregas por tarefa:**
+>
+> **D8.1 — Gate de regressão de precisão no CI.** Novo `frontend/scripts/check_baseline_regression.mjs` (CLI): compara `meanErrorPx` da variante-baseline entre dois relatórios do `measure_baseline`; falha (exit 1) se current excede baseline por mais que a tolerância (default 15%, preliminar — recalibrar quando houver histórico de N execuções). A lógica de decisão foi extraída em `frontend/scripts/checkBaselineDecision.mjs` (função pura sem imports Node) para permitir teste unitário sem depender do wrapper CLI — necessário porque o vitest esbuild não parseia bem o arquivo com `process.argv`/emojis quando importado. O `frontend/.github/workflows/ci.yml` ganhou dois steps novos: (i) **smoke test das CLIs** roda em toda execução (garante que `measure_baseline.mjs --help` e `check_baseline_regression.mjs --help` continuam parseando args sem crash — sem isso, a CLI regride silenciosamente antes de haver fixture); (ii) **gate real de regressão** roda apenas quando `fixtures/replay/ci-baseline.jsonl` e `ci-baseline.report.json` estão commitados; enquanto não estão, vira no-op sem quebrar o CI. Roteiro de como ativar o gate documentado em `fixtures/replay/README.md`.
+>
+> **D8.2 — Documentação consolidada.** Criado `docs/RESULTADOS-D2-D8.md` — um único documento respondendo "o que foi ligado, o que ficou desligado e por quê, números antes/depois de cada sprint". Estrutura: resumo executivo + tabelas "ligadas por default" / "ficaram desligadas — dependem de fixture" / "decisões conservadoras registradas" + sprint-a-sprint (D2-D8) com entregas, pendências humanas e testes novos por sprint. `README.md` atualizado: contagens reais de testes (228 raiz + 105 frontend, antes ficava travado em "119"); nova entrada "Semana de Precisão (D2 → D8): ✅ Concluída"; resumo de 7 linhas do que cada sprint entregou; referência ao novo `docs/RESULTADOS-D2-D8.md` na Estrutura. Cuidado tomado com o alerta do critério de aceite: não reincidimos em "13 pontos" nem "React 18" (o README já mencionava React 19 desde antes e "9 pontos" que agora ganhou "modo rápido opcional (4 cantos)" — realidade acurada).
+>
+> **D8.3 — Sanity check final.** Rodadas verdes: raiz 26/26 · 228/228; frontend 19/19 · 105/105; build limpo; electron:compile limpo. **Fixes colaterais necessários pra chegar em "build limpo":** 4 warnings de TS pré-existentes ao D2 (unused vars) que impediam o `tsc -b` de terminar: `PhotoCaptureScreen.tsx` (`Trash2` import, `canvasRef` ref, `stream` state — este último transformado em `[, setStream]` porque o `setStream` ainda é chamado); `accuracy.ts:112` (`currentPerEyeWeight` var declarada mas nunca lida — declaração removida, param renomeado para `_perEyeWeight`). **Fix colateral no teste flaky** `qualityAnalyzer.a1-5.test.ts`: primeiro teste (`crop cinza`) ganhou timeout de 15s (era default 5s) porque monta jsdom+canvas 3.2.3 do zero e sob load pesado do pool D2-D8 (+174 testes na semana) fica >5s intermitente; runs isolados <500ms confirmam que o comportamento estava correto, só faltava teto — asserção não foi relaxada. **Refactor do teste `experiment.test.ts` (D7.1):** trocou `vi.resetModules()` + `await import` por chamada direta a `loadEnvOverrides(envSintético)` (função agora exportada) — `resetModules` estressava o pool o suficiente pra reproduzir o timeout do qualityAnalyzer test. **Tag git NÃO criada** — ver seção de decisão abaixo.
+>
+> **D8.4 — Backlog consolidado no §8 do ROADMAP.** O §8 ganhou duas subseções: (i) `8.1. Backlog técnico` — preserva os 6 itens originais + adiciona 2 novos (recalibração da tolerância de 15% do gate D8.1; variante de 5 pontos para o modo rápido D6.1); (ii) `8.2. Pendências humanas emergentes de D2–D7` — consolida em UM lugar as 9 pendências que atravessaram sprint a sprint (fixture D2.4; 5 fotos D3.1; sweep expandFactor D3.2; rodada de ablação D4.3/D5.1; sessão de movimento D5.2; tempo real e erro pós-recalibração D6; sweep A2 D7.1; curva de drift D7.3; baseline de CI D8.1). Cada uma com comando exato para o próximo operador reproduzir.
+>
+> **Sobre tag git — decisão declarada:** o ROADMAP D8.3 pede "criar tag git marcando o estado final". Não foi feita autorização explícita do operador para operações hard-to-reverse (git tag é publicado se pusher; renomear ou apagar após publicado é intrusivo). A recomendação de tag (`v-precisao-semana-1` ou similar) fica registrada aqui; o operador pode criar diretamente quando for conveniente. Todos os demais critérios de aceite (CI com gate rodando; docs atualizados sem imprecisões; nenhuma flag ligada sem número) estão fechados.
+>
+> **Testes novos (11):** `frontend/src/utils/checkBaselineRegression.test.ts` — 11 casos sobre `decideRegression`: identidade (0%), dentro da tolerância (+10% com tol=15), melhoria (delta negativo), boundary condition (exatamente no limite NÃO regride — comparação estrita), regressões (+16%, +50%), tolerância 0% (qualquer aumento regride), entradas inválidas (NaN, 0, negativo) viram `verdict: 'invalid'` sem crash.
+>
+> **Compatibilidade:** todas as mudanças em CLI são aditivas (`check_baseline_regression.mjs` é um script novo; step de CI é aditivo e condicional). Refactor do `experiment.ts` (`loadEnvOverrides` agora exportado + tipagem `EnvLike` sem `NodeJS.ProcessEnv`) NÃO muda comportamento — só sinatura de teste. Cleanup de unused vars em `PhotoCaptureScreen.tsx`/`accuracy.ts` idem: `setStream` continua sendo chamado (só o valor não era lido); `currentPerEyeWeight` nunca era lida em lugar algum.
+>
+> **Ordem de execução:** D8.1 (script + CI wiring + testes) → D8.2 (RESULTADOS.md + README) → D8.4 (§8 do ROADMAP) → D8.3 (sanity check — expôs os warnings pré-existentes; fixados como parte da consolidação) → refactor de `experiment.test.ts` (contornar flake do qualityAnalyzer) → testes finais → esta atualização.
+
 ### D8 — Consolidação
 
 **Objetivo:** proteger o que foi medido/decidido nesta semana contra regressão futura, e deixar registro claro para quem continuar o trabalho.
@@ -409,12 +435,30 @@ A ordem de execução (D2→D8) já reflete a priorização por impacto×esforç
 
 ## 8. O que fica fora desta semana (backlog explícito, não escondido)
 
+### 8.1. Backlog técnico (fora de escopo do ciclo de 1 semana)
+
 - **Reconstrução 3D de cabeça / Structure-from-Motion** para compensar deslocamento lateral (a solução completa que a literatura usa para esse problema) — a correção de D5 é um passo pequeno e reversível na mesma direção, não a solução completa.
 - **Retreinar ou substituir o L2CS-Net** — fora de escopo de qualquer ciclo de 1 semana; D3 endurece o *uso* do modelo existente, não o modelo em si.
 - **Implementação completa de RANSAC** (com amostragem aleatória de subconjuntos) para detecção de outlier — com apenas 9 pontos de calibração, RANSAC clássico não é estatisticamente estável; D4 usa uma versão robusta baseada em MAD, adequada a N pequeno, mas mais simples que RANSAC completo.
 - **Investigação do motivo do revert de `f78b6bd`** ("calibração em ordem raster + gate de deriva de olhar por ponto") — antes de reintroduzir ordenação raster ou um gate de deriva *entre* pontos, alguém precisa entender por que a tentativa anterior foi revertida (o commit de revert não documenta o motivo).
 - **Automação completa da curva de deriva** (gravações múltiplas, múltiplos usuários, análise estatística) — D7 produz a primeira curva manual/preliminar, não um pipeline de medição contínua.
 - **Validação em outro hardware/webcam** — toda a evidência interna deste projeto (incluindo o próprio "bug dos óculos") vem de um único conjunto de hardware; isso é uma limitação conhecida herdada dos ciclos anteriores, não introduzida por este roadmap.
+- **Recalibração da tolerância de 15% do gate de CI (D8.1)** — o número atual é chutado. Recalibrar com histórico de N execuções da mesma fixture sob condições estáveis para converter em "variância normal observada + margem de segurança", não valor arbitrário.
+- **Variante de 5 pontos para o modo rápido de calibração (D6.1)** — só entrar se a métrica de "erro pós-recalibração rápida vs. completa" (pendência humana) mostrar precisão sistematicamente pior com 4 cantos. Contramedida NÃO é reduzir o vetor de features (invalidaria perfis salvos, custo alto por ganho incerto), é adicionar 1 ponto central.
+
+### 8.2. Pendências humanas emergentes de D2–D7 (dependem de sessão com webcam)
+
+Todas foram documentadas ao longo da semana; consolidadas aqui para o próximo operador não precisar caçar em cada sprint. Todas dependem de sessão física — o agente que executou D2–D8 não tem acesso à câmera.
+
+- **[D2.4] Fixture de referência.** Gravar 1 sessão calibração+accuracy via `SettingsScreen → Gravador de sessão`. Roteiro em `fixtures/replay/README.md`. Base de tudo — D3.1, D3.2, D4.3, D5.1, D5.2, D7.1, D7.3 e o gate de CI de D8.1 ficam suspensos sem ela.
+- **[D3.1] Validação de axis symmetry.** Capturar 5 fotos (`look_center`, `look_up`, `look_down`, `look_left`, `look_right`) idealmente em ≥2 distâncias; rodar `node frontend/scripts/l2cs_axis_validation.mjs --dirs <dir60cm>,<dir40cm>`.
+- **[D3.2] Sweep de `EXPAND_FACTOR`.** 6 sessões (uma por valor ∈ {1.0, 1.2, 1.4, 1.6, 1.8, 2.0}), roteiro completo em `frontend/scripts/sweep_expand_factor.md`. Replay NÃO pode varrer porque não persiste pixels.
+- **[D4.3 + D5.1] Rodada de ablação.** `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<X>.jsonl --ablation`. Comparar cada linha vs. baseline; decidir se algum grupo de features é ruído (**não remover** com N=1 — só registrar como achado preliminar).
+- **[D5.2] Gravação de movimento controlado.** Sessão curta com aproximação/afastamento e deslocamento lateral leve. Comparar `applyDistanceCorrection` OFF vs ON: `__irisflowExp.set('applyDistanceCorrection', true)` → reload → gravar → replay com e sem via env-var `IRISFLOW_EXP_applyDistanceCorrection=true|false` do D7.1.
+- **[D6] Tempo real + erro pós-rápida.** Sessão de usuário real: medir tempo de coleta (meta ROADMAP <15s no modo rápido vs. ~19-29s no completo) e erro do accuracy test pós-recalibração rápida vs. pós-completa.
+- **[D7.1] Sweep A2.** `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<X>.jsonl --a2-flags`. Decidir `isotropicLandmarks` on/off com base no delta. `lockCameraExposure` fica FORA — precisa medição AO VIVO (afeta apenas câmera, não replay).
+- **[D7.3] Curva de drift.** Gravar 1 sessão contínua ~40 min. `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<X>.jsonl --drift-curve`. Produz erro em [0-5min], [20-25min], [40-45min] (mesma gravação, calibração preservada).
+- **[D8.1] Baseline de CI.** Após produzir a fixture de referência (D2.4), renomear/copiar como `fixtures/replay/ci-baseline.jsonl` (ou publicar via LFS/artefato se grande) e gerar snapshot com `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/ci-baseline.jsonl --out fixtures/replay/ci-baseline.report.json`. Commitar o `.report.json`; o step de gate no CI passa a rodar automaticamente.
 
 ---
 
