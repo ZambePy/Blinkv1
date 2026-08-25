@@ -108,6 +108,10 @@ export interface CalibrationApi {
   // excessivo. Default 60000 ms (1 min); janelas menores dão resposta
   // mais rápida ao custo de variância maior.
   getRecentBlinkRatePerMinute(windowMs?: number): number;
+  // D2 — condição óptica do perfil ativo. Consumido pelo AUTO_TEST_META do
+  // fluxo pós-calibração para preencher `RunMeta.oculos` em vez de hardcode.
+  // Retorna 'desconhecido' enquanto D6 não expõe a seleção na UI de calibração.
+  getActiveOpticalCondition(): import('../calibrationProfiles').OpticalCondition;
 }
 
 // Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
@@ -130,6 +134,11 @@ export interface EngineDiagnostics {
     hz: number;
     latencyMs: number;
     stalePct: number;
+    // D3.3 (ROADMAP §5) — média rolling da confidence (1 - H/H_max da softmax
+    // por eixo, agregada por min(yaw, pitch)) das últimas ~20 inferências.
+    // 0 antes de qualquer resultado válido. Exposto para observabilidade;
+    // downstream ainda NÃO consome (regra 4 do projeto — medir antes de agir).
+    confidence: number;
   };
   gaze: {
     yaw: number;
@@ -172,6 +181,10 @@ export interface GazeEngine {
   subscribe(cb: (sample: GazeSample) => void): () => void;
   onStateChange(cb: (state: EngineState) => void): () => void;
   getState(): EngineState;
+  // D2 — tempo desde o `start()` bem-sucedido, em ms (performance.now-based).
+  // 0 antes do primeiro start. Consumido pelo AUTO_TEST_META para preencher
+  // `RunMeta.minutosDeSessao` em vez de hardcode 0. Reinicia a cada stop→start.
+  getSessionUptimeMs(): number;
   // Sprint 5 — troca em tempo real do preset do filtro temporal.
   // `estavel`/`balanceado`/`responsivo` alteram mincutoff, beta e o buffer
   // ponderado. Ver FILTER_PRESETS em oneEuroFilter.ts.
@@ -273,6 +286,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let rafHandle = 0;
   let lastVideoTime = -1;
   let running = false;
+  // D2 — marca do `performance.now()` no start bem-sucedido. Consumido por
+  // getSessionUptimeMs() para o AUTO_TEST_META refletir o tempo real de uso
+  // em vez de hardcode 0. Null antes do primeiro start; reset a cada start.
+  let sessionStartMs: number | null = null;
 
   // Default é 'balanceado-v2' (espaço normalizado). Os presets v1 legados
   // filtram em pixels e produzem alpha≈0.99 a 30fps — o filtro passa quase
@@ -511,7 +528,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             }
           }
           const g = l2csClient.getLatestGaze(startTimeMs);
-          l2csGaze = { yaw: g.yaw, pitch: g.pitch, valid: g.valid };
+          l2csGaze = { yaw: g.yaw, pitch: g.pitch, valid: g.valid, confidence: g.confidence };
           if (g.valid) l2csFramesValid++; else l2csFramesStale++;
           diagL2csYaw = g.yaw;
           diagL2csPitch = g.pitch;
@@ -690,7 +707,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             landmarks: flattenLandmarks(landmarks),
             faceMatrix: faceMatrix ? Array.from(faceMatrix) : undefined,
             l2cs: l2csGaze
-              ? { yaw: l2csGaze.yaw, pitch: l2csGaze.pitch, valid: l2csGaze.valid }
+              ? { yaw: l2csGaze.yaw, pitch: l2csGaze.pitch, valid: l2csGaze.valid, confidence: l2csGaze.confidence }
               : undefined,
             featuresLeft: extractorResult.featuresLeft.length
               ? extractorResult.featuresLeft.slice()
@@ -723,6 +740,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       calibration.init();
       initL2CSAsync();
       running = true;
+      sessionStartMs = performance.now();
       setState('tracking');
       rafHandle = requestAnimationFrame(loop);
     },
@@ -750,6 +768,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
 
     getState(): EngineState {
       return state;
+    },
+
+    getSessionUptimeMs(): number {
+      return sessionStartMs === null ? 0 : Math.max(0, performance.now() - sessionStartMs);
     },
 
     setFilterPreset(preset: FilterPreset | FilterPresetV2): void {
@@ -793,6 +815,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           hz: diagL2csHz,
           latencyMs: l2csClient?.getAverageLatencyMs() ?? 0,
           stalePct: diagL2csStalePct,
+          confidence: l2csClient?.getAverageConfidence() ?? 0,
         },
         gaze: {
           yaw: diagL2csYaw,
@@ -870,6 +893,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getRecentBlinkRatePerMinute(windowMs?: number): number {
         return getRecentBlinkRatePerMinute(windowMs);
+      },
+      getActiveOpticalCondition(): import('../calibrationProfiles').OpticalCondition {
+        return calibration.getActiveProfileMeta()?.opticalCondition ?? 'desconhecido';
       },
     },
 

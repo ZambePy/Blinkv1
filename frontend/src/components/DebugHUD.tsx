@@ -45,7 +45,7 @@ export const DebugHUD: React.FC = () => {
 
         <span style={{ color: '#88f' }}>L2CS</span>
         <span>
-          {diag.l2cs.status} &middot; {diag.l2cs.hz.toFixed(1)} Hz &middot; {diag.l2cs.latencyMs.toFixed(0)} ms &middot; stale {diag.l2cs.stalePct.toFixed(0)} %
+          {diag.l2cs.status} &middot; {diag.l2cs.hz.toFixed(1)} Hz &middot; {diag.l2cs.latencyMs.toFixed(0)} ms &middot; stale {diag.l2cs.stalePct.toFixed(0)} % &middot; conf {diag.l2cs.confidence.toFixed(2)}
         </span>
 
         <span style={{ color: '#88f' }}>yaw / pitch</span>

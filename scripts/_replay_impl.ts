@@ -24,7 +24,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
 import { RidgeRegressor } from '../src/ridge';
 import { StandardScaler } from '../src/scaler';
-import { OneEuroFilter2D, FILTER_PRESETS, type FilterPreset } from '../src/oneEuroFilter';
+import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2, type FilterPreset, type FilterPresetV2 } from '../src/oneEuroFilter';
 import { extractFeatures } from '../src/featurePipeline';
 import type { Point3D, L2CSGazeInput } from '../src/extractor';
 import { parseJSONL } from '../src/telemetry/recorder';
@@ -35,10 +35,25 @@ import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/
 // baterem com os do teste online).
 const ASSUMED_DIST_PX = 2268;
 
+// D3.2 (ROADMAP §5) — o replay aceita presets v1 (pixel space) e v2
+// (normalized space). Presets v2 são o default do engine desde D1-1, e sem
+// suportá-los aqui o baseline offline não bate 1:1 com o accuracy test ao
+// vivo — limitação documentada em `frontend/scripts/measure_baseline.mjs`
+// como "escopo do D3", que este bloco resolve.
+type AnyFilterPreset = FilterPreset | FilterPresetV2;
+
+function isV2Preset(name: string): name is FilterPresetV2 {
+  return name.endsWith('-v2') && name in FILTER_PRESETS_V2;
+}
+
+function isV1Preset(name: string): name is FilterPreset {
+  return name in FILTER_PRESETS;
+}
+
 interface CliArgs {
   jsonl: string;
   report?: string;
-  filter: FilterPreset;
+  filter: AnyFilterPreset;
   verbose: boolean;
   recomputeFeatures: boolean;
 }
@@ -49,7 +64,7 @@ function parseArgs(argv: string[]): CliArgs {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
     else if (a === '--report') args.report = argv[++i];
-    else if (a === '--filter') args.filter = argv[++i] as FilterPreset;
+    else if (a === '--filter') args.filter = argv[++i] as AnyFilterPreset;
     else if (a === '--verbose' || a === '-v') args.verbose = true;
     else if (a === '--recompute-features') args.recomputeFeatures = true;
     else if (a === '--help' || a === '-h') {
@@ -63,8 +78,10 @@ function parseArgs(argv: string[]): CliArgs {
     printHelp();
     throw new Error('Falta --jsonl <path>');
   }
-  if (!(args.filter! in FILTER_PRESETS)) {
-    throw new Error(`--filter deve ser um de: ${Object.keys(FILTER_PRESETS).join(', ')}`);
+  const filterName = args.filter as string;
+  if (!isV1Preset(filterName) && !isV2Preset(filterName)) {
+    const allPresets = [...Object.keys(FILTER_PRESETS), ...Object.keys(FILTER_PRESETS_V2)];
+    throw new Error(`--filter deve ser um de: ${allPresets.join(', ')}`);
   }
   return args as CliArgs;
 }
@@ -78,8 +95,11 @@ Argumentos:
   --jsonl <path>    Arquivo .jsonl produzido pelo gravador (Fase 0.1). Obrigatorio.
   --report <path>   Escreve o relatorio em JSON no caminho dado. Sem esse flag,
                     imprime na stdout.
-  --filter <preset> Preset do OneEuroFilter: estavel | balanceado | responsivo.
-                    Padrao: balanceado.
+  --filter <preset> Preset do OneEuroFilter. Padrao: balanceado.
+                    v1 (espaço pixel):        estavel | balanceado | responsivo
+                    v2 (espaço normalizado):  estavel-v2 | balanceado-v2 | responsivo-v2
+                    Default do engine desde D1-1 é balanceado-v2 — use v2 para
+                    baseline comparável com o accuracy test ao vivo.
   --recompute-features Ignora features gravados e recomputa a partir de landmarks.
   -v, --verbose     Loga cada frame de precisao com erro por frame.
   -h, --help        Mostra esta ajuda.
@@ -105,7 +125,9 @@ function toFloat32(arr: number[] | undefined): Float32Array | undefined {
 
 function toL2CSInput(l2cs: RecordedFrame['l2cs']): L2CSGazeInput | null {
   if (!l2cs || !l2cs.valid) return null;
-  return { yaw: l2cs.yaw, pitch: l2cs.pitch, valid: true };
+  // D3.3 — preserva `confidence` se a gravação for pós-D3.3; ausente em
+  // gravações antigas (o campo é opcional em RecordedL2CS por retrocompat).
+  return { yaw: l2cs.yaw, pitch: l2cs.pitch, valid: true, confidence: l2cs.confidence };
 }
 
 interface CalibrationSample {
@@ -268,7 +290,7 @@ interface Report {
   generatedAt: string;
   input: { path: string; startedAt: string; formatVersion: number };
   resolution: { w: number; h: number };
-  filter: { preset: FilterPreset; mincutoff: number; beta: number };
+  filter: { preset: AnyFilterPreset; mincutoff: number; beta: number; normalizedSpace: boolean };
   frames: {
     totalInJsonl: number;
     droppedInRecording: number;
@@ -364,15 +386,27 @@ async function runInner(args: CliArgs): Promise<number> {
     split.calibration.map((s) => `${s.targetXNorm.toFixed(4)},${s.targetYNorm.toFixed(4)}`),
   ).size;
 
-  const fc = FILTER_PRESETS[args.filter];
+  // D3.2 — resolve config v1 (pixel) ou v2 (normalized). No caminho v2, o
+  // filtro opera em [0, 1] antes de converter para pixel — exatamente o que
+  // o engine faz desde D1-1.
+  const filterName = args.filter as string;
+  const fc = isV2Preset(filterName)
+    ? FILTER_PRESETS_V2[filterName]
+    : FILTER_PRESETS[filterName as FilterPreset];
   const filter = new OneEuroFilter2D(60, fc.mincutoff, fc.beta);
+  const filterInNormalizedSpace = fc.filterInNormalizedSpace;
 
   const errors: FrameError[] = [];
   for (const s of split.accuracy) {
     const raw = regr.predictPx(s.featuresLeft, s.featuresRight, vw, vh);
     // Timestamp em segundos (OneEuro usa segundos). captureTs vem de
     // performance.now() em ms — divide por 1000.
-    const smooth = filter.filter(raw.x, raw.y, s.captureTs / 1000);
+    const smooth = filterInNormalizedSpace
+      ? (() => {
+          const sm = filter.filter(raw.x / vw, raw.y / vh, s.captureTs / 1000);
+          return { x: sm.x * vw, y: sm.y * vh };
+        })()
+      : filter.filter(raw.x, raw.y, s.captureTs / 1000);
     const dx = smooth.x - s.target.xPx;
     const dy = smooth.y - s.target.yPx;
     const errPx = Math.hypot(dx, dy);
@@ -439,7 +473,7 @@ async function runInner(args: CliArgs): Promise<number> {
       formatVersion: rec.header.formatVersion,
     },
     resolution: { w: vw, h: vh },
-    filter: { preset: args.filter, mincutoff: fc.mincutoff, beta: fc.beta },
+    filter: { preset: args.filter, mincutoff: fc.mincutoff, beta: fc.beta, normalizedSpace: filterInNormalizedSpace },
     frames: {
       totalInJsonl: rec.frames.length,
       droppedInRecording: rec.droppedFrames,

@@ -5,11 +5,19 @@
 //   pitch > 0  →  olhar para CIMA (provisional, ver l2cs.meta.json)
 // `valid` cai para false se o último resultado for mais velho que STALE_MS,
 // para que o consumidor faça degradação graciosa em vez de travar.
+//
+// D3.3 (ROADMAP §5) — `confidence` = min(conf_yaw, conf_pitch), onde cada
+// componente é `1 - H/H_max` da distribuição softmax daquele eixo. 0 =
+// distribuição uniforme (incerteza total), 1 = massa toda num único bin.
+// Escolhido o min (o eixo pior é o gargalo) e não a média para não mascarar
+// incerteza direcional. Opcional para compat com consumidores anteriores a
+// D3.3; ainda NÃO é usado para rejeitar ou ponderar nada (regra 4 do projeto).
 export interface L2CSGaze {
   yaw: number;
   pitch: number;
   timestamp: number;
   valid: boolean;
+  confidence?: number;
 }
 
 // Metadados do modelo (frontend/public/models/l2cs/l2cs.meta.json).
@@ -33,5 +41,5 @@ export type L2CSWorkerRequest =
 export type L2CSWorkerResponse =
   | { type: 'ready'; meta: L2CSModelMeta }
   | { type: 'init_error'; error: string }
-  | { type: 'result'; id: number; yaw: number; pitch: number; inferenceMs: number }
+  | { type: 'result'; id: number; yaw: number; pitch: number; confidence: number; inferenceMs: number }
   | { type: 'infer_error'; id: number; error: string };

@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from 'react';
+import React, { useMemo, useState, useEffect, useRef } from 'react';
 import { Delete, Play, RotateCcw } from 'lucide-react';
 import { useSettings } from '../context/SettingsContext';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
@@ -118,9 +118,24 @@ export const KeyboardScreen: React.FC = () => {
     return LAYOUTS[settings.keyboardLayout as keyof typeof LAYOUTS];
   }, [settings.keyboardLayout]);
 
+  const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (feedbackTimeoutRef.current) {
+        clearTimeout(feedbackTimeoutRef.current);
+      }
+    };
+  }, []);
+
   const triggerFeedback = (key: string) => {
     setLastPressed(key);
-    setTimeout(() => setLastPressed(null), 200);
+    if (feedbackTimeoutRef.current) {
+      clearTimeout(feedbackTimeoutRef.current);
+    }
+    feedbackTimeoutRef.current = setTimeout(() => {
+      setLastPressed(null);
+    }, 200);
   };
 
   const append = (char: string) => {

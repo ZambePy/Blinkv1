@@ -55,6 +55,10 @@ interface GazeContextValue {
   recording: RecordingApi;
   setFilterPreset: (preset: FilterPreset | FilterPresetV2) => void;
   getDiagnostics: () => EngineDiagnostics | null;
+  // D2 — tempo em ms desde o start bem-sucedido do engine. 0 antes do start.
+  // Consumido pelo AUTO_TEST_META do fluxo pós-calibração para preencher
+  // `RunMeta.minutosDeSessao` em vez de hardcode 0.
+  getSessionUptimeMs: () => number;
   isDwelling: boolean;
   isComposing: boolean;
   setIsComposing: (val: boolean) => void;
@@ -489,6 +493,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
       setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
       resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
+      getActiveOpticalCondition: () => engineRef.current?.calibration.getActiveOpticalCondition() ?? 'desconhecido',
     }),
     [],
   );
@@ -520,6 +525,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       recording,
       setFilterPreset: (preset: FilterPreset | FilterPresetV2) => engineRef.current?.setFilterPreset(preset),
       getDiagnostics: () => engineRef.current?.getDiagnostics() ?? null,
+      getSessionUptimeMs: () => engineRef.current?.getSessionUptimeMs() ?? 0,
       isDwelling,
       isComposing,
       setIsComposing,

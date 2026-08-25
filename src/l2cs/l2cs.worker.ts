@@ -19,7 +19,7 @@
 
 /// <reference lib="webworker" />
 
-import { decodeAngleDeg, degToRad } from './decode';
+import { decodeAngleWithConfidence, degToRad } from './decode';
 import type { L2CSModelMeta, L2CSWorkerRequest, L2CSWorkerResponse } from './types';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -92,14 +92,18 @@ async function infer(id: number, tensor: Float32Array): Promise<void> {
 
   const yawOut = out[meta.outputTensorNames.yaw];
   const pitchOut = out[meta.outputTensorNames.pitch];
-  const yawDeg = decodeAngleDeg(yawOut.data as Float32Array, meta.binWidth, meta.binOffset);
-  const pitchDeg = decodeAngleDeg(pitchOut.data as Float32Array, meta.binWidth, meta.binOffset);
+  const yawDecoded = decodeAngleWithConfidence(yawOut.data as Float32Array, meta.binWidth, meta.binOffset);
+  const pitchDecoded = decodeAngleWithConfidence(pitchOut.data as Float32Array, meta.binWidth, meta.binOffset);
+
+  // D3.3 — confiança agregada = min(yaw, pitch). Ver comentário em L2CSGaze.
+  const confidence = Math.min(yawDecoded.confidence, pitchDecoded.confidence);
 
   post({
     type: 'result',
     id,
-    yaw: degToRad(yawDeg),
-    pitch: degToRad(pitchDeg),
+    yaw: degToRad(yawDecoded.deg),
+    pitch: degToRad(pitchDecoded.deg),
+    confidence,
     inferenceMs: dt,
   });
 }

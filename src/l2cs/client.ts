@@ -29,6 +29,9 @@ export interface L2CSClient {
   isReady(): boolean;
   getMeta(): L2CSModelMeta | null;
   getAverageLatencyMs(): number;
+  // D3.3 — média rolling das confidences (entropia softmax) das últimas
+  // ~20 inferências. 0 = incerteza total ou nenhum resultado ainda.
+  getAverageConfidence(): number;
 }
 
 const DEFAULT_MODEL_URL = '/models/l2cs/l2cs_gaze360.onnx';
@@ -52,6 +55,10 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
   let pendingId = 0;
   let latest: L2CSGaze = { yaw: 0, pitch: 0, timestamp: 0, valid: false };
   let recentLatencies: number[] = [];
+  // D3.3 — confidences dos últimos N resultados válidos, para expor média
+  // no diagnóstico sem forçar o consumidor a acumular ele mesmo. Mesma
+  // janela de 20 amostras que já usamos para latência.
+  let recentConfidences: number[] = [];
 
   function post(msg: L2CSWorkerRequest, transfer?: Transferable[]): void {
     if (!worker) return;
@@ -79,9 +86,12 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
         pitch: msg.pitch,
         timestamp: performance.now(),
         valid: true,
+        confidence: msg.confidence,
       };
       recentLatencies.push(msg.inferenceMs);
       if (recentLatencies.length > 20) recentLatencies.shift();
+      recentConfidences.push(msg.confidence);
+      if (recentConfidences.length > 20) recentConfidences.shift();
     } else if (msg.type === 'infer_error') {
       // Não invalidamos o cache — mantemos o último valor enquanto ele ainda
       // for fresh; se ficar stale, valid cai para false naturalmente.
@@ -118,6 +128,7 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
       readyResolve = null;
       readyReject = null;
       latest = { yaw: 0, pitch: 0, timestamp: 0, valid: false };
+      recentConfidences = [];
     },
 
     canSubmit(nowMs?: number): boolean {
@@ -145,6 +156,9 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
       const now = nowMs ?? performance.now();
       if (!latest.valid) return latest;
       if (now - latest.timestamp > staleMs) {
+        // Stale — confiança não faz mais sentido (o valor de referência
+        // envelheceu), então retorna undefined explícito no lugar de
+        // propagar um número que o consumidor confundiria com "medido agora".
         return { yaw: 0, pitch: 0, timestamp: latest.timestamp, valid: false };
       }
       return latest;
@@ -162,6 +176,15 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
       let sum = 0;
       for (const t of recentLatencies) sum += t;
       return sum / recentLatencies.length;
-    }
+    },
+    // D3.3 — média das últimas 20 confidences válidas. 0 se ainda não houver
+    // nenhum resultado (mesmo padrão de getAverageLatencyMs). Consumido pelo
+    // EngineDiagnostics para expor no HUD; NÃO alimenta lógica de decisão.
+    getAverageConfidence(): number {
+      if (recentConfidences.length === 0) return 0;
+      let sum = 0;
+      for (const c of recentConfidences) sum += c;
+      return sum / recentConfidences.length;
+    },
   };
 }

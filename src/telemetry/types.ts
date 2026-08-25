@@ -44,9 +44,11 @@ export interface RecordedL2CS {
   yaw: number;    // rad, sinal Gaze360 (yaw+ = direita)
   pitch: number;  // rad, sinal Gaze360 (pitch+ = cima, provisional)
   valid: boolean;
-  // TODO Fase 3.2 — expor entropia do softmax como sinal de confiança do
-  // modelo. Exige carregar o vetor de probabilidades pela mensagem do
-  // worker; hoje só o valor esperado é transmitido.
+  // D3.3 (ROADMAP §5) — confiança agregada da softmax do L2CS, min(yaw, pitch)
+  // de `1 - H/H_max`. Opcional para compat com gravações anteriores a D3.3
+  // (formato v2 sem esse campo); replay/consumidor deve tratar undefined
+  // como "sem sinal de confiança nesta gravação", não como 0.
+  confidence?: number;
 }
 
 export interface RecordedQuality {

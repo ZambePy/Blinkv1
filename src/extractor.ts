@@ -471,10 +471,16 @@ export function extractEyeFeatures(
 // dependência do módulo l2cs — o extractor permanece agnóstico. Quem passar
 // o objeto (engine.ts) sabe quando o gaze é válido e quando não é (cache
 // stale, worker não pronto, etc).
+//
+// D3.3 — `confidence` (opcional, 0..1) é a entropia normalizada da softmax
+// agregada por min(yaw, pitch). O extractor **não** consome — passa adiante
+// para o gravador de telemetria e o `EngineDiagnostics` só. Deixá-la aqui
+// evita um segundo canal paralelo entre engine e extractor.
 export interface L2CSGazeInput {
   yaw: number;    // rad
   pitch: number;  // rad
   valid: boolean; // false → bloco de 7 zeros
+  confidence?: number;
 }
 
 export function extractCompactFeatures(

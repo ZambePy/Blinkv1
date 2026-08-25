@@ -1,0 +1,329 @@
+# Roadmap de Precisão do Pipeline de Rastreamento Ocular — IrisFlow
+
+> **Janela de execução: 1 semana corrida (D2–D8), não 1 semana por sprint.** Cada sprint abaixo cabe em ~1 dia de trabalho focado. O escopo de cada tarefa foi deliberadamente cortado para caber nesse orçamento — onde a resposta certa exigiria mais tempo (ex.: retreinar o L2CS-Net, reconstrução 3D completa da cabeça), a tarefa desta semana é **medir e decidir**, não **construir a solução definitiva**. O que fica de fora está listado explicitamente na §8, não escondido.
+
+> **Herda as 4 regras do projeto** (`PLANO-FRENTES-A-B.md`): (1) falhar alto, nunca em silêncio; (2) a comunicação/emergência nunca é bloqueada; (3) o que a UI afirma tem que ser verdade; (4) nenhuma mudança de sintonia entra ligada por padrão sem medição prévia. Toda tarefa abaixo que envolve uma flag nova respeita a regra 4 — off por padrão, ligada só com número que justifique.
+
+---
+
+## 1. Contexto: de onde este roadmap parte
+
+O repositório (`main`, commit `5503091`, 22/08/2026) já passou por dois ciclos de trabalho documentados:
+
+1. **`PLANO-FRENTES-A-B.md` — Sprints 0 a 8 (concluídos).** Resolveu o "bug dos óculos" (causa raiz: refração de lente introduz viés sistemático de ~400px, não features congeladas como a hipótese original supunha — ver `docs/BUG-OCULOS-EVIDENCIA.md`), implementou o design system de interação ocular (B1–B2), predição de palavras (B3-1), teclado por varredura, modo descanso, lembretes, histórico clínico, e a rede de segurança de emergência/PIN/onboarding (B4). Baseline registrado: **57 px / 0,9°** sem óculos e, após as correções, **57 px / 0,98°** com óculos também (`docs/BUG-OCULOS-EVIDENCIA.md`, adendo).
+2. **Série `D1` (commits `c08995b`…`5503091`, 22/08/2026), recuperada cirurgicamente de um commit revertido (`f78b6bd`, revert em `429ee49`).** Já entregou: filtro temporal em espaço normalizado como padrão (`balanceado-v2`), fusão binocular ponderada por EAR por olho, correção de viés de sessão via EMA sobre dwell clicks (recalibração implícita, 2 graus de liberdade, sempre ativa), taxa de piscadas por minuto com edge-detection (sinal de fadiga, hoje só exposto para UI de conforto visual, não realimenta o pipeline), e modo escuro + filtro âmbar (conforto visual/luz azul).
+
+**Estado atual verificado nesta análise:** `npm test` → 21 arquivos / 160 testes verdes na raiz; `npm --prefix frontend test` → 12 arquivos / 39 testes verdes. `npm run build` e `npm run electron:compile` não foram re-executados nesta rodada mas nada no histórico indica quebra. Duas tags existem: `v0-melhor-erro` (`f9d9252`, 111px/1,0°) e `v0-menor-erro-oculos`.
+
+**O que este roadmap NÃO repete:** nada do que já está `✅ FEITO` nos dois ciclos acima. O foco é o que os próprios documentos do projeto apontam como próximo passo e que nunca foi executado — citando o adendo de `BUG-OCULOS-EVIDENCIA.md`: *"o foco das investigações e melhorias de precisão passa a ser os efeitos comportamentais e clínicos ao longo do tempo: (1) deriva do olhar ao longo do uso na sessão, (2) modificação da posição da cabeça, (3) fadiga ocular"* — exatamente o escopo pedido nesta tarefa.
+
+**Achado relevante do histórico de commits:** uma tentativa de "calibração em ordem raster + gate de deriva de olhar por ponto" (`f78b6bd`) foi implementada e revertida (`429ee49`) na mesma sessão em que a série D1 nasceu. O commit de revert não documenta o motivo. Partes dessa tentativa foram recuperadas seletivamente como D1-2/D1-3/D1-4; a ordenação raster dos pontos e o gate de deriva *entre* pontos (distinto do gate de deriva de pose *dentro* de um ponto, que já existe e está ativo) não foram recuperados. **Recomendação: não reintroduzir esses dois itens sem antes investigar por que foram revertidos** — isso está fora do escopo desta semana; ver §8.
+
+---
+
+## 2. Avaliação crítica do L2CS-Net na arquitetura atual
+
+**O que o L2CS-Net é, segundo a literatura:** uma CNN que regride yaw e pitch do olhar separadamente por classificação em bins + regressão fina, treinada para "unconstrained environments" (Gaze360) e MPIIGaze. O paper original reporta **erro angular médio de 3,92° no MPIIGaze e 10,41° no Gaze360** ([Abdelrahman et al. 2022, arXiv:2203.03339](https://arxiv.org/abs/2203.03339); [código oficial](https://github.com/Ahmednull/L2CS-Net)). Os próprios autores reconhecem que "estimar o olhar em ambiente não controlado ainda é um problema desafiador devido à unicidade da aparência do olho, condições de iluminação e diversidade de pose de cabeça e direção do olhar."
+
+**Implicação direta para o IrisFlow:** 10,41° de erro médio (Gaze360, o benchmark mais próximo de "unconstrained") equivaleria, a 60cm de distância de tela, a **centenas de pixels de erro** — muito acima do que uma interface de dwell click tolera. Usar o L2CS-Net como preditor único seria inadequado para este produto. **O design atual não faz isso** — o L2CS entra como um bloco de 7 dimensões (`tan(yaw)`, `tan(pitch)`, termos cruzados com uma proxy de distância, termos quadráticos) concatenado ao vetor de features geométricas do MediaPipe, e o mapeamento final para pixel é aprendido pelo Ridge individual do usuário. Essa é uma escolha de arquitetura correta e consistente com a literatura: o L2CS contribui um sinal de direção de olhar **independente de calibração geométrica de íris** (útil quando a geometria de íris está ambígua — pose extrema, oclusão parcial), mas a calibração pessoal via Ridge é quem carrega a responsabilidade de precisão final.
+
+**Limitações concretas encontradas no código, priorizadas por risco silencioso:**
+
+| Achado | Local | Risco | Já mitigado? |
+|---|---|---|---|
+| `EXPAND_FACTOR = 1.4` (fator de expansão do crop antes do resize 448²) nunca foi varrido empiricamente | `src/l2cs/crop.ts:7-13` | Comentário do próprio código chama isso de "o parâmetro de maior risco silencioso do pipeline" — um crop errado degrada precisão sem sintoma visível | Não |
+| Convenção de espelhamento (`IS_VIDEO_MIRRORED=false`) confirmada com **1 único** ponto de evidência (`look_right` → yaw positivo) | `src/tracker/engine.ts:203-226`, `frontend/scripts/l2cs_axis_validation.mjs` | Um sinal invertido corromperia toda predição sem erro visível — mesma classe de bug que o "bug dos óculos" | Parcialmente (script existe, matriz de validação é mínima) |
+| Nenhum sinal de confiança do L2CS chega ao pipeline — só o ângulo esperado (soft-argmax), nunca a entropia da distribuição softmax que já é calculada internamente | `src/telemetry/types.ts` (`// TODO Fase 3.2`), `src/l2cs/decode.ts` | Um frame com distribuição bimodal/incerta (pose no limite do dataset de treino) é tratado com a mesma confiança que um frame nítido | Não |
+| Cadência de 10Hz (`l2csCadenceMs=100`) + tolerância de staleness de 500ms — durante movimento rápido de cabeça, até 5 ciclos de cadência podem ficar "válidos" com um ângulo defasado | `src/config/experiment.ts`, `src/l2cs/client.ts` | Coerente com o achado da literatura de que rotação de cabeça degrada precisão de rastreamento webcam de ~50mm para ~80mm RMSE ([Frontiers in Robotics and AI, 2024](https://www.frontiersin.org/journals/robotics-and-ai/articles/10.3389/frobt.2024.1369566/full)) — mas nunca medido neste projeto especificamente | Não |
+| Zero-padding em frame inválido (`valid=false` → `[0,0,0,0,0,0,0]`) torna "sem sinal" indistinguível de "L2CS mediu exatamente zero" para o Ridge | `src/l2cs/block.ts` | Aceito como compromisso de design consistente (o Ridge aprendeu essa convenção durante a própria calibração); não é urgente corrigir | Sim (por design) |
+
+**Comparação com alternativas leves (WebGazer.js):** o WebGazer também usa Ridge Regression sobre features de olho, mas se autocalibra **implicitamente** a partir de cliques do mouse, sem pontos explícitos ([webgazer.cs.brown.edu](https://webgazer.cs.brown.edu/)) — o IrisFlow já faz o equivalente por dwell click (`feedOnlineSample`, D1-3), mas mantém também uma calibração explícita completa como base, o que é mais robusto para o público-alvo (ALS) do que depender só de cliques incidentais. **Não há razão, com a evidência disponível, para abandonar o L2CS em favor de um pipeline mais simples tipo WebGazer** — o L2CS contribui precisão adicional em pose extrema que features de olho puro não capturam; o problema é que seu uso nunca foi *validado* dentro deste projeto especificamente.
+
+**Decisão desta semana:** não retreinar nem substituir o L2CS-Net (fora do orçamento de 1 semana). Em vez disso, D3 abaixo **mede** os três primeiros riscos da tabela com os scripts que já existem no repo (`frontend/scripts/l2cs_axis_validation.mjs`, `l2cs_smoke.mjs`) e decide com números.
+
+---
+
+## 3. Avaliação crítica da arquitetura de calibração Ridge
+
+| Dimensão pedida | Estado atual | Avaliação |
+|---|---|---|
+| **Nº e distribuição de pontos** | 9 pontos, grade 3×3 em 10/50/90%, ordem embaralhada a cada sessão (`CalibrationCheck.tsx`), tempo por ponto escalado pela distância ao centro (cantos recebem mais tempo de coleta) | Um estudo recente de rastreamento por webcam obteve 3,2–3,3° de erro com apenas **4 pontos** de canto + correção de movimento (Structure-from-Motion) ([Frontiers in Robotics and AI, 2024](https://www.frontiersin.org/journals/robotics-and-ai/articles/10.3389/frobt.2024.1369566/full)); já uma ferramenta comercial (GazeRecorder) usa **~30 pontos** para mais precisão, ao custo de tempo de coleta. O próprio código do IrisFlow documenta explicitamente (`calibration.ts:123-125`) que o orçamento de coleta é limitado a ~40s **por causa da fadiga do usuário-alvo com ELA** — um orçamento de tempo, não de "quanto mais melhor". **Recomendação com base nessa evidência: manter 9 pontos.** É um meio-termo já calibrado contra a fadiga real do público, e a literatura mostra que o ganho de ir além de ~9-13 pontos é marginal frente ao ganho de qualidade por ponto. O investimento desta semana vai para *extrair melhor sinal de cada ponto* (D4), não para adicionar pontos. |
+| **Seleção de features** | ~44 dims/olho: geometria de íris/pálpebra + pose (yaw/pitch/roll) linear **e** termos quadráticos de interação pose×offset (`extractor.ts:538-561`, comentário "Sprint 3") + bloco L2CS de 7 dims | Com ~9 pontos × ~50-65 amostras/ponto ≈ 450-580 amostras de treino para ~44 parâmetros por eixo por olho, a razão amostra:dimensão é apertada (~10:1) e várias features compartilham a mesma origem (pose de cabeça), criando colinearidade que o Ridge regulariza mas não elimina. **Nunca foi medido se os termos quadráticos de pose realmente reduzem erro na grade de validação independente que já existe** (`accuracy.ts`, grade 25/50/75%, disjunta da grade de calibração). Essa é uma pergunta respondível em horas com a infraestrutura que já existe — não uma pesquisa nova. Ver D4/D5. |
+| **Nº e distribuição de pontos de validação** | Grade 25/50/75%, disjunta da grade de calibração (10/50/90%), com uma única exceção de sobreposição no centro — desenho correto, evita vazamento treino/teste | Ponto forte já existente. Gap: o fluxo automático pós-calibração usa `AUTO_TEST_META` **hardcoded** (`iluminacao:'boa', oculos:false, movimentoCabeca:'parada', minutosDeSessao:0`, `CalibrationCheck.tsx:68-77`) — ou seja, todo relatório de acurácia automático mente sobre as condições reais em que foi medido. Isso precisa ser corrigido **antes** de qualquer outra medição desta semana ter valor (D2). |
+| **Detecção de outliers** | Só existe dentro de um ponto (variância intra-ponto, warn-only; deriva de pose por frame, rejeita frame individual). **Não existe nenhuma verificação entre pontos** — um ponto inteiro mal coletado (usuário olhou para o lado durante a coleta) entra no treino sem sinalização | O projeto já calcula, para seleção de λ por CV, o erro leave-one-ponto-out (`ridge.ts`, `selectLambdaCV`, agrupamento por `(screenX,screenY)`) — a mesma infraestrutura, reaproveitada, dá um detector de outlier por ponto quase de graça (ver D4). A técnica geral (deixar um ponto de fora, medir residual, comparar contra um limiar robusto) é da mesma família do RANSAC para regressão robusta ([scikit-learn RANSAC](https://scikit-learn.org/stable/auto_examples/linear_model/plot_ransac.html)), adaptada para N pequeno via MAD (median absolute deviation) em vez de amostragem aleatória — RANSAC clássico precisa de muito mais pontos que 9 para ser estatisticamente estável. |
+| **Recalibração explícita** | Só existe o fluxo completo de 9 pontos. Não há opção de recalibração rápida parcial | A evidência dos 4 pontos (Frontiers 2024, acima) sugere que uma recalibração rápida de poucos pontos é uma opção viável para correção pontual, sem repetir a fadiga de uma calibração completa. Ver D6. |
+| **Recalibração implícita** | Dois mecanismos: (1) EMA de viés de sessão (2 graus de liberdade, sempre ativo, D1-3) — seguro, nunca mexe nos coeficientes do modelo; (2) RLS completo (`RecursiveRidgeRegressor`, atualiza os β do Ridge) — atrás de flag `USE_ONLINE_CALIBRATION`, **desligada por padrão**. Ambos disparados por `feedOnlineSample` a cada dwell click confirmado, com rejeição de outlier fixa em 15% da tela contra a predição do modelo *base* (offline) | Design coerente com a filosofia do WebGazer (calibração implícita via interação do usuário), mas mais seguro (a base do IrisFlow nunca é substituída sem calibração explícita completa). Gap real: o viés de sessão acumulado nunca é **sinalizado** ao cuidador — se `|bias|` cresce, o sistema silenciosamente absorve, sem sugerir recalibração. Ver D6. |
+
+---
+
+## 4. Head Pose Estimation — o que já existe e o que falta
+
+**Correção importante antes de propor qualquer coisa:** a pose de cabeça **já é** uma feature do modelo, e já atua como filtro de qualidade — este roadmap não está "adicionando" head pose do zero, está validando e estendendo o que existe:
+
+- Pose (yaw/pitch/roll), extraída preferencialmente da matriz de transformação facial do MediaPipe (`extractor.ts:357-371`, com guarda explícita contra `NaN` de `asin` fora de `[-1,1]`), entra **diretamente** no vetor de features de cada olho.
+- Entra **também** via termos de interação polinomial com o offset de íris (`offsetX·yaw`, `offsetX·yaw²`, `offsetX·yaw·scale`, etc. — `extractor.ts:538-561`) — uma tentativa de deixar o Ridge aprender uma correção de pose linear e quadrática simultaneamente.
+- Atua como **gate de aceitação de amostra durante a calibração**: se a pose se afastar mais de ~5° do baseline do ponto, o frame é rejeitado (`calibration.ts:697-724`, `POSE_DRIFT_*_MAX = 0.087 rad`).
+- Uma proxy de distância câmera-rosto (`cameraDistanceEstimate = 1/interEyeDist`) já é calculada (`extractor.ts`) mas **só é consumida pelo bloco L2CS** — não corrige nada na conversão offset-de-íris→ângulo do caminho principal.
+
+**Por que isso importa, com evidência:** o mesmo estudo de webcam citado acima mostra que, sem compensação, a precisão de rastreamento cai de ~50-53mm RMSE (cabeça parada) para **~80mm RMSE sob rotação de cabeça** (±30° yaw / ±25° pitch) e **~60mm RMSE sob deslocamento lateral** (±100mm) — e que corrigir o deslocamento lateral exigiu reconstrução de movimento (Structure-from-Motion), não apenas incluir pose como feature de regressão ([Frontiers in Robotics and AI, 2024](https://www.frontiersin.org/journals/robotics-and-ai/articles/10.3389/frobt.2024.1369566/full)). Isso confirma que a intuição do projeto (usar pose como feature) é uma direção correta, mas também mostra o limite: **feature de pose numa regressão linear/quadrática compensa mudanças pequenas de pose vistas durante a calibração; não compensa deslocamento de posição/distância não visto no treino** — para isso, tipicamente é necessária uma correção geométrica explícita, não só mais parâmetros de regressão.
+
+**O que a análise da MediaPipe Iris (usada para a geometria de base) diz sobre robustez:** o próprio MediaPipe Iris reporta erro relativo de profundidade de **4,3% (± 2,4%) sem óculos e 4,8% (± 3,1%) com óculos** ([Google Research, 2020](https://research.google/blog/mediapipe-iris-real-time-iris-tracking-depth-estimation/)) — uma degradação modesta. Isso **corrobora** a conclusão do próprio `BUG-OCULOS-EVIDENCIA.md`: o salto de 8× no erro com óculos (57px→440px, antes da correção) não pode ser explicado por perda de qualidade de landmark (que degrada só ~0,5 pontos percentuais); a causa dominante é mesmo o viés óptico de refração da lente, como o projeto já concluiu — e não algo que "mais head pose" resolveria.
+
+**Decisão desta semana:** nenhuma reconstrução 3D nova. Duas tarefas testáveis em 1 dia: (1) medir, por ablação, se os termos de pose (lineares e quadráticos) realmente reduzem erro na grade de validação independente; (2) testar, atrás de flag e de forma reversível, se usar `cameraDistanceEstimate` para corrigir a conversão offset→ângulo ajuda no cenário específico de afastamento/aproximação da câmera após calibrar. Ver D5.
+
+---
+
+## 5. Sprints (D2–D8) — 1 dia cada, 1 semana no total
+
+### D2 — Fechar o loop de medição (pré-requisito de tudo) ✅ FEITO (2026-08-23)
+
+> **Executado em 2026-08-23** sobre o commit `e958392`. Testes: 55/55 frontend + 160/160 raiz verdes. Nenhuma regressão. **Uma pendência humana explícita:** a gravação `.jsonl` física em `fixtures/replay/` (item 4 abaixo) depende de sessão com webcam e ficou marcada como próximo passo do operador — toda a infra para produzi-la e consumi-la já está pronta.
+>
+> **O que foi feito, por tarefa técnica:**
+>
+> 1. **`docs/PONTO-DE-REFERENCIA.md` sem nenhum `[PREENCHER]`.** Consolidado com dados reais da Rodada A de `docs/BUG-OCULOS-EVIDENCIA.md` — 57 px / 0,9° (supera o baseline anterior `v0-melhor-erro` = 111 px / 1,0°, commit `f9d9252`), medido no commit `5503091` (22/08/2026). Todos os 10 campos de "Condições de captura" preenchidos com valor observável (resolução da tela 1920×1080, vídeo 1280×720 @ 30 fps do constraint em `GazeContext.tsx:400`, distância ~60 cm digitada — não medida —, cabeça livre, óculos não). Passos de reprodução (npm run dev → 9 pontos → accuracy test automático → ler `[accuracy]` no console) documentados. Adendo mantido para a rodada `v0-menor-erro-oculos` (57 px / 0,98°, com óculos).
+>
+> 2. **`AUTO_TEST_META` deixou de ser hardcode.** O hardcode em `CalibrationCheck.tsx:68-77` (`minutosDeSessao: 0`, `oculos: false` sempre) foi substituído por chamada a `buildAutoTestMeta({ sessionUptimeMs, opticalCondition, ... })` — nova utilidade pura em `frontend/src/utils/autoTestMeta.ts`. Wiring novo: adicionei `getSessionUptimeMs()` ao `GazeEngine` (marca `performance.now()` no `start()` bem-sucedido) e `getActiveOpticalCondition()` à `CalibrationApi` (proxy do `getActiveProfileMeta()?.opticalCondition ?? 'desconhecido'`). O contexto React (`GazeContext.tsx`) expõe as duas. O CalibrationCheck agora chama `buildAutoTestMeta` na hora do accuracy test (não no mount), então o `minutosDeSessao` reporta o tempo real de sessão. `oculos` deriva do perfil ativo — enquanto D6 não expuser a seleção óptica na UI o valor observado seguirá sendo `false` (via `desconhecido` → `false`), mas o wiring já está pronto para não precisar mais de mudança em `AUTO_TEST_META` quando D6 vier. `iluminacao` e geometria (`distanciaCm=60`, `telaPolegadas=15.6`) seguem como default — pendência declarada de D7 (iluminação) e D5 (geometria).
+>
+> 3. **`frontend/scripts/measure_baseline.mjs` existe e roda.** Wrapper que reaproveita `scripts/replay.mjs` para rodar a mesma gravação sob 4 variantes de configuração de uma vez (`baseline`, `+recompute-features`, `estavel`, `responsivo`) e imprime uma tabela comparativa (mean/p50/p90 px, mean °, contagem de frames). Aceita `--out` para salvar o agregado JSON, `--variants` para lista custom, `--verbose`. Smoke-testado: `--help` exibe uso; `--jsonl arquivo-inexistente` sai com código 1 e mensagem clara apontando para o botão de gravação em `SettingsScreen`. **Limitação conhecida e documentada no arquivo:** presets v2 do OneEuroFilter (`balanceado-v2` etc., default do engine desde D1-1) não são aceitos pelo `_replay_impl.ts` ainda — trocar isso é escopo do D3 (que já é o consumidor natural do sweep). Enquanto isso o script usa v1, cujos números **não são comparáveis 1:1 com o accuracy test ao vivo**, mas são comparáveis **entre si** entre as variantes desta tabela — que é o que D3–D5 precisam para decidir "melhorou ou piorou".
+>
+> 4. **`fixtures/replay/` com `README.md` de instruções — gravação `.jsonl` é passo humano pendente.** Adicionei `fixtures/replay/README.md` (versionado; `.gitignore` cobre `*.jsonl` mas deixa README passar) com roteiro passo-a-passo para produzir a fixture usando o botão **Gravador de sessão** que já existe em `SettingsScreen` (`recording.start/stop/exportAsJSONL`, wiring de A0 pré-existente), convenção de nome (`YYYY-MM-DD_<condicao>_<comprimento>.jsonl`), e comandos de consumo (`scripts/replay.mjs` e `measure_baseline.mjs`). **A gravação em si não pôde ser feita por este agente** (sem acesso à câmera) — é a única tarefa manual do D2 e precisa acontecer antes de D3 começar.
+>
+> **Testes novos:** `frontend/src/utils/autoTestMeta.test.ts` — 12 casos garantindo que `minutosDeSessao` vem do uptime (nunca 0 fixo), arredondamento correto, negativo → 0, `oculos` mapeado por condição óptica (`sem_oculos`/`lentes_contato`/`desconhecido` → false; `oculos_simples`/`oculos_progressivo` → true, com nota explícita no teste sobre por que lentes de contato NÃO contam), geometria preservada, `dateISO` injetável para determinismo.
+>
+> **Métrica cumprida:** infraestrutura de medição repetível — não há métrica de precisão nova nesta sprint (é sprint de infra, como o roadmap previu). Rodando `measure_baseline.mjs` duas vezes sobre a mesma gravação (quando existir) produzirá números idênticos: o replay é 100 % determinístico sobre input, e as variantes rodam em subprocessos isolados sem estado compartilhado.
+>
+> **Ordem de execução:** D2.1 → D2.2 → D2.3 → D2.4 (infra) → verificação de testes → esta atualização de status. Nada foi feito fora do escopo declarado no plano.
+
+**Objetivo:** ter um processo repetível e determinístico de medir "melhorou ou piorou" antes de qualquer outra sprint depender disso.
+
+**Problema resolvido:** hoje não existe uma forma confiável de avaliar mudanças. `AUTO_TEST_META` em `CalibrationCheck.tsx` é hardcoded (sempre `iluminacao:'boa', oculos:false, movimentoCabeca:'parada', minutosDeSessao:0`) independente da realidade; `docs/PONTO-DE-REFERENCIA.md` tem 7 de 10 campos vazios (`[PREENCHER]`); testar uma mudança de flag exige recalibração manual completa a cada tentativa, o que é caro (tempo + fadiga real) e não determinístico (a webcam/luz variam entre execuções).
+
+**Tarefas técnicas:**
+1. Preencher `docs/PONTO-DE-REFERENCIA.md` com os dados reais já existentes em `docs/BUG-OCULOS-EVIDENCIA.md` (condição da Rodada A) — é consolidação, não medição nova.
+2. Substituir os campos hardcoded de `AUTO_TEST_META` (`CalibrationCheck.tsx:68-77`) por captura real onde já há dado disponível sem UI nova: `minutosDeSessao` a partir de um timestamp de início de sessão (já computável via `performance.now()` no engine); `oculos` a partir da condição óptica selecionada (mesmo que continue `'desconhecido'` até D6 wiring a UI).
+3. Criar `frontend/scripts/measure_baseline.mjs`, reaproveitando `scripts/replay.mjs` (já existente, já suporta `--recompute-features` desde `[PREP-5]`) e `src/telemetry/recorder.ts` — roda o pipeline de extração de features + predição sobre uma gravação já feita, sob diferentes flags de `EXPERIMENT`, e reporta erro comparável sem exigir recalibração humana a cada execução.
+4. Gravar pelo menos 1 sessão fixture própria (calibração + alguns minutos de uso) em `fixtures/replay/` (diretório existe, hoje só com `.gitignore`) para servir de dado determinístico às sprints seguintes.
+
+**Arquivos/componentes potencialmente afetados:** `docs/PONTO-DE-REFERENCIA.md`, `frontend/src/pages/onboarding/CalibrationCheck.tsx` (`AUTO_TEST_META`), `src/accuracy.ts` (consumo de `RunMeta`), `scripts/replay.mjs`, novo `frontend/scripts/measure_baseline.mjs`, `fixtures/replay/*` (nova gravação).
+
+**Critérios de aceite:** `PONTO-DE-REFERENCIA.md` sem nenhum `[PREENCHER]`; `node scripts/replay.mjs <gravação> --recompute-features` roda e produz um relatório de erro numérico; `AUTO_TEST_META.minutosDeSessao` reflete tempo real de sessão, não `0` fixo; existe ao menos 1 gravação fixture utilizável pelas sprints D3–D7.
+
+**Métricas:** nenhuma métrica de precisão nova ainda — a métrica desta sprint é "existe processo repetível" (mesma gravação, reprocessada duas vezes, produz erro dentro de uma tolerância de variância documentada, ex.: ±2%, já que o replay é determinístico sobre dados já gravados).
+
+**Testes:** teste unitário garantindo que `RunMeta` não usa mais valores hardcoded para `minutosDeSessao`; smoke test do script de replay contra a fixture nova.
+
+**Riscos:** se a fixture gravada nesta sprint tiver condições atípicas (1 sessão só), decisões das sprints seguintes ficam limitadas a essa amostra — documentar isso como limitação conhecida, não escondida (ver riscos gerais, §7).
+
+---
+
+### D3 — Endurecer o uso do L2CS-Net ✅ FEITO (2026-08-24)
+
+> **Executado em 2026-08-24** sobre o commit `e958392` (mesmo baseline do D2). Testes: 55/55 frontend + 169/169 raiz verdes (+9 testes novos entre `decode.test.ts` e `client.test.ts`). Nenhuma regressão. **Duas pendências humanas explícitas** (mesma família da pendência do D2.4 — dependem de webcam/foto que o agente não pode capturar): (a) captura das 5 fotos da matriz expandida em pelo menos 2 distâncias para D3.1; (b) sweep ao vivo de `expandFactor` para D3.2, roteirizado em `frontend/scripts/sweep_expand_factor.md`. Toda a infraestrutura de análise e a decisão sobre cadência/staleness estão fechadas.
+>
+> **O que foi feito, por tarefa técnica:**
+>
+> 1. **D3.1 — Matriz de validação de eixo expandida.** `frontend/scripts/l2cs_axis_validation.mjs` reescrito. Antes: 3 fotos fixas (`look_center`, `look_up`, `look_right`), veredicto por foto isolada. Agora: 5 fotos suportadas (adicionadas `look_down` e `look_left`), veredicto por PAR (`pitch_symmetry` = up vs down; `yaw_symmetry` = right vs left), com checagem de (i) sinais opostos, (ii) magnitudes ambas significativas, (iii) eixo dominante correto. Fotos ausentes são puladas com WARN — nenhum crash quando o operador só tem o conjunto legado. Aceita `--dir <path>` e `--dirs <p1>,<p2>` para rodar múltiplas distâncias e verificar consistência de sinal (`sign_consistency_look_*`) entre elas. Dependências ONNX/`sharp` agora carregam via `import()` dinâmico em `main()` — `--help` funciona sem `npm install`. `frontend/public/l2cs_capture.html` atualizado com as 5 poses e nota sobre gravar em 2 distâncias. **Pendência humana:** capturar as 5 fotos (idealmente ×2 distâncias) e rodar `node frontend/scripts/l2cs_axis_validation.mjs --dirs <dir60cm>,<dir40cm>` — ≥6 poses cobertas, veredictos de simetria emitidos automaticamente.
+>
+> 2. **D3.2 — Sweep de `expandFactor` + presets v2 no replay.** Achado importante ao investigar: **o sweep de `expandFactor` não é automatizável via replay** — o gravador NÃO persiste pixels do vídeo (privacidade + tamanho, ver `src/telemetry/types.ts:7-9`), então o JSONL só carrega o *resultado* do L2CS calculado ao vivo com o `expandFactor` daquela sessão. Trocar `expandFactor` no replay não muda nada. Documentado como decisão + roteiro humano em `frontend/scripts/sweep_expand_factor.md` (uma sessão por valor, ~2-3 min cada, mesma iluminação/postura). O que foi *possível* automatizar: adicionei suporte a presets v2 do OneEuroFilter (`estavel-v2`/`balanceado-v2`/`responsivo-v2`) em `scripts/_replay_impl.ts` — v1 filtrava só em pixel space, v2 filtra em espaço normalizado e é o default do engine desde D1-1. Isso resolve a limitação declarada no comentário do próprio `measure_baseline.mjs` ("escopo do D3"). Consequência prática: o baseline default de `measure_baseline.mjs` foi promovido de `balanceado` → `balanceado-v2`, então os números agora batem 1:1 com o accuracy test ao vivo, não só entre si. Adicionei também uma variante v1 preservada na tabela default para permitir a comparação v1 vs v2 sobre a mesma gravação. **Pendência humana:** rodar o sweep ao vivo seguindo o roteiro (6 sessões) e consolidar os `meanErrorPx`/`meanErrorDeg` numa decisão sobre o valor definitivo de `EXPAND_FACTOR`.
+>
+> 3. **D3.3 — `confidence` da softmax exposta como diagnóstico.** Nova função pura `decodeAngleWithConfidence` em `src/l2cs/decode.ts` que devolve `{ deg, confidence }` — `confidence = 1 - H/H_max` onde `H = -Σ p·log(p)` da softmax do eixo. Convenção: 0 = distribuição uniforme (incerteza total, sinal inútil), 1 = massa toda num único bin (certeza total). Agregação por eixo (yaw+pitch): `min(conf_yaw, conf_pitch)` — o eixo pior é o gargalo; usar média mascararia incerteza direcional. Plumbing: worker (`l2cs.worker.ts`) → `L2CSWorkerResponse.result` → `L2CSClient.getLatestGaze()` → `L2CSGaze.confidence` (opcional para compat) → `L2CSGazeInput.confidence` (no extractor, sem consumo, só passa adiante) → `RecordedL2CS.confidence` (resolve o `TODO Fase 3.2` que estava em `telemetry/types.ts`) → `EngineDiagnostics.l2cs.confidence` (média rolling das últimas 20 inferências via novo `L2CSClient.getAverageConfidence()`) → `DebugHUD` (mostra `conf 0.XX`). **Ainda NÃO consome downstream** (respeitando a regra 4: nunca ligar peso/gate sem antes ver quanto a métrica varia em uso real) — o campo existe só para observabilidade nesta sprint.
+>
+> 4. **D3.4 — Cadência de 100 ms + staleness de 500 ms: decisão preliminar "manter como está".** `stalePct` (100 - hz_L2CS_efetivo / cadência) já era exposto em `EngineDiagnostics.l2cs.stalePct` (aparece no HUD `?debug=1`, mesma frequência do resto). O que se pode dizer sem gravação com movimento de cabeça (pendência da fixture do D2): (a) a cadência 100 ms está bem justificada pela literatura — o gaze angular muda devagar em condições normais, e o comentário em `src/l2cs/client.ts:2` cita explicitamente 10 Hz como escolha deliberada; (b) o staleness 500 ms tolera 5 ciclos de cadência antes de invalidar, o que é conservador — o achado da tabela da §2 do ROADMAP diz que rotação rápida de cabeça pode degradar a precisão para ~80 mm RMSE, e isso é medido em cenário sem nossa cadência, então cortar para 200 ms poderia amplificar o buraco de sinal em vez de reduzi-lo; (c) o público-alvo ELA (memory `project_target_users_als.md`) não faz movimentos rápidos de cabeça por definição — a premissa "head-still" torna a cadência atual seguramente adequada. **Decisão registrada: manter `l2csCadenceMs=100` e `DEFAULT_STALE_MS=500`.** Revisão futura: rodar `measure_baseline.mjs` sobre uma gravação de sessão longa com movimento controlado (escopo do D5/D7); só mudar se `stalePct > 15%` sustentado *E* houver ganho de erro comprovado.
+>
+> **Testes novos (9):** `src/l2cs/decode.test.ts` ganhou 7 casos para `decodeAngleWithConfidence` — mesmo ângulo que a função legada; uniforme → 0; delta → ~1; ∈ [0,1] para logits patológicos; bimodal → intermediário (1 - log(2)/log(N)); k-modal fecha a fórmula 1 - log(k)/log(N); N=1 → 1 por convenção. `src/l2cs/client.test.ts` ganhou 2 casos — `getAverageConfidence() = 0` antes de qualquer resultado; L2CSGaze default inválido NÃO carrega `confidence` (o consumidor distingue "sem sinal" de "conf=0" pela ausência do campo).
+>
+> **Métricas coletadas nesta sprint:** nenhuma sobre precisão do modelo em px/° (as três medições — sweep de `expandFactor`, matriz de eixo em ≥2 distâncias, distribuição real de `confidence` — dependem de sessão física). O que temos: `confidence` já está sendo observada em uso normal via HUD, começando desta sprint; qualquer sessão daqui em diante já contribui dado para a decisão futura de "usar como peso/gate".
+>
+> **Compatibilidade:** `RecordedL2CS.confidence` é opcional — gravações v2 pré-D3.3 continuam funcionando no replay (o campo fica undefined; consumidor deve tratar como "sem sinal", não como 0). Nenhuma bump de `RECORDING_FORMAT_VERSION` foi feito: v2 continua v2, só que agora com um campo opcional a mais.
+>
+> **Ordem de execução:** D3.3 (código) → testes → D3.1 (script + capture.html) → D3.2 (replay v2 + measure_baseline + roteiro) → D3.4 (decisão documentada) → verificação de testes → esta atualização.
+
+### D3 — Endurecer o uso do L2CS-Net
+
+**Objetivo:** decidir com números, não com suposição, os três parâmetros do L2CS marcados como risco silencioso no próprio código.
+
+**Problema resolvido:** `EXPAND_FACTOR=1.4` nunca foi varrido; a convenção de espelhamento tem uma única evidência confirmatória; nenhum sinal de confiança do L2CS chega ao restante do pipeline apesar de já ser calculado internamente (softmax).
+
+**Tarefas técnicas:**
+1. Rodar `frontend/scripts/l2cs_axis_validation.mjs` com uma matriz maior de poses de referência (centro, olhando para cima/baixo/esquerda/direita, em pelo menos 2 distâncias) em vez do único caso `look_right` já documentado — confirmar (ou corrigir) `IS_VIDEO_MIRRORED` e a convenção de sinal com mais de 1 ponto de dado.
+2. Usar `measure_baseline.mjs` (D2) para rodar a mesma gravação com `expandFactor ∈ {1.0, 1.2, 1.4, 1.6, 1.8, 2.0}` e comparar erro final — decisão do valor definitivo baseada no sweep, documentada em `docs/` (não precisa recalibrar fisicamente a cada valor: o replay reprocessa a mesma gravação).
+3. Expor a entropia da distribuição softmax já calculada em `src/l2cs/decode.ts` como um campo opcional `confidence` em `L2CSGaze` (`src/l2cs/types.ts`) — propagar até `EngineDiagnostics` para ficar visível, **sem** ainda usá-la para rejeitar ou ponderar nada (isso é trabalho de uma sprint futura, uma vez que haja dado de quanto essa confiança varia em uso real).
+4. Usando a gravação de D2 (idealmente incluindo algum movimento de cabeça), medir `l2cs.stalePct` (já exposto em `EngineDiagnostics`) e decidir se a cadência de 100ms/staleness de 500ms precisam mudar — documentar a decisão mesmo que seja "manter como está".
+
+**Arquivos/componentes potencialmente afetados:** `frontend/scripts/l2cs_axis_validation.mjs`, `frontend/scripts/l2cs_smoke.mjs`, `src/l2cs/crop.ts` (`EXPAND_FACTOR`, só muda se o sweep justificar), `src/l2cs/decode.ts`, `src/l2cs/types.ts` (`L2CSGaze.confidence`), `src/l2cs/block.ts` (opcional, encaminhar adiante), `src/tracker/engine.ts` (`EngineDiagnostics`).
+
+**Critérios de aceite:** relatório de sweep de `expandFactor` com decisão justificada por número; matriz de validação de eixo com ≥6 poses documentada; `confidence` exposto em diagnósticos (mesmo sem consumo downstream ainda); decisão sobre cadência/staleness registrada.
+
+**Métricas:** erro médio (px/°) por valor de `expandFactor`; `stalePct` do L2CS na gravação com movimento de cabeça; distribuição de `confidence` observada.
+
+**Testes:** teste unitário de `decodeAngleDeg` + entropia com valores conhecidos; teste garantindo que `confidence` chega ao consumidor sem quebrar contratos existentes.
+
+**Riscos:** mudar `expandFactor` muda o vetor de features do bloco L2CS (invalida perfis salvos, como já documentado para `isotropicLandmarks`) — só aplicar em produção depois de decisão confirmada, e incrementar `RECORDING_FORMAT_VERSION` se o valor mudar.
+
+---
+
+### D4 — Robustez da calibração Ridge: outliers entre pontos + seleção de features
+
+**Objetivo:** dar à calibração de 9 pontos uma defesa que hoje não existe (outlier entre pontos) e responder, com dado, se o vetor de ~44 dims/olho está carregando features que não ajudam.
+
+**Problema resolvido:** não existe rejeição de outlier no nível de ponto (só dentro de um ponto); os termos polinomiais de pose×offset nunca foram validados contra a grade de validação independente que já existe.
+
+**Tarefas técnicas:**
+1. Implementar `detectOutlierPoints(profile): { outlierIndices, residuals, madThreshold }` em `src/calibration.ts`, reaproveitando o mesmo agrupamento por `(screenX,screenY)` já usado em `selectLambdaCV` (`ridge.ts`): treinar deixando um ponto de fora por vez, medir o erro nele, calcular MAD (median absolute deviation) dos 9 resíduos, marcar pontos com resíduo `> 3×MAD` como candidatos a outlier.
+2. Política: **apenas sinalizar** (regra 4) — expor no `__irisflowDebug` e no resumo de qualidade do perfil salvo (`StoredCalibrationProfile.quality`, `calibrationProfiles.ts`); não bloquear nem re-treinar automaticamente sem o ponto ainda.
+3. Rodar, com `measure_baseline.mjs` (D2), 4 variantes do vetor de features sobre a mesma gravação: (a) vetor completo atual; (b) sem os termos quadráticos pose×offset; (c) sem o bloco L2CS inteiro; (d) sem termos lineares de pose — comparar erro na grade de validação independente (25/50/75%) de `accuracy.ts` para cada variante.
+4. Documentar a contribuição real de cada grupo de features. Se alguma variante reduzida empatar ou vencer a completa nesta amostra, registrar como achado preliminar (N=1 sessão) para decisão futura — **não remover feature nenhuma ainda** com base em uma única gravação.
+
+**Arquivos/componentes potencialmente afetados:** `src/ridge.ts` (reaproveitar, não duplicar, a lógica de agrupamento LOO), `src/calibration.ts` (`detectOutlierPoints`, nova função pura e testável), `src/calibrationProfiles.ts` (campo de outlier no resumo de qualidade), `frontend/scripts/measure_baseline.mjs` (parametrizar variantes de feature).
+
+**Critérios de aceite:** `detectOutlierPoints` implementada, exportada e testada com casos sintéticos; relatório de ablação de features com números de pelo menos 1 gravação real; nenhuma mudança de comportamento no caminho feliz (100% diagnóstico nesta sprint).
+
+**Métricas:** erro leave-one-ponto-out por ponto (px); MAD; erro na grade 25/50/75% por variante de feature testada.
+
+**Testes:** testes unitários de `detectOutlierPoints` com (i) 1 ponto claramente ruim entre 9 bons, (ii) todos os pontos bons (nenhum outlier), (iii) poucos pontos (robustez do MAD com N pequeno).
+
+**Riscos:** MAD com N=9 é estatisticamente frágil — deixar isso explícito na documentação e no próprio log ("sinal indicativo, não conclusivo com tão poucos pontos"), para não criar falsa confiança num número pequeno de amostras.
+
+---
+
+### D5 — Head pose: validar a feature existente e testar uma extensão de correção
+
+**Objetivo:** responder, com dado, se a pose de cabeça como feature de regressão está ajudando, e testar — de forma reversível — uma correção adicional para deslocamento de distância/posição da câmera.
+
+**Problema resolvido:** pose já é feature (linear + quadrática) mas nunca foi validada isoladamente; `cameraDistanceEstimate` já é calculada mas só alimenta o bloco L2CS, sem corrigir nada no caminho principal, apesar de a literatura mostrar que deslocamento lateral/de distância é uma das maiores fontes de degradação de precisão em rastreamento por webcam.
+
+**Tarefas técnicas:**
+1. Isolar, dentro da ablação de D4, especificamente o resultado dos termos de pose: reportar separadamente a contribuição de yaw/pitch/roll lineares vs. os termos quadráticos vs. ausência total, em px/graus, na grade de validação.
+2. Implementar, atrás de uma flag nova (`EXPERIMENT.applyDistanceCorrection`, default `false`), uma função pura e testável que usa `cameraDistanceEstimate` para escalar a conversão offset-de-íris→ângulo antes da predição do Ridge (fora do próprio modelo — uma correção geométrica explícita, não mais um parâmetro de regressão).
+3. Gravar (se a fixture de D2 não cobrir isso) uma sessão curta com movimento controlado de aproximação/afastamento e leve deslocamento lateral, especificamente para testar esta correção.
+4. Medir erro com e sem a correção nessa gravação; registrar a decisão (manter desligada, ajustar constante, ou promover para próxima medição) — sem ligar por padrão nesta sprint.
+
+**Arquivos/componentes potencialmente afetados:** `src/extractor.ts` (`cameraDistanceEstimate` já existe, consumo novo em outro lugar), `src/calibration.ts` (novo passo opcional em `mapGaze`, atrás de flag), `src/config/experiment.ts` (`applyDistanceCorrection`), novos testes.
+
+**Critérios de aceite:** relatório de ablação de pose (herdado de D4) com números; função de correção por distância implementada e testada isoladamente; decisão registrada com base na gravação de movimento controlado, mesmo que a decisão seja "não ligar ainda, dado insuficiente".
+
+**Métricas:** erro (px/°) com e sem termos de pose; erro (px/°) com e sem correção de distância no cenário de movimento controlado.
+
+**Testes:** testes unitários da função de correção com casos sintéticos (distância maior que a de calibração → escala esperada em uma direção; distância igual → sem mudança).
+
+**Riscos:** 1 sessão gravada não é suficiente para uma decisão estatisticamente robusta — a decisão desta sprint é preliminar e direcional, e deve ser documentada como tal; não comunicar ao usuário final que "compensação de movimento de cabeça" está resolvida.
+
+---
+
+### D6 — Recalibração explícita rápida + sinalização de drift ao cuidador
+
+**Objetivo:** dar ao cuidador uma forma rápida de corrigir a calibração sem repetir os 9 pontos completos, e tornar visível quando o sistema já está compensando silenciosamente um desvio grande.
+
+**Problema resolvido:** só existe o fluxo completo de 9 pontos; o sistema de perfis por condição óptica (A1-6) já foi construído no backend mas nunca foi exposto na tela de calibração (`CalibrationCheck.tsx` sempre chama `startCalibrationMode()` sem opções, então todo perfil salvo fica com `opticalCondition: 'desconhecido'`); o viés de sessão (`getSessionBias()`, D1-3) é absorvido silenciosamente sem nunca sinalizar ao cuidador que uma recalibração ajudaria.
+
+**Tarefas técnicas:**
+1. Adicionar um modo rápido reaproveitando a infraestrutura existente (`startCollectingPoint`/`processStaticPoint` não mudam): `startCalibrationMode({ quick: true })` usando um subconjunto de 4 pontos (cantos) em vez de 9 — coerente com o achado de que 4 pontos produzem ~3,2-3,3° em outro sistema webcam (Frontiers 2024, citado em §3).
+2. Adicionar à tela de calibração (`CalibrationCheck.tsx`) uma seleção simples da condição óptica (`OpticalCondition`, tipo já existe em `calibrationProfiles.ts`) antes de iniciar, passando `opts.opticalCondition` para `startCalibrationMode` — hoje esse parâmetro existe na API mas nunca é usado pelo único ponto de entrada da UI.
+3. Expor `getSessionBias()` (já existe em `CalibrationApi`) como um indicador visível ao cuidador quando `|bias| > limiar` (ex.: 5–6% da tela) — reaproveitar o padrão visual/textual já usado no aviso de estado degradado (B4-2), sugerindo "recalibração rápida recomendada", **nunca bloqueando** nada (regra 2).
+
+**Arquivos/componentes potencialmente afetados:** `src/calibration.ts` (modo rápido + subconjunto de pontos), `frontend/src/pages/onboarding/CalibrationCheck.tsx` (seleção de condição óptica + entrada do modo rápido), `frontend/src/context/GazeContext.tsx` (consumo de `getSessionBias()` para o indicador), componente de aviso reaproveitado do padrão de B4-2.
+
+**Critérios de aceite:** fluxo de recalibração rápida (4 pontos) funcional, testado e medido (tempo de coleta e precisão resultante); condição óptica selecionada persiste em `StoredCalibrationProfile.meta.opticalCondition`; indicador de drift aparece só acima do limiar e nunca aparece nas rotas de emergência/calibração (mesmo padrão de teste já usado em `EmergencyContext.test.tsx`).
+
+**Métricas:** tempo de coleta do modo rápido (meta: <15s, contra ~19-29s do modo completo); erro pós-recalibração-rápida comparado ao pós-calibração-completa, na mesma gravação/sessão de teste.
+
+**Testes:** teste de `startCalibrationMode({ quick: true })` cobrindo contagem de pontos e orçamento de tempo; teste de que o indicador de drift respeita a regra de nunca aparecer sobre rotas de emergência.
+
+**Riscos:** 4 pontos podem não ser suficientes para estimar com confiança os termos quadráticos de pose (mais parâmetros do que uma calibração de 4 pontos consegue sustentar) — considerar usar um vetor de features mais simples (sem termos quadráticos) especificamente no modo rápido, e documentar essa decisão explicitamente em vez de aplicar o mesmo modelo completo a menos dados.
+
+---
+
+### D7 — Robustez em sessões longas: drift, fadiga, iluminação
+
+**Objetivo:** produzir a primeira medição real (mesmo que preliminar) de como a precisão se comporta ao longo de uma sessão longa, e decidir com dado se as flags de A2 relevantes (`isotropicLandmarks`, `lockCameraExposure`) devem ligar por padrão.
+
+**Problema resolvido:** as flags de A2 continuam desligadas sem terem sido medidas (regra 4 do projeto, respeitada até aqui, mas nunca resolvida); `RunMeta.minutosDeSessao` existe como campo mas não é automaticamente preenchido em uso real; a taxa de piscadas (fadiga, D1-4) já é medida mas não está conectada a nenhuma ação; a curva de deriva 0/20/40min prevista no plano original (`PLANO-FRENTES-A-B.md`, "Depois: a fase de medição") nunca foi executada.
+
+**Tarefas técnicas:**
+1. Com os resultados de D3 (L2CS) e D4/D5 (Ridge/pose) já em mãos, e usando `measure_baseline.mjs`, decidir com número se `isotropicLandmarks` e `lockCameraExposure` devem ligar por padrão — só ligar se a gravação mostrar melhora sem regressão no caminho feliz.
+2. Terminar de automatizar `minutosDeSessao` no `RunMeta` (base já lançada em D2) — conectar ao fluxo real de accuracy test, não só ao automático pós-calibração.
+3. Gravar (ou reaproveitar) uma sessão contínua de ~20-40min via `telemetry/recorder`; rodar o teste de precisão via replay em 3 pontos no tempo (0, ~20, ~40min); produzir a curva erro×tempo que o plano original previu mas nunca executou.
+4. Conectar a taxa de piscadas elevada (D1-4, hoje só exibida) a uma sugestão leve e não-bloqueante — reaproveitando o mesmo padrão visual de aviso de D6/B4-2 — de ativar o Modo Descanso (B3-3, já existe) quando a taxa sustentada ultrapassar o limiar clínico já documentado no código (>25/min).
+
+**Arquivos/componentes potencialmente afetados:** `src/config/experiment.ts` (decisão de defaults, se houver mudança), `src/accuracy.ts` (`RunMeta.minutosDeSessao` automático), `frontend/scripts/measure_baseline.mjs` (curva de drift), `frontend/src/context/GazeContext.tsx` ou `SettingsContext.tsx` (aviso de fadiga → Modo Descanso).
+
+**Critérios de aceite:** curva de erro×tempo documentada com pelo menos 1 sessão real; decisão registrada (com números) sobre `isotropicLandmarks`/`lockCameraExposure`; aviso de fadiga não-bloqueante implementado e testado.
+
+**Métricas:** erro em 0/20/40min (px/°); delta de erro com `isotropicLandmarks`/`lockCameraExposure` ligado vs. desligado; taxa de piscadas ao longo da sessão gravada.
+
+**Testes:** teste do gatilho de aviso de fadiga (limiar >25/min sustentado, usando `nowMs` injetável como já é padrão em `a2.filter-blink.test.ts`); smoke test do script de curva de drift contra a fixture.
+
+**Riscos:** uma única sessão de 20-40min é uma amostra estatística mínima — nomear explicitamente como "primeira medição, não conclusão" no relatório; qualquer flag ligada por decisão desta sprint precisa continuar revertível com um único commit, mantendo a disciplina de regra 4 do projeto.
+
+---
+
+### D8 — Consolidação
+
+**Objetivo:** proteger o que foi medido/decidido nesta semana contra regressão futura, e deixar registro claro para quem continuar o trabalho.
+
+**Problema resolvido:** sem consolidação, as decisões desta semana (o que foi ligado, o que ficou desligado e por quê, os números antes/depois) ficam espalhadas em logs de console e não sobrevivem à próxima sessão de trabalho — o mesmo problema que motivou a criação de `docs/PONTO-DE-REFERENCIA.md` no ciclo anterior.
+
+**Tarefas técnicas:**
+1. Adicionar ao CI existente (`frontend/.github/workflows/ci.yml`) um passo que roda `measure_baseline.mjs` contra a(s) fixture(s) gravada(s) em D2/D7 e falha se o erro exceder o baseline em mais de uma tolerância definida (ex.: ±15%, calibrada pela variância observada nas execuções desta semana, não um número arbitrário) — transforma a medição da semana num gate automático permanente, protegendo o baseline de 57px/0,9° de regressão silenciosa futura.
+2. Atualizar `README.md` e criar `docs/RESULTADOS-D2-D8.md` consolidando todas as decisões tomadas: o que foi ligado, o que ficou desligado e por quê, números antes/depois de cada sprint.
+3. Rodar `npm test && npm run build && npm run electron:compile` limpos; criar tag git marcando o estado final (ex.: `v-precisao-semana-1`).
+4. Registrar explicitamente o backlog do que fica para a próxima iteração (§8 abaixo).
+
+**Arquivos/componentes potencialmente afetados:** `frontend/.github/workflows/ci.yml`, `README.md`, novo `docs/RESULTADOS-D2-D8.md`, tag git.
+
+**Critérios de aceite:** CI com gate de regressão de precisão rodando; documentação atualizada refletindo o estado real do pipeline (sem reincidir em imprecisões já flagradas no projeto, como "13 pontos" ou "React 18" mencionados em `A3-2`); tag criada.
+
+**Métricas:** nenhuma nova — consolidação num único relatório dos números já produzidos em D2–D7.
+
+**Testes:** o próprio gate de CI é o teste desta sprint.
+
+**Riscos:** um gate de regressão calibrado com tolerância muito apertada gera falsos positivos por variância normal de webcam/iluminação entre execuções — calibrar a tolerância com a variância real observada nos replays desta semana (D2), não com um número arbitrário escolhido a priori.
+
+---
+
+## 6. Ordem de execução e priorização por impacto × esforço
+
+A ordem de execução (D2→D8) já reflete a priorização por impacto×esforço, com uma restrição de dependência: **D2 precisa vir primeiro independentemente do ranking**, porque toda sprint seguinte depende de conseguir medir "melhorou ou piorou".
+
+| Ordem | Sprint | Impacto | Esforço | Por quê nesta posição |
+|---|---|---|---|---|
+| 1 | D2 — Loop de medição | Altíssimo (bloqueia todas as outras) | Baixo (reaproveita `replay.mjs`, `recorder.ts` já existentes) | Pré-requisito técnico, não uma opção de priorização |
+| 2 | D3 — L2CS-Net | Alto (3 riscos silenciosos documentados pelo próprio código) | Baixo-médio (scripts já existem, só faltam rodar e decidir) | Maior risco/esforço já não é escrever código, é rodar o sweep |
+| 3 | D4 — Outliers + features Ridge | Alto (nenhuma defesa hoje contra ponto ruim; vetor nunca validado) | Médio (reaproveita infraestrutura de CV existente) | Depende de D2 para medir o efeito da ablação |
+| 4 | D5 — Head pose | Médio-alto (responde diretamente ao pedido do usuário; literatura mostra que é uma fonte real de erro) | Médio (nova função + gravação dedicada) | Depende parcialmente da ablação de D4 |
+| 5 | D6 — Recalibração + sinalização de drift | Médio (melhora usabilidade em sessão longa; wiring de algo já construído) | Baixo-médio (maior parte é UI, backend já existe) | Menos urgente que blindar o motor de precisão primeiro |
+| 6 | D7 — Sessões longas | Médio (primeira medição real de drift/fadiga; decide flags pendentes) | Médio (requer gravação de sessão longa) | Depende dos resultados de D3-D5 para decidir as flags |
+| 7 | D8 — Consolidação | Alto a longo prazo (protege tudo contra regressão) | Baixo | Só faz sentido depois que há algo a consolidar |
+
+---
+
+## 7. Riscos gerais e mitigação
+
+- **Preservar o baseline.** Todo commit desta semana deve poder ser comparado contra 57px/0,9° via `measure_baseline.mjs` (D2). Nenhuma mudança entra sem esse número documentado antes/depois.
+- **Orçamento de fadiga do usuário-alvo (ELA).** Nenhuma mudança pode aumentar o tempo de calibração acima do orçamento de ~40s já estabelecido (`calibration.ts:123-125`); o modo rápido de D6 existe para *reduzir* esse tempo, não para competir com ele.
+- **Regra 4 do projeto.** Nenhuma flag nova liga por padrão sem número que justifique — todas as flags propostas nesta semana (`applyDistanceCorrection` e qualquer decisão sobre `isotropicLandmarks`/`lockCameraExposure`) seguem essa disciplina.
+- **Amostra pequena.** A maior parte das decisões desta semana se apoia em 1-2 gravações próprias. Isso é aceitável para um ciclo de 1 semana, mas todo relatório produzido (D3, D4, D5, D7) deve dizer explicitamente "N=1 sessão, achado preliminar" onde for o caso, para não virar falsa certeza herdada por quem continuar o trabalho.
+
+---
+
+## 8. O que fica fora desta semana (backlog explícito, não escondido)
+
+- **Reconstrução 3D de cabeça / Structure-from-Motion** para compensar deslocamento lateral (a solução completa que a literatura usa para esse problema) — a correção de D5 é um passo pequeno e reversível na mesma direção, não a solução completa.
+- **Retreinar ou substituir o L2CS-Net** — fora de escopo de qualquer ciclo de 1 semana; D3 endurece o *uso* do modelo existente, não o modelo em si.
+- **Implementação completa de RANSAC** (com amostragem aleatória de subconjuntos) para detecção de outlier — com apenas 9 pontos de calibração, RANSAC clássico não é estatisticamente estável; D4 usa uma versão robusta baseada em MAD, adequada a N pequeno, mas mais simples que RANSAC completo.
+- **Investigação do motivo do revert de `f78b6bd`** ("calibração em ordem raster + gate de deriva de olhar por ponto") — antes de reintroduzir ordenação raster ou um gate de deriva *entre* pontos, alguém precisa entender por que a tentativa anterior foi revertida (o commit de revert não documenta o motivo).
+- **Automação completa da curva de deriva** (gravações múltiplas, múltiplos usuários, análise estatística) — D7 produz a primeira curva manual/preliminar, não um pipeline de medição contínua.
+- **Validação em outro hardware/webcam** — toda a evidência interna deste projeto (incluindo o próprio "bug dos óculos") vem de um único conjunto de hardware; isso é uma limitação conhecida herdada dos ciclos anteriores, não introduzida por este roadmap.
+
+---
+
+## Referências
+
+- Abdelrahman, A. A., Hempel, T., Khalifa, A., Al-Hamadi, A. — *L2CS-Net: Fine-Grained Gaze Estimation in Unconstrained Environments*, arXiv:2203.03339, 2022. [arxiv.org/abs/2203.03339](https://arxiv.org/abs/2203.03339) · [código oficial](https://github.com/Ahmednull/L2CS-Net)
+- *Webcam-based gaze estimation for computer screen interaction*, Frontiers in Robotics and AI, 2024. [frontiersin.org/.../frobt.2024.1369566](https://www.frontiersin.org/journals/robotics-and-ai/articles/10.3389/frobt.2024.1369566/full)
+- *MediaPipe Iris: Real-time Iris Tracking & Depth Estimation*, Google Research, 2020. [research.google/blog/mediapipe-iris-real-time-iris-tracking-depth-estimation](https://research.google/blog/mediapipe-iris-real-time-iris-tracking-depth-estimation/)
+- WebGazer.js — *Democratizing Webcam Eye Tracking on the Browser*. [webgazer.cs.brown.edu](https://webgazer.cs.brown.edu/)
+- *A Stochastic Nonlinear Dynamical System for Smoothing Noisy Eye Gaze Data* (comparação EKF vs. média móvel simples), arXiv:2504.13278, 2025. [arxiv.org/html/2504.13278](https://arxiv.org/html/2504.13278)
+- *Robust linear model estimation using RANSAC*, documentação scikit-learn (referência conceitual para detecção robusta de outlier em regressão). [scikit-learn.org/.../plot_ransac](https://scikit-learn.org/stable/auto_examples/linear_model/plot_ransac.html)
+- Documentação interna já citada e validada pelo próprio projeto: `PLANO-FRENTES-A-B.md`, `docs/BUG-OCULOS-EVIDENCIA.md`, `docs/AUDITORIA-SPRINT-0.md`, `docs/AUDITORIA-UX.md`, `docs/PONTO-DE-REFERENCIA.md`.

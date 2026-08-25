@@ -142,10 +142,26 @@
       <div class="shot" data-idx="2">
         <div class="thumb" id="thumb-2">3</div>
         <div class="info">
+          <div class="name">look_down.jpg</div>
+          <div class="desc">Olhos p/ a base do monitor</div>
+        </div>
+        <button class="retake" data-retake="2" style="display:none;">Refazer</button>
+      </div>
+      <div class="shot" data-idx="3">
+        <div class="thumb" id="thumb-3">4</div>
+        <div class="info">
           <div class="name">look_right.jpg</div>
           <div class="desc">Olhos p/ a borda direita</div>
         </div>
-        <button class="retake" data-retake="2" style="display:none;">Refazer</button>
+        <button class="retake" data-retake="3" style="display:none;">Refazer</button>
+      </div>
+      <div class="shot" data-idx="4">
+        <div class="thumb" id="thumb-4">5</div>
+        <div class="info">
+          <div class="name">look_left.jpg</div>
+          <div class="desc">Olhos p/ a borda esquerda</div>
+        </div>
+        <button class="retake" data-retake="4" style="display:none;">Refazer</button>
       </div>
 
       <div class="controls">
@@ -156,12 +172,18 @@
       <details>
         <summary>Onde salvar as fotos</summary>
         <p>
-          O navegador baixa em <code>Downloads</code>. Depois mova as 3 para:<br>
+          O navegador baixa em <code>Downloads</code>. Depois mova as 5 para:<br>
           <code>frontend/python_scripts/l2cs_validation/</code>
         </p>
         <p>
           Dicas: rosto centralizado no oval, ~50 cm de distância, boa iluminação frontal
           (evite janela atrás). Não vire a cabeça entre as fotos — só os olhos.
+        </p>
+        <p>
+          <b>Para a matriz completa do ROADMAP §5 (≥2 distâncias)</b>: repita
+          as 5 fotos a ~60 cm e ~40 cm, cada distância num subdiretório separado, e
+          depois rode <code>node frontend/scripts/l2cs_axis_validation.mjs --dirs
+          &lt;dir60cm&gt;,&lt;dir40cm&gt;</code>.
         </p>
       </details>
     </div>
@@ -177,12 +199,18 @@
   const startBtn = document.getElementById('startBtn');
   const captureBtn = document.getElementById('captureBtn');
 
+  // D3.1 (ROADMAP §5) — matriz expandida: centro + cima/baixo (par pitch) +
+  // direita/esquerda (par yaw). Simetria explícita permite validar sinal +
+  // eixo dominante com mais de 1 ponto de evidência (o script de validação
+  // reporta veredicto por PAR, não por foto isolada).
   const shots = [
     { name: 'look_center.jpg', hint: '① Olhe DIRETO para a lente' },
     { name: 'look_up.jpg',     hint: '② Cabeça reta — olhos PARA CIMA (topo do monitor)' },
-    { name: 'look_right.jpg',  hint: '③ Cabeça reta — olhos PARA A DIREITA (borda direita)' },
+    { name: 'look_down.jpg',   hint: '③ Cabeça reta — olhos PARA BAIXO (base do monitor)' },
+    { name: 'look_right.jpg',  hint: '④ Cabeça reta — olhos PARA A DIREITA (borda direita)' },
+    { name: 'look_left.jpg',   hint: '⑤ Cabeça reta — olhos PARA A ESQUERDA (borda esquerda)' },
   ];
-  const taken = [null, null, null];
+  const taken = [null, null, null, null, null];
   let currentIdx = 0;
   let stream = null;
 

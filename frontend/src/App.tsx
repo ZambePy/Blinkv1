@@ -52,6 +52,10 @@ const GalleryScreen = lazyNamed(
   () => import('./pages/entertainment/GalleryScreen'),
   'GalleryScreen'
 );
+const PhotoCaptureScreen = lazyNamed(
+  () => import('./pages/entertainment/PhotoCaptureScreen'),
+  'PhotoCaptureScreen'
+);
 const NewsScreen = lazyNamed(() => import('./pages/entertainment/NewsScreen'), 'NewsScreen');
 const CaregiverDashboard = lazyNamed(
   () => import('./pages/caregiver/CaregiverDashboard'),
@@ -278,6 +282,30 @@ function App() {
                     element={
                       <Protected>
                         <GalleryScreen />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="/photo"
+                    element={
+                      <Protected>
+                        <PhotoCaptureScreen />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="/camera"
+                    element={
+                      <Protected>
+                        <PhotoCaptureScreen />
+                      </Protected>
+                    }
+                  />
+                  <Route
+                    path="/games/photo"
+                    element={
+                      <Protected>
+                        <PhotoCaptureScreen />
                       </Protected>
                     }
                   />

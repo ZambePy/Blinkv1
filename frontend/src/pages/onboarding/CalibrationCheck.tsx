@@ -4,7 +4,7 @@ import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle } from 'luc
 import { useGaze } from '../../context/GazeContext';
 import { BackButton } from '../../components/ui/BackButton';
 import { startAccuracyTest } from '@tracker/accuracy';
-import type { RunMeta } from '@tracker/accuracy';
+import { buildAutoTestMeta } from '../../utils/autoTestMeta';
 
 // Grade 3×3 (10/50/90). Mantida local para evitar dependência de API ainda não exportada.
 const CALIBRATION_POINTS = [
@@ -39,7 +39,7 @@ const humanMessage: Record<string, string> = {
 
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
-  const { calibration, l2csStatus } = useGaze();
+  const { calibration, l2csStatus, getSessionUptimeMs } = useGaze();
 
   const l2csReady  = l2csStatus === 'ready';
   const l2csFailed = l2csStatus === 'error';
@@ -65,23 +65,25 @@ export const CalibrationCheck: React.FC = () => {
     return () => { isMounted.current = false; };
   }, []);
 
-  const AUTO_TEST_META: RunMeta = {
-    data: new Date().toISOString().slice(0, 10),
-    iluminacao: 'boa',
-    oculos: false,
-    movimentoCabeca: 'parada',
-    minutosDeSessao: 0,
-    observacoes: 'auto (imediatamente após calibração)',
-    distanciaCm: 60,
-    telaPolegadas: 15.6,
-  };
-
   const finishAndTransition = () => {
     setStage('transitioning');
     setTimeout(() => { navigate('/menu'); }, 800);
   };
 
   const runAccuracyTestThenExit = () => {
+    // D2 (ROADMAP.md) — meta capturada NA HORA do accuracy test, não no mount:
+    //   - `minutosDeSessao` reflete uptime real do engine (via engine.getSessionUptimeMs)
+    //   - `oculos` deriva do perfil ativo (`desconhecido` até D6 expor a UI)
+    // Antes: hardcode 0/false, todo relatório automático mentia.
+    const meta = buildAutoTestMeta({
+      sessionUptimeMs: getSessionUptimeMs(),
+      opticalCondition: calibration.getActiveOpticalCondition?.() ?? 'desconhecido',
+      // Geometria segue como default nesta sprint — D5 troca por distância
+      // medida via faceMatrix[14]. `telaPolegadas: 15.6` é o hardcode que
+      // o ROADMAP §5 registra explicitamente como pendência do D5/S1-1.
+      distanciaCm: 60,
+      telaPolegadas: 15.6,
+    });
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
       if (action === 'redo') {
@@ -91,7 +93,7 @@ export const CalibrationCheck: React.FC = () => {
         return;
       }
       finishAndTransition();
-    }, AUTO_TEST_META);
+    }, meta);
   };
 
   const startNextPoint = (step: number) => {
