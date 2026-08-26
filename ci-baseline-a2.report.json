@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-08-26T17:38:52.662Z",
+  "generatedAt": "2026-08-26T17:38:11.265Z",
   "fixture": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
   "variants": [
     {
@@ -19,7 +19,7 @@
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:38.971Z",
+        "generatedAt": "2026-08-26T17:38:01.237Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -159,7 +159,7 @@
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:40.632Z",
+        "generatedAt": "2026-08-26T17:38:02.980Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -299,7 +299,7 @@
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:42.127Z",
+        "generatedAt": "2026-08-26T17:38:04.606Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -439,7 +439,7 @@
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:43.694Z",
+        "generatedAt": "2026-08-26T17:38:06.257Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -579,7 +579,7 @@
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:45.166Z",
+        "generatedAt": "2026-08-26T17:38:07.845Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -703,24 +703,26 @@
       }
     },
     {
-      "name": "ablation: sem pose linear (yaw/pitch/roll isoladas)",
+      "name": "A2-5: isotropicLandmarks=OFF (baseline reforçado com recompute)",
       "variant": {
-        "name": "ablation: sem pose linear (yaw/pitch/roll isoladas)",
+        "name": "A2-5: isotropicLandmarks=OFF (baseline reforçado com recompute)",
         "filter": "balanceado-v2",
-        "recomputeFeatures": false,
-        "drop": "pose-linear"
+        "recomputeFeatures": true,
+        "env": {
+          "IRISFLOW_EXP_isotropicLandmarks": "false"
+        }
       },
       "error": null,
       "summary": {
         "frames": 455,
-        "meanErrorPx": 153.9943860104458,
-        "medianErrorPx": 85.59550548691064,
-        "p90ErrorPx": 474.92635636212896,
-        "meanErrorDeg": 3.8150561671168646
+        "meanErrorPx": 150.2596325118321,
+        "medianErrorPx": 76.38326945469686,
+        "p90ErrorPx": 470.94967875573195,
+        "meanErrorDeg": 3.7215860757681414
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:46.656Z",
+        "generatedAt": "2026-08-26T17:38:09.522Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -751,85 +753,85 @@
         },
         "accuracy": {
           "n": 455,
-          "meanErrorPx": 153.9943860104458,
-          "medianErrorPx": 85.59550548691064,
-          "p90ErrorPx": 474.92635636212896,
-          "maxErrorPx": 1026.3377406591844,
-          "meanErrorDeg": 3.8150561671168646,
-          "medianErrorDeg": 2.1613468875293145,
-          "p90ErrorDeg": 11.827022890118968,
+          "meanErrorPx": 150.2596325118321,
+          "medianErrorPx": 76.38326945469686,
+          "p90ErrorPx": 470.94967875573195,
+          "maxErrorPx": 1026.4815597503823,
+          "meanErrorDeg": 3.7215860757681414,
+          "medianErrorDeg": 1.928917736161942,
+          "p90ErrorDeg": 11.730747701087555,
           "perPoint": [
             {
               "targetXPx": 480,
               "targetYPx": 270,
               "count": 50,
-              "meanErrorPx": 106.92439083180844,
-              "medianErrorPx": 106.75738401626309,
-              "meanErrorDeg": 2.698911021803452
+              "meanErrorPx": 100.32970389592572,
+              "medianErrorPx": 101.63204236827042,
+              "meanErrorDeg": 2.5327078056085934
             },
             {
               "targetXPx": 960,
               "targetYPx": 270,
               "count": 51,
-              "meanErrorPx": 73.52771706228827,
-              "medianErrorPx": 40.957074586321504,
-              "meanErrorDeg": 1.8521867927737736
+              "meanErrorPx": 71.97220744541437,
+              "medianErrorPx": 41.33390113858389,
+              "meanErrorDeg": 1.8133248597112692
             },
             {
               "targetXPx": 1440,
               "targetYPx": 270,
               "count": 50,
-              "meanErrorPx": 139.77099318343818,
-              "medianErrorPx": 72.04682058454739,
-              "meanErrorDeg": 3.4993207114736498
+              "meanErrorPx": 142.72815015964972,
+              "medianErrorPx": 76.49747874984375,
+              "meanErrorDeg": 3.574583598240654
             },
             {
               "targetXPx": 480,
               "targetYPx": 540,
               "count": 51,
-              "meanErrorPx": 252.3513225071339,
-              "medianErrorPx": 98.4465347476411,
-              "meanErrorDeg": 6.117104640511794
+              "meanErrorPx": 248.57335606462317,
+              "medianErrorPx": 87.72321730490218,
+              "meanErrorDeg": 6.023360092225561
             },
             {
               "targetXPx": 960,
               "targetYPx": 540,
               "count": 50,
-              "meanErrorPx": 140.18988040224562,
-              "medianErrorPx": 56.6167933990547,
-              "meanErrorDeg": 3.511487505075722
+              "meanErrorPx": 137.6380301337271,
+              "medianErrorPx": 53.76280014465762,
+              "meanErrorDeg": 3.44773600538161
             },
             {
               "targetXPx": 1440,
               "targetYPx": 540,
               "count": 50,
-              "meanErrorPx": 130.6242978426781,
-              "medianErrorPx": 43.578967821660896,
-              "meanErrorDeg": 3.255241403824861
+              "meanErrorPx": 131.8850665716841,
+              "medianErrorPx": 48.13471764271148,
+              "meanErrorDeg": 3.288200024220667
             },
             {
               "targetXPx": 480,
               "targetYPx": 810,
               "count": 51,
-              "meanErrorPx": 211.09928763377346,
-              "medianErrorPx": 38.995634806031546,
-              "meanErrorDeg": 5.10271946939311
+              "meanErrorPx": 208.66435498760592,
+              "medianErrorPx": 34.71595983083912,
+              "meanErrorDeg": 5.039101712380535
             },
             {
               "targetXPx": 960,
               "targetYPx": 810,
               "count": 51,
-              "meanErrorPx": 145.2225682124625,
-              "medianErrorPx": 94.2309461643049,
-              "meanErrorDeg": 3.6474621591709244
+              "meanErrorPx": 135.95956089060587,
+              "medianErrorPx": 82.22746445805224,
+              "meanErrorDeg": 3.414926364468818
             },
             {
               "targetXPx": 1440,
               "targetYPx": 810,
               "count": 51,
-              "meanErrorPx": 184.30827167736763,
-              "medianErrorPx": 97.82585476723348,
-              "meanErrorDeg": 4.606066623038414
+              "meanErrorPx": 172.85180011830482,
+              "medianErrorPx": 86.0716151808698,
+              "meanErrorDeg": 4.3202731045849525
             }
           ]
         },
@@ -838,175 +840,32 @@
           "rbfApplied": false,
           "onlineRls": false,
           "source": "src/",
-          "featuresSource": "recorded",
-          "droppedFeatureGroups": [
-            "pose-linear"
-          ]
+          "featuresSource": "recomputed",
+          "droppedFeatureGroups": []
         }
       }
     },
     {
-      "name": "ablation: sem pose×offset 1ª ordem (pose-cross)",
+      "name": "A2-5: isotropicLandmarks=ON  (candidato a ligar por default)",
       "variant": {
-        "name": "ablation: sem pose×offset 1ª ordem (pose-cross)",
+        "name": "A2-5: isotropicLandmarks=ON  (candidato a ligar por default)",
         "filter": "balanceado-v2",
-        "recomputeFeatures": false,
-        "drop": "pose-cross"
-      },
-      "error": null,
-      "summary": {
-        "frames": 455,
-        "meanErrorPx": 161.64323496410864,
-        "medianErrorPx": 86.75872397181297,
-        "p90ErrorPx": 483.39412194008816,
-        "meanErrorDeg": 4.011473364308018
-      },
-      "report": {
-        "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:48.148Z",
-        "input": {
-          "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
-          "startedAt": "2026-08-26T01:17:30.209Z",
-          "formatVersion": 2
-        },
-        "resolution": {
-          "w": 1920,
-          "h": 1080
-        },
-        "filter": {
-          "preset": "balanceado-v2",
-          "mincutoff": 0.5,
-          "beta": 5,
-          "normalizedSpace": true
-        },
-        "frames": {
-          "totalInJsonl": 3147,
-          "droppedInRecording": 0,
-          "calibration": 514,
-          "accuracy": 455,
-          "live": 2070,
-          "discarded": 5,
-          "rejectedByDecision": 103,
-          "legacyNoDecision": 0
-        },
-        "calibration": {
-          "uniqueTargets": 9
-        },
-        "accuracy": {
-          "n": 455,
-          "meanErrorPx": 161.64323496410864,
-          "medianErrorPx": 86.75872397181297,
-          "p90ErrorPx": 483.39412194008816,
-          "maxErrorPx": 980.6327789469614,
-          "meanErrorDeg": 4.011473364308018,
-          "medianErrorDeg": 2.1906905486778614,
-          "p90ErrorDeg": 12.031800957370264,
-          "perPoint": [
-            {
-              "targetXPx": 480,
-              "targetYPx": 270,
-              "count": 50,
-              "meanErrorPx": 134.88460720203943,
-              "medianErrorPx": 134.7248444634261,
-              "meanErrorDeg": 3.403071379982836
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 270,
-              "count": 51,
-              "meanErrorPx": 105.23346326344887,
-              "medianErrorPx": 80.29818680937073,
-              "meanErrorDeg": 2.6519722190765416
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 270,
-              "count": 50,
-              "meanErrorPx": 145.6812211951471,
-              "medianErrorPx": 73.88224557027306,
-              "meanErrorDeg": 3.645552322424555
-            },
-            {
-              "targetXPx": 480,
-              "targetYPx": 540,
-              "count": 51,
-              "meanErrorPx": 250.98700648237102,
-              "medianErrorPx": 98.62301183033954,
-              "meanErrorDeg": 6.115127941601288
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 540,
-              "count": 50,
-              "meanErrorPx": 146.204917175312,
-              "medianErrorPx": 62.654905712637586,
-              "meanErrorDeg": 3.662117153425194
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 540,
-              "count": 50,
-              "meanErrorPx": 145.44090667732945,
-              "medianErrorPx": 47.517080192308356,
-              "meanErrorDeg": 3.625706960326299
-            },
-            {
-              "targetXPx": 480,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 207.16632007512413,
-              "medianErrorPx": 36.13994838883582,
-              "meanErrorDeg": 5.006633142810366
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 140.7188781980119,
-              "medianErrorPx": 90.0127091709214,
-              "meanErrorDeg": 3.533492507411679
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 177.01372994531965,
-              "medianErrorPx": 93.39985940445646,
-              "meanErrorDeg": 4.426068109731586
-            }
-          ]
-        },
-        "config": {
-          "assumedDistPx": 2268,
-          "rbfApplied": false,
-          "onlineRls": false,
-          "source": "src/",
-          "featuresSource": "recorded",
-          "droppedFeatureGroups": [
-            "pose-cross"
-          ]
+        "recomputeFeatures": true,
+        "env": {
+          "IRISFLOW_EXP_isotropicLandmarks": "true"
         }
-      }
-    },
-    {
-      "name": "ablation: sem pose quadrática (pose²/pose×scale)",
-      "variant": {
-        "name": "ablation: sem pose quadrática (pose²/pose×scale)",
-        "filter": "balanceado-v2",
-        "recomputeFeatures": false,
-        "drop": "pose-quadratic"
       },
       "error": null,
       "summary": {
         "frames": 455,
-        "meanErrorPx": 163.27651252420924,
-        "medianErrorPx": 87.99159778549331,
-        "p90ErrorPx": 478.0203833849791,
-        "meanErrorDeg": 4.055778894846627
+        "meanErrorPx": 159.74298447010426,
+        "medianErrorPx": 79.94998024108757,
+        "p90ErrorPx": 502.1365374890373,
+        "meanErrorDeg": 3.9587880686028774
       },
       "report": {
         "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:49.642Z",
+        "generatedAt": "2026-08-26T17:38:11.234Z",
         "input": {
           "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
           "startedAt": "2026-08-26T01:17:30.209Z",
@@ -1027,8 +886,8 @@
           "droppedInRecording": 0,
           "calibration": 514,
           "accuracy": 455,
-          "live": 2070,
-          "discarded": 5,
+          "live": 2060,
+          "discarded": 15,
           "rejectedByDecision": 103,
           "legacyNoDecision": 0
         },
@@ -1037,85 +896,85 @@
         },
         "accuracy": {
           "n": 455,
-          "meanErrorPx": 163.27651252420924,
-          "medianErrorPx": 87.99159778549331,
-          "p90ErrorPx": 478.0203833849791,
-          "maxErrorPx": 956.0038870044109,
-          "meanErrorDeg": 4.055778894846627,
-          "medianErrorDeg": 2.2217900984352825,
-          "p90ErrorDeg": 11.901882341090886,
+          "meanErrorPx": 159.74298447010426,
+          "medianErrorPx": 79.94998024108757,
+          "p90ErrorPx": 502.1365374890373,
+          "maxErrorPx": 1034.9837131860509,
+          "meanErrorDeg": 3.9587880686028774,
+          "medianErrorDeg": 2.0189155217623598,
+          "p90ErrorDeg": 12.483939181623908,
           "perPoint": [
             {
               "targetXPx": 480,
               "targetYPx": 270,
               "count": 50,
-              "meanErrorPx": 119.48918710317196,
-              "medianErrorPx": 119.41727439682526,
-              "meanErrorDeg": 3.0154178702919476
+              "meanErrorPx": 127.22089860874198,
+              "medianErrorPx": 128.55643104179208,
+              "meanErrorDeg": 3.2102778998869836
             },
             {
               "targetXPx": 960,
               "targetYPx": 270,
               "count": 51,
-              "meanErrorPx": 105.81327910676016,
-              "medianErrorPx": 81.14658517141953,
-              "meanErrorDeg": 2.6664304863483994
+              "meanErrorPx": 81.48246023524916,
+              "medianErrorPx": 51.946204684248755,
+              "meanErrorDeg": 2.052461897610808
             },
             {
               "targetXPx": 1440,
               "targetYPx": 270,
               "count": 50,
-              "meanErrorPx": 151.81882443456675,
-              "medianErrorPx": 74.18444266676534,
-              "meanErrorDeg": 3.7992292551838927
+              "meanErrorPx": 146.35183371582013,
+              "medianErrorPx": 72.22636575604977,
+              "meanErrorDeg": 3.6635618591796093
             },
             {
               "targetXPx": 480,
               "targetYPx": 540,
               "count": 51,
-              "meanErrorPx": 241.18302753006384,
-              "medianErrorPx": 91.39446881304369,
-              "meanErrorDeg": 5.885647503058418
+              "meanErrorPx": 265.99744178381656,
+              "medianErrorPx": 115.79621380016506,
+              "meanErrorDeg": 6.461010270919555
             },
             {
               "targetXPx": 960,
               "targetYPx": 540,
               "count": 50,
-              "meanErrorPx": 148.7752771390424,
-              "medianErrorPx": 66.25771869389665,
-              "meanErrorDeg": 3.7280129720804593
+              "meanErrorPx": 156.8988691193107,
+              "medianErrorPx": 69.35613624931719,
+              "meanErrorDeg": 3.9273453534044642
             },
             {
               "targetXPx": 1440,
               "targetYPx": 540,
               "count": 50,
-              "meanErrorPx": 163.1330574422774,
-              "medianErrorPx": 73.62007490845406,
-              "meanErrorDeg": 4.070852637307072
+              "meanErrorPx": 134.89468969481624,
+              "medianErrorPx": 45.27968441573892,
+              "meanErrorDeg": 3.359494219430017
             },
             {
               "targetXPx": 480,
               "targetYPx": 810,
               "count": 51,
-              "meanErrorPx": 207.72579424815686,
-              "medianErrorPx": 44.016244307517205,
-              "meanErrorDeg": 5.034260177047122
+              "meanErrorPx": 222.14829283028286,
+              "medianErrorPx": 57.07132535616063,
+              "meanErrorDeg": 5.379737285284272
             },
             {
               "targetXPx": 960,
               "targetYPx": 810,
               "count": 51,
-              "meanErrorPx": 143.48403286439245,
-              "medianErrorPx": 90.13138493767366,
-              "meanErrorDeg": 3.602180195586665
+              "meanErrorPx": 136.0491011893022,
+              "medianErrorPx": 85.51667658165584,
+              "meanErrorDeg": 3.4156187303373993
             },
             {
               "targetXPx": 1440,
               "targetYPx": 810,
               "count": 51,
-              "meanErrorPx": 186.69574649694547,
-              "medianErrorPx": 103.16952013731994,
-              "meanErrorDeg": 4.66841811662697
+              "meanErrorPx": 165.20002507827118,
+              "medianErrorPx": 81.21483774732023,
+              "meanErrorDeg": 4.126752298578449
             }
           ]
         },
@@ -1124,298 +983,8 @@
           "rbfApplied": false,
           "onlineRls": false,
           "source": "src/",
-          "featuresSource": "recorded",
-          "droppedFeatureGroups": [
-            "pose-quadratic"
-          ]
-        }
-      }
-    },
-    {
-      "name": "ablation: sem bloco L2CS inteiro",
-      "variant": {
-        "name": "ablation: sem bloco L2CS inteiro",
-        "filter": "balanceado-v2",
-        "recomputeFeatures": false,
-        "drop": "l2cs"
-      },
-      "error": null,
-      "summary": {
-        "frames": 455,
-        "meanErrorPx": 153.7438725421603,
-        "medianErrorPx": 80.7411032040448,
-        "p90ErrorPx": 476.2238279982133,
-        "meanErrorDeg": 3.810563053053193
-      },
-      "report": {
-        "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:51.137Z",
-        "input": {
-          "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
-          "startedAt": "2026-08-26T01:17:30.209Z",
-          "formatVersion": 2
-        },
-        "resolution": {
-          "w": 1920,
-          "h": 1080
-        },
-        "filter": {
-          "preset": "balanceado-v2",
-          "mincutoff": 0.5,
-          "beta": 5,
-          "normalizedSpace": true
-        },
-        "frames": {
-          "totalInJsonl": 3147,
-          "droppedInRecording": 0,
-          "calibration": 514,
-          "accuracy": 455,
-          "live": 2070,
-          "discarded": 5,
-          "rejectedByDecision": 103,
-          "legacyNoDecision": 0
-        },
-        "calibration": {
-          "uniqueTargets": 9
-        },
-        "accuracy": {
-          "n": 455,
-          "meanErrorPx": 153.7438725421603,
-          "medianErrorPx": 80.7411032040448,
-          "p90ErrorPx": 476.2238279982133,
-          "maxErrorPx": 1002.6823515764545,
-          "meanErrorDeg": 3.810563053053193,
-          "medianErrorDeg": 2.0388763647384205,
-          "p90ErrorDeg": 11.858419995479473,
-          "perPoint": [
-            {
-              "targetXPx": 480,
-              "targetYPx": 270,
-              "count": 50,
-              "meanErrorPx": 102.71935410036939,
-              "medianErrorPx": 105.35949454097067,
-              "meanErrorDeg": 2.592935026950587
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 270,
-              "count": 51,
-              "meanErrorPx": 79.50731344071662,
-              "medianErrorPx": 50.712035690533554,
-              "meanErrorDeg": 2.003308297763723
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 270,
-              "count": 50,
-              "meanErrorPx": 117.62952933949667,
-              "medianErrorPx": 41.00169344143853,
-              "meanErrorDeg": 2.9400715659966115
-            },
-            {
-              "targetXPx": 480,
-              "targetYPx": 540,
-              "count": 51,
-              "meanErrorPx": 242.3253569893786,
-              "medianErrorPx": 82.91882448982278,
-              "meanErrorDeg": 5.8819143139468295
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 540,
-              "count": 50,
-              "meanErrorPx": 147.52348001484515,
-              "medianErrorPx": 65.6360554988552,
-              "meanErrorDeg": 3.696425213975141
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 540,
-              "count": 50,
-              "meanErrorPx": 144.88870801676995,
-              "medianErrorPx": 48.561492166609405,
-              "meanErrorDeg": 3.6126977820773574
-            },
-            {
-              "targetXPx": 480,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 211.2149698618107,
-              "medianErrorPx": 40.26139437828889,
-              "meanErrorDeg": 5.1091436812131965
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 145.3341267135947,
-              "medianErrorPx": 87.02442086697104,
-              "meanErrorDeg": 3.6492843647255073
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 190.54781011428108,
-              "medianErrorPx": 106.58405202570403,
-              "meanErrorDeg": 4.762226002923647
-            }
-          ]
-        },
-        "config": {
-          "assumedDistPx": 2268,
-          "rbfApplied": false,
-          "onlineRls": false,
-          "source": "src/",
-          "featuresSource": "recorded",
-          "droppedFeatureGroups": [
-            "l2cs"
-          ]
-        }
-      }
-    },
-    {
-      "name": "ablation: sem pose alguma (linear + cross + quadratic)",
-      "variant": {
-        "name": "ablation: sem pose alguma (linear + cross + quadratic)",
-        "filter": "balanceado-v2",
-        "recomputeFeatures": false,
-        "drop": "pose-linear,pose-cross,pose-quadratic"
-      },
-      "error": null,
-      "summary": {
-        "frames": 455,
-        "meanErrorPx": 156.4483002222827,
-        "medianErrorPx": 90.05406928268154,
-        "p90ErrorPx": 475.40195317243,
-        "meanErrorDeg": 3.8839157500953023
-      },
-      "report": {
-        "replayVersion": 1,
-        "generatedAt": "2026-08-26T17:38:52.626Z",
-        "input": {
-          "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
-          "startedAt": "2026-08-26T01:17:30.209Z",
-          "formatVersion": 2
-        },
-        "resolution": {
-          "w": 1920,
-          "h": 1080
-        },
-        "filter": {
-          "preset": "balanceado-v2",
-          "mincutoff": 0.5,
-          "beta": 5,
-          "normalizedSpace": true
-        },
-        "frames": {
-          "totalInJsonl": 3147,
-          "droppedInRecording": 0,
-          "calibration": 514,
-          "accuracy": 455,
-          "live": 2070,
-          "discarded": 5,
-          "rejectedByDecision": 103,
-          "legacyNoDecision": 0
-        },
-        "calibration": {
-          "uniqueTargets": 9
-        },
-        "accuracy": {
-          "n": 455,
-          "meanErrorPx": 156.4483002222827,
-          "medianErrorPx": 90.05406928268154,
-          "p90ErrorPx": 475.40195317243,
-          "maxErrorPx": 960.5281595418479,
-          "meanErrorDeg": 3.8839157500953023,
-          "medianErrorDeg": 2.2738135194256315,
-          "p90ErrorDeg": 11.838532544366164,
-          "perPoint": [
-            {
-              "targetXPx": 480,
-              "targetYPx": 270,
-              "count": 50,
-              "meanErrorPx": 88.2957915146005,
-              "medianErrorPx": 91.85155793451139,
-              "meanErrorDeg": 2.2292849451196086
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 270,
-              "count": 51,
-              "meanErrorPx": 94.29641870060782,
-              "medianErrorPx": 75.38584260684509,
-              "meanErrorDeg": 2.3782125108696595
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 270,
-              "count": 50,
-              "meanErrorPx": 172.32876498349322,
-              "medianErrorPx": 102.35983813558977,
-              "meanErrorDeg": 4.319140876481438
-            },
-            {
-              "targetXPx": 480,
-              "targetYPx": 540,
-              "count": 51,
-              "meanErrorPx": 219.64823068021914,
-              "medianErrorPx": 66.63096756303733,
-              "meanErrorDeg": 5.33512574853251
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 540,
-              "count": 50,
-              "meanErrorPx": 114.6926110477434,
-              "medianErrorPx": 39.07961928237006,
-              "meanErrorDeg": 2.874582982751735
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 540,
-              "count": 50,
-              "meanErrorPx": 149.23057016785413,
-              "medianErrorPx": 66.18573882891634,
-              "meanErrorDeg": 3.728333892380296
-            },
-            {
-              "targetXPx": 480,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 207.19601129997326,
-              "medianErrorPx": 47.883292379820524,
-              "meanErrorDeg": 5.015890952555162
-            },
-            {
-              "targetXPx": 960,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 164.72814182406185,
-              "medianErrorPx": 117.64556082658564,
-              "meanErrorDeg": 4.137303889721002
-            },
-            {
-              "targetXPx": 1440,
-              "targetYPx": 810,
-              "count": 51,
-              "meanErrorPx": 195.63295662168906,
-              "medianErrorPx": 110.90362276307378,
-              "meanErrorDeg": 4.890614573943427
-            }
-          ]
-        },
-        "config": {
-          "assumedDistPx": 2268,
-          "rbfApplied": false,
-          "onlineRls": false,
-          "source": "src/",
-          "featuresSource": "recorded",
-          "droppedFeatureGroups": [
-            "pose-linear",
-            "pose-cross",
-            "pose-quadratic"
-          ]
+          "featuresSource": "recomputed",
+          "droppedFeatureGroups": []
         }
       }
     }

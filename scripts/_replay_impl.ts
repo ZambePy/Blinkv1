@@ -205,10 +205,20 @@ function toFloat32(arr: number[] | undefined): Float32Array | undefined {
 }
 
 function toL2CSInput(l2cs: RecordedFrame['l2cs']): L2CSGazeInput | null {
-  if (!l2cs || !l2cs.valid) return null;
+  if (!l2cs) return null;
+  // §8.1 fix (D7.1, 2026-08-26) — PRESERVA `valid=false` em vez de retornar
+  // null. Motivo: o vetor de features precisa ter shape ESTÁVEL entre frames
+  // pra alimentar StandardScaler + Ridge. No pipeline LIVE, `extractFeatures`
+  // recebe `l2csGaze` mesmo com valid=false, e `buildL2CSBlock` zera as 7
+  // dims — shape sempre 44. Filtrar aqui produzia 37 dims quando l2cs.valid
+  // era false e 44 quando true, gerando mismatch entre calibração e
+  // inferência dentro do mesmo replay (ci-baseline.jsonl tem ~50/50 de
+  // valid=true vs false, mistura garantida). Isso bloqueava D7.1 e qualquer
+  // outra variante `--recompute-features` em fixtures gravadas com L2CS
+  // ativo — que é a operação real do projeto.
   // D3.3 — preserva `confidence` se a gravação for pós-D3.3; ausente em
   // gravações antigas (o campo é opcional em RecordedL2CS por retrocompat).
-  return { yaw: l2cs.yaw, pitch: l2cs.pitch, valid: true, confidence: l2cs.confidence };
+  return { yaw: l2cs.yaw, pitch: l2cs.pitch, valid: l2cs.valid, confidence: l2cs.confidence };
 }
 
 interface CalibrationSample {
@@ -243,6 +253,8 @@ function getFeatures(
   f: RecordedFrame,
   recomputeFeatures: boolean,
   dropFeatures: readonly FeatureGroup[],
+  videoWidth?: number,
+  videoHeight?: number,
 ): { left: number[]; right: number[] } | null {
   let left: number[];
   let right: number[];
@@ -254,7 +266,18 @@ function getFeatures(
   } else {
     const lm = unflattenLandmarks(f.landmarks);
     if (!lm) return null;
-    const geo = extractFeatures(lm, toFloat32(f.faceMatrix), toL2CSInput(f.l2cs));
+    // §8.1 fix (D7.1, 2026-08-26) — propaga videoWidth/videoHeight pra que a
+    // flag EXPERIMENT.isotropicLandmarks tenha efeito no path recompute.
+    // Antes de hoje, o replay não passava dimensões de vídeo e o branch
+    // de `isotropicLandmarks` em featurePipeline.ts era no-op silencioso
+    // no replay — sweep A2-5 mostrava OFF=ON idênticos.
+    const geo = extractFeatures(
+      lm,
+      toFloat32(f.faceMatrix),
+      toL2CSInput(f.l2cs),
+      videoWidth,
+      videoHeight,
+    );
     if (geo.blinkDetected) return null;
     left = geo.featuresLeft;
     right = geo.featuresRight;
@@ -309,10 +332,18 @@ function splitFrames(
     }
   }
 
+  // §8.1 fix (D7.1, 2026-08-26) — dimensões do vídeo original vêm do header
+  // (`videoResolution`, gravado pelo recorder no start). Necessárias pra flag
+  // `isotropicLandmarks` funcionar no path recompute. Cai pra `resolution` se
+  // o header for antigo/sem `videoResolution`, aí a flag continua no-op nessa
+  // gravação — mas não quebra.
+  const videoW = rec.header.videoResolution?.w ?? vw;
+  const videoH = rec.header.videoResolution?.h ?? vh;
+
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
-    const feats = getFeatures(f, recomputeFeatures, dropFeatures);
+    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH);
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {
