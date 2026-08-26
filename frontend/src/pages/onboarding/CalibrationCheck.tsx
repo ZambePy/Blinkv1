@@ -6,7 +6,6 @@ import { useSettings } from '../../context/SettingsContext';
 import { BackButton } from '../../components/ui/BackButton';
 import { startAccuracyTest } from '@tracker/accuracy';
 import { buildAutoTestMeta } from '../../utils/autoTestMeta';
-import { buildAutoRecordingFilename, saveAutoRecording } from '../../utils/autoRecording';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 
 // D6.1 — a lista canônica de alvos passou a viver em `src/calibration.ts`
@@ -66,7 +65,7 @@ const humanMessage: Record<string, string> = {
 
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
-  const { calibration, l2csStatus, getSessionUptimeMs, recording } = useGaze();
+  const { calibration, l2csStatus, getSessionUptimeMs } = useGaze();
   // D9 — geometria física do posto de uso. Fonte ÚNICA para (a) o erro angular
   // do relatório e (b) o posicionamento dos alvos pelo orçamento de
   // excentricidade. Antes eram dois hardcodes de 15,6"/60 cm em arquivos
@@ -122,80 +121,14 @@ export const CalibrationCheck: React.FC = () => {
   const retryCountRef            = useRef(0);
   const MAX_RETRIES_PER_POINT    = 3;
 
-  // D2 (auto-gravação da sessão de calibração+precisão). true = nós
-  // iniciamos a gravação em handleStart e somos responsáveis por parar +
-  // salvar. false = havia gravação manual pré-existente (SettingsScreen)
-  // ou nunca iniciamos — não mexemos.
-  const autoRecordingOwnedRef    = useRef(false);
-  // Guarda o modo em curso pra o filename refletir quick vs full quando
-  // salvarmos no callback do accuracy test.
-  const activeQuickRef           = useRef(false);
-
   useEffect(() => {
     isMounted.current = true;
-    return () => {
-      isMounted.current = false;
-      // Se o usuário fechou a página no meio de uma auto-gravação (nossa),
-      // não deixamos frames acumulando no singleton. Não salva — a
-      // gravação parcial não representa nenhuma sessão útil pra baseline.
-      if (autoRecordingOwnedRef.current) {
-        autoRecordingOwnedRef.current = false;
-        try {
-          recording.stop();
-          recording.clear();
-        } catch {
-          // silencioso — cleanup best-effort
-        }
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    return () => { isMounted.current = false; };
   }, []);
 
   const finishAndTransition = () => {
     setStage('transitioning');
     setTimeout(() => { navigate('/menu'); }, 800);
-  };
-
-  // Fecha a auto-gravação (se nós somos os donos): para o recorder,
-  // exporta o JSONL e salva. Em Electron vai pra raiz do projeto; em
-  // browser dispara download. Silencia erros de save (não interrompem o
-  // fluxo do usuário — só logam) — regra 4: gravação é diagnóstico, não
-  // pode bloquear operação.
-  const finalizeAutoRecordingIfOwned = async (quick: boolean) => {
-    if (!autoRecordingOwnedRef.current) return;
-    autoRecordingOwnedRef.current = false;
-    try {
-      if (!recording.isActive()) return;
-      recording.stop();
-      const jsonl = recording.exportAsJSONL();
-      if (!jsonl) return;
-      const filename = buildAutoRecordingFilename({
-        opticalCondition: calibration.getActiveOpticalCondition?.() ?? opticalCondition,
-        quick,
-      });
-      const outcome = await saveAutoRecording(jsonl, filename);
-      if (outcome.kind === 'electron') {
-        console.log(`[auto-recording] salvo em ${outcome.absPath} (${outcome.bytes} bytes)`);
-      } else {
-        console.log(`[auto-recording] download disparado: ${outcome.filename} (${outcome.bytes} bytes)`);
-      }
-      recording.clear();
-    } catch (err) {
-      console.warn('[auto-recording] falha ao salvar gravação automática:', err);
-    }
-  };
-
-  // Descarta a auto-gravação (calibração falhou ou usuário cancelou):
-  // não salva, só limpa o buffer. Também respeita "só se nós somos donos".
-  const discardAutoRecordingIfOwned = () => {
-    if (!autoRecordingOwnedRef.current) return;
-    autoRecordingOwnedRef.current = false;
-    try {
-      recording.stop();
-      recording.clear();
-    } catch (err) {
-      console.warn('[auto-recording] falha ao descartar gravação:', err);
-    }
   };
 
   const runAccuracyTestThenExit = () => {
@@ -215,13 +148,6 @@ export const CalibrationCheck: React.FC = () => {
     });
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
-      // Fecha a gravação AQUI — o callback fira quando o usuário sai do
-      // overlay diagnóstico do accuracy test (Espaço/clique). Casa com
-      // a decisão do ROADMAP D2: uma gravação = uma calibração+precisão
-      // completa; uso livre pós-Espaço é escopo D5/D7, gravação
-      // separada. Vale para redo também: o run que acabou é dado
-      // legítimo, mesmo que o cuidador queira refazer.
-      void finalizeAutoRecordingIfOwned(activeQuickRef.current);
       if (action === 'redo') {
         calibration.clear?.();
         setStage('tutorial');
@@ -247,10 +173,6 @@ export const CalibrationCheck: React.FC = () => {
             const reason = outcome.reason || 'unknown';
             const msg = humanMessage[reason] || humanMessage.unknown;
             console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
-            // Calibração falhou: descarta a auto-gravação (o run não é
-            // representativo pra baseline). Cuidador vai reiniciar via
-            // handleStart, que abre nova gravação limpa.
-            discardAutoRecordingIfOwned();
             setErrorMessage(msg);
             setStage('tutorial');
           }
@@ -292,27 +214,6 @@ export const CalibrationCheck: React.FC = () => {
   // silenciosamente.
   const handleStart = (quick: boolean = false) => {
     if (!l2csReady) return;
-
-    // D2 — auto-gravação da sessão inteira (calibração + accuracy test).
-    // Só assumimos ownership se NÃO houver gravação manual em curso do
-    // SettingsScreen — se houver, o cuidador iniciou intencionalmente e
-    // nós não sobrescrevemos. Sem manual? Limpa e começa.
-    if (!recording.isActive()) {
-      try {
-        recording.clear();
-        recording.start();
-        autoRecordingOwnedRef.current = true;
-      } catch (err) {
-        // Se o start falhar (engine não subiu, video sem stream), a
-        // calibração continua — gravação é diagnóstico opcional.
-        console.warn('[auto-recording] falha ao iniciar gravação; seguindo sem ela:', err);
-        autoRecordingOwnedRef.current = false;
-      }
-    } else {
-      autoRecordingOwnedRef.current = false;
-    }
-    activeQuickRef.current = quick;
-
     setCalibrationMode(quick ? 'quick' : 'full');
     setStage('calibrating');
     setCompletedList([]);

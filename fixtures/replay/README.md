@@ -82,10 +82,10 @@ Com `--out relatorio.json` também salva o agregado em disco para diff futuro.
 
 ## Estado atual da pasta (2026-08-26)
 
-Primeira fixture real gravada em 2026-08-26 pelo operador:
+Primeira fixture real gravada em 2026-08-26 pelo operador via **fluxo
+manual do SettingsScreen → Gravador de sessão** (roteiro acima):
 
-- **`ci-baseline.jsonl`** — 97 MB, 455 frames, condição `oculos_simples`,
-  produzida pelo fluxo de auto-gravação (calibração + accuracy test).
+- **`ci-baseline.jsonl`** — 97 MB, 455 frames, condição `oculos_simples`.
   Gitignorada por default (biometria + tamanho); commitada com
   `git add -f` se o operador decidir versionar.
 - **`ci-baseline.report.json`** — snapshot esperado pro gate do CI
@@ -94,26 +94,13 @@ Primeira fixture real gravada em 2026-08-26 pelo operador:
   rodadas — 4 verdes + 1 falha documentada (`--recompute-features` vs
   bloco L2CS — ver ROADMAP §8.1).
 
-### Fluxo novo de auto-gravação (Electron, desde 2026-08-26)
-
-Não precisa mais iniciar/parar manualmente pelo `SettingsScreen` pra
-produzir uma fixture. Clicar em **Começar** (9 pontos) ou
-**Recalibração rápida** na tela de calibração já dispara o gravador; ao
-fechar o overlay do accuracy test, o `.jsonl` é escrito automaticamente
-na raiz do projeto com nome
-`irisflow-recording-<YYYY-MM-DD_HH-mm-ss>_<condicao>_calib+precisao.jsonl`.
-O operador move pra `fixtures/replay/` e (se for a nova baseline)
-renomeia pra `ci-baseline.jsonl`. Em browser puro (`npm run dev`) o
-mesmo fluxo cai no download do browser (`~/Downloads/`).
-
-Guardas:
-- Auto-gravação **cede** se houver gravação manual pré-existente do
-  `SettingsScreen` — cuidador quem manda.
-- Calibração falha (matriz singular, etc.) → gravação descartada.
-- Fechar janela no meio → gravação órfã é limpa no unmount.
-
-O fluxo manual (SettingsScreen → Gravador de sessão) segue existindo pra
-casos especiais (gravação só de uso livre, sem calibração no meio).
+Nota histórica: houve uma tentativa em 2026-08-26 de automatizar
+start/stop da gravação dentro do fluxo de calibração (auto-recording
+no `CalibrationCheck.tsx` + IPC pro Electron salvar direto na raiz do
+projeto). Foi implementada, testada e depois revertida no mesmo dia —
+gerava atrito (97 MB de `.jsonl` a cada calibração normal do usuário)
+e o fluxo manual do SettingsScreen já basta pra fixtures pontuais. Se
+algum sprint futuro pedir automação, git blame recupera o pattern.
 
 ## Gate de regressão em CI (D8.1)
 

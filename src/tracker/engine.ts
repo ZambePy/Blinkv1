@@ -147,17 +147,6 @@ export interface RecordingApi {
   clear(): void;
 }
 
-// Escrita de gravação em disco (só existe quando rodando sob Electron —
-// browser puro cai no fallback de download). Exposta via preload em
-// window.irisflowElectron; contrato compartilhado entre preload/renderer.
-export interface ElectronSaveResult {
-  absPath: string;
-  bytes: number;
-}
-export interface IrisflowElectronBridge {
-  saveRecording(jsonl: string, filename: string): Promise<ElectronSaveResult>;
-}
-
 export interface EngineDiagnostics {
   fpsRender: number;
   l2cs: {

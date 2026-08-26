@@ -25,6 +25,10 @@ python_ml/.git/
 # Scratch / experimentos externos
 scratch/
 
+# Relatórios de accuracy test auto-gerados na raiz pelo próprio pipeline
+# (não são fixture, são snapshot ephemeral por sessão).
+accuracy-report-*.json
+
 # Claude Code
 .claude/
 
