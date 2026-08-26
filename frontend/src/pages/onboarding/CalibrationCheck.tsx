@@ -63,9 +63,20 @@ const humanMessage: Record<string, string> = {
   unknown: 'Erro desconhecido durante o treinamento do modelo. Por favor, tente novamente.',
 };
 
+// D3.2 (ROADMAP §5) — chave do localStorage pro checkbox "gravar sessão junto
+// com a calibração". Motivo do design: o sweep de EXPAND_FACTOR exige 6
+// rodadas de calibração+accuracy em fila, e no fluxo original o botão de
+// gravar mora em Configurações. Alternar entre telas 6 vezes é atrito real.
+// Deixando o checkbox aqui (default OFF, opt-in explícito), o operador que
+// vai rodar sweep marca uma vez e faz as 6 rodadas sem sair da tela.
+// Diferença essencial pro auto-recording revertido no D2: aqui é opt-in
+// explícito, não sempre-ligado. Usuário normal nunca dispara gravação sem
+// querer.
+const AUTO_RECORD_STORAGE_KEY = 'irisflow.autoRecordOnCalibrate';
+
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
-  const { calibration, l2csStatus, getSessionUptimeMs } = useGaze();
+  const { calibration, l2csStatus, getSessionUptimeMs, recording } = useGaze();
   // D9 — geometria física do posto de uso. Fonte ÚNICA para (a) o erro angular
   // do relatório e (b) o posicionamento dos alvos pelo orçamento de
   // excentricidade. Antes eram dois hardcodes de 15,6"/60 cm em arquivos
@@ -89,6 +100,28 @@ export const CalibrationCheck: React.FC = () => {
   // D6.2 — seleção da condição óptica antes de iniciar. Default `desconhecido`
   // preserva o comportamento antes de D6 (perfil salvo como desconhecido).
   const [opticalCondition, setOpticalCondition] = useState<OpticalCondition>('desconhecido');
+
+  // D3.2 — checkbox opt-in pra iniciar a gravação junto com a calibração.
+  // Persistido para o operador do sweep de EXPAND_FACTOR não precisar remarcar
+  // a cada rodada. STOP e EXPORT continuam manuais em Configurações.
+  const [autoRecord, setAutoRecord] = useState<boolean>(() => {
+    try { return localStorage.getItem(AUTO_RECORD_STORAGE_KEY) === 'true'; }
+    catch { return false; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem(AUTO_RECORD_STORAGE_KEY, String(autoRecord)); }
+    catch { /* localStorage indisponível — silencia */ }
+  }, [autoRecord]);
+  // Espelho reativo do isActive() do recorder — usado só para mostrar o
+  // indicador "🔴 Gravando" na UI. Poll a 500 ms é barato e evita ter que
+  // adicionar API de subscription no recorder por conta desse único consumidor.
+  const [isRecording, setIsRecording] = useState<boolean>(false);
+  useEffect(() => {
+    const tick = () => setIsRecording(recording.isActive());
+    tick();
+    const id = window.setInterval(tick, 500);
+    return () => window.clearInterval(id);
+  }, [recording]);
   // D6.1 — modo em curso; controla renderização de "4/4" vs "9/9" e a lista
   // de alvos consultada para display. Nulo enquanto nada iniciou.
   const [calibrationMode, setCalibrationMode] = useState<'full' | 'quick' | null>(null);
@@ -121,9 +154,50 @@ export const CalibrationCheck: React.FC = () => {
   const retryCountRef            = useRef(0);
   const MAX_RETRIES_PER_POINT    = 3;
 
+  // D3.2 — ownership da gravação auto-iniciada. Só finalizamos gravação que
+  // ESTE componente iniciou (via handleStart com autoRecord marcado). Se o
+  // operador começou manualmente em Configurações, deixamos em paz.
+  const autoRecordOwnedRef = useRef(false);
+  // Ref atualizada a cada render pra callback de unmount + timeouts sempre
+  // enxergarem a versão mais nova (evita closure obsoleto sobre `recording`).
+  const finalizeAutoRecordingRef = useRef<(exportFile: boolean) => void>(() => {});
+  finalizeAutoRecordingRef.current = (exportFile: boolean) => {
+    if (!autoRecordOwnedRef.current) return;
+    if (!recording.isActive()) {
+      autoRecordOwnedRef.current = false;
+      return;
+    }
+    const stats = recording.getStats();
+    const jsonl = exportFile ? recording.exportAsJSONL() : '';
+    recording.stop();
+    if (exportFile && jsonl) {
+      const blob = new Blob([jsonl], { type: 'application/x-ndjson' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      // ':' inválido em nome de arquivo no Windows — troca por '-'.
+      const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+      a.download = `irisflow-recording-${stamp}.jsonl`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      console.log(`[calib] gravação finalizada + exportada — ${stats.frames} frames`);
+    } else {
+      console.log('[calib] gravação descartada (attempt incompleto)');
+    }
+    recording.clear();
+    autoRecordOwnedRef.current = false;
+  };
+
   useEffect(() => {
     isMounted.current = true;
-    return () => { isMounted.current = false; };
+    return () => {
+      isMounted.current = false;
+      // Sair da tela no meio de uma gravação auto-iniciada: descarta pra não
+      // deixar JSONL parcial em lugar nenhum.
+      finalizeAutoRecordingRef.current(false);
+    };
   }, []);
 
   const finishAndTransition = () => {
@@ -149,11 +223,15 @@ export const CalibrationCheck: React.FC = () => {
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
       if (action === 'redo') {
+        // Attempt descartado — não exporta um JSONL parcial.
+        finalizeAutoRecordingRef.current(false);
         calibration.clear?.();
         setStage('tutorial');
         setCompletedList([]);
         return;
       }
+      // Fluxo bem-sucedido: para + exporta antes de sair da tela.
+      finalizeAutoRecordingRef.current(true);
       finishAndTransition();
     }, meta);
   };
@@ -173,6 +251,9 @@ export const CalibrationCheck: React.FC = () => {
             const reason = outcome.reason || 'unknown';
             const msg = humanMessage[reason] || humanMessage.unknown;
             console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
+            // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
+            // Descarta em vez de exportar; próxima tentativa recomeça limpa.
+            finalizeAutoRecordingRef.current(false);
             setErrorMessage(msg);
             setStage('tutorial');
           }
@@ -214,6 +295,22 @@ export const CalibrationCheck: React.FC = () => {
   // silenciosamente.
   const handleStart = (quick: boolean = false) => {
     if (!l2csReady) return;
+
+    // D3.2 — se o operador marcou o opt-in E ainda não há uma gravação ativa
+    // (ex.: iniciada manualmente em Configurações), inicia agora. Paramos +
+    // exportamos automaticamente após o accuracy test bem-sucedido. NÃO
+    // paramos gravação iniciada manualmente em Settings (o `autoRecordOwnedRef`
+    // é a distinção).
+    // Diferença essencial pro auto-recording revertido no D2: aqui é opt-in
+    // explícito (checkbox default off), o download vai pro Downloads do
+    // browser (não pro project root via IPC), e cancelamentos/redos são
+    // descartados em vez de exportados.
+    if (autoRecord && !recording.isActive()) {
+      recording.start();
+      autoRecordOwnedRef.current = true;
+      console.log('[calib] gravação iniciada junto com a calibração (opt-in D3.2)');
+    }
+
     setCalibrationMode(quick ? 'quick' : 'full');
     setStage('calibrating');
     setCompletedList([]);
@@ -484,6 +581,48 @@ export const CalibrationCheck: React.FC = () => {
                 ))}
               </select>
 
+              {/* D3.2 — opt-in de gravação. Fica ANTES do botão primário para
+                   que o operador do sweep marque uma vez e clique 6× seguidas
+                   sem sair da tela. Persistido em localStorage. */}
+              <label
+                data-testid="auto-record-label"
+                style={{
+                  alignSelf: 'stretch',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  fontSize: '0.9rem',
+                  color: TEXT_DIM,
+                  cursor: 'pointer',
+                  padding: '0.6rem 0.9rem',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  borderRadius: '0.75rem',
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={autoRecord}
+                  onChange={(e) => setAutoRecord(e.target.checked)}
+                  data-no-dwell="true"
+                  data-testid="auto-record-checkbox"
+                  style={{ width: 18, height: 18, cursor: 'pointer', accentColor: ACCENT }}
+                />
+                <span style={{ flex: 1, textAlign: 'left' }}>
+                  <strong style={{ color: TEXT_PRIMARY }}>Gravar sessão</strong> junto com esta calibração
+                  {isRecording && (
+                    <span style={{ color: DANGER, marginLeft: '0.5rem', fontWeight: 700 }}>
+                      🔴 gravando
+                    </span>
+                  )}
+                  <br />
+                  <span style={{ fontSize: '0.78rem', color: TEXT_DIM }}>
+                    Grava calibração + teste de precisão. JSONL baixa automático quando
+                    o teste termina. Redo/falha descarta.
+                  </span>
+                </span>
+              </label>
+
               <button
                 type="button"
                 onClick={() => handleStart(false)}
@@ -556,6 +695,30 @@ export const CalibrationCheck: React.FC = () => {
         {/* ─── CALIBRANDO ──────────────────────────────────────────────── */}
         {stage === 'calibrating' && (
           <>
+            {/* D3.2 — indicador de gravação. Canto superior direito, discreto,
+                 fora do centro do olhar. Só aparece se recorder ativo — assim
+                 continua invisível pra usuário que gravou via Configurações. */}
+            {isRecording && (
+              <div
+                data-testid="recording-indicator"
+                style={{
+                  position: 'absolute', top: '1.25rem', right: '1.5rem', zIndex: 45,
+                  display: 'flex', alignItems: 'center', gap: '0.4rem',
+                  padding: '0.35rem 0.7rem',
+                  background: 'rgba(239,68,68,0.10)',
+                  border: `1px solid ${DANGER}`,
+                  borderRadius: '999px',
+                  color: DANGER, fontSize: '0.8rem', fontWeight: 700,
+                }}
+              >
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%', background: DANGER,
+                  animation: 'cfPulseRed 1.2s infinite alternate',
+                }} />
+                Gravando
+              </div>
+            )}
+
             {/* Barra de progresso — discreta, no topo, não distrai o olhar */}
             <div style={{
               position: 'absolute', top: '1.25rem', left: '50%', transform: 'translateX(-50%)',
@@ -694,6 +857,7 @@ export const CalibrationCheck: React.FC = () => {
           @keyframes cfSpin    { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
           @keyframes cfFadeUp  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
           @keyframes cfScaleIn { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:scale(1); } }
+          @keyframes cfPulseRed { from { opacity: 0.55; } to { opacity: 1; } }
         `}</style>
       </main>
     </>

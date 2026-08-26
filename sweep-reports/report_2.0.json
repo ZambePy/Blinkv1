@@ -1,0 +1,124 @@
+{
+  "replayVersion": 1,
+  "generatedAt": "2026-08-26T17:13:06.621Z",
+  "input": {
+    "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\sweep-expand_2.0_oculos_simples.jsonl",
+    "startedAt": "2026-08-26T17:02:01.644Z",
+    "formatVersion": 2
+  },
+  "resolution": {
+    "w": 1920,
+    "h": 1080
+  },
+  "filter": {
+    "preset": "balanceado-v2",
+    "mincutoff": 0.5,
+    "beta": 5,
+    "normalizedSpace": true
+  },
+  "frames": {
+    "totalInJsonl": 1566,
+    "droppedInRecording": 0,
+    "calibration": 520,
+    "accuracy": 460,
+    "live": 478,
+    "discarded": 3,
+    "rejectedByDecision": 105,
+    "legacyNoDecision": 0
+  },
+  "calibration": {
+    "uniqueTargets": 9
+  },
+  "accuracy": {
+    "n": 460,
+    "meanErrorPx": 183.6006611308786,
+    "medianErrorPx": 104.05124795692436,
+    "p90ErrorPx": 540.4632614587625,
+    "maxErrorPx": 1131.7076966234258,
+    "meanErrorDeg": 4.550885995116505,
+    "medianErrorDeg": 2.6267724538015487,
+    "p90ErrorDeg": 13.403572618530735,
+    "perPoint": [
+      {
+        "targetXPx": 480,
+        "targetYPx": 270,
+        "count": 52,
+        "meanErrorPx": 182.1960304295969,
+        "medianErrorPx": 155.74153052605945,
+        "meanErrorDeg": 4.586508850423695
+      },
+      {
+        "targetXPx": 960,
+        "targetYPx": 270,
+        "count": 50,
+        "meanErrorPx": 136.78978972652547,
+        "medianErrorPx": 74.58770992875313,
+        "meanErrorDeg": 3.4184398820994586
+      },
+      {
+        "targetXPx": 1440,
+        "targetYPx": 270,
+        "count": 51,
+        "meanErrorPx": 197.6012721082433,
+        "medianErrorPx": 164.2290132080172,
+        "meanErrorDeg": 4.964129094702313
+      },
+      {
+        "targetXPx": 480,
+        "targetYPx": 540,
+        "count": 52,
+        "meanErrorPx": 248.8765325835899,
+        "medianErrorPx": 132.2565857748939,
+        "meanErrorDeg": 6.021873768308552
+      },
+      {
+        "targetXPx": 960,
+        "targetYPx": 540,
+        "count": 51,
+        "meanErrorPx": 120.17793756414667,
+        "medianErrorPx": 39.15372624243844,
+        "meanErrorDeg": 2.99705112559629
+      },
+      {
+        "targetXPx": 1440,
+        "targetYPx": 540,
+        "count": 51,
+        "meanErrorPx": 166.11819970290486,
+        "medianErrorPx": 102.56507311753097,
+        "meanErrorDeg": 4.158159225247481
+      },
+      {
+        "targetXPx": 480,
+        "targetYPx": 810,
+        "count": 51,
+        "meanErrorPx": 259.5211048776317,
+        "medianErrorPx": 102.99876503545796,
+        "meanErrorDeg": 6.292360968203806
+      },
+      {
+        "targetXPx": 960,
+        "targetYPx": 810,
+        "count": 51,
+        "meanErrorPx": 168.57913531308145,
+        "medianErrorPx": 100.1061170789474,
+        "meanErrorDeg": 4.214109742806221
+      },
+      {
+        "targetXPx": 1440,
+        "targetYPx": 810,
+        "count": 51,
+        "meanErrorPx": 170.37571037893537,
+        "medianErrorPx": 93.85377964990461,
+        "meanErrorDeg": 4.253595088042755
+      }
+    ]
+  },
+  "config": {
+    "assumedDistPx": 2268,
+    "rbfApplied": false,
+    "onlineRls": false,
+    "source": "src/",
+    "featuresSource": "recorded",
+    "droppedFeatureGroups": []
+  }
+}
