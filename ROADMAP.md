@@ -467,7 +467,33 @@ Todas foram documentadas ao longo da semana; consolidadas aqui para o próximo o
 
   Delta 1.4 → 2.0 = **17% de melhoria em mean px**. Queda mais brusca entre 1.4 → 1.6 (−15%); 1.6/1.8/2.0 ficam dentro do próprio ruído. Estabilidade da amostra: 457-460 frames de accuracy por rodada, ~100-105 rejeitados por decisão (acomodação/qualidade/pose) — variação < 2% entre sessões, confirmando iluminação/postura estáveis. **Decisão: manter default 1.4 por enquanto** (regra 4 do projeto). Motivos: (a) N=1 sessão por valor — sinal forte mas amostra pequena; (b) mudar `EXPAND_FACTOR` invalida perfis salvos (mesma regra do `isotropicLandmarks`) e exige bumpar `RECORDING_FORMAT_VERSION`; (c) 1.6 vs 2.0 é empate dentro do ruído — sem 2ª sessão não dá pra escolher entre eles com confiança. Sanity check honesto: `ci-baseline.jsonl` (D2, mesmo default 1.4, mesma condição `oculos_simples`) deu 150 px vs. sessão de sweep atual com 1.4 = 221 px — variância entre sessões ~40-70 px, delta dentro do sweep ~80 px. Sinal está acima do ruído. **Pendência derivada adicionada abaixo:** rodar 2ª sessão pra confirmar direção.
 - **[D3.2 follow-up] 2ª sessão de sweep de `EXPAND_FACTOR`.** Repetir o sweep de 6 valores em condições comparáveis (mesma iluminação, mesma decisão de óculos, mesma postura) pra confirmar o trend 1.4 → 1.6 do sweep original. Se confirmado, promover **1.6** como default (não 2.0 — o ganho 1.6 → 2.0 é dentro do ruído e 2.0 amplia mais o crop, custo em latência e robustez em poses extremas que não foram testadas). Passos ao promover: (a) trocar `EXPAND_FACTOR = 1.4` em `src/l2cs/crop.ts:13`; (b) trocar `expandFactor: 1.4` em `src/config/experiment.ts:65`; (c) bumpar `RECORDING_FORMAT_VERSION` em `src/telemetry/types.ts`; (d) atualizar `docs/PONTO-DE-REFERENCIA.md` com novo baseline pós-mudança.
-- **[D4.3 + D5.1] Rodada de ablação.** `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<X>.jsonl --ablation`. Comparar cada linha vs. baseline; decidir se algum grupo de features é ruído (**não remover** com N=1 — só registrar como achado preliminar).
+- ~~**[D4.3 + D5.1] Rodada de ablação.**~~ ✅ Resolvida em 2026-08-26. `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/ci-baseline.jsonl --ablation --out ci-baseline-ablation.report.json` rodada sobre a fixture do D2 (455 frames de accuracy, `oculos_simples`). Baseline: **150,3 px / 3,72°**. Tabela consolidada de deltas vs baseline:
+
+  | Variante | mean px | Δ vs baseline | mean ° |
+  |---|---|---|---|
+  | baseline (balanceado-v2, features gravadas) | **150,3** | — | 3,72 |
+  | estavel-v2 | 153,8 | +3,5 | 3,81 |
+  | responsivo-v2 | 147,8 | −2,5 | 3,66 |
+  | balanceado v1 (pixel space) | **145,6** | **−4,7** | **3,61** |
+  | ablation: sem pose linear (yaw/pitch/roll isoladas) | 154,0 | +3,7 | 3,82 |
+  | ablation: sem pose×offset (cross) | 161,6 | **+11,3** | 4,01 |
+  | ablation: sem pose quadrática | 163,3 | **+13,0** | 4,06 |
+  | ablation: sem bloco L2CS inteiro | 153,7 | +3,4 | 3,81 |
+  | ablation: sem pose alguma (linear + cross + quadratic) | 156,4 | +6,1 | 3,88 |
+
+  (Variante `balanceado-v2 + recompute-features` falhou como esperado — bug do §8.1 sobre dimensão 37 vs 44. Não afeta a análise.)
+
+  **Achados preliminares (N=1 sessão, todos DIRECIONAIS — não conclusivos):**
+
+  1. **Termos de interação pose×offset dominam a contribuição da pose.** Remover `pose-cross` degrada +11,3 px; remover `pose-quadratic` degrada +13,0 px; mas remover `pose-linear` isolada degrada apenas +3,7 px. Interpretação: o Ridge usa os termos de INTERAÇÃO (pose × offset de íris), não os yaw/pitch/roll puros, pra corrigir gaze em função da postura da cabeça. Coerente teoricamente — a pose linear sozinha não muda offset de íris; ela importa quando MULTIPLICADA pelo offset.
+
+  2. **Bloco L2CS contribui pouco NESTA fixture (+3,4 px sem ele) — MAS não justifica remover.** O valor real do L2CS está em cenários de pose extrema (a razão de ele existir), que a fixture do D2 explicitamente não estressa (público-alvo ELA, memory `project_target_users_als.md`: sem movimentos agressivos). Remover porque contribui pouco aqui otimizaria pro teste, não pro uso real. Manter.
+
+  3. **`balanceado v1 (pixel space)` bate v2 por 4,7 px nesta fixture.** Sinal fraco — delta 3% e N=1, provavelmente dentro do ruído entre sessões (variância D3.2 = 40-70 px). Não conclusivo. Registrar como sinal pra investigação futura antes de reverter o default do D1-1.
+
+  4. **Efeitos de pose não são aditivos** — remover cross sozinho: +11,3 px; remover quadrática sozinha: +13,0 px; remover os 3 grupos de pose juntos: apenas +6,1 px. Se fossem independentes, remover os 3 daria +28 px. O fato de dar +6,1 sugere que Ridge redistribui peso entre grupos correlacionados — cross e quadrática carregam informação parecida.
+
+  **Decisão: manter todos os grupos de features ativos.** Motivos: (a) N=1 sessão, deltas de 3-13 px são pequenos vs. variância entre sessões (~40-70 px); (b) L2CS bloco tem valor teórico em cenários fora da fixture; (c) mudar o extractor invalidaria perfis salvos — não vale sem 2ª sessão. Snapshot completo: `ci-baseline-ablation.report.json` (na raiz — pequeno, sem biometria, evidência histórica dos achados D4).
 - **[D5.2] Gravação de movimento controlado.** Sessão curta com aproximação/afastamento e deslocamento lateral leve. Comparar `applyDistanceCorrection` OFF vs ON: `__irisflowExp.set('applyDistanceCorrection', true)` → reload → gravar → replay com e sem via env-var `IRISFLOW_EXP_applyDistanceCorrection=true|false` do D7.1.
 - **[D6] Tempo real + erro pós-rápida.** Sessão de usuário real: medir tempo de coleta (meta ROADMAP <15s no modo rápido vs. ~19-29s no completo) e erro do accuracy test pós-recalibração rápida vs. pós-completa.
 - **[D7.1] Sweep A2.** `node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<X>.jsonl --a2-flags`. Decidir `isotropicLandmarks` on/off com base no delta. `lockCameraExposure` fica FORA — precisa medição AO VIVO (afeta apenas câmera, não replay).
