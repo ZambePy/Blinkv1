@@ -29,6 +29,13 @@ scratch/
 # (não são fixture, são snapshot ephemeral por sessão).
 accuracy-report-*.json
 
+# D3.1 — Validação de axis symmetry do L2CS (ROADMAP §5).
+# Fotos de referência (5 poses × ≥1 distância) e o axis_validation_report.json
+# ficam localmente. Mesma lógica do ci-baseline.jsonl: biometria + tamanho não
+# vão pro Git por padrão. Se precisar versionar (auditoria/repro), usar `git
+# add -f frontend/python_scripts/l2cs_validation/<subdir>`.
+frontend/python_scripts/l2cs_validation/
+
 # Claude Code
 .claude/
 

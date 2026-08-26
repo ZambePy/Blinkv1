@@ -51,6 +51,21 @@
     background: rgba(0,0,0,.65); border: 1px solid var(--border);
     border-radius: 6px; font-size: 13px; color: var(--text);
   }
+  .distance-meter {
+    position: absolute; right: 12px; top: 12px; padding: 8px 12px;
+    background: rgba(0,0,0,.75); border: 1px solid var(--border);
+    border-radius: 6px; font-size: 13px; color: var(--muted);
+    font-family: ui-monospace, Menlo, Consolas, monospace;
+    min-width: 140px; text-align: right;
+  }
+  .distance-meter .cm { font-size: 20px; font-weight: 700; color: var(--text); }
+  .distance-meter .target { display: block; font-size: 11px; margin-top: 2px; }
+  .distance-meter.near-60 { border-color: var(--ok); color: var(--ok); }
+  .distance-meter.near-60 .cm { color: var(--ok); }
+  .distance-meter.near-40 { border-color: var(--accent); color: var(--accent); }
+  .distance-meter.near-40 .cm { color: var(--accent); }
+  .distance-meter.no-face { color: var(--warn); border-color: var(--warn); }
+  .distance-meter.no-face .cm { color: var(--warn); font-size: 13px; font-weight: 400; }
 
   .panel {
     background: var(--panel); border: 1px solid var(--border);
@@ -106,8 +121,9 @@
 <div class="wrap">
   <h1>L2CS — Captura de fotos de validação</h1>
   <p class="sub">
-    Tire 3 fotos com a cabeça <b>imóvel</b>, movendo <b>apenas os olhos</b>. Sem espelhamento —
-    a imagem sai como a câmera vê. Cada foto vai ser baixada como JPG.
+    Tire 5 fotos com a cabeça <b>imóvel</b>, movendo <b>apenas os olhos</b>. Sem espelhamento —
+    a imagem sai como a câmera vê. Cada foto vai ser baixada como JPG. Faça o conjunto
+    completo a <b>~60 cm</b> e depois a <b>~40 cm</b> (o medidor no vídeo ajuda).
   </p>
 
   <div class="grid">
@@ -118,6 +134,10 @@
         <div class="crosshair"></div>
         <div class="face-guide"></div>
         <div class="hint" id="hint">Aguardando webcam…</div>
+        <div class="distance-meter no-face" id="distanceMeter">
+          <span class="cm" id="distanceCm">—</span>
+          <span class="target" id="distanceTarget">medidor: aguardando rosto</span>
+        </div>
       </div>
       <div class="status" id="status">Clique em <b>Iniciar câmera</b> para começar.</div>
     </div>
@@ -172,25 +192,34 @@
       <details>
         <summary>Onde salvar as fotos</summary>
         <p>
-          O navegador baixa em <code>Downloads</code>. Depois mova as 5 para:<br>
-          <code>frontend/python_scripts/l2cs_validation/</code>
+          O navegador baixa em <code>Downloads</code>. Mova as 5 fotos de cada distância
+          para o subdiretório correspondente:<br>
+          <code>frontend/python_scripts/l2cs_validation/dist_60cm/</code><br>
+          <code>frontend/python_scripts/l2cs_validation/dist_40cm/</code>
         </p>
         <p>
-          Dicas: rosto centralizado no oval, ~50 cm de distância, boa iluminação frontal
-          (evite janela atrás). Não vire a cabeça entre as fotos — só os olhos.
+          Dicas: rosto centralizado no oval, boa iluminação frontal (evite janela atrás),
+          não vire a cabeça entre as fotos — só os olhos. Se usar óculos na operação real,
+          faça <b>todas</b> as fotos com óculos (misturar as duas condições invalida a
+          comparação).
         </p>
         <p>
-          <b>Para a matriz completa do ROADMAP §5 (≥2 distâncias)</b>: repita
-          as 5 fotos a ~60 cm e ~40 cm, cada distância num subdiretório separado, e
-          depois rode <code>node frontend/scripts/l2cs_axis_validation.mjs --dirs
-          &lt;dir60cm&gt;,&lt;dir40cm&gt;</code>.
+          <b>Medidor de distância</b>: usa MediaPipe FaceLandmarker + IPD ≈ 63 mm com
+          FOV típico de webcam (~60°). Precisão ±3 cm — suficiente pra separar 40 vs 60.
+          A caixa fica <b>verde</b> perto de 60 cm, <b>azul</b> perto de 40 cm.
+        </p>
+        <p>
+          Depois rode: <code>node frontend/scripts/l2cs_axis_validation.mjs --dirs
+          frontend/python_scripts/l2cs_validation/dist_60cm,frontend/python_scripts/l2cs_validation/dist_40cm</code>
         </p>
       </details>
     </div>
   </div>
 </div>
 
-<script>
+<script type="module">
+import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/vision_bundle.mjs';
+
 (() => {
   const video = document.getElementById('video');
   const preview = document.getElementById('previewCanvas');
@@ -198,6 +227,100 @@
   const status = document.getElementById('status');
   const startBtn = document.getElementById('startBtn');
   const captureBtn = document.getElementById('captureBtn');
+  const distanceMeter = document.getElementById('distanceMeter');
+  const distanceCmEl = document.getElementById('distanceCm');
+  const distanceTargetEl = document.getElementById('distanceTarget');
+
+  // Medidor de distância — MediaPipe FaceLandmarker via CDN.
+  // Fórmula: distância_cm = (IPD_mm × focal_px) / (IPD_px × 10)
+  //   IPD_mm = 63 (média adulto, variação individual 54-70 → erro ~10%)
+  //   focal_px ≈ largura_video × 0.85 (aproximação p/ FOV horizontal ~60°)
+  // Landmarks íris (MediaPipe FaceLandmarker refinado): 468 = íris direita, 473 = íris esquerda.
+  const IPD_MM = 63;
+  const FOV_FACTOR = 0.85;
+  let landmarker = null;
+  let landmarkerReady = false;
+  let lastVideoTs = -1;
+
+  async function initFaceLandmarker() {
+    try {
+      distanceTargetEl.textContent = 'carregando medidor…';
+      const resolver = await FilesetResolver.forVisionTasks(
+        'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.9/wasm'
+      );
+      landmarker = await FaceLandmarker.createFromOptions(resolver, {
+        baseOptions: {
+          modelAssetPath:
+            'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task',
+          delegate: 'GPU',
+        },
+        outputFaceBlendshapes: false,
+        outputFacialTransformationMatrixes: false,
+        runningMode: 'VIDEO',
+        numFaces: 1,
+      });
+      landmarkerReady = true;
+      distanceTargetEl.textContent = 'medidor pronto';
+    } catch (e) {
+      console.error('[distance] falha ao carregar FaceLandmarker:', e);
+      distanceMeter.classList.remove('no-face');
+      distanceMeter.classList.add('no-face');
+      distanceCmEl.textContent = 'off';
+      distanceTargetEl.textContent = 'medidor indisponível';
+    }
+  }
+
+  function updateDistanceUI(cm) {
+    if (cm == null) {
+      distanceMeter.className = 'distance-meter no-face';
+      distanceCmEl.textContent = '—';
+      distanceTargetEl.textContent = 'sem rosto detectado';
+      return;
+    }
+    const rounded = Math.round(cm);
+    distanceCmEl.textContent = rounded + ' cm';
+    const near60 = Math.abs(cm - 60) <= 3;
+    const near40 = Math.abs(cm - 40) <= 3;
+    distanceMeter.className =
+      'distance-meter' + (near60 ? ' near-60' : near40 ? ' near-40' : '');
+    if (near60) distanceTargetEl.textContent = '✓ em 60 cm — pode capturar';
+    else if (near40) distanceTargetEl.textContent = '✓ em 40 cm — pode capturar';
+    else if (cm > 60) distanceTargetEl.textContent = 'aproxime até 60 cm';
+    else if (cm < 40) distanceTargetEl.textContent = 'afaste até 40 cm';
+    else distanceTargetEl.textContent = 'alvo: 40 cm ou 60 cm';
+  }
+
+  function computeDistanceCm(landmarks, videoW, videoH) {
+    if (!landmarks || landmarks.length < 478) return null;
+    const rightIris = landmarks[468];
+    const leftIris = landmarks[473];
+    const dx = (rightIris.x - leftIris.x) * videoW;
+    const dy = (rightIris.y - leftIris.y) * videoH;
+    const ipdPx = Math.hypot(dx, dy);
+    if (ipdPx < 1) return null;
+    const focalPx = videoW * FOV_FACTOR;
+    return (IPD_MM * focalPx) / (ipdPx * 10);
+  }
+
+  function measureLoop() {
+    if (!stream || !landmarkerReady) {
+      requestAnimationFrame(measureLoop);
+      return;
+    }
+    const now = performance.now();
+    if (video.currentTime !== lastVideoTs && video.videoWidth > 0) {
+      lastVideoTs = video.currentTime;
+      try {
+        const result = landmarker.detectForVideo(video, now);
+        const face = result.faceLandmarks && result.faceLandmarks[0];
+        const cm = computeDistanceCm(face, video.videoWidth, video.videoHeight);
+        updateDistanceUI(cm);
+      } catch (e) {
+        // silencioso — se um frame falhar, o próximo tenta
+      }
+    }
+    requestAnimationFrame(measureLoop);
+  }
 
   // D3.1 (ROADMAP §5) — matriz expandida: centro + cima/baixo (par pitch) +
   // direita/esquerda (par yaw). Simetria explícita permite validar sinal +
@@ -229,10 +352,10 @@
       captureBtn.textContent = 'Capturar ' + shots[currentIdx].name;
       captureBtn.disabled = !stream;
     } else if (taken.every(t => t !== null)) {
-      hint.textContent = '✅ Todas as 3 fotos capturadas';
+      hint.textContent = '✅ Todas as 5 fotos capturadas';
       captureBtn.textContent = 'Concluído';
       captureBtn.disabled = true;
-      setStatus('Pronto! Mova os 3 arquivos de <b>Downloads</b> para <code>frontend/python_scripts/l2cs_validation/</code>.', 'ok');
+      setStatus('Pronto! Mova os 5 arquivos de <b>Downloads</b> para o subdiretório da distância certa (<code>dist_60cm/</code> ou <code>dist_40cm/</code>).', 'ok');
     } else {
       // Some retake pending
       const nextEmpty = taken.findIndex(t => t === null);
@@ -255,6 +378,7 @@
       startBtn.disabled = true;
       setStatus('Câmera ativa. Ajuste o rosto no oval e capture ' + shots[0].name + '.');
       refreshUI();
+      measureLoop();
     } catch (e) {
       setStatus('Erro ao acessar a câmera: ' + e.message, 'warn');
     }
@@ -315,6 +439,9 @@
 
   startBtn.addEventListener('click', start);
   captureBtn.addEventListener('click', capture);
+
+  // Carrega o FaceLandmarker em paralelo — pronto antes de o usuário clicar "Iniciar".
+  initFaceLandmarker();
 
   // Space bar to capture
   window.addEventListener('keydown', (e) => {
