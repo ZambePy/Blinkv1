@@ -269,8 +269,11 @@ export const SettingsScreen: React.FC = () => {
     oculos: false,
     movimentoCabeca: 'parada',
     minutosDeSessao: 0,
-    distanciaCm: 60,
-    telaPolegadas: 15.6,
+    // D9 — geometria vem das settings persistidas (fonte única, compartilhada
+    // com a grade de calibração). Os campos abaixo espelham o valor atual;
+    // editá-los grava nas settings, não só neste state local.
+    distanciaCm: settings.viewingDistanceCm,
+    telaPolegadas: settings.screenDiagonalIn,
   });
   const [onlineCalibration, setOnlineCalibration] = useState(false);
 
@@ -288,7 +291,16 @@ export const SettingsScreen: React.FC = () => {
     // D7.2 (ROADMAP §5) — se o cuidador não editou "Sessão (min)" (segue 0),
     // preenche com o uptime real do engine. Se ele escolheu 20/40 no select
     // (para simular um teste de deriva), a escolha manual é preservada.
-    const metaWithUptime = applyUptimeToRunMetaIfDefault(accuracyMeta, getSessionUptimeMs());
+    // D9 — a geometria SEMPRE vem das settings, mesmo que o state local esteja
+    // defasado (ex.: cuidador mudou a tela noutra aba da tela de config).
+    const metaWithUptime = applyUptimeToRunMetaIfDefault(
+      {
+        ...accuracyMeta,
+        distanciaCm: settings.viewingDistanceCm,
+        telaPolegadas: settings.screenDiagonalIn,
+      },
+      getSessionUptimeMs(),
+    );
     setAccuracyRunning(true);
     startAccuracyTest((r) => {
       setAccuracyRunning(false);
@@ -1290,8 +1302,13 @@ export const SettingsScreen: React.FC = () => {
               </span>
               <input
                 type="number"
-                value={accuracyMeta.distanciaCm}
-                onChange={(e) => setAccuracyMeta({ ...accuracyMeta, distanciaCm: Number(e.target.value) })}
+                value={settings.viewingDistanceCm}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v) || v <= 0) return;
+                  updateSettings({ viewingDistanceCm: v });
+                  setAccuracyMeta({ ...accuracyMeta, distanciaCm: v });
+                }}
                 style={{
                   padding: '0.75rem',
                   borderRadius: '0.75rem',
@@ -1308,8 +1325,13 @@ export const SettingsScreen: React.FC = () => {
               <input
                 type="number"
                 step="0.1"
-                value={accuracyMeta.telaPolegadas}
-                onChange={(e) => setAccuracyMeta({ ...accuracyMeta, telaPolegadas: Number(e.target.value) })}
+                value={settings.screenDiagonalIn}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  if (!Number.isFinite(v) || v <= 0) return;
+                  updateSettings({ screenDiagonalIn: v });
+                  setAccuracyMeta({ ...accuracyMeta, telaPolegadas: v });
+                }}
                 style={{
                   padding: '0.75rem',
                   borderRadius: '0.75rem',

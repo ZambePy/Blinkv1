@@ -26,6 +26,16 @@ interface Settings {
   // IPC `window.electronBrightness` está disponível (Windows via WMI).
   // Persiste entre sessões e re-aplica no boot.
   monitorBrightness: number | null;
+  // D9 — geometria física do posto de uso. NÃO é cosmética: entra em duas
+  // contas que antes usavam hardcodes separados e divergentes.
+  //   1. `meanErrorDeg` do relatório de precisão. Com 15,6" hardcoded numa
+  //      tela de 23,6", o erro angular saía 34% MENOR do que o real
+  //      (2,98° reportado vs 4,50° verdadeiro no relatório 1787682565489).
+  //   2. A posição dos alvos de calibração, que passou a sair de um orçamento
+  //      de excentricidade angular (ver `computeCalibrationTargets`).
+  // Só o cuidador sabe estes números — o browser não expõe tamanho físico.
+  screenDiagonalIn: number;
+  viewingDistanceCm: number;
 }
 
 const defaultSettings: Settings = {
@@ -43,6 +53,12 @@ const defaultSettings: Settings = {
   brightnessLevel: 1.0,
   amberFilter: false,
   monitorBrightness: null,
+  // Defaults = o posto de uso de referência (medido). Editáveis em
+  // Configurações → Teste de precisão; qualquer tela diferente PRECISA ser
+  // ajustada, senão o erro angular do relatório mente e a grade de
+  // calibração fica posicionada para a tela errada.
+  screenDiagonalIn: 23.6,
+  viewingDistanceCm: 60,
 };
 
 const SettingsContext = createContext<{

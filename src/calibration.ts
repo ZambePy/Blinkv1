@@ -272,6 +272,7 @@ export function clearCalibration() {
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
   pendingProfileMeta = null;
+  currentCalibrationTargets = null;
   resetSessionBias();
 }
 
@@ -522,37 +523,235 @@ export function exportGazeDistanceLog(): void {
 // pontos → ~3,2–3,3° em outro sistema webcam). Centro é omitido de propósito
 // — os 4 cantos dão exatamente 4 restrições independentes na média binocular,
 // que é o mínimo pra estimar bias + escala em x e y sem singularidade.
-// BUG-8: targets em 10%/90% deixam 10% de cada borda em zona de extrapolação
-// pura do Ridge linear — erro sistematicamente alto. Com 5%/95% a zona de
-// extrapolação cai para ~5% e o Ridge interpola melhor nas bordas reais.
-export const CALIBRATION_TARGETS_FULL: readonly { x: number; y: number }[] = [
-  { x: 0.05, y: 0.05 }, { x: 0.5, y: 0.05 }, { x: 0.95, y: 0.05 },
-  { x: 0.05, y: 0.5 },  { x: 0.5, y: 0.5 },  { x: 0.95, y: 0.5 },
-  { x: 0.05, y: 0.95 }, { x: 0.5, y: 0.95 }, { x: 0.95, y: 0.95 },
-];
-export const CALIBRATION_TARGETS_QUICK: readonly { x: number; y: number }[] = [
-  { x: 0.05, y: 0.05 }, { x: 0.95, y: 0.05 },
-  { x: 0.05, y: 0.95 }, { x: 0.95, y: 0.95 },
-];
+// ─── D9: orçamento de excentricidade angular dos alvos ──────────────────────
+//
+// BUG-8 empurrou os alvos de 10%/90% para 5%/95% argumentando que assim o
+// Ridge extrapolaria menos nas bordas. O raciocínio estava certo sobre a
+// regressão e errado sobre o olho.
+//
+// EVIDÊNCIA (accuracy-report-1787682565489, 1920×1080, 23,6", 60 cm — a
+// diagonal que aparece no JSON, 15,6", era o hardcode da UI, não a tela real):
+// decompondo os 9 pares (ground-truth → predito) num mapa afim sobra resíduo
+// de 36,5 px sobre erro médio de 173,5 px — 79% do erro é ganho/cisalhamento/
+// offset coerente, não ruído. Os ganhos medidos foram:
+//
+//     ganho X = 1,294      ganho Y = 0,930
+//
+// Um modelo LINEAR nas features não consegue ter ganho > 1 no interior e ao
+// mesmo tempo acertar os alvos externos: a única forma de aprender ganho 1,29
+// é o olhar registrado nos alvos ter percorrido menos que a distância nominal.
+//
+// O ganho medido não é h direto: é a RAZÃO entre a hipometria nos alvos de
+// calibração e a hipometria nos pontos de validação. Traduzindo para ângulo
+// com a geometria real (52,25 × 29,39 cm a 60 cm), os dois eixos restringem a
+// mesma curva h(θ) em conjunto:
+//
+//   eixo Y — alvos a 12,4°, validação a 7,0°, ganho 0,930 ≈ 1
+//            → nenhuma queda mensurável até 12,4°: o JOELHO está em ~12,4°+
+//   eixo X — alvos a 21,4°, validação a 12,3°, ganho 1,294
+//            → como 12,3° está abaixo do joelho, h(21,4°) = 1/1,294 = 0,773
+//
+// Ou seja: até ~12,4° o olho entrega o que se pede; a 21,4° entrega 77%. É
+// hipometria com a cabeça parada. A assimetria entre os eixos é a prova de
+// que a causa é o OLHO e não o regressor — mesmo modelo, mesmo ruído, mesmas
+// features nos dois eixos, e só o eixo que exige 21,4° apresenta erro de ganho.
+// Como o modelo é global, esse erro contamina a tela inteira, inclusive o
+// centro.
+//
+// CORREÇÃO: derivar a posição dos alvos de um orçamento de excentricidade em
+// vez de uma fração fixa da tela. Troca-se ~14% de extrapolação nas bordas
+// (barata: o mapeamento olhar→tela é quase linear — o termo de tan contribui
+// ~2% ao longo da tela toda) por 22% de erro de ganho em TODA a tela (caro).
+//
+// Na tela de referência (23,6" a 60 cm) o orçamento de 16° produz alvos
+// horizontais em ~17%/83% e mantém os verticais em 5%/95% — a altura da tela
+// cabe inteira no orçamento. A assimetria que a fórmula gera sozinha é
+// exatamente a assimetria que o relatório mediu (ganho errado em X, correto
+// em Y): bom sinal de que o modelo geométrico está certo. Numa 15,6", onde
+// 5%/95% já exige só 14,5°, o orçamento de 16° não morde e a grade continua
+// em 5%/95% — como deve ser.
+//
+// ESCOLHA DO VALOR — varredura no simulador de regiões (ver
+// `calibration.regions.test.ts`), erro médio em px por região, 8 sementes,
+// tela de referência:
+//
+//   orçamento          centro  cantos-UI  bordas-UI  grade-UI  grade do teste  extremos
+//   21,4° (=5%/95%)      13       121         73        92          119           67
+//   20°                  13        85         55        69           99           75
+//   18°                  13        41         36        44           74          106
+//   16°  ← escolhido     12        24         31        39           54          146
+//   14°                  12        53         41        51           43          187
+//   12°                  12        80         54        68           43          218
+//
+// "cantos/bordas/grade-UI" usam a geometria REAL da interface: `GazeGrid`
+// preenche o viewport com no máximo 6 alvos, então os centros das células
+// ficam em x ∈ {1/6, 1/2, 5/6} e y ∈ {1/4, 3/4} — nenhum alvo interativo do
+// app fica a menos de ~17% da borda. "extremos" são 6%/94%, região onde o app
+// nunca coloca alvo; é a única que piora, e piora porque o modelo passa a
+// dizer a verdade (o olho não chega lá) em vez de inflar o ganho.
+//
+// NOTA sobre a escolha: 12°–14° dão erro MENOR na grade do teste de precisão
+// (43–44 px vs 56 px), que é o número exibido na tela. Escolher 16° é
+// deliberado — ele minimiza as regiões que o produto de fato usa. Otimizar
+// para a métrica exibida em vez de para o uso real seria exatamente o tipo de
+// ajuste que deixa o número bonito e o app pior.
+//
+// Por que o ótimo fica ACIMA do joelho (~12,4°): puxar os alvos para dentro
+// encolhe a amplitude do sinal de olhar, o que amplifica ruído e piora a
+// extrapolação nas bordas. Abaixo de ~16° esse custo passa a superar o que se
+// economiza de hipometria.
+//
+// ⚠️ LIMITE HONESTO: a curva h(θ) foi ajustada com DOIS pontos de UMA sessão
+// (joelho 12,43° pelo eixo Y, h(21,4°)=0,773 pelo eixo X). A direção é
+// sustentada pela física e pela assimetria X/Y medida, mas o ótimo exato
+// precisa de re-medição com usuário real. Fica isolado como constante nomeada
+// e como `geometry.maxEccentricityDeg` em `startCalibrationMode` justamente
+// para ser re-ajustado — usuários com ELA/oftalmoparesia podem precisar de
+// menos.
+export const MAX_ECCENTRICITY_DEG = 16;
+
+/** Geometria física necessária para converter graus em fração de tela. */
+export interface CalibrationGeometry {
+  screenWidthPx: number;
+  screenHeightPx: number;
+  /** Diagonal física do monitor em polegadas. */
+  screenDiagonalIn: number;
+  /** Distância olho→tela em cm. */
+  viewingDistanceCm: number;
+  /** Excentricidade máxima admitida, em graus. */
+  maxEccentricityDeg?: number;
+}
+
+// Fallback quando o caller não passa geometria. Em produção quem manda é
+// `settings.screenDiagonalIn` / `settings.viewingDistanceCm` (persistidas em
+// SettingsContext, editáveis em Configurações → Teste de precisão), que também
+// alimentam o `RunMeta` do relatório — uma fonte só para o erro angular e para
+// a posição dos alvos.
+//
+// ⚠️ Estes defaults descrevem o posto de uso de referência (23,6" a 60 cm,
+// medida exata informada pelo usuário), não uma tela genérica. Errar a
+// diagonal não é cosmético: com 15,6" configurado numa tela de 23,6",
+// `meanErrorDeg` sai 34% MENOR que o real (2,98° exibido vs 4,50° verdadeiro
+// no relatório 1787682565489).
+export const DEFAULT_SCREEN_DIAGONAL_IN = 23.6;
+export const DEFAULT_VIEWING_DISTANCE_CM = 60;
+
+// Fração da tela medida a partir do centro. O teto 0,45 reproduz os alvos em
+// 5%/95% quando a tela inteira já cabe no orçamento angular; o piso 0,22 evita
+// que uma geometria absurda (tela gigante, distância mal digitada) colapse os
+// alvos em cima do centro e destrua o condicionamento do Ridge.
+const MIN_EXTENT_FRACTION = 0.22;
+const MAX_EXTENT_FRACTION = 0.45;
+
+/**
+ * Fração da tela (a partir do centro) em que o alvo deve ficar para que a
+ * excentricidade angular exigida do olho não passe de `maxDeg`.
+ * Função pura — `sizePx`/`pxPerCm` descrevem o eixo sendo calculado.
+ */
+export function eccentricityExtentFraction(
+  sizePx: number,
+  pxPerCm: number,
+  viewingDistanceCm: number,
+  maxDeg: number,
+): number {
+  if (!(sizePx > 0) || !(pxPerCm > 0) || !(viewingDistanceCm > 0) || !(maxDeg > 0)) {
+    return MAX_EXTENT_FRACTION;
+  }
+  const halfSizeCm = sizePx / pxPerCm / 2;
+  if (!(halfSizeCm > 0)) return MAX_EXTENT_FRACTION;
+  const budgetCm = viewingDistanceCm * Math.tan((maxDeg * Math.PI) / 180);
+  // Fração da SEMI-tela que o orçamento cobre → fração da tela inteira.
+  const fraction = (budgetCm / halfSizeCm) * 0.5;
+  if (!Number.isFinite(fraction)) return MAX_EXTENT_FRACTION;
+  return Math.min(MAX_EXTENT_FRACTION, Math.max(MIN_EXTENT_FRACTION, fraction));
+}
+
+/**
+ * Grade 3×3 (full) ou 4 cantos (quick) posicionada dentro do orçamento de
+ * excentricidade. Pura e determinística — é o que o teste de regiões usa.
+ */
+export function computeCalibrationTargets(
+  geometry: CalibrationGeometry,
+  quick = false,
+): { x: number; y: number }[] {
+  const { screenWidthPx, screenHeightPx, screenDiagonalIn, viewingDistanceCm } = geometry;
+  const maxDeg = geometry.maxEccentricityDeg ?? MAX_ECCENTRICITY_DEG;
+  const diagPx = Math.hypot(screenWidthPx, screenHeightPx);
+  const pxPerCm = screenDiagonalIn > 0 ? diagPx / (screenDiagonalIn * 2.54) : 0;
+
+  const ex = eccentricityExtentFraction(screenWidthPx, pxPerCm, viewingDistanceCm, maxDeg);
+  const ey = eccentricityExtentFraction(screenHeightPx, pxPerCm, viewingDistanceCm, maxDeg);
+
+  const xs = [0.5 - ex, 0.5, 0.5 + ex];
+  const ys = [0.5 - ey, 0.5, 0.5 + ey];
+
+  if (quick) {
+    return [
+      { x: xs[0], y: ys[0] }, { x: xs[2], y: ys[0] },
+      { x: xs[0], y: ys[2] }, { x: xs[2], y: ys[2] },
+    ];
+  }
+  const out: { x: number; y: number }[] = [];
+  for (const y of ys) for (const x of xs) out.push({ x, y });
+  return out;
+}
+
+/** Geometria da janela atual + defaults físicos. Fora do browser (testes,
+ *  replay) cai num 1920×1080 nominal para continuar determinístico. */
+export function currentCalibrationGeometry(
+  overrides?: Partial<CalibrationGeometry>,
+): CalibrationGeometry {
+  const hasDom = typeof document !== 'undefined' && !!document.documentElement;
+  return {
+    screenWidthPx: hasDom ? document.documentElement.clientWidth || 1920 : 1920,
+    screenHeightPx: hasDom ? document.documentElement.clientHeight || 1080 : 1080,
+    screenDiagonalIn: DEFAULT_SCREEN_DIAGONAL_IN,
+    viewingDistanceCm: DEFAULT_VIEWING_DISTANCE_CM,
+    maxEccentricityDeg: MAX_ECCENTRICITY_DEG,
+    ...overrides,
+  };
+}
+
+// Listas nominais (geometria default) — exportadas porque a UI e os testes as
+// consomem para desenhar/afirmar a grade antes de qualquer sessão começar.
+// Durante uma calibração real vale `getCalibrationTargets()`, que devolve a
+// grade calculada para a tela em uso.
+export const CALIBRATION_TARGETS_FULL: readonly { x: number; y: number }[] =
+  computeCalibrationTargets(currentCalibrationGeometry(), false);
+export const CALIBRATION_TARGETS_QUICK: readonly { x: number; y: number }[] =
+  computeCalibrationTargets(currentCalibrationGeometry(), true);
 
 // D6.1 — modo em execução. `null` quando não está calibrando.
 let currentCalibrationMode: 'full' | 'quick' | null = null;
+// D9 — grade calculada para a tela/geometria da sessão em curso. `null` fora
+// de uma calibração; nesse caso `getCalibrationTargets` devolve a lista
+// nominal, que é o que a UI precisa para desenhar o tutorial.
+let currentCalibrationTargets: readonly { x: number; y: number }[] | null = null;
 
 export function getCalibrationMode(): 'full' | 'quick' | null {
   return currentCalibrationMode;
 }
 
 /** Alvos ativos para a sessão de calibração em curso. Se nenhuma calibração
- *  está ativa, retorna a lista FULL (default histórico) — útil para a UI
+ *  está ativa, retorna a lista nominal (default histórico) — útil para a UI
  *  renderizar a grade antes de decidir o modo. */
 export function getCalibrationTargets(): readonly { x: number; y: number }[] {
+  if (currentCalibrationTargets) return currentCalibrationTargets;
   return currentCalibrationMode === 'quick'
     ? CALIBRATION_TARGETS_QUICK
     : CALIBRATION_TARGETS_FULL;
 }
 
 export function startCalibrationMode(
-  opts?: { opticalCondition?: OpticalCondition; label?: string; quick?: boolean },
+  opts?: {
+    opticalCondition?: OpticalCondition;
+    label?: string;
+    quick?: boolean;
+    /** D9 — geometria física da tela/usuário. Quando o cuidador tiver
+     *  configurado diagonal e distância reais, a UI passa aqui e a grade se
+     *  ajusta; sem isso, valem os defaults de 15,6"/60 cm. */
+    geometry?: Partial<CalibrationGeometry>;
+  },
 ) {
   // BUG-1: reset earHistory para que o threshold adaptativo de piscada
   // não venha enviesado de sessões anteriores.
@@ -593,6 +792,20 @@ export function startCalibrationMode(
     // essa opção como backlog explícito neste comentário.
     console.log('[calib] Modo RÁPIDO (D6.1) — 4 cantos, sem termos quadráticos garantidos.');
   }
+
+  // D9 — grade posicionada pelo orçamento de excentricidade da tela em uso.
+  const geometry = currentCalibrationGeometry(opts?.geometry);
+  currentCalibrationTargets = computeCalibrationTargets(
+    geometry,
+    currentCalibrationMode === 'quick',
+  );
+  const exPct = ((0.5 - currentCalibrationTargets[0].x) * 100).toFixed(1);
+  const eyPct = ((0.5 - currentCalibrationTargets[0].y) * 100).toFixed(1);
+  console.log(
+    `[calib] Alvos D9 — orçamento ${geometry.maxEccentricityDeg}° em ` +
+    `${geometry.screenDiagonalIn}" a ${geometry.viewingDistanceCm} cm → ` +
+    `±${exPct}% em X, ±${eyPct}% em Y (a partir do centro).`,
+  );
 
   // A1-6 — meta para o perfil que resultar desta calibração. Default
   // `desconhecido` porque a UI que pergunta a condição óptica (B1-6/B2-1)
@@ -1055,10 +1268,18 @@ export interface OutlierPointsReport {
 
 // Ridge mínimo local para o LOO — reutiliza `trainRidgeModel` e `predictRidge`
 // do módulo `ridge` (mesma fórmula do CV de λ ali dentro), mas evita o CV de
-// λ (que é caro e não muda a *dominância* do resíduo). Usa λ=1 fixo — o alvo
+// λ (que é caro e não muda a *dominância* do resíduo). Usa λ fixo — o alvo
 // não é achar o modelo ótimo, é comparar RESÍDUOS entre alvos deixados de fora
 // com o mesmo λ, isolando o efeito do alvo.
-const OUTLIER_LOO_LAMBDA = 1.0;
+//
+// D9 — λ passou a ser adimensional em `trainRidgeModel` (a penalidade é
+// `λ·m·P`, não mais `λ·I` absoluto). O valor antigo `1.0` equivalia, num LOO
+// com m amostras, a `1/m` na escala nova; com m ~ centenas isso é
+// regularização praticamente nula. `2e-3` mantém a mesma ordem de grandeza
+// efetiva do detector original para os tamanhos de coleta reais, sem depender
+// de m. A penalidade continua isotrópica aqui de propósito: o LOO precisa
+// comparar alvos com o MESMO viés, e a matriz Σ_W mudaria entre folds.
+const OUTLIER_LOO_LAMBDA = 2e-3;
 const OUTLIER_MAD_SCALE = 1.4826;      // MAD → σ para distribuição normal
 const OUTLIER_ZSCORE_THRESHOLD = 3.0;  // ~conservador; ver ROADMAP D4 riscos
 // Piso absoluto do threshold em unidades normalizadas de tela (15% da tela).

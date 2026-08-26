@@ -80,14 +80,40 @@ node frontend/scripts/measure_baseline.mjs --jsonl fixtures/replay/<seu-arquivo>
 
 Com `--out relatorio.json` também salva o agregado em disco para diff futuro.
 
-## Estado atual da pasta (2026-08-25, D8)
+## Estado atual da pasta (2026-08-26)
 
-Nenhum arquivo `.jsonl` real ainda. D2 estabeleceu a infraestrutura de
-medição, e D3-D7 estenderam-na (sweep de filtro, ablação de features,
-sweep de `isotropicLandmarks`, curva de deriva temporal) — mas **a
-gravação em si depende de uma sessão física com webcam**. É a única
-tarefa manual persistente desde o D2, e continua sendo o gargalo desta
-semana.
+Primeira fixture real gravada em 2026-08-26 pelo operador:
+
+- **`ci-baseline.jsonl`** — 97 MB, 455 frames, condição `oculos_simples`,
+  produzida pelo fluxo de auto-gravação (calibração + accuracy test).
+  Gitignorada por default (biometria + tamanho); commitada com
+  `git add -f` se o operador decidir versionar.
+- **`ci-baseline.report.json`** — snapshot esperado pro gate do CI
+  (D8.1). VAI pro Git. Baseline observado nessa fixture: 150,3 px /
+  3,72° (`baseline (balanceado-v2, features gravadas)`), 5 variantes
+  rodadas — 4 verdes + 1 falha documentada (`--recompute-features` vs
+  bloco L2CS — ver ROADMAP §8.1).
+
+### Fluxo novo de auto-gravação (Electron, desde 2026-08-26)
+
+Não precisa mais iniciar/parar manualmente pelo `SettingsScreen` pra
+produzir uma fixture. Clicar em **Começar** (9 pontos) ou
+**Recalibração rápida** na tela de calibração já dispara o gravador; ao
+fechar o overlay do accuracy test, o `.jsonl` é escrito automaticamente
+na raiz do projeto com nome
+`irisflow-recording-<YYYY-MM-DD_HH-mm-ss>_<condicao>_calib+precisao.jsonl`.
+O operador move pra `fixtures/replay/` e (se for a nova baseline)
+renomeia pra `ci-baseline.jsonl`. Em browser puro (`npm run dev`) o
+mesmo fluxo cai no download do browser (`~/Downloads/`).
+
+Guardas:
+- Auto-gravação **cede** se houver gravação manual pré-existente do
+  `SettingsScreen` — cuidador quem manda.
+- Calibração falha (matriz singular, etc.) → gravação descartada.
+- Fechar janela no meio → gravação órfã é limpa no unmount.
+
+O fluxo manual (SettingsScreen → Gravador de sessão) segue existindo pra
+casos especiais (gravação só de uso livre, sem calibração no meio).
 
 ## Gate de regressão em CI (D8.1)
 

@@ -7,7 +7,7 @@
 //   • Erro em pixels ao lado de cada par
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
-import { mapGaze, setGazeCorrections, resetSessionBias } from './calibration';
+import { mapGaze, setGazeCorrections, resetSessionBias, getCalibrationTargets } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { EXPERIMENT } from './config/experiment';
 
@@ -32,6 +32,43 @@ export interface AccuracyResult {
   /** % de amostras dentro de um alvo de raio R centrado no ponto.
    *  Preditor direto da taxa de sucesso do dwell. */
   hitRateByRadius: { radiusPx: number; pct: number }[];
+  /** D9 — decomposição afim do erro. Ajusta, por mínimos quadrados sobre os 9
+   *  pares (ground-truth → predito) em coordenadas NORMALIZADAS:
+   *
+   *      predX = gainX·gx + crossXY·gy + offsetX
+   *      predY = shearYX·gx + gainY·gy + offsetY
+   *
+   *  e reporta quanto do erro sobra depois de remover esse mapa afim
+   *  (`residualPx`). É o diagnóstico que separa as duas famílias de causa:
+   *
+   *   • `residualPx` << `meanError` → o sinal de olhar está bom e o que está
+   *     errado é o MAPEAMENTO (ganho/offset/cisalhamento). Causa típica:
+   *     amplitude de olhar na calibração diferente da nominal (hipometria nos
+   *     alvos excêntricos), deriva de pose entre calibração e teste, ou
+   *     geometria de tela divergente.
+   *   • `residualPx` ≈ `meanError` → o erro é incoerente: ruído do regressor,
+   *     ponto de calibração contaminado, landmarks instáveis.
+   *
+   *  Puramente informativo — NÃO entra em `meanError`, `score` nem em nenhuma
+   *  métrica exibida como resultado. Undefined com menos de 4 pontos válidos
+   *  (o ajuste afim tem 3 parâmetros por eixo). */
+  affine?: {
+    gainX: number;
+    gainY: number;
+    crossXY: number;
+    shearYX: number;
+    offsetXPx: number;
+    offsetYPx: number;
+    /** Erro médio remanescente após remover o mapa afim (px). */
+    residualPx: number;
+    /** Fração do erro médio explicada pelo mapa afim, em [0,1]. */
+    explainedFraction: number;
+  };
+  /** D9 — pontos de validação que coincidiram com alvos de calibração. Quando
+   *  presente, o erro reportado nesses pontos mede memorização e o resultado
+   *  global está otimista. Ausente no caminho normal. Só registro — nenhuma
+   *  métrica é ajustada por causa disto. */
+  validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[];
   /** Deriva de pose entre início do teste e ponto de maior desvio. Assinatura
    *  do bug "cursor com viés grande": shift uniforme nos 9 pontos que
    *  correlaciona com cabeça inclinando alguns graus entre calibração e teste.
@@ -79,11 +116,21 @@ interface PointDiagnostic {
   meanPose?: { yaw: number; pitch: number; roll: number };
 }
 
-// Grade 3×3 disjunta da calibração — calibração usa 10/50/90, precisão usa
-// 25/50/75. Sem sobreposição de posições entre treino e teste (a exceção é o
-// centro, comum às duas grades por convenção). Se validássemos nas mesmas
-// posições da calibração, o erro reportado seria artificialmente baixo (mede
-// memorização, não generalização).
+// Grade 3×3 de validação, fixa em 25/50/75. Disjunta da grade de calibração
+// (a exceção é o centro, comum às duas por convenção): validar nas mesmas
+// posições do treino mediria memorização, não generalização.
+//
+// D9 — a grade de calibração deixou de ser 5%/95% fixo e passou a sair do
+// orçamento de excentricidade (`computeCalibrationTargets`). Na tela de
+// referência (23,6" a 60 cm) ela cai em ~17%/83% em X e 5%/95% em Y, então
+// 25/75 continua disjunto em X e segue medindo INTERPOLAÇÃO em Y e
+// EXTRAPOLAÇÃO em X. Estes 9 pontos NÃO acompanham a grade de calibração de
+// propósito: uma métrica que se move junto com o protocolo não serve para
+// comparar sessões ao longo do tempo.
+//
+// ⚠️ Se a geometria configurada colocar um alvo de calibração em cima de um
+// destes 9 pontos, o teste passaria a medir memorização e o número ficaria
+// artificialmente bom. `checkValidationOverlap` detecta e avisa.
 const VALIDATION_POINTS = [
   { name: "P1", screenX: 0.25, screenY: 0.25 },
   { name: "P2", screenX: 0.50, screenY: 0.25 },
@@ -153,6 +200,20 @@ export function startAccuracyTest(
   meta?: RunMeta,
 ) {
   isAccuracyTesting = true;
+
+  // D9 — guarda de honestidade da métrica. Roda ANTES do teste para que o
+  // aviso apareça no console junto do resto do diagnóstico da sessão.
+  const overlap = checkValidationOverlap(getCalibrationTargets(), VALIDATION_POINTS);
+  if (overlap.length > 0) {
+    console.warn(
+      `[accuracy] ⚠ ${overlap.length} ponto(s) de validação coincidem com alvos de ` +
+      `calibração (${overlap.map(o => o.validationPoint).join(', ')}). O erro nesses ` +
+      `pontos mede MEMORIZAÇÃO, não generalização — o resultado global fica ` +
+      `otimista. Causa: a geometria configurada posicionou a grade em cima da ` +
+      `grade de validação. Ajuste a diagonal/distância em Configurações ou ` +
+      `MAX_ECCENTRICITY_DEG.`,
+    );
+  }
   // O accuracy test mede o Ridge CRU. Se o bias EMA da sessão (D1-3) tiver
   // acumulado resíduos de dwells em botões arbitrários da UI (ex: dwell no
   // botão "Refazer teste" entre rodadas), medir com o bias aplicado enviesa o
@@ -179,7 +240,7 @@ export function startAccuracyTest(
     if (pointIndex >= VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
       currentValidationTarget = null;
-      finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta, poseBaseline);
+      finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta, poseBaseline, overlap);
       return;
     }
 
@@ -346,6 +407,142 @@ function showValidationDot(
   overlay.appendChild(dot);
 }
 
+// D9 — dois pontos "iguais" para efeito de vazamento treino→teste. 2% de cada
+// eixo em 1920×1080 são ~38 px em X e ~22 px em Y: bem abaixo do menor alvo
+// interativo do app (5° ≈ 200 px), então se um alvo de calibração cai dentro
+// disso de um ponto de validação, o teste está medindo memorização.
+const OVERLAP_TOLERANCE = 0.02;
+
+/**
+ * D9 — detecta alvos de calibração que caíram em cima de pontos de validação.
+ *
+ * A grade de calibração agora depende da geometria configurada
+ * (`computeCalibrationTargets`), então uma combinação de tela/distância pode,
+ * em princípio, posicionar um alvo praticamente sobre um dos 9 pontos de
+ * validação. Se isso acontecer, o erro reportado naquele ponto mede treino,
+ * não generalização, e o número global fica artificialmente bom.
+ *
+ * Puramente de detecção: não altera nenhuma métrica. Só avisa e registra no
+ * JSON, para que ninguém compare um relatório contaminado com um limpo sem
+ * saber.
+ */
+export function checkValidationOverlap(
+  calibrationTargets: readonly { x: number; y: number }[],
+  validationPoints: readonly { name: string; screenX: number; screenY: number }[],
+  tolerance: number = OVERLAP_TOLERANCE,
+): { validationPoint: string; calibX: number; calibY: number }[] {
+  const hits: { validationPoint: string; calibX: number; calibY: number }[] = [];
+  for (const v of validationPoints) {
+    // O CENTRO da tela pertence às duas grades por convenção — está assim
+    // desde antes do D9 e é a exceção documentada no comentário de
+    // VALIDATION_POINTS. Consequência honesta, que fica registrada aqui: o
+    // erro de P5 é erro de TREINO, não de generalização, e por isso o
+    // agregado dos 9 pontos é levemente otimista (1 ponto em 9). Não é o
+    // vazamento que este guarda procura — ele procura o caso NÃO intencional,
+    // em que a geometria configurada move a grade para cima da validação.
+    if (Math.abs(v.screenX - 0.5) < tolerance && Math.abs(v.screenY - 0.5) < tolerance) continue;
+    for (const c of calibrationTargets) {
+      if (Math.abs(c.x - v.screenX) < tolerance && Math.abs(c.y - v.screenY) < tolerance) {
+        hits.push({ validationPoint: v.name, calibX: c.x, calibY: c.y });
+        break;
+      }
+    }
+  }
+  return hits;
+}
+
+/** Percentil com interpolação linear entre as ordens vizinhas (convenção
+ *  'linear' do numpy). `sorted` precisa estar ordenado crescente. */
+export function percentileLinear(sorted: readonly number[], q: number): number {
+  const n = sorted.length;
+  if (n === 0) return 0;
+  if (n === 1) return sorted[0];
+  const pos = (n - 1) * q;
+  const lo = Math.floor(pos);
+  const hi = Math.ceil(pos);
+  if (lo === hi) return sorted[lo];
+  return sorted[lo] + (sorted[hi] - sorted[lo]) * (pos - lo);
+}
+
+/**
+ * D9 — decomposição afim do erro de mapeamento.
+ *
+ * Ajusta por mínimos quadrados, em coordenadas normalizadas [0,1]:
+ *     predX = a·gx + b·gy + c
+ *     predY = d·gx + e·gy + f
+ * Cada eixo é uma regressão de 3 parâmetros sobre os N pontos de validação.
+ *
+ * O objetivo NÃO é corrigir nada — é dizer, num número, se o erro é um mapa
+ * coerente (ganho/offset/cisalhamento errados) ou ruído. Nenhuma métrica
+ * exibida depende deste cálculo.
+ */
+export function affineErrorDecomposition(
+  points: readonly { groundX: number; groundY: number; predX: number; predY: number }[],
+  vw: number,
+  vh: number,
+  meanError: number,
+): AccuracyResult['affine'] {
+  const usable = points.filter(
+    p => Number.isFinite(p.predX) && Number.isFinite(p.predY),
+  );
+  if (usable.length < 4 || !(vw > 0) || !(vh > 0)) return undefined;
+
+  const rows = usable.map(p => [p.groundX / vw, p.groundY / vh, 1]);
+
+  // Normal equations 3×3 resolvidas por eliminação com pivotação parcial.
+  const solve3 = (ys: number[]): number[] | null => {
+    const A = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
+    const b = [0, 0, 0];
+    for (let k = 0; k < rows.length; k++) {
+      for (let i = 0; i < 3; i++) {
+        for (let j = 0; j < 3; j++) A[i][j] += rows[k][i] * rows[k][j];
+        b[i] += rows[k][i] * ys[k];
+      }
+    }
+    const M = A.map((r, i) => [...r, b[i]]);
+    for (let c = 0; c < 3; c++) {
+      let piv = c;
+      for (let r = c + 1; r < 3; r++) if (Math.abs(M[r][c]) > Math.abs(M[piv][c])) piv = r;
+      [M[c], M[piv]] = [M[piv], M[c]];
+      const dv = M[c][c];
+      if (!Number.isFinite(dv) || Math.abs(dv) < 1e-12) return null;
+      for (let j = c; j <= 3; j++) M[c][j] /= dv;
+      for (let r = 0; r < 3; r++) {
+        if (r === c) continue;
+        const f = M[r][c];
+        for (let j = c; j <= 3; j++) M[r][j] -= f * M[c][j];
+      }
+    }
+    return M.map(r => r[3]);
+  };
+
+  const cx = solve3(usable.map(p => p.predX / vw));
+  const cy = solve3(usable.map(p => p.predY / vh));
+  if (!cx || !cy) return undefined;
+
+  let residualSum = 0;
+  for (let i = 0; i < usable.length; i++) {
+    const [gx, gy] = rows[i];
+    const fitX = (cx[0] * gx + cx[1] * gy + cx[2]) * vw;
+    const fitY = (cy[0] * gx + cy[1] * gy + cy[2]) * vh;
+    residualSum += Math.hypot(fitX - usable[i].predX, fitY - usable[i].predY);
+  }
+  const residualPx = residualSum / usable.length;
+
+  return {
+    gainX: cx[0],
+    crossXY: cx[1],
+    offsetXPx: cx[2] * vw,
+    shearYX: cy[0],
+    gainY: cy[1],
+    offsetYPx: cy[2] * vh,
+    residualPx,
+    explainedFraction: meanError > 0
+      ? Math.max(0, Math.min(1, 1 - residualPx / meanError))
+      : 0,
+  };
+}
+
 function finishTest(
   overlay: HTMLDivElement,
   pointErrors: number[],
@@ -353,6 +550,7 @@ function finishTest(
   onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
   meta?: RunMeta,
   poseBaseline?: { yaw: number; pitch: number; roll: number } | null,
+  validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[],
 ) {
   overlay.remove();
 
@@ -362,8 +560,13 @@ function finishTest(
   const meanError = pointErrors.reduce((s, v) => s + v, 0) / pointErrors.length;
   const sortedErrors = [...pointErrors].sort((a, b) => a - b);
   const medianError = sortedErrors[Math.floor(sortedErrors.length / 2)] || 0;
-  const p90Error = sortedErrors[Math.floor(sortedErrors.length * 0.9)] || 0;
-  
+  // D9 — antes: `sorted[floor(n*0.9)]`, que com n=9 dá `sorted[8]` — ou seja, o
+  // p90 por ponto era LITERALMENTE o máximo, e o relatório publicava dois nomes
+  // para o mesmo número (p90Error === maxError em todos os relatórios
+  // existentes). Percentil linear-interpolado (mesma convenção do numpy
+  // 'linear') resolve sem mudar nenhuma outra métrica.
+  const p90Error = percentileLinear(sortedErrors, 0.9);
+
   const meanErrorX = diagnostics.reduce((s, d) => s + d.errorX, 0) / diagnostics.length || 0;
   const meanErrorY = diagnostics.reduce((s, d) => s + d.errorY, 0) / diagnostics.length || 0;
 
@@ -451,11 +654,39 @@ function finishTest(
     }
   }
 
+  // D9 — decomposição afim. Só diagnóstico: entra no JSON e no console, nunca
+  // em meanError/score. Ver o comentário do campo em `AccuracyResult`.
+  const affine = affineErrorDecomposition(diagnostics, vw, vh, meanError);
+  if (affine) {
+    console.log(
+      `[accuracy] Decomposição afim: ganhoX=${affine.gainX.toFixed(3)} ` +
+      `ganhoY=${affine.gainY.toFixed(3)} cisalhamento=${affine.shearYX.toFixed(3)} ` +
+      `offset=(${Math.round(affine.offsetXPx)}, ${Math.round(affine.offsetYPx)})px | ` +
+      `resíduo=${Math.round(affine.residualPx)}px de ${Math.round(meanError)}px ` +
+      `(${(affine.explainedFraction * 100).toFixed(0)}% do erro é mapa afim)`,
+    );
+    // Ganho fora de [0.9, 1.1] com resíduo pequeno é a assinatura de amplitude
+    // de olhar divergente entre calibração e uso — não é ruído de regressor.
+    const gainOff = Math.max(Math.abs(affine.gainX - 1), Math.abs(affine.gainY - 1));
+    if (gainOff > 0.10 && affine.explainedFraction > 0.5) {
+      console.warn(
+        `[accuracy] ⚠ Erro dominado por ganho (${(gainOff * 100).toFixed(0)}% fora de 1.0) e ` +
+        `não por ruído. Suspeitos, nesta ordem: (1) o olhar não alcançou os alvos de ` +
+        `calibração — reduza MAX_ECCENTRICITY_DEG; (2) a cabeça mudou de pose entre ` +
+        `calibração e teste (ver poseDrift); (3) a geometria configurada (polegadas/cm) ` +
+        `não corresponde à tela real.`,
+      );
+    }
+  }
+
   const result: AccuracyResult = {
     meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
     jitterRMS, score, colorClass, pointErrors, pointJitters,
     sampleMeanError, sampleMedianError, sampleP90Error, hitRateByRadius,
-    poseDrift,
+    poseDrift, affine,
+    validationOverlap: validationOverlap && validationOverlap.length > 0
+      ? validationOverlap
+      : undefined,
   };
 
   try {

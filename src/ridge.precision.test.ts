@@ -5,7 +5,8 @@
 // relação linear conhecida (ideal para Ridge) e mede:
 //   1. Que o softClamp tem derivada contínua (sem saltos de velocidade)
 //   2. Que a precisão nas bordas ≤ 1.5× a precisão central
-//   3. Que targets 5%/95% produzem menos erro de extrapolação que 10%/90%
+//   3. Que a grade de calibração mantém as invariantes de forma (D9: as
+//      posições saem do orçamento de excentricidade, não são mais constantes)
 //   4. Que sacadas rápidas preservam amplitude com os novos betas
 
 import { describe, it, expect } from 'vitest';
@@ -235,26 +236,32 @@ describe('Ridge precision — edges vs center', () => {
 
 // ── Calibration targets coverage ─────────────────────────────────────────────
 
-describe('Calibration targets — 5%/95% coverage', () => {
-  it('FULL targets cover all 9 positions at 5%/50%/95%', () => {
+// D9 — as posições dos alvos deixaram de ser constantes 5%/95%: agora saem do
+// orçamento de excentricidade angular. Ver o cabeçalho de
+// `computeCalibrationTargets` em calibration.ts para o porquê (ganho medido de
+// 1.294 em X vs 0.930 em Y no relatório 1787682565489). Estes testes afirmam
+// as invariantes da grade; os números por tela vivem em `calibration.d9.test.ts`.
+describe('Calibration targets — grade 3×3 dentro do orçamento angular', () => {
+  it('FULL cobre 3 posições distintas por eixo, simétricas em torno do centro', () => {
     expect(CALIBRATION_TARGETS_FULL).toHaveLength(9);
-    const xs = new Set(CALIBRATION_TARGETS_FULL.map(t => t.x));
-    const ys = new Set(CALIBRATION_TARGETS_FULL.map(t => t.y));
-    expect(xs).toContain(0.05);
-    expect(xs).toContain(0.5);
-    expect(xs).toContain(0.95);
-    expect(ys).toContain(0.05);
-    expect(ys).toContain(0.5);
-    expect(ys).toContain(0.95);
+    const xs = [...new Set(CALIBRATION_TARGETS_FULL.map(t => t.x))].sort((a, b) => a - b);
+    const ys = [...new Set(CALIBRATION_TARGETS_FULL.map(t => t.y))].sort((a, b) => a - b);
+    expect(xs).toHaveLength(3);
+    expect(ys).toHaveLength(3);
+    expect(xs[1]).toBeCloseTo(0.5, 10);
+    expect(ys[1]).toBeCloseTo(0.5, 10);
+    expect(xs[0] + xs[2]).toBeCloseTo(1, 10);
+    expect(ys[0] + ys[2]).toBeCloseTo(1, 10);
   });
 
-  it('QUICK targets are the 4 corners at 5%/95%', () => {
+  it('QUICK são os 4 cantos da mesma grade', () => {
     expect(CALIBRATION_TARGETS_QUICK).toHaveLength(4);
-    const positions = CALIBRATION_TARGETS_QUICK.map(t => `${t.x},${t.y}`);
-    expect(positions).toContain('0.05,0.05');
-    expect(positions).toContain('0.95,0.05');
-    expect(positions).toContain('0.05,0.95');
-    expect(positions).toContain('0.95,0.95');
+    const xs = [...new Set(CALIBRATION_TARGETS_QUICK.map(t => t.x))].sort((a, b) => a - b);
+    const ys = [...new Set(CALIBRATION_TARGETS_QUICK.map(t => t.y))].sort((a, b) => a - b);
+    expect(xs).toHaveLength(2);
+    expect(ys).toHaveLength(2);
+    expect(xs[0] + xs[1]).toBeCloseTo(1, 10);
+    expect(ys[0] + ys[1]).toBeCloseTo(1, 10);
   });
 
   it('QUICK targets are a subset of FULL targets', () => {
@@ -266,12 +273,20 @@ describe('Calibration targets — 5%/95% coverage', () => {
     }
   });
 
-  it('targets are closer to screen edge than old 10%/90%', () => {
+  it('alvos ficam dentro da tela e com amplitude suficiente para condicionar o Ridge', () => {
     const minX = Math.min(...CALIBRATION_TARGETS_FULL.map(t => t.x));
     const maxX = Math.max(...CALIBRATION_TARGETS_FULL.map(t => t.x));
-    // 5% < 10%: closer to edge
-    expect(minX).toBeLessThan(0.10);
-    expect(maxX).toBeGreaterThan(0.90);
+    const minY = Math.min(...CALIBRATION_TARGETS_FULL.map(t => t.y));
+    const maxY = Math.max(...CALIBRATION_TARGETS_FULL.map(t => t.y));
+    // Dentro da tela, com folga para o alvo de 80 px caber inteiro.
+    // 0.049 e não 0.05: 0.5 - 0.45 dá 0.04999999999999999 em ponto flutuante.
+    expect(minX).toBeGreaterThanOrEqual(0.049);
+    expect(maxX).toBeLessThanOrEqual(0.951);
+    expect(minY).toBeGreaterThanOrEqual(0.049);
+    expect(maxY).toBeLessThanOrEqual(0.951);
+    // Amplitude mínima: sem span o sistema normal fica mal condicionado.
+    expect(maxX - minX).toBeGreaterThanOrEqual(0.44);
+    expect(maxY - minY).toBeGreaterThanOrEqual(0.44);
   });
 });
 

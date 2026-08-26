@@ -49,7 +49,12 @@ describe('GazeRegressor golden snapshot', () => {
 
     // Train once via the raw function, then wrap the SAME model in the interface.
     // This isolates the wrapper from CV λ-selection to test only the predict path.
-    const model = trainRidgeModel(scaled, targets);
+// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
+    // passamos o valor explícito para este teste continuar descrevendo o MESMO
+    // regime de regularização que sempre descreveu.
+    const LAMBDA_LEGACY_EQUIV = 1 / 9;
+    const model = trainRidgeModel(scaled, targets, LAMBDA_LEGACY_EQUIV);
     const probe = scaler.transformSingle([0, 0, 0.1, 0.05]);
     const golden = predictRidge(model, probe);
 
@@ -67,7 +72,12 @@ describe('GazeRegressor golden snapshot', () => {
     scaler.fit(features);
     const scaled = scaler.transform(features);
 
-    const model = trainRidgeModel(scaled, targets);
+// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
+    // passamos o valor explícito para este teste continuar descrevendo o MESMO
+    // regime de regularização que sempre descreveu.
+    const LAMBDA_LEGACY_EQUIV = 1 / 9;
+    const model = trainRidgeModel(scaled, targets, LAMBDA_LEGACY_EQUIV);
     const maxF0 = Math.max(...features.map(f => f[0]));
     const probe = scaler.transformSingle([maxF0 * 2, 0, 0.1, 0.05]);
     const golden = predictRidge(model, probe);

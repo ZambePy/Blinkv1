@@ -89,6 +89,9 @@ export interface CalibrationApi {
     quick?: boolean;
     opticalCondition?: import('../calibrationProfiles').OpticalCondition;
     label?: string;
+    // D9 — geometria física da tela/usuário. Posiciona a grade dentro do
+    // orçamento de excentricidade angular; ver `computeCalibrationTargets`.
+    geometry?: Partial<import('../calibration').CalibrationGeometry>;
   }): void;
   // D6.1 — alvos ativos para renderização na UI. Reflete a lista de 4 cantos
   // (quick) ou grade 3×3 (full) da sessão em curso. Antes de iniciar, retorna
@@ -142,6 +145,17 @@ export interface RecordingApi {
   getStats(): { frames: number; dropped: number };
   exportAsJSONL(): string;
   clear(): void;
+}
+
+// Escrita de gravação em disco (só existe quando rodando sob Electron —
+// browser puro cai no fallback de download). Exposta via preload em
+// window.irisflowElectron; contrato compartilhado entre preload/renderer.
+export interface ElectronSaveResult {
+  absPath: string;
+  bytes: number;
+}
+export interface IrisflowElectronBridge {
+  saveRecording(jsonl: string, filename: string): Promise<ElectronSaveResult>;
 }
 
 export interface EngineDiagnostics {
@@ -884,6 +898,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         quick?: boolean;
         opticalCondition?: import('../calibrationProfiles').OpticalCondition;
         label?: string;
+        geometry?: Partial<import('../calibration').CalibrationGeometry>;
       }): void {
         calibration.startCalibrationMode(opts);
       },

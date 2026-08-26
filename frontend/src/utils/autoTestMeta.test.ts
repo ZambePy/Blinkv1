@@ -84,13 +84,13 @@ describe('buildAutoTestMeta', () => {
   it('preserva geometria (distanciaCm, telaPolegadas) tal como recebida', () => {
     const meta = buildAutoTestMeta({
       distanciaCm: 55,
-      telaPolegadas: 23.3,
+      telaPolegadas: 23.6,
       dateISO: '2026-08-23',
       sessionUptimeMs: 60_000,
       opticalCondition: 'desconhecido',
     });
     expect(meta.distanciaCm).toBe(55);
-    expect(meta.telaPolegadas).toBe(23.3);
+    expect(meta.telaPolegadas).toBe(23.6);
   });
 
   it('observacoes inclui a condição óptica para o leitor do relatório saber a origem do valor', () => {

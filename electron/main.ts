@@ -1,7 +1,43 @@
-import { app, BrowserWindow, session } from 'electron';
+import { app, BrowserWindow, ipcMain, session } from 'electron';
+import { promises as fs } from 'node:fs';
 import path from 'node:path';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173';
+
+// Raiz do projeto: dist-electron/ fica um nível abaixo. Em produção
+// (app.isPackaged), main.cjs mora em resources/app.asar/dist-electron/ e
+// escrever "na raiz do projeto" não faz sentido; cai em userData. Em dev
+// é o repo mesmo.
+function resolveSaveDir(): string {
+  if (app.isPackaged) return app.getPath('userData');
+  return path.resolve(__dirname, '..');
+}
+
+// Aceita só nome de arquivo (sem separador de path). Bloqueia traversal
+// e mantém a promessa "salva na raiz do projeto".
+function isSafeFilename(name: string): boolean {
+  if (!name || typeof name !== 'string') return false;
+  if (name.includes('/') || name.includes('\\')) return false;
+  if (name.startsWith('.')) return false;
+  if (!name.endsWith('.jsonl')) return false;
+  return true;
+}
+
+ipcMain.handle(
+  'irisflow:saveRecording',
+  async (_event, payload: { jsonl?: unknown; filename?: unknown }) => {
+    const jsonl = typeof payload?.jsonl === 'string' ? payload.jsonl : '';
+    const filename = typeof payload?.filename === 'string' ? payload.filename : '';
+    if (!jsonl) throw new Error('jsonl vazio');
+    if (!isSafeFilename(filename)) throw new Error(`filename inválido: ${filename}`);
+    const dir = resolveSaveDir();
+    const absPath = path.join(dir, filename);
+    await fs.writeFile(absPath, jsonl, 'utf8');
+    const bytes = Buffer.byteLength(jsonl, 'utf8');
+    console.log(`[irisflow:saveRecording] escreveu ${bytes} bytes em ${absPath}`);
+    return { absPath, bytes };
+  },
+);
 
 function createWindow(): void {
   const win = new BrowserWindow({

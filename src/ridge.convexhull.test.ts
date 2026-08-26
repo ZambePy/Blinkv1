@@ -69,7 +69,12 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     const scaler = new StandardScaler();
     scaler.fit(features);
     const scaledFeatures = scaler.transform(features);
-    const model = trainRidgeModel(scaledFeatures, targets); // lambda default = 1.0, igual à produção
+// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
+    // passamos o valor explícito para este teste continuar descrevendo o MESMO
+    // regime de regularização que sempre descreveu.
+    const LAMBDA_LEGACY_EQUIV = 1 / 9;
+    const model = trainRidgeModel(scaledFeatures, targets, LAMBDA_LEGACY_EQUIV);
 
     // Ponto DENTRO do fecho convexo: centro da grade (gx=gy=0.5 → f0=f1=0)
     const inHullRaw = [0, 0, 0.1, 0.05];

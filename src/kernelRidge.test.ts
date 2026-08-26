@@ -56,7 +56,12 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     // livremente para fora de [0,1]. O clamp downstream em `mapGaze` é que
     // "satura" o valor final. Aqui checamos a extrapolação bruta, que revela
     // o mesmo problema de saturação da UI.
-    const ridgeModel = trainRidgeModel(scaled, targets);
+// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
+    // passamos o valor explícito para este teste continuar descrevendo o MESMO
+    // regime de regularização que sempre descreveu.
+    const LAMBDA_LEGACY_EQUIV = 1 / 9;
+    const ridgeModel = trainRidgeModel(scaled, targets, LAMBDA_LEGACY_EQUIV);
     const ridgePred  = predictRidge(ridgeModel, probeScaled);
     const ridgeSaturates = ridgePred.x < 0 || ridgePred.x > 1;
 
@@ -160,7 +165,12 @@ describe('KernelRidgeRegressor — Gate 2: precisão in-hull vs Ridge', () => {
     const tgtsX  = targets.map(t => t.screenX);
     const tgtsY  = targets.map(t => t.screenY);
 
-    const ridgeModel = trainRidgeModel(scaled, targets);
+// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
+    // passamos o valor explícito para este teste continuar descrevendo o MESMO
+    // regime de regularização que sempre descreveu.
+    const LAMBDA_LEGACY_EQUIV = 1 / 9;
+    const ridgeModel = trainRidgeModel(scaled, targets, LAMBDA_LEGACY_EQUIV);
     const kr = new KernelRidgeRegressor();
     kr.train(scaled, tgtsX, tgtsY);
 
