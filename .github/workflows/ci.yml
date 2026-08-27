@@ -52,11 +52,16 @@ jobs:
       # >= 22.12.0 e emitia EBADENGINE no Node 20.
       - uses: actions/setup-node@v4
         with:
-          node-version: 24
+          node-version: 24.11.1
           cache: npm
           cache-dependency-path: |
             package-lock.json
             frontend/package-lock.json
+        
+      - name: Verificar versões do ambiente
+        run: |
+          node --version
+          npm --version
 
       # `working-directory` em vez de `npm --prefix <dir>`: o npm interpreta o
       # diretório como argumento POSICIONAL de `ci` (`npm ci frontend`) e
