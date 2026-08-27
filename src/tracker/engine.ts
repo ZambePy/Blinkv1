@@ -99,6 +99,11 @@ export interface CalibrationApi {
   getCalibrationTargets(): readonly { x: number; y: number }[];
   getCalibrationMode(): 'full' | 'quick' | null;
   startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void;
+  /** D12 — compensação de distância. Ver `distanceCompensation.ts`. */
+  setCameraFovDeg(fov: number | null): void;
+  setCalibrationDistancesCm(cameraCm: number | null, screenCm: number | null): void;
+  getCurrentCameraDistanceCm(): number | null;
+  getDistanceRange(): import('../distanceCompensation').DistanceRange | null;
   // A1-1 — outcome tipado. Callback opcional; se fornecido, recebe { ok: true }
   // no sucesso ou { ok: false, reason, detail } em qualquer falha do treino
   // (matriz singular, features degeneradas, amostras insuficientes, etc.).
@@ -561,6 +566,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           (landmarks[33].y - landmarks[263].y) * (videoEl?.videoHeight ?? 0),
         );
         latestFaceCenter = { x: landmarks[1].x, y: landmarks[1].y };
+        // D12 — alimenta a compensação de distância. Dois números por quadro;
+        // `mapGaze` converte para cm usando o campo de visão calibrado.
+        calibration.setCurrentFrameGeometry(latestIodPx, videoEl?.videoWidth ?? 0);
 
         const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
         const faceMatrix = rawMatrix ? new Float32Array(rawMatrix) : undefined;
@@ -982,6 +990,18 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getCalibrationMode(): 'full' | 'quick' | null {
         return calibration.getCalibrationMode();
+      },
+      setCameraFovDeg(fov: number | null): void {
+        calibration.setCameraFovDeg(fov);
+      },
+      setCalibrationDistancesCm(cameraCm: number | null, screenCm: number | null): void {
+        calibration.setCalibrationDistancesCm(cameraCm, screenCm);
+      },
+      getCurrentCameraDistanceCm(): number | null {
+        return calibration.getCurrentCameraDistanceCm();
+      },
+      getDistanceRange() {
+        return calibration.getDistanceRange();
       },
       startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void {
         calibration.startCollectingPoint(x, y, onDone);

@@ -224,6 +224,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     engineRef.current?.calibration.setEyeDominance?.(settings.eyeDominance);
   }, [settings.eyeDominance]);
 
+  // D12 — o campo de visão habilita a compensação de distância: sem ele o
+  // pipeline não converte tamanho de rosto em centímetros e a compensação fica
+  // inativa (comportamento anterior). Propagado em efeito próprio para reagir
+  // à calibração de FOV feita em Configurações sem exigir recarregar.
+  useEffect(() => {
+    engineRef.current?.calibration.setCameraFovDeg?.(settings.cameraHorizontalFovDeg);
+  }, [settings.cameraHorizontalFovDeg]);
+
   const subscribe = useCallback((cb: (s: GazeSample) => void) => {
     subscribersRef.current.add(cb);
     return () => {
@@ -830,6 +838,13 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         engineRef.current?.calibration.setOnlineCalibrationEnabled(enabled),
       onlineSampleCount: () => engineRef.current?.calibration.onlineSampleCount() ?? 0,
       setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
+      // D12 — compensação de distância. Ver `distanceCompensation.ts`.
+      setCameraFovDeg: (fov) => engineRef.current?.calibration.setCameraFovDeg(fov),
+      setCalibrationDistancesCm: (cameraCm, screenCm) =>
+        engineRef.current?.calibration.setCalibrationDistancesCm(cameraCm, screenCm),
+      getCurrentCameraDistanceCm: () =>
+        engineRef.current?.calibration.getCurrentCameraDistanceCm() ?? null,
+      getDistanceRange: () => engineRef.current?.calibration.getDistanceRange() ?? null,
       setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
       resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
       // D6.3 — indicador de drift consulta este valor a cada tick para

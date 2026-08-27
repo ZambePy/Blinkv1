@@ -12,10 +12,14 @@ import type { RidgeModel } from './ridge';
 import { trainRidgeModel, predictRidge, targetGroupKey, RidgeRegressor } from './ridge';
 import { L2CS_BLOCK_DIM } from './l2cs/block';
 import {
-  applyDistanceCorrectionToFeatures,
-  computeDistanceCorrectionRatio,
 } from './distanceCorrection';
 import { EXPERIMENT } from './config/experiment';
+import { estimateDistanceCm } from './setupReadiness';
+import {
+  evaluateDistanceRange,
+  applyDistanceRatioToPrediction,
+  type DistanceRange,
+} from './distanceCompensation';
 import type { RecordedSampleDecision } from './telemetry/types';
 import { resetEarHistory } from './extractor';
 import {
@@ -239,6 +243,64 @@ export const featureScalerRight = new StandardScaler();
 // dos pontos carregou o valor (compat com callers antigos). O que
 // mapGaze faz com null: sem correção (comportamento pré-D5.2).
 let calibrationRefDistance: number | null = null;
+
+// D12 — distâncias da calibração em CENTÍMETROS, para a compensação de saída.
+//
+// `calibrationRefDistance` acima é o proxy `1/scale3D`, adimensional: serve
+// para razões, não para a aritmética aditiva que a compensação exige (ver o
+// cabeçalho de `distanceCompensation.ts` sobre por que é aditiva).
+let calibrationCameraDistanceCm: number | null = null;
+let calibrationScreenDistanceCm: number | null = null;
+
+/** D12 — registra as distâncias desta calibração, em cm. Chamado pela UI, que
+ *  é quem conhece a distância medida da câmera e a configurada até a tela. */
+export function setCalibrationDistancesCm(
+  cameraCm: number | null,
+  screenCm: number | null,
+): void {
+  calibrationCameraDistanceCm = cameraCm;
+  calibrationScreenDistanceCm = screenCm;
+}
+
+export function getCalibrationDistancesCm(): { cameraCm: number | null; screenCm: number | null } {
+  return { cameraCm: calibrationCameraDistanceCm, screenCm: calibrationScreenDistanceCm };
+}
+
+// D12 — geometria do quadro corrente e campo de visão da câmera.
+//
+// Ficam em estado de módulo, e não como parâmetros de `mapGaze`, de propósito:
+// a alternativa exigiria propagar dois valores por engine → mapGaze e por
+// accuracy → mapGaze. Como estado, o teste de precisão herda a compensação sem
+// nenhuma mudança de assinatura — e medir o teste SEM a compensação que o
+// cursor usa faria o relatório descrever um sistema que não existe.
+let currentIodPx = 0;
+let currentVideoWidth = 0;
+let cameraFovDeg: number | null = null;
+
+/** Campo de visão horizontal da câmera, calibrado uma vez pelo cuidador. Sem
+ *  ele não há como converter tamanho de rosto em centímetros, e a compensação
+ *  de distância fica inativa (comportamento anterior ao D12). */
+export function setCameraFovDeg(fov: number | null): void {
+  cameraFovDeg = fov;
+}
+
+/** Chamado a cada quadro pelo engine. Barato: dois números. */
+export function setCurrentFrameGeometry(iodPx: number, videoWidth: number): void {
+  currentIodPx = iodPx;
+  currentVideoWidth = videoWidth;
+}
+
+/** Distância câmera→rosto do quadro corrente, em cm. `null` sem FOV calibrado. */
+export function getCurrentCameraDistanceCm(): number | null {
+  return estimateDistanceCm(currentIodPx, currentVideoWidth, cameraFovDeg);
+}
+
+/** Última avaliação de faixa de distância. Diagnóstico para a UI e o relatório. */
+let lastDistanceRange: DistanceRange | null = null;
+
+export function getDistanceRange(): DistanceRange | null {
+  return lastDistanceRange;
+}
 
 export function getCalibrationRefDistance(): number | null {
   return calibrationRefDistance;
@@ -1161,12 +1223,19 @@ interface TrainingSummary {
 // Puramente diagnóstico. Não altera o modelo, não bloqueia, não entra em
 // nenhuma métrica exibida como resultado.
 export interface CalibrationFitDiagnostics {
-  /** Erro médio do modelo nas próprias amostras de treino, em fração de tela. */
-  trainErrorNorm: number;
-  /** Erro leave-one-target-out médio, em fração de tela. */
-  looErrorNorm: number;
+  /** Erro médio do modelo nas próprias amostras de treino, em PIXELS.
+   *
+   *  Em px e não em "fração de tela" porque fração de tela não é uma grandeza
+   *  única: x é fração da largura e y da altura, e numa tela 16:9 elas valem
+   *  coisas diferentes. Combinar as duas com `hypot` e multiplicar pela
+   *  diagonal — como esta métrica fazia antes — inflava um erro puro de Y em
+   *  104%. Cada eixo agora é convertido pela sua própria dimensão antes de
+   *  compor. */
+  trainErrorPx: number;
+  /** Erro leave-one-target-out médio, em pixels. Mesma convenção. */
+  looErrorPx: number;
   /** Erro LOO por alvo, na ordem dos alvos únicos. */
-  looByTarget: { x: number; y: number; errorNorm: number; samples: number }[];
+  looByTarget: { x: number; y: number; errorPx: number; samples: number }[];
   /** Média e desvio da pose durante TODA a calibração (rad). O desvio é o
    *  número interessante: pose que varia muito entre alvos vira variável
    *  confundida com o olhar. */
@@ -1279,8 +1348,8 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   );
   const d = lastFitDiagnostics;
   console.log(
-    `[calib] D10 ajuste — treino=${(d.trainErrorNorm * 100).toFixed(2)}% de tela | ` +
-    `LOO=${(d.looErrorNorm * 100).toFixed(2)}% | L2CS válido=${(d.l2csValidFraction * 100).toFixed(0)}% | ` +
+    `[calib] D10 ajuste — treino=${d.trainErrorPx.toFixed(0)}px | ` +
+    `LOO=${d.looErrorPx.toFixed(0)}px | L2CS válido=${(d.l2csValidFraction * 100).toFixed(0)}% | ` +
     `amostras/alvo=[${d.samplesPerTarget.join(',')}]`,
   );
   if (d.poseStd) {
@@ -1300,8 +1369,13 @@ export function computeFitDiagnostics(
   featuresRight: number[][],
   targets: { screenX: number; screenY: number }[],
   profile?: readonly CalibrationPoint[],
+  viewport?: { w: number; h: number },
 ): CalibrationFitDiagnostics {
   const n = featuresLeft.length;
+  // Cada eixo convertido pela SUA dimensão. Ver o comentário de `trainErrorPx`.
+  const vw = viewport?.w ?? (typeof document !== 'undefined' ? document.documentElement.clientWidth : 1920);
+  const vh = viewport?.h ?? (typeof document !== 'undefined' ? document.documentElement.clientHeight : 1080);
+  const errPx = (dx: number, dy: number) => Math.hypot(dx * vw, dy * vh);
 
   // Predição binocular idêntica à de `mapGaze` sem pesos: média simples.
   const binocular = (
@@ -1332,15 +1406,15 @@ export function computeFitDiagnostics(
   };
 
   // ── erro de treino ────────────────────────────────────────────────────
-  let trainErrorNorm = 0;
+  let trainErrorPx = 0;
   if (n > 0 && regressorLeft && regressorRight) {
     let sum = 0;
     for (let i = 0; i < n; i++) {
       const a = regressorLeft.predict(featureScalerLeft.transformSingle(featuresLeft[i]));
       const b = regressorRight.predict(featureScalerRight.transformSingle(featuresRight[i]));
-      sum += Math.hypot((a.x + b.x) / 2 - targets[i].screenX, (a.y + b.y) / 2 - targets[i].screenY);
+      sum += errPx((a.x + b.x) / 2 - targets[i].screenX, (a.y + b.y) / 2 - targets[i].screenY);
     }
-    trainErrorNorm = sum / n;
+    trainErrorPx = sum / n;
   }
 
   // ── agrupamento por alvo ──────────────────────────────────────────────
@@ -1366,17 +1440,17 @@ export function computeFitDiagnostics(
         let s = 0;
         for (const i of test) {
           const p = binocular(f.sl, f.sr, f.ml, f.mr, featuresLeft[i], featuresRight[i]);
-          s += Math.hypot(p.x - targets[i].screenX, p.y - targets[i].screenY);
+          s += errPx(p.x - targets[i].screenX, p.y - targets[i].screenY);
         }
         const e = s / test.length;
-        looByTarget.push({ x: targets[test[0]].screenX, y: targets[test[0]].screenY, errorNorm: e, samples: test.length });
+        looByTarget.push({ x: targets[test[0]].screenX, y: targets[test[0]].screenY, errorPx: e, samples: test.length });
         looSum += e; looCount++;
       } catch {
-        looByTarget.push({ x: targets[test[0]].screenX, y: targets[test[0]].screenY, errorNorm: NaN, samples: test.length });
+        looByTarget.push({ x: targets[test[0]].screenX, y: targets[test[0]].screenY, errorPx: NaN, samples: test.length });
       }
     }
   }
-  const looErrorNorm = looCount > 0 ? looSum / looCount : NaN;
+  const looErrorPx = looCount > 0 ? looSum / looCount : NaN;
 
   // ── pose e validade do L2CS durante a calibração ──────────────────────
   let poseMean: CalibrationFitDiagnostics['poseMean'] = null;
@@ -1412,8 +1486,8 @@ export function computeFitDiagnostics(
   }
 
   return {
-    trainErrorNorm,
-    looErrorNorm,
+    trainErrorPx,
+    looErrorPx,
     looByTarget,
     poseMean,
     poseStd,
@@ -2045,28 +2119,29 @@ export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
   perEyeWeight?: { left: number; right: number },
-  currentCameraDistance?: number | null,
+  // D12 — mantido na assinatura por compatibilidade com os callers existentes
+  // (engine e testes de regressão), mas não é mais lido: a compensação de
+  // distância passou a usar `setCurrentFrameGeometry` + `setCameraFovDeg`, que
+  // dão a distância em CENTÍMETROS. Este parâmetro carregava o proxy
+  // adimensional `1/scale3D`, que serve para razões mas não para a aritmética
+  // aditiva que a compensação exige.
+  _currentCameraDistance?: number | null,
 ): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
 
-  // D5.2 — correção geométrica de distância câmera-rosto. NO-OP quando:
-  //   - flag EXPERIMENT.applyDistanceCorrection = false (default);
-  //   - caller não passou currentCameraDistance;
-  //   - calibrationRefDistance ainda não foi capturada (perfis pré-D5.2);
-  //   - ratio computado sai fora de [1/3, 3] (rejeitado pelo helper).
-  // Em qualquer um desses casos, a função pura devolve o vetor idêntico.
-  let correctedLeft = featuresLeft;
-  let correctedRight = featuresRight;
-  if (EXPERIMENT.applyDistanceCorrection) {
-    const ratio = computeDistanceCorrectionRatio(currentCameraDistance, calibrationRefDistance);
-    if (ratio !== 1) {
-      correctedLeft = applyDistanceCorrectionToFeatures(featuresLeft, ratio);
-      correctedRight = applyDistanceCorrectionToFeatures(featuresRight, ratio);
-    }
-  }
-
-  const scaledLeft  = featureScalerLeft.transformSingle(correctedLeft);
-  const scaledRight = featureScalerRight.transformSingle(correctedRight);
+  // D12 — a compensação de distância deixou de mexer nas FEATURES e passou a
+  // corrigir a SAÍDA (ver o bloco no fim desta função e o cabeçalho de
+  // `distanceCompensation.ts`).
+  //
+  // O caminho antigo (`applyDistanceCorrectionToFeatures`) escalava as dims de
+  // offset do vetor. Duas objeções, e a segunda é fatal:
+  //   1. Geometricamente as features estão CERTAS — o ângulo do olho não mudou
+  //      quando a pessoa se afastou. Quem erra é a conversão para pixels.
+  //   2. Aquele helper depende dos índices 25..34 do vetor, que DEIXARAM DE
+  //      EXISTIR quando o conjunto ativo virou `iris12` (12 dims). Ele seguiria
+  //      rodando sem erro e corrigindo dimensões erradas — falha silenciosa.
+  const scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
+  const scaledRight = featureScalerRight.transformSingle(featuresRight);
 
   let predLeft: { x: number; y: number };
   let predRight: { x: number; y: number };
@@ -2150,8 +2225,24 @@ export function mapGaze(
     }
     return v;
   }
-  const avgNormX = softClamp(baseX);
-  const avgNormY = softClamp(baseY);
+  // D12 — compensação de distância, aplicada em espaço NORMALIZADO e ANTES do
+  // softClamp.
+  //
+  // Antes do clamp porque o clamp é quem garante que o resultado fique dentro
+  // da tela; compensar depois poderia empurrar o valor para fora de novo.
+  // Em espaço normalizado o centro é 0,5 — e o centro é o ponto fixo correto,
+  // porque olhar para o centro corresponde a ângulo zero, que não depende de
+  // distância nenhuma.
+  const range = evaluateDistanceRange(
+    getCurrentCameraDistanceCm(),
+    calibrationCameraDistanceCm,
+    calibrationScreenDistanceCm,
+  );
+  lastDistanceRange = range;
+  const compensado = applyDistanceRatioToPrediction(baseX, baseY, 1, 1, range.ratio);
+
+  const avgNormX = softClamp(compensado.x);
+  const avgNormY = softClamp(compensado.y);
 
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;

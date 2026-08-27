@@ -9,7 +9,7 @@
 
 import {
   mapGaze, setGazeCorrections, resetSessionBias, getCalibrationTargets,
-  getCalibrationFitDiagnostics,
+  getCalibrationFitDiagnostics, getDistanceRange, getCalibrationDistancesCm,
 } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { EXPERIMENT } from './config/experiment';
@@ -737,14 +737,26 @@ function finishTest(
     pipeline,
     result,
     diagnostics,
+    // D12 — a faixa de distância no momento do teste. Diz se o resultado foi
+    // obtido na distância de calibração ou compensado, e quanto. Sem isto, dois
+    // relatórios com o mesmo `meanError` podem descrever situações diferentes:
+    // um medido na posição de calibração e outro a 15 cm dela.
+    distanceRange: (() => {
+      const r = getDistanceRange();
+      const cal = getCalibrationDistancesCm();
+      if (!r) return null;
+      return {
+        status: r.status,
+        deltaCm: r.deltaCm,
+        ratioAplicado: r.ratio,
+        distanciaCalibracaoCameraCm: cal.cameraCm,
+        distanciaCalibracaoTelaCm: cal.screenCm,
+        distanciaTelaNoTesteCm: r.screenDistanceNowCm,
+        dentroDaFaixa: r.status === 'ok',
+      };
+    })(),
     calibrationFit: fit
-      ? {
-          ...fit,
-          // Versões em px na resolução desta tela, para comparar direto com
-          // `result.meanError` sem o leitor ter que multiplicar na cabeça.
-          trainErrorPx: fit.trainErrorNorm * Math.hypot(vw, vh),
-          looErrorPx: fit.looErrorNorm * Math.hypot(vw, vh),
-        }
+      ? fit
       : null,
     geometry: {
       assumed: geometryAssumed, distPx, pxPorCm: pxPorCm || undefined,

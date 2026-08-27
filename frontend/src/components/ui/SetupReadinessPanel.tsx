@@ -51,6 +51,7 @@ const LABEL_BY_ID: Record<string, string> = {
   viewport: 'Tela cheia',
   resolution: 'Câmera',
   distance: 'Distância',
+  distanceRange: 'Faixa de distância',
   centering: 'Enquadramento',
   headPose: 'Postura',
   lighting: 'Luz',
@@ -69,7 +70,7 @@ export interface SetupReadinessPanelProps {
 }
 
 export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onReport }) => {
-  const { getDiagnostics, getCameraStream, getCameraTuning, cameraError } = useGaze();
+  const { getDiagnostics, getCameraStream, getCameraTuning, cameraError, calibration } = useGaze();
   const { settings, updateSettings } = useSettings();
   // Etapa 1 → Etapa 2: o campo de visão calibrado é o que habilita o medidor
   // de distância e o alvo "posicione a câmera a X cm". Sem ele o painel ainda
@@ -143,6 +144,9 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
         : null;
       const next = evaluateReadiness(agg, {
         horizontalFovDeg,
+        // D12 — "dentro/fora da faixa" em relação à distância de calibração.
+        // Só aparece depois que existe uma calibração com distâncias gravadas.
+        distanceRange: calibration.getDistanceRange?.() ?? null,
         flicker,
         powerLineHz: flicker?.detected
           ? inferPowerLineHz(flicker.dominantHz, d.brightnessHistoryFps)
@@ -153,7 +157,7 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
       onReport?.(next);
     }, 100);
     return () => clearInterval(id);
-  }, [getDiagnostics, onReport, horizontalFovDeg, getCameraTuning]);
+  }, [getDiagnostics, onReport, horizontalFovDeg, getCameraTuning, calibration]);
 
   const checks = report?.checks ?? [];
   // `warn` e `fail` primeiro e por extenso; `ok` vira selo compacto.

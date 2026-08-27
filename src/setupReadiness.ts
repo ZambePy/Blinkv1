@@ -31,6 +31,7 @@ export type CheckStatus = 'ok' | 'warn' | 'fail' | 'unknown';
 
 export type CheckId =
   | 'face'
+  | 'distanceRange'
   | 'flicker'
   | 'viewport'
   | 'resolution'
@@ -78,6 +79,13 @@ export interface ReadinessSnapshot {
 
 /** Sinais que não vêm de um frame só. */
 export interface ReadinessContext {
+  /** D12 — faixa de distância em relação à calibração. Quando presente vira
+   *  uma checagem própria: "dentro da faixa" (compensado) vs "fora". */
+  distanceRange?: {
+    status: 'ok' | 'warn' | 'out' | 'unknown';
+    deltaCm: number | null;
+    message: string;
+  } | null;
   /** Campo de visão horizontal da câmera (Etapa 1). Habilita a estimativa de
    *  distância e o alvo de posicionamento. */
   horizontalFovDeg?: number | null;
@@ -390,6 +398,21 @@ export function evaluateReadiness(
           ? 'Sem reflexo persistente nos olhos.'
           : `Reflexo em ${persist !== undefined ? `${(persist * 100).toFixed(0)}% dos frames` : 'cena'} — ` +
             'assinatura de lente de óculos. Incline a tela ~10° para baixo ou reduza luzes atrás de você.',
+      });
+    }
+
+    // ── faixa de distância em relação à calibração ─────────────────────────
+    // Diferente do item `distance`, que pergunta "o rosto tem pixels
+    // suficientes?". Este pergunta "a posição de agora está dentro da faixa que
+    // a compensação cobre?". São restrições independentes: dá para estar bem
+    // enquadrado e ainda assim longe demais da posição em que se calibrou.
+    if (ctx.distanceRange && ctx.distanceRange.status !== 'unknown') {
+      const dr = ctx.distanceRange;
+      const status: CheckStatus =
+        dr.status === 'ok' ? 'ok' : dr.status === 'warn' ? 'warn' : 'fail';
+      checks.push({
+        id: 'distanceRange', status, value: dr.deltaCm,
+        message: dr.message,
       });
     }
 

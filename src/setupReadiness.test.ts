@@ -348,3 +348,55 @@ describe('effectiveViewingDistanceCm — a medição realimenta o pipeline', () 
     expect(effectiveViewingDistanceCm(130, 60).source).toBe('measured');
   });
 });
+
+describe('checagem de faixa de distância (D12)', () => {
+  it('sem calibração com distâncias, o item nem aparece', () => {
+    const ids = evaluateReadiness(goodSnapshot()).checks.map((c) => c.id);
+    expect(ids).not.toContain('distanceRange');
+  });
+
+  it('status unknown também não emite o item', () => {
+    const r = evaluateReadiness(goodSnapshot(), {
+      distanceRange: { status: 'unknown', deltaCm: null, message: 'x' },
+    });
+    expect(r.checks.map((c) => c.id)).not.toContain('distanceRange');
+  });
+
+  it('dentro da faixa aparece marcado como OK', () => {
+    const r = evaluateReadiness(goodSnapshot(), {
+      distanceRange: { status: 'ok', deltaCm: 4, message: 'compensado automaticamente' },
+    });
+    const c = r.checks.find((x) => x.id === 'distanceRange')!;
+    expect(c.status).toBe('ok');
+    expect(c.value).toBe(4);
+  });
+
+  it('fora da faixa vira falha e derruba canStart', () => {
+    const r = evaluateReadiness(goodSnapshot(), {
+      distanceRange: { status: 'out', deltaCm: -30, message: 'fora da faixa' },
+    });
+    expect(r.checks.find((x) => x.id === 'distanceRange')!.status).toBe('fail');
+    expect(r.canStart).toBe(false);
+    // Mas não bloqueia de forma dura: dá para calibrar de novo aqui mesmo.
+    expect(r.blockedHard).toBe(false);
+  });
+
+  it('warn avisa sem impedir', () => {
+    const r = evaluateReadiness(goodSnapshot(), {
+      distanceRange: { status: 'warn', deltaCm: -10, message: 'precisão cai nas bordas' },
+    });
+    expect(r.checks.find((x) => x.id === 'distanceRange')!.status).toBe('warn');
+    expect(r.canStart).toBe(true);
+  });
+
+  it('é independente da checagem `distance` — perguntam coisas diferentes', () => {
+    // `distance` = o rosto tem pixels suficientes? `distanceRange` = a posição
+    // de agora está dentro do que a compensação cobre? Dá para estar bem
+    // enquadrado e ainda assim longe da posição em que se calibrou.
+    const r = evaluateReadiness(goodSnapshot(), {
+      distanceRange: { status: 'out', deltaCm: 25, message: 'fora' },
+    });
+    expect(r.checks.find((x) => x.id === 'distance')!.status).toBe('ok');
+    expect(r.checks.find((x) => x.id === 'distanceRange')!.status).toBe('fail');
+  });
+});

@@ -362,6 +362,14 @@ export const CalibrationCheck: React.FC = () => {
       console.log(`[Etapa1] distância da sessão: ${dist.cm.toFixed(1)} cm (${dist.source}).`);
     }
 
+    // D12 — congela as distâncias desta calibração. A compensação de distância
+    // usa a VARIAÇÃO em relação a estes dois números para reescalar a predição
+    // quando o paciente sentar mais perto ou mais longe depois.
+    calibration.setCalibrationDistancesCm?.(
+      calibration.getCurrentCameraDistanceCm?.() ?? null,
+      dist.cm,
+    );
+
     calibration.startCalibrationMode?.({
       quick,
       opticalCondition,
