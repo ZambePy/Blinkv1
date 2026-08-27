@@ -41,14 +41,15 @@ function calibrarCom(dims: number): void {
   // relógio o suficiente para CRUZAR esse teto, o perfil sai vazio mesmo com
   // frames aceitos: eles ficam presos no buffer do ponto.
   //
-  // Passo de 300 ms × 15 amostras cobre 4,5 s: descarta a primeira, aceita ~9 e
-  // fecha o ponto.
+  // Passo de 80 ms × 40 amostras cobre 3,2 s. Descarta as 5 primeiras
+  // (acomodação < 400 ms) e aceita ~17 antes do ponto fechar em 1680 ms — acima
+  // de MIN_ACCEPTED_SAMPLES (15), que passou a rejeitar pontos ralos em 1.1.
   let relogio = 0;
-  const spy = vi.spyOn(performance, 'now').mockImplementation(() => (relogio += 300));
+  const spy = vi.spyOn(performance, 'now').mockImplementation(() => (relogio += 80));
   startCalibrationMode();
   for (const t of alvos) {
     startCollectingPoint(t.x, t.y, () => {});
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 40; i++) {
       const v = Array.from({ length: dims }, (_, d) =>
         Math.sin(d * 1.7 + 0.3) * t.x + Math.cos(d * 2.3 + 1.1) * t.y + rnd() * 0.01);
       const w = Array.from({ length: dims }, (_, d) =>
@@ -138,11 +139,11 @@ describe('completeCalibration — preflight de amostras', () => {
 
   it('menos de 3 alvos únicos também é insuficiente', () => {
     let relogio = 0;
-    vi.spyOn(performance, 'now').mockImplementation(() => (relogio += 300));
+    vi.spyOn(performance, 'now').mockImplementation(() => (relogio += 80));
     startCalibrationMode();
     for (const t of [{ x: 0.3, y: 0.3 }, { x: 0.7, y: 0.7 }]) {
       startCollectingPoint(t.x, t.y, () => {});
-      for (let i = 0; i < 15; i++) {
+      for (let i = 0; i < 40; i++) {
         const v = Array.from({ length: 8 }, (_, d) => Math.sin(d) * t.x + Math.cos(d) * t.y);
         feedRawData(v, v.slice(), null);
       }

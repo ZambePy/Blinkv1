@@ -28,6 +28,11 @@ import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2, type FilterPreset, 
 import { extractFeatures } from '../src/featurePipeline';
 import type { Point3D, L2CSGazeInput } from '../src/extractor';
 import { FEATURE_VECTOR_ID } from '../src/extractor';
+// 1.1 — os limiares do gate vêm do módulo, não de cópias no harness: um
+// harness com o número duplicado mede o pipeline de ontem em silêncio.
+import {
+  POSE_DRIFT_YAW_MAX, POSE_DRIFT_PITCH_MAX, POSE_DRIFT_ROLL_MAX, MIN_ACCEPTED_SAMPLES,
+} from '../src/calibration';
 import { parseJSONL } from '../src/telemetry/recorder';
 import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/types';
 
@@ -105,6 +110,20 @@ interface CliArgs {
   // do CLI: `--time-window <startSec>,<endSec>`, offsets desde o primeiro
   // captureTs do JSONL. Undefined = sem filtro (comportamento anterior).
   timeWindow?: { startSec: number; endSec: number };
+  /**
+   * 1.1 — reaplica o gate de pose offline, em vez de honrar a decisão gravada.
+   *
+   * O replay normalmente reproduz `sampleDecision.accepted` do JSONL. Isso é
+   * correto para comparar variantes de FEATURES ou de MODELO, mas torna o
+   * harness cego a qualquer mudança no gate de aceitação: mexer na tolerância
+   * de pose não muda um único frame do conjunto de treino, e o replay reporta
+   * "sem diferença" quando na verdade não mediu nada.
+   *
+   * Com esta flag o gate de pose é reconstruído a partir da pose gravada por
+   * frame. As demais razões de rejeição (`acclimation`, `quality`) continuam
+   * vindo da gravação — não mudaram e reexecutá-las só somaria ruído.
+   */
+  regatePose?: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number };
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -126,6 +145,24 @@ function parseArgs(argv: string[]): CliArgs {
     // Opt-in explícito para o comportamento antigo. Útil para reproduzir um
     // relatório histórico bit a bit; nunca para medir o pipeline atual.
     else if (a === '--use-recorded-features') args.recomputeFeatures = false;
+    // 1.1 — `--regate-pose <yawMax>,<pitchMax>,<rollMax>,<minSamples>` em rad.
+    // Sem argumento, usa os valores em vigor no código.
+    else if (a === '--regate-pose') {
+      const raw = argv[i + 1];
+      if (raw && !raw.startsWith('--')) {
+        i++;
+        const n = raw.split(',').map((x) => Number(x.trim()));
+        if (n.length !== 4 || n.some((x) => !Number.isFinite(x))) {
+          throw new Error(`--regate-pose espera <yawMax>,<pitchMax>,<rollMax>,<minSamples>; recebi '${raw}'`);
+        }
+        args.regatePose = { yawMax: n[0], pitchMax: n[1], rollMax: n[2], minSamples: n[3] };
+      } else {
+        args.regatePose = {
+          yawMax: POSE_DRIFT_YAW_MAX, pitchMax: POSE_DRIFT_PITCH_MAX,
+          rollMax: POSE_DRIFT_ROLL_MAX, minSamples: MIN_ACCEPTED_SAMPLES,
+        };
+      }
+    }
     else if (a === '--drop-features') {
       const raw = argv[++i];
       const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
@@ -315,11 +352,89 @@ function getFeatures(
 // início da sessão (~primeiros minutos); janelas de 20-25min ou 40-45min
 // cortariam a calibração inteira e o replay falharia com "faltam amostras".
 // A janela é aplicada em segundos-desde-primeiro-captureTs.
+/** 1.1 — o que o re-gate offline fez, para o relatório poder ser lido sem
+ *  precisar reexecutar nada. */
+interface RegateInfo {
+  /** Espelha o gate ao vivo: referência é o primeiro frame elegível de CADA ponto. */
+  baselineKind: 'per-target';
+  thresholds: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number };
+  /** Aceitos na gravação que o gate reaplicado rejeita por deriva de pose. */
+  rejeitadosPorPose: number;
+  /** Alvos descartados inteiros por caírem abaixo de `minSamples`. */
+  alvosDescartados: number;
+  /** Aceitos por alvo depois do re-gate, na ordem em que aparecem. */
+  aceitosPorAlvo: number[];
+  /** Deriva ENTRE alvos — não gateada, só medida. Ver `medirDerivaEntreAlvos`. */
+  derivaEntreAlvos: ReturnType<typeof medirDerivaEntreAlvos>;
+}
+
+/**
+ * 1.1 — deriva postural entre alvos, medida na gravação.
+ *
+ * Não gateia nada — espelha `getSessionPoseDrift` em `src/calibration.ts`. Está
+ * aqui porque foi este número que derrubou a hipótese de que apertar o gate
+ * melhoraria a calibração: a amplitude entre alvos é uma ordem de grandeza
+ * maior que a dispersão dentro deles.
+ */
+function medirDerivaEntreAlvos(rec: Recording): {
+  yawDeg: number; pitchDeg: number; rollDeg: number; trendRYaw: number; trendRPitch: number; alvos: number;
+} | null {
+  const porAlvo = new Map<string, { yaw: number; pitch: number; roll: number }[]>();
+  for (const f of rec.frames) {
+    if (f.target?.kind !== 'calibration') continue;
+    const q = f.quality;
+    if (!q || typeof q.yaw !== 'number' || typeof q.pitch !== 'number' || typeof q.roll !== 'number') continue;
+    const k = `${Math.round(f.target.xPx)},${Math.round(f.target.yPx)}`;
+    const arr = porAlvo.get(k); if (arr) arr.push({ yaw: q.yaw, pitch: q.pitch, roll: q.roll });
+    else porAlvo.set(k, [{ yaw: q.yaw, pitch: q.pitch, roll: q.roll }]);
+  }
+  if (porAlvo.size < 2) return null;
+  const medPorAlvo = [...porAlvo.values()].map((v) => {
+    const m = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+      const a = v.map(pick).sort((x, y) => x - y);
+      const i2 = a.length >> 1;
+      return a.length % 2 ? a[i2] : (a[i2 - 1] + a[i2]) / 2;
+    };
+    return { yaw: m((p) => p.yaw), pitch: m((p) => p.pitch), roll: m((p) => p.roll) };
+  });
+  const amp = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+    const v = medPorAlvo.map(pick); return Math.max(...v) - Math.min(...v);
+  };
+  const corr = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+    const y = medPorAlvo.map(pick); const n = y.length;
+    const mx = (n - 1) / 2; const my = y.reduce((a, b) => a + b, 0) / n;
+    let num = 0, dx = 0, dy = 0;
+    for (let i2 = 0; i2 < n; i2++) { num += (i2 - mx) * (y[i2] - my); dx += (i2 - mx) ** 2; dy += (y[i2] - my) ** 2; }
+    const den = Math.sqrt(dx * dy); return den > 0 ? num / den : 0;
+  };
+  const deg = (r: number) => (r * 180) / Math.PI;
+  return {
+    yawDeg: deg(amp((p) => p.yaw)), pitchDeg: deg(amp((p) => p.pitch)), rollDeg: deg(amp((p) => p.roll)),
+    trendRYaw: corr((p) => p.yaw), trendRPitch: corr((p) => p.pitch), alvos: porAlvo.size,
+  };
+}
+
+/** 1.1 — mesmo predicado do gate ao vivo, aplicado à pose gravada. Frame sem
+ *  pose gravada é REJEITADO: aceitá-lo seria assumir que a cabeça estava parada
+ *  justamente onde não há medição. */
+function posePassaNoGate(
+  f: RecordedFrame,
+  ref: { yaw: number; pitch: number; roll: number },
+  lim: { yawMax: number; pitchMax: number; rollMax: number },
+): boolean {
+  const q = f.quality;
+  if (!q || typeof q.yaw !== 'number' || typeof q.pitch !== 'number' || typeof q.roll !== 'number') return false;
+  return Math.abs(q.yaw - ref.yaw) <= lim.yawMax
+    && Math.abs(q.pitch - ref.pitch) <= lim.pitchMax
+    && Math.abs(q.roll - ref.roll) <= lim.rollMax;
+}
+
 function splitFrames(
   rec: Recording,
   recomputeFeatures: boolean,
   dropFeatures: readonly FeatureGroup[],
   timeWindow?: { startSec: number; endSec: number },
+  regatePose?: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number },
 ): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
@@ -328,6 +443,7 @@ function splitFrames(
   rejectedByDecision: number;
   legacyNoDecision: number;
   timeWindow?: { startSec: number; endSec: number; filteredOut: number; firstCaptureTs: number };
+  regate?: RegateInfo;
 } {
   const vw = rec.header.resolution.w;
   const vh = rec.header.resolution.h;
@@ -338,6 +454,13 @@ function splitFrames(
   let rejectedByDecision = 0;
   let legacyNoDecision = 0;
   let accuracyFilteredOutByWindow = 0;
+
+  // 1.1 — estado do re-gate offline. Uma referência por alvo, fixada no
+  // primeiro frame elegível daquele alvo, exatamente como ao vivo.
+  const regate = regatePose;
+  const baselinePorAlvo = new Map<string, { yaw: number; pitch: number; roll: number }>();
+  let rejeitadosPorPose = 0;
+  const chaveAlvo = (t: RecordedTarget) => `${Math.round(t.xPx)},${Math.round(t.yPx)}`;
 
   // D7.3 — resolvemos o "tempo zero" da gravação lazy: primeiro captureTs de
   // qualquer frame (não só accuracy) — reflete o momento em que o gravador
@@ -369,7 +492,33 @@ function splitFrames(
       // acomodação/baixa qualidade que o pipeline ao vivo descartou — e o
       // baseline offline deixa de ser comparável ao online (achado A3).
       if (rec.header.formatVersion >= 2) {
-        if (!f.sampleDecision?.accepted) { rejectedByDecision++; continue; }
+        if (regate) {
+          // 1.1 — só o critério de POSE é reexecutado.
+          //
+          // `acclimation` e `quality` não mudaram entre as variantes, e
+          // reexecutá-los exigiria reproduzir o relógio da sessão. Um frame
+          // elegível é o que a gravação aceitou, mais o que ela rejeitou
+          // exatamente por pose — este último pode voltar, porque o baseline
+          // de sessão não é o mesmo contra o qual ele foi rejeitado.
+          const d = f.sampleDecision;
+          const elegivel = d?.accepted === true || d?.reason === 'pose_drift';
+          if (!elegivel) { rejectedByDecision++; continue; }
+          // Referência do ALVO: o primeiro frame elegível dele a chegar aqui.
+          const k = chaveAlvo(f.target);
+          const ref = baselinePorAlvo.get(k);
+          if (!ref) {
+            const q = f.quality;
+            if (q && typeof q.yaw === 'number' && typeof q.pitch === 'number' && typeof q.roll === 'number') {
+              baselinePorAlvo.set(k, { yaw: q.yaw, pitch: q.pitch, roll: q.roll });
+            }
+          } else if (!posePassaNoGate(f, ref, regate)) {
+            rejectedByDecision++;
+            if (d?.accepted) rejeitadosPorPose++;
+            continue;
+          }
+        } else if (!f.sampleDecision?.accepted) {
+          rejectedByDecision++; continue;
+        }
       } else {
         legacyNoDecision++;   // v1: comportamento antigo, mas avisa no relatório
       }
@@ -404,8 +553,37 @@ function splitFrames(
       live++;
     }
   }
+  let regateInfo: RegateInfo | undefined;
+  if (regatePose) {
+    // 1.1 — MIN_ACCEPTED_SAMPLES ao vivo faz o ponto ser REFEITO. Offline não há
+    // como refazer, então o alvo é descartado — e o número aparece no relatório,
+    // porque perder um alvo muda o que o Ridge tem para restringir e ninguém
+    // deve descobrir isso comparando médias.
+    const porAlvo = new Map<string, CalibrationSample[]>();
+    for (const c of calibration) {
+      const k = `${Math.round(c.targetXPx)},${Math.round(c.targetYPx)}`;
+      const arr = porAlvo.get(k); if (arr) arr.push(c); else porAlvo.set(k, [c]);
+    }
+    const mantidos: CalibrationSample[] = [];
+    let alvosDescartados = 0;
+    const aceitosPorAlvo: number[] = [];
+    for (const [, arr] of porAlvo) {
+      aceitosPorAlvo.push(arr.length);
+      if (arr.length < regatePose.minSamples) { alvosDescartados++; continue; }
+      mantidos.push(...arr);
+    }
+    calibration.length = 0;
+    calibration.push(...mantidos);
+    regateInfo = {
+      baselineKind: 'per-target',
+      thresholds: regatePose, rejeitadosPorPose, alvosDescartados, aceitosPorAlvo,
+      derivaEntreAlvos: medirDerivaEntreAlvos(rec),
+    };
+  }
+
   return {
     calibration, accuracy, live, discarded, rejectedByDecision, legacyNoDecision,
+    regate: regateInfo,
     timeWindow: timeWindow && firstCaptureTs !== null
       ? { startSec: timeWindow.startSec, endSec: timeWindow.endSec, filteredOut: accuracyFilteredOutByWindow, firstCaptureTs }
       : undefined,
@@ -491,6 +669,7 @@ interface Report {
     discarded: number;
     rejectedByDecision: number;
     legacyNoDecision: number;
+    regatePose?: RegateInfo;
   };
   calibration: { uniqueTargets: number };
   accuracy: {
@@ -586,7 +765,7 @@ async function runInner(args: CliArgs): Promise<number> {
     return 2;
   }
 
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
   if (split.timeWindow) {
@@ -714,6 +893,9 @@ async function runInner(args: CliArgs): Promise<number> {
       discarded: split.discarded,
       rejectedByDecision: split.rejectedByDecision,
       legacyNoDecision: split.legacyNoDecision,
+      // 1.1 — presente só quando `--regate-pose` foi usado. A ausência do campo
+      // é a marca de que o relatório honrou as decisões gravadas.
+      regatePose: split.regate,
     },
     calibration: { uniqueTargets },
     accuracy: accSection,

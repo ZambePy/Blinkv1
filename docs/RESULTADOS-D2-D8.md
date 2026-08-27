@@ -43,6 +43,90 @@ Data: **2026-08-25**. Baseline referência: **57 px / 0,9°** (Rodada A, sem
 
 ---
 
+## 1.1 — o gate de pose não era o gargalo. A medição diz onde ele está.
+
+A hipótese da Fase 1.1 era: o gate de deriva de pose usa como referência o
+primeiro frame de CADA ponto, então a cabeça pode migrar entre alvos sem nunca
+violá-lo; apertar a tolerância e ancorá-la na sessão recuperaria precisão.
+
+A primeira metade estava certa. A segunda estava errada, e o harness mostra por quê.
+
+**Fixture criada para poder medir isto:** `npm run replay -- --regate-pose`
+reaplica o gate offline sobre a pose gravada por frame, em vez de honrar
+`sampleDecision.accepted` do JSONL. Sem ela o replay é estruturalmente cego a
+mudanças no gate — reproduz as decisões gravadas e reporta "sem diferença"
+quando na verdade não mediu nada. (Regra do plano: sem fixture, a tarefa é criar
+a fixture primeiro.)
+
+### Tabela — `fixtures/replay/ci-baseline.jsonl`, filtro `balanceado-v2`, features recomputadas
+
+| variante | meanErrorInner | p90 | amostras de treino | rejeitados por pose | Δ vs baseline |
+|---|---|---|---|---|---|
+| gravado (baseline 0.4) | **144,6 px** | 410,1 | 514 | — | — |
+| gate 1,0°/ponto (novo) | **144,6 px** | 410,1 | 514 | 0 | **+0,0%** |
+| gate 4,98°/ponto (antigo) | **144,6 px** | 410,1 | 514 | 0 | **+0,0%** |
+| gate 0,5°/ponto | **144,7 px** | 410,6 | 475 | 39 | **+0,0%** |
+
+`meanErrorEdge` não aparece: a gravação só tem a grade interior 25/50/75. O anel
+de bordas de 0.3 existe apenas no teste ao vivo e entra na próxima gravação.
+
+### Por que o gate é inerte
+
+| grandeza | medido |
+|---|---|
+| dispersão de pose DENTRO de cada ponto (p90) | yaw 0,09–0,30° · pitch 0,16–0,26° |
+| deriva ENTRE alvos (amplitude das medianas) | yaw 2,38° · pitch 3,92° · roll 1,15° |
+| correlação da pose com a ORDEM de coleta | yaw **+0,961** · pitch **−0,925** |
+
+A cabeça fica parada dentro de cada ponto — 0,3° é ruído de landmark, não
+movimento. Isso é coerente com o perfil do usuário-alvo (ELA: a cabeça não se
+mexe por vontade própria), e significa que **um gate por ponto não tem o que
+rejeitar**, em qualquer tolerância entre 0,75° e 4,98°.
+
+O que existe é deriva postural lenta ao longo da sessão, quase perfeitamente
+linear no tempo (r ≈ 0,96). A 38,5 px/grau na tela de referência são **91 px em
+X e 151 px em Y** de inconsistência entre o primeiro e o último alvo — da mesma
+ordem do erro total de 144,6 px.
+
+### Por que gatear isso não funciona
+
+Um gate só sabe apagar frames. A deriva não está dentro dos pontos, está entre
+eles: cada alvo é internamente consistente e sistematicamente deslocado em
+relação aos vizinhos. Ancorar o gate num baseline de sessão apagou **509 dos 514
+frames** — ou seja, apagou alvos inteiros dos extremos da sessão, que é
+exatamente a informação de que o modelo mais precisa.
+
+Deriva entre alvos é para **modelar**, não para rejeitar. Isso é 1.2 (pose no
+vetor de features) e 1.3 (compensação geométrica na saída).
+
+> ⚠️ **Achado para 1.2.** A pose está correlacionada com a ORDEM de coleta
+> (r ≈ 0,96), e a ordem dos alvos é fixa. Logo a pose está indiretamente
+> correlacionada com a POSIÇÃO do alvo (corr(alvoX, yaw) = −0,46). Um modelo que
+> receba pose como feature pode usá-la como atalho para adivinhar o alvo, e o
+> erro de treino cai sem que nada tenha sido aprendido. **1.2 precisa ser medido
+> com LOO por alvo, nunca por split aleatório**, e a ordem de apresentação dos
+> alvos deveria ser aleatorizada em gravações futuras.
+
+### O que 1.1 entregou, já que não entregou precisão
+
+- `--regate-pose` no harness — sem isto, nenhuma mudança de gate é mensurável.
+- Correção de vazamento de estado: `startCalibrationMode` não zerava
+  `isCollecting`. Quem abandonasse a calibração no meio de um alvo e recomeçasse
+  seguia coletando contra o alvo antigo, com o timeout daquele ponto pendente.
+- `MIN_ACCEPTED_SAMPLES = 15`: um ponto com 3 amostras entrava no treino ao lado
+  de outros com ~60, sem nenhum sinal. Agora é refeito.
+- `getSessionPoseDrift()` + aviso ao operador acima de 60 px-equivalentes,
+  distinguindo deriva monótona (escorregar na cadeira → apoiar a nuca) de
+  errática (refazer a calibração).
+- Tolerância documentada com a medição que a justifica, em vez do 0,087 herdado
+  sem procedência.
+
+**O critério de aceite da Fase 1 (−30% em `meanErrorInner`) não foi atingido por
+1.1 e não podia ter sido.** Ele permanece aberto para 1.2/1.3, que atacam a
+deriva medida aqui.
+
+---
+
 ## Baseline verdadeiro do pipeline atual (0.4)
 
 Primeiro número gerado pelo código de hoje, para a configuração de hoje.

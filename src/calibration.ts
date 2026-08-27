@@ -202,13 +202,179 @@ const distanceLog: GazeDistanceLogEntry[] = [];
 // consegue separar as duas contribuições. Filtramos aqui para forçar que
 // as amostras de cada ponto tenham pose homogênea.
 //
-// Threshold em radianos. 0.087 rad ≈ 5°. Baseline é a pose observada no
-// primeiro frame ACEITO do ponto (já pós-acomodação).
-const POSE_DRIFT_YAW_MAX   = 0.087;
-const POSE_DRIFT_PITCH_MAX = 0.087;
-const POSE_DRIFT_ROLL_MAX  = 0.087;
+// Threshold em radianos, contra a pose do primeiro frame ACEITO do ponto
+// (já pós-acomodação). O valor e o porquê estão logo abaixo.
+/**
+ * 1.1 — tolerância de deriva de pose DENTRO de um ponto de calibração.
+ *
+ * Este número saiu de medição, não de derivação. O caminho até ele importa
+ * porque o valor "óbvio" estava errado por um fator de 30.
+ *
+ * O GANHO GEOMÉTRICO sugere apertar: com a cabeça girando Δ e o olho parado na
+ * órbita, o ponto aparente se desloca `d · tan(Δ)`. Na tela de referência
+ * (23,6" a 60 cm, 36,75 px/cm) 1° = 38,5 px. A tolerância herdada, 0,087 rad
+ * (4,98°), permitiria 192 px de contaminação — inaceitável no papel.
+ *
+ * MEDIÇÃO (`fixtures/replay/ci-baseline.jsonl`, 514 frames aceitos, 9 alvos,
+ * via `npm run replay -- --regate-pose`):
+ *
+ *   dispersão DENTRO de cada ponto, p90 ......... yaw 0,09–0,30°  pitch 0,16–0,26°
+ *   deriva ENTRE alvos (amplitude das medianas) .. yaw 2,34°      pitch 3,90°
+ *   correlação da pose com a ORDEM de coleta ..... yaw +0,961     pitch −0,920
+ *
+ * A cabeça fica parada dentro de cada ponto — 0,3° é ruído de landmark, não
+ * movimento. O que existe é deriva postural lenta ao longo da sessão, quase
+ * perfeitamente linear no tempo (r ≈ 0,96). São 90 px em X e 150 px em Y de
+ * inconsistência entre o primeiro e o último alvo, da mesma ordem do erro total
+ * de 144,6 px do baseline.
+ *
+ * CONSEQUÊNCIA: qualquer tolerância entre 0,75° e 4,98° retém 100% dos frames
+ * nesta gravação. O gate é inerte, e apertá-lo mais não melhora nada — só
+ * começa a apagar alvos inteiros, porque a deriva não está dentro dos pontos.
+ * Deriva entre alvos é para MODELAR (pose no vetor, 1.2; compensação
+ * geométrica, 1.3), não para rejeitar.
+ *
+ * 0,017 rad (1,0°) é ~3× a dispersão intra-ponto observada: pega um lapso real
+ * (o usuário virar a cabeça no meio da coleta) sem custar um único frame de uma
+ * cabeça parada. Serve como rede de segurança, e é honesto sobre não ser mais
+ * do que isso.
+ */
+export const POSE_DRIFT_YAW_MAX   = 0.017;
+export const POSE_DRIFT_PITCH_MAX = 0.017;
+export const POSE_DRIFT_ROLL_MAX  = 0.017;
+
+/**
+ * 1.1 — mínimo de amostras aceitas para um ponto entrar no treino.
+ *
+ * `processStaticPoint` aceitava um ponto com 3 amostras. Com ~60 nos demais,
+ * ele entrava com 1/20 do peso — presente o bastante para deslocar o ajuste,
+ * ausente o bastante para não restringi-lo, e sem nenhum sinal ao operador.
+ *
+ * Não é hipotético: na gravação de referência um dos nove alvos fechou com 37
+ * amostras aceitas contra 64 do melhor.
+ *
+ * 15 é ~1/4 do que um ponto saudável coleta. Abaixo disso o ponto é REFEITO: a
+ * UI já trata `success: false` com retry e a mensagem "Tente não se mover".
+ */
+export const MIN_ACCEPTED_SAMPLES = 15;
+
+/**
+ * 1.1 — frames de pose necessários para o baseline de sessão ser reportável.
+ *
+ * ~1 s a 30 fps. O baseline NÃO gateia nada (ver `POSE_DRIFT_YAW_MAX`); serve
+ * de referência para medir a deriva da sessão e mostrá-la ao operador.
+ */
+export const SESSION_POSE_BASELINE_MIN_SAMPLES = 20;
+
+/**
+ * 1.1 — acima de quantos pixels-equivalentes de deriva entre alvos o operador
+ * é avisado.
+ *
+ * 60 px é ~1,5° na tela de referência, metade do que a gravação de baseline
+ * acumulou em pitch. Não bloqueia a calibração: a deriva é modelável e bloquear
+ * custaria uma sessão inteira a um usuário com ELA. Só informa, e diz o que
+ * fazer a respeito.
+ */
+export const POSE_DRIFT_WARN_PX = 60;
 
 let currentPointBaselinePose: { yaw: number; pitch: number; roll: number } | null = null;
+
+/**
+ * 1.1 — pose de referência da SESSÃO de calibração.
+ *
+ * Fixada uma vez, antes do primeiro alvo, com a mediana de ~1 s de frames.
+ * Todos os pontos são julgados contra ela — é o que impede que dois alvos
+ * sejam coletados em posturas diferentes e o Ridge tente explicar a diferença
+ * como se fosse olhar.
+ */
+let sessionBaselinePose: { yaw: number; pitch: number; roll: number } | null = null;
+/** Buffer de poses acumulado antes do primeiro alvo. */
+let sessionPoseSamples: { yaw: number; pitch: number; roll: number }[] = [];
+/** 1.1 — pose mediana de cada alvo concluído, na ordem de coleta. */
+let sessionPoseByTarget: { yaw: number; pitch: number; roll: number }[] = [];
+
+/**
+ * 1.1 — quanto a postura migrou ao longo da calibração, em graus e em pixels.
+ *
+ * A conversão para pixels usa o mesmo ganho geométrico do resto do módulo
+ * (`d · tan(Δ)` na distância de calibração), porque grau não diz nada ao
+ * operador e 150 px diz tudo.
+ *
+ * `trendR` é a correlação da pose com a ORDEM de coleta. Perto de ±1 significa
+ * deriva postural lenta e monótona — o usuário escorregando na cadeira ao longo
+ * da sessão. Perto de 0 significa movimento errático. A distinção importa:
+ * a primeira é modelável (1.2/1.3), a segunda pede refazer a calibração.
+ */
+export interface SessionPoseDrift {
+  targets: number;
+  yawDeg: number; pitchDeg: number; rollDeg: number;
+  yawPx: number; pitchPx: number;
+  trendRYaw: number; trendRPitch: number;
+}
+
+export function getSessionPoseDrift(): SessionPoseDrift | null {
+  const n = sessionPoseByTarget.length;
+  if (n < 2) return null;
+  const amp = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+    const v = sessionPoseByTarget.map(pick);
+    return Math.max(...v) - Math.min(...v);
+  };
+  // Correlação de Pearson contra o índice de coleta.
+  const corr = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+    const y = sessionPoseByTarget.map(pick);
+    const x = y.map((_, i) => i);
+    const mx = x.reduce((a, b) => a + b, 0) / n;
+    const my = y.reduce((a, b) => a + b, 0) / n;
+    let num = 0, dx = 0, dy = 0;
+    for (let i = 0; i < n; i++) {
+      num += (x[i] - mx) * (y[i] - my); dx += (x[i] - mx) ** 2; dy += (y[i] - my) ** 2;
+    }
+    const den = Math.sqrt(dx * dy);
+    return den > 0 ? num / den : 0;
+  };
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  // px por radiano na distância de visão: d · tan(Δ) ≈ d · Δ para Δ pequeno.
+  // A distância de calibração medida tem precedência; sem ela vale a configurada.
+  const g = currentCalibrationGeometry();
+  const diagPx = Math.hypot(g.screenWidthPx, g.screenHeightPx);
+  const pxPerCm = g.screenDiagonalIn > 0 ? diagPx / (g.screenDiagonalIn * 2.54) : 0;
+  const distCm = calibrationScreenDistanceCm ?? g.viewingDistanceCm;
+  const pxPorRad = distCm * pxPerCm;
+  return {
+    targets: n,
+    yawDeg: toDeg(amp((p) => p.yaw)),
+    pitchDeg: toDeg(amp((p) => p.pitch)),
+    rollDeg: toDeg(amp((p) => p.roll)),
+    yawPx: amp((p) => p.yaw) * pxPorRad,
+    pitchPx: amp((p) => p.pitch) * pxPorRad,
+    trendRYaw: corr((p) => p.yaw),
+    trendRPitch: corr((p) => p.pitch),
+  };
+}
+
+export function getSessionBaselinePose(): { yaw: number; pitch: number; roll: number } | null {
+  return sessionBaselinePose;
+}
+
+/** Fixa o baseline a partir do buffer. Mediana por eixo — robusta a um frame
+ *  espúrio, que a média não seria. Devolve false se não houve amostras
+ *  suficientes; nesse caso o caller mantém o comportamento antigo. */
+function finalizeSessionPoseBaseline(): boolean {
+  if (sessionBaselinePose) return true;
+  if (sessionPoseSamples.length < SESSION_POSE_BASELINE_MIN_SAMPLES) return false;
+  const med = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+    const v = sessionPoseSamples.map(pick).sort((a, b) => a - b);
+    const m = v.length >> 1;
+    return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+  };
+  sessionBaselinePose = { yaw: med((p) => p.yaw), pitch: med((p) => p.pitch), roll: med((p) => p.roll) };
+  const deg = (r: number) => ((r * 180) / Math.PI).toFixed(1);
+  console.log(
+    `[calib] 1.1 — baseline de pose da sessão fixado com ${sessionPoseSamples.length} frames: ` +
+    `yaw=${deg(sessionBaselinePose.yaw)}° pitch=${deg(sessionBaselinePose.pitch)}° roll=${deg(sessionBaselinePose.roll)}°`,
+  );
+  return true;
+}
 let poseDriftRejects = 0;
 
 let profile: CalibrationPoint[] = [];
@@ -878,6 +1044,29 @@ export function startCalibrationMode(
   resetEarHistory();
 
   isCalibrating = true;
+
+  // 1.1 — zera a coleta de uma calibração abandonada.
+  //
+  // `startCalibrationMode` limpava todo o resto do estado mas deixava
+  // `isCollecting` como estivesse. Quem saísse da tela no meio de um alvo e
+  // recomeçasse entrava com a coleta ainda ligada: `feedRawData` seguia no ramo
+  // de coleta, acumulando amostras contra `currentTargetX/Y` do alvo ANTIGO,
+  // e o timeout pendente daquele ponto ainda dispararia mais tarde chamando o
+  // callback de uma sessão que já não existe.
+  //
+  // Encontrado ao escrever o teste do baseline de sessão: o baseline nunca era
+  // fixado no segundo `startCalibrationMode` porque o ramo de acumulação de
+  // pose vive justamente no `!isCollecting`.
+  isCollecting = false;
+  if (collectionTimeoutHandle !== null) {
+    clearTimeout(collectionTimeoutHandle);
+    collectionTimeoutHandle = null;
+  }
+
+  // 1.1 — o baseline pertence à SESSÃO; recomeçar a calibração recomeça ele.
+  sessionBaselinePose = null;
+  sessionPoseSamples = [];
+  sessionPoseByTarget = [];
   profile = [];
   regressorLeft = null;
   regressorRight = null;
@@ -954,6 +1143,17 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   if (collectionTimeoutHandle !== null) {
     clearTimeout(collectionTimeoutHandle);
     collectionTimeoutHandle = null;
+  }
+
+  // 1.1 — fixa o baseline de pose da sessão no primeiro alvo, a partir dos
+  // frames acumulados durante a janela de preparo da UI. Se não houver frames
+  // suficientes, segue sem ele e o gate cai no comportamento por ponto.
+  if (!sessionBaselinePose && !finalizeSessionPoseBaseline()) {
+    console.warn(
+      `[calib] 1.1 — baseline de pose da sessão não fixado ` +
+      `(${sessionPoseSamples.length}/${SESSION_POSE_BASELINE_MIN_SAMPLES} frames). ` +
+      `Deriva entre alvos volta a ser invisível nesta calibração.`,
+    );
   }
 
   currentTargetX = x;
@@ -1071,6 +1271,15 @@ export function countDeadFeatures(
 
 export function feedRawData(featuresLeft: number[], featuresRight: number[], quality?: any | null) {
   if (!isCalibrating || !isCollecting) {
+    // 1.1 — a janela entre `startCalibrationMode` e o primeiro alvo (a UI espera
+    // PREPARE_MS ali) é onde o baseline de pose da sessão é montado. Sem isto o
+    // baseline só poderia sair do primeiro frame do primeiro ponto, que é
+    // exatamente o que se quer evitar: um único frame como referência.
+    if (isCalibrating && !sessionBaselinePose && quality
+      && typeof quality.yaw === 'number' && typeof quality.pitch === 'number' && typeof quality.roll === 'number') {
+      sessionPoseSamples.push({ yaw: quality.yaw, pitch: quality.pitch, roll: quality.roll });
+      if (sessionPoseSamples.length > 120) sessionPoseSamples.shift();
+    }
     lastDecision = { accepted: false, elapsedMs: 0, reason: 'not_collecting' };
     return;
   }
@@ -1107,27 +1316,31 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
       return; // Ignora frame ruim
     }
 
-    // Hotfix — deriva de pose dentro do ponto. `currentPointBaselinePose` é
-    // fixado no primeiro frame que sobrevive aos filtros de qualidade.
-    // Se a cabeça se afastar dessa referência dentro da janela, o ponto
-    // encerra virando amostras com pose inconsistente — Ridge não separa
-    // yaw da cabeça de yaw do olhar.
+    // 1.1 — deriva de pose DENTRO do ponto, contra a referência do próprio ponto.
+    //
+    // ⚠️ ESTE GATE FOI MEDIDO E É QUASE INERTE. Ver `POSE_DRIFT_YAW_MAX`.
+    //
+    // A versão anterior deste bloco julgava contra um baseline de SESSÃO, com a
+    // hipótese de que a deriva entre alvos passava despercebida por cada ponto
+    // redefinir o zero. A hipótese sobre a deriva estava certa; a de que um gate
+    // a resolveria estava errada, e a medição mostrou por quê — ver o comentário
+    // de `sessionPoseByTarget`. Um gate só sabe apagar frames, e a deriva não
+    // está DENTRO dos pontos: está ENTRE eles. Julgar contra o baseline de
+    // sessão apagava 509 dos 514 frames da gravação de referência, ou seja,
+    // apagava alvos inteiros.
     if (
       typeof quality.yaw === 'number' &&
       typeof quality.pitch === 'number' &&
       typeof quality.roll === 'number'
     ) {
-      if (!currentPointBaselinePose) {
-        currentPointBaselinePose = {
-          yaw: quality.yaw,
-          pitch: quality.pitch,
-          roll: quality.roll,
-        };
+      const ref = currentPointBaselinePose;
+      if (!ref) {
+        currentPointBaselinePose = { yaw: quality.yaw, pitch: quality.pitch, roll: quality.roll };
       } else {
         if (
-          Math.abs(quality.yaw   - currentPointBaselinePose.yaw)   > POSE_DRIFT_YAW_MAX ||
-          Math.abs(quality.pitch - currentPointBaselinePose.pitch) > POSE_DRIFT_PITCH_MAX ||
-          Math.abs(quality.roll  - currentPointBaselinePose.roll)  > POSE_DRIFT_ROLL_MAX
+          Math.abs(quality.yaw   - ref.yaw)   > POSE_DRIFT_YAW_MAX ||
+          Math.abs(quality.pitch - ref.pitch) > POSE_DRIFT_PITCH_MAX ||
+          Math.abs(quality.roll  - ref.roll)  > POSE_DRIFT_ROLL_MAX
         ) {
           poseDriftRejects++;
           lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'pose_drift' };
@@ -1226,6 +1439,49 @@ function processStaticPoint() {
     );
   }
 
+  // 1.1 — ponto com poucas amostras é REFEITO, não aceito de qualquer jeito.
+  //
+  // Antes, um ponto com 3 amostras entrava no treino ao lado de outros com ~60:
+  // peso suficiente para deslocar o ajuste, insuficiente para restringi-lo, e
+  // sem nenhum sinal. Na gravação de referência o pior alvo fechou com 37
+  // amostras contra 64 do melhor — bem acima do mínimo, mas o caso ruim não
+  // tinha tratamento nenhum.
+  //
+  // A UI já sabe lidar: `success: false` dispara retry com "Tente não se mover".
+  if (collectedFeaturesLeft.length < MIN_ACCEPTED_SAMPLES) {
+    console.warn(
+      `[calib] ✗ Ponto com ${collectedFeaturesLeft.length} amostras ` +
+      `(mínimo ${MIN_ACCEPTED_SAMPLES}) — refazendo. ` +
+      `Rejeitados por deriva de pose: ${poseDriftRejects}.`,
+    );
+    const cbFew = pointCompleteCallback;
+    pointCompleteCallback = null;
+    if (cbFew) cbFew(false);
+    return;
+  }
+
+  // 1.1 — pose mediana DESTE alvo, para medir a deriva da sessão.
+  //
+  // Não gateia nada. É o registro que permite ao operador (e ao relatório) ver
+  // que a cabeça migrou entre o primeiro e o último alvo, que é a deriva que o
+  // gate por ponto estruturalmente não vê.
+  {
+    const poses = collectedQualities.filter(
+      (q): q is { yaw: number; pitch: number; roll: number } =>
+        !!q && typeof q.yaw === 'number' && typeof q.pitch === 'number' && typeof q.roll === 'number',
+    );
+    if (poses.length > 0) {
+      const med = (pick: (p: { yaw: number; pitch: number; roll: number }) => number) => {
+        const v = poses.map(pick).sort((a, b) => a - b);
+        const m = v.length >> 1;
+        return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+      };
+      sessionPoseByTarget.push({
+        yaw: med((q) => q.yaw), pitch: med((q) => q.pitch), roll: med((q) => q.roll),
+      });
+    }
+  }
+
   for (let i = 0; i < collectedFeaturesLeft.length; i++) {
     profile.push({
       screenX: currentTargetX,
@@ -1293,6 +1549,12 @@ export interface CalibrationFitDiagnostics {
    *  confundida com o olhar. */
   poseMean: { yaw: number; pitch: number; roll: number } | null;
   poseStd: { yaw: number; pitch: number; roll: number } | null;
+  /** 1.1 — deriva postural ENTRE alvos, em graus e em pixels de tela.
+   *
+   *  `poseStd` acima mistura o ruído dentro de cada ponto com a migração entre
+   *  pontos; medido na gravação de referência, o primeiro é 0,3° e o segundo
+   *  3,9°, e só o segundo importa. Este campo separa os dois. */
+  poseDrift: SessionPoseDrift | null;
   /** Fração das amostras de treino em que o bloco L2CS estava válido (≠ 0).
    *  Se isto for < 1, parte do treino viu 7 zeros onde a inferência vai ver
    *  valores reais (ou vice-versa) — vazamento direto para o erro. */
@@ -1409,6 +1671,27 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
       `[calib] D10 pose durante a calibração — desvio yaw=${d.poseStd.yaw.toFixed(4)} ` +
       `pitch=${d.poseStd.pitch.toFixed(4)} roll=${d.poseStd.roll.toFixed(4)} rad`,
     );
+  }
+  // 1.1 — a deriva entre alvos em PIXELS, que é a unidade em que ela dói.
+  if (d.poseDrift) {
+    const pd = d.poseDrift;
+    const monotona = Math.abs(pd.trendRYaw) > 0.8 || Math.abs(pd.trendRPitch) > 0.8;
+    console.log(
+      `[calib] 1.1 deriva de pose entre os ${pd.targets} alvos — ` +
+      `yaw ${pd.yawDeg.toFixed(2)}° (${pd.yawPx.toFixed(0)}px em X) | ` +
+      `pitch ${pd.pitchDeg.toFixed(2)}° (${pd.pitchPx.toFixed(0)}px em Y) | ` +
+      `tendência r=${pd.trendRYaw.toFixed(2)}/${pd.trendRPitch.toFixed(2)}`,
+    );
+    if (Math.max(pd.yawPx, pd.pitchPx) > POSE_DRIFT_WARN_PX) {
+      console.warn(
+        `[calib] ⚠️ A cabeça migrou ${Math.max(pd.yawPx, pd.pitchPx).toFixed(0)}px-equivalentes ` +
+        `entre o primeiro e o último alvo. ` +
+        (monotona
+          ? `A deriva é monótona (r≈${pd.trendRYaw.toFixed(2)}), típica de escorregar na cadeira ` +
+            `ao longo da sessão — apoiar a nuca reduz mais que refazer a calibração.`
+          : `A deriva é errática — vale refazer a calibração com a cabeça apoiada.`),
+      );
+    }
   }
 
   return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
@@ -1543,6 +1826,7 @@ export function computeFitDiagnostics(
     looByTarget,
     poseMean,
     poseStd,
+    poseDrift: getSessionPoseDrift(),
     l2csValidFraction: n > 0 ? l2csValid / n : 0,
     samplesPerTarget,
   };
