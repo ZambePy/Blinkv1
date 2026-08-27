@@ -70,7 +70,7 @@ export interface SetupReadinessPanelProps {
 }
 
 export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onReport }) => {
-  const { getDiagnostics, getCameraStream, getCameraTuning, cameraError, calibration } = useGaze();
+  const { getDiagnostics, getCameraStream, getCameraTuning, cameraError, calibrationInvalidated, calibration } = useGaze();
   const { settings, updateSettings } = useSettings();
   // Etapa 1 → Etapa 2: o campo de visão calibrado é o que habilita o medidor
   // de distância e o alvo "posicione a câmera a X cm". Sem ele o painel ainda
@@ -168,6 +168,28 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
   // causa quase sempre é externa ao app (outro programa segurando o
   // dispositivo). Mostrar isto no lugar das checagens evita o pior cenário —
   // uma tela cheia de indicadores cinzas e nenhuma explicação.
+  // 0.2 — calibração descartada em tempo de execução. Aparece acima de tudo
+  // porque nenhuma checagem de setup importa se o modelo já não vale.
+  if (calibrationInvalidated) {
+    return (
+      <div
+        role="alert"
+        style={{
+          padding: '1.25rem', borderRadius: '1rem',
+          background: `${WARNING}14`, border: `1px solid ${WARNING}66`,
+          display: 'flex', flexDirection: 'column', gap: '0.6rem',
+        }}
+      >
+        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: WARNING }}>
+          Recalibração necessária
+        </div>
+        <div style={{ fontSize: '0.95rem', color: TEXT_PRIMARY, lineHeight: 1.55 }}>
+          {calibrationInvalidated}
+        </div>
+      </div>
+    );
+  }
+
   if (cameraError) {
     return (
       <div

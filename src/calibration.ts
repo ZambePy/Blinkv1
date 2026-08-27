@@ -21,7 +21,7 @@ import {
   type DistanceRange,
 } from './distanceCompensation';
 import type { RecordedSampleDecision } from './telemetry/types';
-import { resetEarHistory } from './extractor';
+import { resetEarHistory, FEATURE_VECTOR_ID, FEATURE_FORMAT_VERSION } from './extractor';
 import {
   profileRegistry,
   shouldWarnPrecisionForCondition,
@@ -295,6 +295,47 @@ export function getCurrentCameraDistanceCm(): number | null {
   return estimateDistanceCm(currentIodPx, currentVideoWidth, cameraFovDeg);
 }
 
+/**
+ * 0.2 — motivo pelo qual a calibração foi descartada em tempo de execução.
+ *
+ * `null` no caminho feliz. Quando preenchido, a UI deve pedir recalibração.
+ *
+ * POR QUE EXISTE: `predictRidge` lança `RangeError` quando o vetor de features
+ * tem dimensão diferente da que treinou o modelo — o que acontece sempre que um
+ * perfil salvo sobrevive a uma mudança de pipeline. O `catch` de `mapGaze`
+ * tratava isso como qualquer outra exceção: incrementava um contador, logava
+ * uma vez por segundo e devolvia `null`. A 30 Hz, para sempre.
+ *
+ * O efeito visível era o engine entrar em `degraded`, o cursor cair no fallback
+ * do nariz e nada explicar o motivo. Recuperável só recalibrando — mas nada
+ * dizia isso a quem estava na tela.
+ *
+ * Dimensão incompatível não é falha transitória: nenhum frame futuro vai
+ * corrigi-la. O certo é descartar o modelo e pedir recalibração.
+ */
+export interface CalibrationInvalidated {
+  reason: 'feature_dim_mismatch';
+  detail: string;
+  at: number;
+}
+
+let invalidation: CalibrationInvalidated | null = null;
+const invalidationListeners = new Set<(e: CalibrationInvalidated) => void>();
+
+export function getCalibrationInvalidation(): CalibrationInvalidated | null {
+  return invalidation;
+}
+
+export function clearCalibrationInvalidation(): void {
+  invalidation = null;
+}
+
+/** Assina o evento. Devolve a função de cancelamento. */
+export function onCalibrationInvalidated(cb: (e: CalibrationInvalidated) => void): () => void {
+  invalidationListeners.add(cb);
+  return () => invalidationListeners.delete(cb);
+}
+
 /** Última avaliação de faixa de distância. Diagnóstico para a UI e o relatório. */
 let lastDistanceRange: DistanceRange | null = null;
 
@@ -404,16 +445,27 @@ const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles.v2';
 const PROFILES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function buildContextKey(): string {
-  // Identificador compacto do contexto em que o perfil foi criado.
-  // Usado para detectar incompatibilidade (tela diferente, pipeline diferente).
+  // Identificador do contexto em que o perfil foi criado. Um perfil só é
+  // reaproveitado quando esta chave bate.
+  //
+  // 0.2 — passou a codificar o PIPELINE, não só a tela e duas flags.
+  //
+  // O comentário anterior dizia "detectar incompatibilidade (tela diferente,
+  // pipeline diferente)", mas nada aqui descrevia o pipeline: a redução do
+  // vetor de 44 para 12 dims não mudava esta chave em nada. Um perfil salvo
+  // antes da mudança era considerado compatível, carregado, e só falhava lá na
+  // frente dentro de `predictRidge` — a 30 Hz, com o cursor caindo no fallback
+  // do nariz e nenhuma explicação para quem está na tela.
+  //
+  //   FEATURE_VECTOR_ID       — quais dimensões saem (conjunto e contagem)
+  //   FEATURE_FORMAT_VERSION  — o que elas significam
   const sw = typeof window !== 'undefined' ? window.screen.width : 0;
   const sh = typeof window !== 'undefined' ? window.screen.height : 0;
-  // Inclui as flags de A2 que mudam o vetor
   const expKey = [
     EXPERIMENT.isotropicLandmarks ? 'iso' : '',
     EXPERIMENT.applyGazeCorrection ? 'rbf' : '',
   ].filter(Boolean).join(',') || 'default';
-  return `${sw}x${sh}_${expKey}`;
+  return `${sw}x${sh}_${FEATURE_VECTOR_ID}_v${FEATURE_FORMAT_VERSION}_${expKey}`;
 }
 
 function tryParseStoredProfiles(): StoredCalibrationProfile[] {
@@ -1729,7 +1781,7 @@ export type CalibrationOutcome =
       ok: false;
       reason:
         | 'singular_matrix'          // solveLinear lançou mesmo após escalonamento λ (A1-3)
-        | 'insufficient_samples'     // profile vazio ou < 2 targets únicos
+        | 'insufficient_samples'     // profile vazio ou < 3 alvos únicos
         | 'degenerate_features'      // preflight de A1-2 (>30% features mortas)
         | 'unknown';
       detail: string;
@@ -1741,6 +1793,12 @@ export type CalibrationOutcome =
 function classifyTrainingError(e: unknown, sampleCount: number): CalibrationOutcome {
   const detail = e instanceof Error ? e.message : String(e);
   if (sampleCount === 0) {
+    return { ok: false, reason: 'insufficient_samples', detail };
+  }
+  // 0.2 — o preflight de `completeCalibration` também dispara com amostras > 0
+  // mas alvos únicos < 3. Sem este ramo, esse caso cairia em `unknown` e a UI
+  // mostraria "erro desconhecido" para uma condição que sabemos nomear.
+  if (/insufficient_samples/i.test(detail)) {
     return { ok: false, reason: 'insufficient_samples', detail };
   }
   if (/degenerate_features/i.test(detail)) {
@@ -1765,6 +1823,28 @@ export function completeCalibration(
 
   let outcome: CalibrationOutcome;
   try {
+    // 0.2 — preflight de amostras.
+    //
+    // `trainRidgeModel` NÃO lança com perfil vazio: devolve um modelo com
+    // `numFeatures: 0`. Sem esta guarda, `completeCalibration` seguia para o
+    // `outcome = { ok: true }`, a UI exibia "Calibração Concluída", e o primeiro
+    // `mapGaze` estourava com "modelo treinado com 0 features".
+    //
+    // `insufficient_samples` já existia como motivo, mas só era alcançável pelo
+    // `catch` — ou seja, apenas quando algo lançava. O caso silencioso, que é o
+    // pior, não tinha caminho.
+    //
+    // Três alvos únicos é o mínimo: dois determinam ganho e offset por eixo sem
+    // folga nenhuma, e qualquer ponto ruim passa a ser indistinguível de sinal.
+    const alvosUnicos = new Set(profile.map((pt) => targetGroupKey({ screenX: pt.screenX, screenY: pt.screenY }))).size;
+    if (profile.length === 0 || alvosUnicos < 3) {
+      throw new Error(
+        `[calib] insufficient_samples: ${profile.length} amostra(s) em ${alvosUnicos} alvo(s) único(s). ` +
+        `Mínimo: 3 alvos. Causa provável: todos os frames rejeitados pelos filtros de ` +
+        `qualidade ou rosto ausente durante a coleta.`,
+      );
+    }
+
     const summary = trainScalersAndRegressors(profile);
     saveProfile();
     // A1-6 — snapshot no registry por condição óptica. Se o pendingMeta não
@@ -2150,6 +2230,23 @@ export function mapGaze(
     predRight = regressorRight.predict(scaledRight);
     _mapGazeConsecutiveErrors = 0; // caminho feliz: zera contador
   } catch (e) {
+    // 0.2 — dimensão incompatível é DEFINITIVA, não transitória.
+    //
+    // Antes, este catch tratava tudo igual: contava, logava 1×/s e devolvia
+    // null. Para um erro de dimensão isso significa null a 30 Hz para sempre,
+    // com o engine em `degraded` e nenhuma explicação na tela. Nenhum frame
+    // futuro conserta um modelo treinado com outro número de features.
+    if (e instanceof RangeError) {
+      const detail = e.message;
+      console.error(`[calib] calibração invalidada — ${detail}`);
+      clearCalibration();
+      invalidation = { reason: 'feature_dim_mismatch', detail, at: Date.now() };
+      for (const cb of invalidationListeners) {
+        try { cb(invalidation); } catch { /* listener quebrado não derruba o loop */ }
+      }
+      return null;
+    }
+
     _mapGazeConsecutiveErrors++;
     const now = performance.now();
     if (now - _mapGazeLastLoggedMs > MAP_GAZE_LOG_INTERVAL_MS) {

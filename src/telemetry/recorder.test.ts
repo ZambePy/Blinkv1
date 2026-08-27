@@ -11,7 +11,7 @@ import {
   startRecording,
   stopRecording,
 } from './recorder';
-import { MAX_FRAMES, RECORDING_FORMAT_VERSION, type RecordedFrame } from './types';
+import { MAX_FRAMES, TELEMETRY_FORMAT_VERSION, type RecordedFrame } from './types';
 
 // Todos os testes começam com o singleton limpo — como o módulo mantém
 // estado entre testes, o beforeEach é obrigatório.
@@ -131,7 +131,7 @@ describe('recorder — serialização', () => {
     const text = exportAsJSONL();
     const parsed = parseJSONL(text);
     expect(parsed).not.toBeNull();
-    expect(parsed!.header.formatVersion).toBe(RECORDING_FORMAT_VERSION);
+    expect(parsed!.header.formatVersion).toBe(TELEMETRY_FORMAT_VERSION);
     expect(parsed!.header.resolution).toEqual({ w: 1920, h: 1080 });
     expect(parsed!.header.l2cs).toEqual({
       dataset: 'gaze360', inputSize: 448, binWidth: 4, binOffset: -180,

@@ -20,7 +20,7 @@
 import { FEATURE_VECTOR_ID } from '../extractor';
 import {
   MAX_FRAMES,
-  RECORDING_FORMAT_VERSION,
+  TELEMETRY_FORMAT_VERSION,
   type RecordedFrame,
   type Recording,
   type RecordingHeader,
@@ -43,7 +43,7 @@ export function startRecording(input: StartRecordingInput): void {
   frames = [];
   dropped = 0;
   header = {
-    formatVersion: RECORDING_FORMAT_VERSION,
+    formatVersion: TELEMETRY_FORMAT_VERSION,
     // Preenchido aqui, junto do formatVersion, pela mesma razão: o caller não
     // pode gravar um valor errado por engano.
     featureVectorId: FEATURE_VECTOR_ID,

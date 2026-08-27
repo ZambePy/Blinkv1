@@ -104,6 +104,9 @@ export interface CalibrationApi {
   setCalibrationDistancesCm(cameraCm: number | null, screenCm: number | null): void;
   getCurrentCameraDistanceCm(): number | null;
   getDistanceRange(): import('../distanceCompensation').DistanceRange | null;
+  /** 0.2 — avisa quando a calibração foi descartada em tempo de execução por
+   *  incompatibilidade de pipeline. A UI deve pedir recalibração. */
+  onInvalidated(cb: (e: import('../calibration').CalibrationInvalidated) => void): () => void;
   // A1-1 — outcome tipado. Callback opcional; se fornecido, recebe { ok: true }
   // no sucesso ou { ok: false, reason, detail } em qualquer falha do treino
   // (matriz singular, features degeneradas, amostras insuficientes, etc.).
@@ -1002,6 +1005,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getDistanceRange() {
         return calibration.getDistanceRange();
+      },
+      onInvalidated(cb) {
+        return calibration.onCalibrationInvalidated(cb);
       },
       startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void {
         calibration.startCollectingPoint(x, y, onDone);

@@ -251,9 +251,23 @@ export function getRecentBlinkRatePerMinute(windowMs: number = 60000): number {
   return _blinkDetector.getBlinkRatePerMinute(windowMs);
 }
 
-// A2-5 — versão do formato de calibração. Incrementar quando mudança de
-// pipeline invalida perfis salvos (ex: ligar isotropicLandmarks muda o vetor).
-export const RECORDING_FORMAT_VERSION = 2;
+/**
+ * Versão da SEMÂNTICA do vetor de features.
+ *
+ * Renomeada de `RECORDING_FORMAT_VERSION` — havia outra constante com esse nome
+ * exato em `telemetry/types.ts`, versionando o JSONL de gravação. Esta aqui
+ * nunca chegou a ser importada por ninguém; só era citada em comentários,
+ * enquanto perfis de calibração continuavam a ser carregados sem nenhuma
+ * verificação de compatibilidade de pipeline.
+ *
+ * Complementa `FEATURE_VECTOR_ID`, não substitui: o id captura QUAIS dimensões
+ * saem (conjunto e contagem), esta versão captura o que elas SIGNIFICAM. Mudar
+ * a matemática do extractor mantendo 12 dims invalida perfis salvos sem alterar
+ * o id — incrementar aqui é o que sinaliza isso.
+ *
+ * Incrementar quando a interpretação de qualquer dimensão mudar.
+ */
+export const FEATURE_FORMAT_VERSION = 2;
 
 // ─── D11 — conjunto de features ativo ───────────────────────────────────────
 //

@@ -76,6 +76,10 @@ interface GazeContextValue {
    *  parado sem rastrear e sem dizer por quê — num software assistivo, quem
    *  está na frente da tela não tem como abrir o DevTools. */
   cameraError: string | null;
+  /** 0.2 — preenchido quando o pipeline mudou sob um perfil salvo e o modelo
+   *  foi descartado. Antes disso o app ia para `degraded` em silêncio: cursor
+   *  no fallback do nariz, sem dizer que a saída era recalibrar. */
+  calibrationInvalidated: string | null;
   // D2 — tempo em ms desde o start bem-sucedido do engine. 0 antes do start.
   // Consumido pelo AUTO_TEST_META do fluxo pós-calibração para preencher
   // `RunMeta.minutosDeSessao` em vez de hardcode 0.
@@ -191,6 +195,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isComposing, setIsComposing] = useState(false);
   const [isDegraded, setIsDegraded] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
+  const [calibrationInvalidated, setCalibrationInvalidated] = useState<string | null>(null);
   const isDegradedRef = useRef(false);
   const wasDwellingRef = useRef(false);
 
@@ -455,6 +460,15 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ].join(';');
     document.body.appendChild(cursor);
     cursorRef.current = cursor;
+
+    // 0.2 — calibração descartada por incompatibilidade de pipeline.
+    const unsubInvalid = engine.calibration.onInvalidated(() => {
+      if (cancelled) return;
+      setCalibrationInvalidated(
+        'A calibração salva não vale para esta versão do rastreador. ' +
+        'Refaça a calibração para voltar a usar o olhar.',
+      );
+    });
 
     const unsubState = engine.onStateChange((s) => {
       if (!cancelled) setState(s);
@@ -779,6 +793,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     return () => {
       cancelled = true;
       unsubState();
+      unsubInvalid();
       unsubL2CSStatus();
       unsubGaze();
       engine.stop();
@@ -845,6 +860,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getCurrentCameraDistanceCm: () =>
         engineRef.current?.calibration.getCurrentCameraDistanceCm() ?? null,
       getDistanceRange: () => engineRef.current?.calibration.getDistanceRange() ?? null,
+      onInvalidated: (cb) => engineRef.current?.calibration.onInvalidated(cb) ?? (() => {}),
       setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
       resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
       // D6.3 — indicador de drift consulta este valor a cada tick para
@@ -891,8 +907,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setIsComposing,
       isDegraded,
       cameraError,
+      calibrationInvalidated,
     }),
-    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing, isDegraded, cameraError],
+    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing, isDegraded, cameraError, calibrationInvalidated],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

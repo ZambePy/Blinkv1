@@ -8,7 +8,16 @@
 // dado biométrico; adicionar vídeo multiplicaria o passivo sem ganho para o
 // replay (que precisa reproduzir o pipeline, não a imagem).
 
-export const RECORDING_FORMAT_VERSION = 2; // era 1 — v2 adiciona `sampleDecision`
+/**
+ * Versão do formato do JSONL de gravação.
+ *
+ * Renomeada de `RECORDING_FORMAT_VERSION` porque `extractor.ts` exportava uma
+ * constante com o MESMO nome e significado diferente (versão do vetor de
+ * features). Duas constantes homônimas com semânticas distintas é convite a
+ * importar a errada — e a que estava em extractor.ts nunca foi importada por
+ * ninguém, só citada em comentários, o que sugere que a confusão já existia.
+ */
+export const TELEMETRY_FORMAT_VERSION = 2; // era 1 — v2 adiciona `sampleDecision`
 
 /** Decisão do pipeline de calibração sobre este frame. Reproduz, no replay,
  *  exatamente o filtro que `calibration.feedRawData` aplicou ao vivo.
