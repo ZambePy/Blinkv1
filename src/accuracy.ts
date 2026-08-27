@@ -24,6 +24,14 @@ export interface AccuracyResult {
   errorPct: number;       // Erro médio como % da diagonal da tela
   meanErrorDeg: number;   // Erro médio em graus angulares
   jitterRMS: number;      // RMS da dispersão de predições em torno da própria média por ponto (px)
+  /** 0.3 — média dos 9 pontos INTERIORES (25/50/75). Igual a `meanError`;
+   *  existe com nome próprio para o leitor não precisar saber que `meanError`
+   *  exclui a borda. */
+  meanErrorInner: number;
+  /** 0.3 — média dos 4 cantos a 5%/95%, onde a predição EXTRAPOLA a grade de
+   *  calibração em X. É a região que a grade 25/50/75 nunca mediu e onde a UI
+   *  de fato posiciona botões. `NaN` se nenhum ponto de borda foi coletado. */
+  meanErrorEdge: number;
   score: string;          // Rótulo qualitativo
   colorClass: string;     // Classe CSS para colorir o painel
   pointErrors: number[];  // Erro por ponto de validação
@@ -109,6 +117,8 @@ export interface RunMeta {
 }
 
 interface PointDiagnostic {
+  /** 0.3 — ponto do anel de borda (extrapolação) vs grade interior. */
+  isEdge?: boolean;
   groundX: number;
   groundY: number;
   predX: number;
@@ -131,11 +141,18 @@ interface PointDiagnostic {
 //
 // D9 — a grade de calibração deixou de ser 5%/95% fixo e passou a sair do
 // orçamento de excentricidade (`computeCalibrationTargets`). Na tela de
-// referência (23,6" a 60 cm) ela cai em ~17%/83% em X e 5%/95% em Y, então
-// 25/75 continua disjunto em X e segue medindo INTERPOLAÇÃO em Y e
-// EXTRAPOLAÇÃO em X. Estes 9 pontos NÃO acompanham a grade de calibração de
-// propósito: uma métrica que se move junto com o protocolo não serve para
-// comparar sessões ao longo do tempo.
+// referência (23,6" a 60 cm) ela cai em ~17%/83% em X e 5%/95% em Y.
+//
+// 0.3 — CORREÇÃO. Este comentário afirmava "INTERPOLAÇÃO em Y e EXTRAPOLAÇÃO
+// em X", o que está errado: 25/75 cabe dentro de 17/83 tanto quanto dentro de
+// 5/95, então os DOIS eixos são interpolação. A consequência é mais séria que
+// um comentário impreciso — significa que esta grade nunca mediu extrapolação,
+// e portanto nunca mediu a borda, que é onde a UI põe botões (`GazeGrid` usa
+// x ∈ {1/6, 1/2, 5/6}). Daí o bloco `EDGE_POINTS` abaixo.
+//
+// Estes 9 pontos NÃO acompanham a grade de calibração de propósito: uma métrica
+// que se move junto com o protocolo não serve para comparar sessões ao longo do
+// tempo. `meanError` continua sendo a média DESTES nove, pelo mesmo motivo.
 //
 // ⚠️ Se a geometria configurada colocar um alvo de calibração em cima de um
 // destes 9 pontos, o teste passaria a medir memorização e o número ficaria
@@ -150,6 +167,34 @@ const VALIDATION_POINTS = [
   { name: "P7", screenX: 0.25, screenY: 0.75 },
   { name: "P8", screenX: 0.50, screenY: 0.75 },
   { name: "P9", screenX: 0.75, screenY: 0.75 },
+];
+
+/**
+ * 0.3 — anel de borda, medido junto mas reportado separado.
+ *
+ * Quatro cantos a 5%/95%. Em X isso é EXTRAPOLAÇÃO de verdade (fora de 17/83);
+ * em Y cai sobre o nível dos alvos de calibração, então mede interpolação em Y
+ * e extrapolação em X — que é exatamente o regime das bordas laterais da UI.
+ *
+ * Só quatro pontos, e não os oito do anel completo: cada ponto custa 1,7 s
+ * (1,4 s de coleta + 0,3 s de transição) e o usuário-alvo tem ELA. Nove pontos
+ * levam ~15 s; treze levam ~22 s. Oito a mais levariam a ~29 s, e fadiga
+ * degrada a própria medição que se está tentando fazer.
+ *
+ * Os cantos são o pior caso — se a borda vai falhar, falha aqui primeiro.
+ */
+const EDGE_POINTS = [
+  { name: "B1", screenX: 0.05, screenY: 0.05 },
+  { name: "B2", screenX: 0.95, screenY: 0.05 },
+  { name: "B3", screenX: 0.05, screenY: 0.95 },
+  { name: "B4", screenX: 0.95, screenY: 0.95 },
+];
+
+/** Ordem de apresentação: interior primeiro (comparabilidade histórica), borda
+ *  depois. `isEdge` acompanha cada ponto para a agregação separar os dois. */
+const ALL_VALIDATION_POINTS = [
+  ...VALIDATION_POINTS.map((p) => ({ ...p, isEdge: false })),
+  ...EDGE_POINTS.map((p) => ({ ...p, isEdge: true })),
 ];
 
 // Hotfix pós-Sprint 0 — paridade com o protocolo de calibração: descartar os
@@ -171,6 +216,8 @@ let currentFeaturesRight: number[] = [];
 // viés grande" (2026-08-22: shift uniforme de +200 px em Y correlacionado
 // com cabeça abaixando ~5°).
 let currentPose: { yaw: number; pitch: number; roll: number } | undefined;
+/** Incrementa a cada `feedAccuracyRaw`. Ver o comentário lá. */
+let currentFrameSeq = 0;
 
 // Flag para indicar que o teste de precisão está rodando
 // Usada por main.ts para reduzir suavização durante o teste
@@ -195,6 +242,17 @@ export function feedAccuracyRaw(
   currentFeaturesLeft = featuresLeft;
   currentFeaturesRight = featuresRight;
   currentPose = pose;
+  // 0.3 — sinaliza que chegou vetor NOVO.
+  //
+  // O laço de coleta roda em `requestAnimationFrame` (60 Hz num monitor comum,
+  // 180 Hz no monitor de referência), mas o engine só produz features quando o
+  // vídeo entrega quadro novo — 30 Hz. Sem este contador, o mesmo vetor era
+  // amostrado 2 a 6 vezes seguidas.
+  //
+  // Isso não muda a média (o valor repetido não desloca o centro), mas DESTRÓI
+  // o jitter: cópias idênticas têm variância zero entre si, então o `jitterRMS`
+  // reportado era otimista por um fator de raiz de (taxa de rAF / 30).
+  currentFrameSeq++;
 }
 
 // Inicia o teste de validação de precisão pós-calibração.
@@ -246,14 +304,14 @@ export function startAccuracyTest(
   const vh = document.documentElement.clientHeight;
 
   function runNextPoint() {
-    if (pointIndex >= VALIDATION_POINTS.length) {
+    if (pointIndex >= ALL_VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
       currentValidationTarget = null;
       finishTest(overlay, pointErrors, diagnostics, onComplete, runMeta, poseBaseline, overlap);
       return;
     }
 
-    const vp = VALIDATION_POINTS[pointIndex];
+    const vp = ALL_VALIDATION_POINTS[pointIndex];
     showValidationDot(overlay, vp, pointIndex);
 
     const startTime = performance.now();
@@ -276,8 +334,13 @@ export function startAccuracyTest(
       xPx: targetScreenX, yPx: targetScreenY, label: vp.name,
     };
 
+    // Última sequência já amostrada neste ponto. -1 força a primeira leitura.
+    let lastSeenSeq = -1;
+
     function collect() {
       const elapsed = performance.now() - startTime;
+      // 0.3 — um vetor, uma amostra. Ver `currentFrameSeq`.
+      const frameNovo = currentFrameSeq !== lastSeenSeq;
 
       // Fixa o baseline de pose no primeiro frame válido do teste (ainda na
       // janela de acomodação está OK — o usuário acabou de calibrar e a pose
@@ -288,7 +351,8 @@ export function startAccuracyTest(
 
       // Só contabiliza amostras após a fase de acomodação — assim o jitter
       // reportado reflete a fixação, não a sacada de entrada no ponto.
-      if (elapsed >= ACCLIMATION_MS) {
+      if (elapsed >= ACCLIMATION_MS && frameNovo) {
+        lastSeenSeq = currentFrameSeq;
         if (currentPose) {
           poseSamplesYaw.push(currentPose.yaw);
           poseSamplesPitch.push(currentPose.pitch);
@@ -353,6 +417,7 @@ export function startAccuracyTest(
         roll:  poseSamplesRoll.reduce((s, v) => s + v, 0) / poseSamplesRoll.length,
       } : undefined;
       diagnostics.push({
+        isEdge: vp.isEdge,
         groundX: targetScreenX,
         groundY: targetScreenY,
         predX: meanPX,
@@ -410,7 +475,7 @@ function showValidationDot(
 
   const instr = overlay.querySelector(".accuracy-instruction") as HTMLElement;
   if (instr) {
-    instr.innerHTML = `Teste de Precisão &nbsp;<span class="highlight">${index + 1}/${VALIDATION_POINTS.length}</span> — olhe para o ponto`;
+    instr.innerHTML = `Teste de Precisão &nbsp;<span class="highlight">${index + 1}/${ALL_VALIDATION_POINTS.length}</span> — olhe para o ponto`;
   }
 
   overlay.appendChild(dot);
@@ -566,8 +631,24 @@ function finishTest(
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
-  const meanError = pointErrors.reduce((s, v) => s + v, 0) / pointErrors.length;
-  const sortedErrors = [...pointErrors].sort((a, b) => a - b);
+  // 0.3 — interior e borda agregados SEPARADAMENTE.
+  //
+  // `meanError` continua sendo a média dos NOVE pontos interiores, e só deles.
+  // Não é para poupar o número: é que ele é a única métrica com histórico, e
+  // mudar o conjunto de pontos que a compõe tornaria todo relatório anterior
+  // incomparável sem que nada no arquivo indicasse a mudança.
+  //
+  // A borda entra como `meanErrorEdge`, e a UI mostra os dois — porque a média
+  // interior sozinha subestima o uso real: `GazeGrid` põe botões em
+  // x ∈ {1/6, 5/6}, fora do que a grade 25/50/75 alcança.
+  const innerErrors = diagnostics.filter((d) => !d.isEdge).map((d) => d.error).filter(Number.isFinite);
+  const edgeErrors = diagnostics.filter((d) => d.isEdge).map((d) => d.error).filter(Number.isFinite);
+  const mediaDe = (v: number[]) => (v.length > 0 ? v.reduce((a, b) => a + b, 0) / v.length : NaN);
+
+  const meanErrorInner = mediaDe(innerErrors);
+  const meanErrorEdge = mediaDe(edgeErrors);
+  const meanError = meanErrorInner;
+  const sortedErrors = [...innerErrors].sort((a, b) => a - b);
   const medianError = sortedErrors[Math.floor(sortedErrors.length / 2)] || 0;
   // D9 — antes: `sorted[floor(n*0.9)]`, que com n=9 dá `sorted[8]` — ou seja, o
   // p90 por ponto era LITERALMENTE o máximo, e o relatório publicava dois nomes
@@ -693,6 +774,7 @@ function finishTest(
 
   const result: AccuracyResult = {
     meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
+    meanErrorInner, meanErrorEdge,
     jitterRMS, score, colorClass, pointErrors, pointJitters,
     sampleMeanError, sampleMedianError, sampleP90Error, hitRateByRadius,
     poseDrift, affine,
@@ -704,6 +786,7 @@ function finishTest(
   try {
     localStorage.setItem("accuracyResult", JSON.stringify({
       meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
+      meanErrorInner, meanErrorEdge,
       jitterRMS, score, colorClass
     }));
   } catch (_) { }
@@ -938,11 +1021,17 @@ function showDiagnosticOverlay(
 
       <div class="diagnostic-metrics">
         <div class="metric-item">
-          <div class="metric-value" style="color:${scoreColor}">${Math.round(result.meanError)}px</div>
-          <div class="metric-label">Erro Médio</div>
+          <div class="metric-value" style="color:${scoreColor}">${Math.round(result.meanErrorInner)}px</div>
+          <div class="metric-label">Erro Médio (interior)</div>
         </div>
         <div class="metric-divider"></div>
         <div class="metric-item">
+          <div class="metric-value" style="color:${scoreColor}">${
+            Number.isFinite(result.meanErrorEdge) ? Math.round(result.meanErrorEdge) + 'px' : '—'
+          }</div>
+          <div class="metric-label">Erro Médio (borda)</div>
+        </div>
+        <div class="metric">
           <div class="metric-value" style="color:${scoreColor}">${Math.round(result.maxError)}px</div>
           <div class="metric-label">Erro Máximo</div>
         </div>
