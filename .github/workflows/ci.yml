@@ -15,8 +15,27 @@ concurrency:
 jobs:
   verify:
     name: Tipos, testes e build
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # windows-latest, e NÃO ubuntu-latest. Duas razões independentes:
+    #
+    #   1. É a plataforma que o produto entrega. O app é Electron para Windows
+    #      e `electron/main.ts` lê o EDID do monitor via PowerShell/WMI —
+    #      código que só existe e só roda aqui. Um CI em Linux nunca exercitaria
+    #      esse caminho.
+    #
+    #   2. `npm ci` em Linux falha com este lockfile, e não é algo que dê para
+    #      consertar do lado do desenvolvedor. O arquivo foi gerado no Windows,
+    #      onde a árvore ideal do npm não inclui `@emnapi/core@1.11.3` nem
+    #      `@emnapi/runtime@1.11.3` — dependências que só aparecem na resolução
+    #      de Linux. `npm install --package-lock-only` rodado no Windows produz
+    #      diff ZERO, porque o npm monta a árvore da plataforma corrente. O
+    #      resultado seria `EUSAGE — Missing: @emnapi/core from lock file` em
+    #      todo push. Lockfiles do npm não são totalmente neutros de plataforma
+    #      quando há dependências opcionais aninhadas.
+    #
+    # Custo aceito: o runner do Windows é mais lento que o do Linux, e o
+    # caminho Linux deixa de ser verificado — mas nós não o distribuímos.
+    runs-on: windows-latest
+    timeout-minutes: 20
 
     env:
       # `electron/build.mjs` marca `electron` como external — o compile é só
@@ -28,36 +47,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # `canvas` NÃO é dependência decorativa: `qualityAnalyzer.a1-5.test.ts`
-      # renderiza canvas 2D de verdade dentro do jsdom para exercitar o
-      # analisador de qualidade com pixels reais, e o jsdom delega `getContext`
-      # a este módulo nativo.
-      #
-      # O install dele é `prebuild-install -r napi || node-gyp rebuild`. O
-      # prebuild costuma existir para linux-x64, mas quando não existe o
-      # fallback compila — e aí precisa destas bibliotecas. Instalar antes custa
-      # ~15 s e elimina um modo de falha que só apareceria como `npm ci`
-      # quebrado, sem indicar a causa.
-      - name: Bibliotecas de sistema para o canvas nativo
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
-
-      # Node 24 (LTS) e NÃO 20.
-      #
-      # Duas razões, ambas vieram de falha real de CI:
-      #
-      #   1. `package-lock.json` foi gerado pelo npm 11, que aninha
-      #      `@emnapi/core` e `@emnapi/runtime` sob
-      #      `@rolldown/binding-wasm32-wasi/node_modules/`. O npm 10.8.2 que
-      #      acompanha o Node 20 espera esses pacotes no topo e aborta com
-      #      `EUSAGE — Missing: @emnapi/core from lock file`. Node 24 traz o
-      #      npm 11 e lê o lockfile do mesmo jeito que a máquina que o gerou.
-      #
-      #   2. `node-abi` (via electron-builder) declara `engines.node >=22.12.0`.
-      #      No Node 20 isso saía como EBADENGINE em todo install.
-      #
-      # Manter esta versão alinhada com `engines.node` do package.json.
+      # Node 24 para bater com o ambiente que gerou o lockfile (npm 11) e com
+      # `engines.node` do package.json — `node-abi`, via electron-builder, exige
+      # >= 22.12.0 e emitia EBADENGINE no Node 20.
       - uses: actions/setup-node@v4
         with:
           node-version: 24
@@ -66,13 +58,9 @@ jobs:
             package-lock.json
             frontend/package-lock.json
 
-      # NENHUM passo abaixo usa `npm --prefix <dir> <cmd>`.
-      #
-      # Esse formato quebrou o primeiro CI: o npm do runner interpretou
-      # `frontend` como argumento POSICIONAL de `ci` (virou `npm ci frontend`)
-      # e imprimiu o usage em vez de instalar. A combinação `--prefix` + `ci` é
-      # ambígua entre versões de npm; `working-directory` do próprio Actions
-      # não passa pelo parser de argumentos do npm e não tem esse problema.
+      # `working-directory` em vez de `npm --prefix <dir>`: o npm interpreta o
+      # diretório como argumento POSICIONAL de `ci` (`npm ci frontend`) e
+      # imprime o usage em vez de instalar.
       - name: Instalar dependências (raiz)
         run: npm ci
 
