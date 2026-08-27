@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildL2CSBlock, L2CS_BLOCK_DIM } from './block';
+import { buildL2CSBlock, isGazePlausible, L2CS_BLOCK_DIM } from './block';
 
 describe('buildL2CSBlock', () => {
   it('valid=false → 7 zeros independente dos outros inputs', () => {
@@ -30,20 +30,41 @@ describe('buildL2CSBlock', () => {
     expect(b[6]).toBeCloseTo(ty * tp, 12);        // cross
   });
 
-  it('clamp ±π/4: yaw extremo → tan clampeado a ±1', () => {
-    const bPos = buildL2CSBlock(Math.PI, 0, true, 1); // clampeia p/ +π/4
-    const bNeg = buildL2CSBlock(-Math.PI, 0, true, 1); // clampeia p/ -π/4
-    expect(bPos[0]).toBeCloseTo(1, 12);   // tan(π/4) = 1
-    expect(bNeg[0]).toBeCloseTo(-1, 12);  // tan(-π/4) = -1
-    // Termos quadráticos ficam 1 nos dois casos (par)
-    expect(bPos[4]).toBeCloseTo(1, 12);
-    expect(bNeg[4]).toBeCloseTo(1, 12);
+  // D10 — MUDANÇA DE CONTRATO. Antes, um ângulo absurdo era clampeado em ±π/4
+  // e virava a CONSTANTE ±1 dentro do vetor de features. Isso transformava
+  // lixo da rede em feature de valor fixo, e o Ridge tratava a constante como
+  // sinal. Foi exatamente o que aconteceu entre D3 e D10 com o bug do crop
+  // preto: yaw=-82° em 100% dos frames → bloco [-1,-1,-d,-d,1,1,1] constante.
+  // Agora ângulo implausível é INVÁLIDO (bloco zerado), não extremo.
+  it('yaw implausível é rejeitado, não clampeado', () => {
+    expect(buildL2CSBlock(Math.PI, 0, true, 1)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+    expect(buildL2CSBlock(-Math.PI, 0, true, 1)).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 
-  it('clamp ±π/4: pitch extremo → tan clampeado a ±1', () => {
-    const b = buildL2CSBlock(0, -10, true, 1);
-    expect(b[1]).toBeCloseTo(-1, 12); // tan(-π/4)
-    expect(b[5]).toBeCloseTo(1, 12);  // (-1)² = 1
+  it('pitch implausível é rejeitado, não clampeado', () => {
+    expect(buildL2CSBlock(0, -10, true, 1)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it('o valor real observado com o crop quebrado seria rejeitado hoje', () => {
+    // fixtures/replay/*.jsonl: yaw = -82,0°, pitch = -50,6°, constantes em
+    // 780/780 frames válidos. Com o contrato antigo isto virava
+    // [-1, -1, -d, -d, 1, 1, 1]; hoje não entra no vetor.
+    const yaw = (-82.0 * Math.PI) / 180;
+    const pitch = (-50.6 * Math.PI) / 180;
+    expect(isGazePlausible(yaw, pitch)).toBe(false);
+    expect(buildL2CSBlock(yaw, pitch, true, 7.85)).toEqual([0, 0, 0, 0, 0, 0, 0]);
+  });
+
+  it('ângulo de uso real continua passando', () => {
+    // ±30° cobre a tela de referência inteira a 60 cm.
+    expect(isGazePlausible(0.52, 0.35)).toBe(true);
+    expect(buildL2CSBlock(0.52, 0.35, true, 1)[0]).toBeCloseTo(Math.tan(0.52), 12);
+  });
+
+  it('NaN/Infinity da rede são rejeitados', () => {
+    expect(isGazePlausible(NaN, 0)).toBe(false);
+    expect(isGazePlausible(0, Infinity)).toBe(false);
+    expect(buildL2CSBlock(NaN, 0, true, 1)).toEqual([0, 0, 0, 0, 0, 0, 0]);
   });
 
   it('sem clamp para valores intermediários (yaw = π/6 dentro do range)', () => {

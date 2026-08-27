@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { computeDisplayGeometry, pickPanelForDisplay } from '@tracker/displayGeometry';
 
 type DwellSpeed = 'slow' | 'normal' | 'fast';
 type KeyboardLayout = 'frequency' | 'alphabetical' | 'qwerty' | 'hierarchical';
@@ -36,6 +37,29 @@ interface Settings {
   // Só o cuidador sabe estes números — o browser não expõe tamanho físico.
   screenDiagonalIn: number;
   viewingDistanceCm: number;
+  // Etapa 1 — de onde veio `screenDiagonalIn`. Existe para o preenchimento
+  // automático (EDID via Electron) NUNCA sobrescrever um valor que o cuidador
+  // digitou: se ele mediu com fita, esse número vale mais que o EDID, que em
+  // vários monitores vem arredondado a centímetro inteiro ou zerado.
+  screenGeometrySource: 'default' | 'auto' | 'manual';
+  // Etapa 1, item 6 — consentimento para ler configurações do sistema (EDID do
+  // monitor, escala da tela). `null` = ainda não perguntamos. Ler o hardware do
+  // usuário sem avisar é o tipo de coisa que um software de saúde não faz por
+  // conveniência, mesmo quando o dado é inócuo e o SO permitiria.
+  systemAccessGranted: boolean | null;
+  // Etapa 1 — campo de visão HORIZONTAL da câmera, em graus. Nenhuma API
+  // expõe isso; é derivado uma única vez, quando o cuidador mede a distância
+  // com fita e aperta "Calibrar campo de visão" em Configurações. A partir
+  // daí o app estima a distância sozinho em toda sessão, que é o que faz o
+  // medidor de distância da pré-calibração funcionar de verdade.
+  cameraHorizontalFovDeg: number | null;
+  // Etapa 1, item 2 — fator de escala do Windows relatado pelo SO. NÃO entra na
+  // conversão px→cm (ver `pickPanelForDisplay` — a escala se cancela, porque o
+  // erro é medido em px CSS e a tela cobre um número fixo de px CSS). Guardado
+  // para (a) desambiguar monitores e (b) registrar a configuração no relatório,
+  // já que "1280×800 numa tela de 23,6\"" é a assinatura de escala em 150% e
+  // confunde quem lê o histórico depois.
+  screenScaleFactor: number | null;
 }
 
 const defaultSettings: Settings = {
@@ -59,6 +83,10 @@ const defaultSettings: Settings = {
   // calibração fica posicionada para a tela errada.
   screenDiagonalIn: 23.6,
   viewingDistanceCm: 60,
+  screenGeometrySource: 'default',
+  systemAccessGranted: null,
+  cameraHorizontalFovDeg: null,
+  screenScaleFactor: null,
 };
 
 const SettingsContext = createContext<{
@@ -101,6 +129,77 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       theme: initialTheme(saved),
     };
   });
+
+  // Etapa 1 — preenche a diagonal a partir do EDID, uma vez no boot.
+  //
+  // Só age quando a origem atual é 'default' ou 'auto'. Um valor marcado como
+  // 'manual' (o cuidador digitou em Configurações) é soberano: o EDID reporta
+  // em centímetros inteiros, então erra por até ~0,4" — melhor que um hardcode
+  // errado, pior que uma medição com fita.
+  useEffect(() => {
+    const sys = (window as unknown as {
+      irisflowSystem?: {
+        getMonitorSizes?: () => Promise<{ widthCm: number; heightCm: number }[]>;
+        getDisplayInfo?: () => Promise<{
+          widthPx: number; heightPx: number; scaleFactor: number;
+        }>;
+      };
+    }).irisflowSystem;
+    if (!sys?.getMonitorSizes) return;   // browser puro / build web: sem IPC
+    // Item 6 — só lê o sistema depois do consentimento explícito.
+    if (settings.systemAccessGranted !== true) return;
+    let cancelled = false;
+    // Item 2 — lê tamanho físico E info do display juntos. A segunda serve
+    // para escolher QUAL painel corresponde ao monitor em uso: com dois
+    // monitores, "o maior" era chute, e escolher errado leva a diagonal errada
+    // direto para o orçamento de excentricidade da calibração.
+    void Promise.all([
+      sys.getMonitorSizes(),
+      sys.getDisplayInfo?.() ?? Promise.resolve(null),
+    ]).then(([sizes, info]) => {
+      if (cancelled) return;
+      setSettings((prev) => {
+        const scale = info?.scaleFactor ?? null;
+        if (prev.screenGeometrySource === 'manual') {
+          return scale !== null && scale !== prev.screenScaleFactor
+            ? { ...prev, screenScaleFactor: scale }
+            : prev;
+        }
+        const aspect = info && info.heightPx > 0 ? info.widthPx / info.heightPx : null;
+        const { panel, ambiguous } = pickPanelForDisplay(sizes ?? [], aspect);
+        const geo = computeDisplayGeometry(panel);
+        if (!geo) {
+          console.log('[Etapa1] EDID não utilizável; mantendo diagonal configurada.');
+          return scale !== null ? { ...prev, screenScaleFactor: scale } : prev;
+        }
+        if (ambiguous) {
+          console.warn(
+            '[Etapa1] mais de um monitor com a mesma proporção — a diagonal lida ' +
+            'pode ser do monitor errado. Se o número abaixo não bater com a sua tela, ' +
+            'corrija à mão em Configurações → Teste de precisão.',
+          );
+        }
+        const rounded = Math.round(geo.diagonalIn * 10) / 10;
+        if (Math.abs(rounded - prev.screenDiagonalIn) < 0.05
+          && prev.screenGeometrySource === 'auto'
+          && scale === prev.screenScaleFactor) return prev;
+        console.log(
+          `[Etapa1] diagonal lida do sistema: ${rounded}" ` +
+          `(${geo.widthCm}×${geo.heightCm} cm). Anterior: ${prev.screenDiagonalIn}".` +
+          (scale && scale !== 1 ? ` Escala do Windows: ${(scale * 100).toFixed(0)}%.` : ''),
+        );
+        const next = {
+          ...prev,
+          screenDiagonalIn: rounded,
+          screenGeometrySource: 'auto' as const,
+          screenScaleFactor: scale,
+        };
+        try { localStorage.setItem('irisflow_settings', JSON.stringify(next)); } catch { /* indisponível */ }
+        return next;
+      });
+    }).catch(() => { /* IPC indisponível: segue com o valor configurado */ });
+    return () => { cancelled = true; };
+  }, [settings.systemAccessGranted]);
 
   // Aplica conforto visual no boot e a cada mudança relevante.
   useEffect(() => {

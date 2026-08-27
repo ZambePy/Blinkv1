@@ -31,8 +31,15 @@ export interface InvariantViolation {
 const violations = new Map<InvariantCode, InvariantViolation>();
 
 export class InvariantError extends Error {
-  constructor(public readonly code: InvariantCode, detail: string) {
+  // Campo declarado e atribuído explicitamente em vez de parameter property
+  // (`constructor(public readonly code…)`): parameter property EMITE código, e
+  // o projeto compila com `erasableSyntaxOnly`, que só aceita sintaxe de tipo
+  // removível sem transformação.
+  readonly code: InvariantCode;
+
+  constructor(code: InvariantCode, detail: string) {
     super(`[invariant:${code}] ${detail}`);
+    this.code = code;
     this.name = 'InvariantError';
   }
 }
@@ -50,7 +57,12 @@ export class InvariantError extends Error {
 export function assertInvariant(cond: boolean, code: InvariantCode, detail: string): void {
   if (cond) return;
 
-  const isTest = typeof process !== 'undefined' && process.env?.NODE_ENV === 'test';
+  // `process` não existe no browser e não está nos `types` deste tsconfig
+  // (só `vite/client`). Mesmo idioma de `config/experiment.ts`: alcançar via
+  // `globalThis` com cast local, em vez de puxar @types/node para o núcleo e
+  // arriscar que código de browser passe a compilar contra APIs de Node.
+  const proc = (globalThis as { process?: { env?: Record<string, string | undefined> } }).process;
+  const isTest = proc?.env?.NODE_ENV === 'test';
   if (isTest) {
     throw new InvariantError(code, detail);
   }

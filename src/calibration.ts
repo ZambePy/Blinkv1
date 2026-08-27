@@ -9,7 +9,8 @@ import { StandardScaler } from './scaler';
 import { isAccuracyTesting } from './accuracy';
 import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
-import { trainRidgeModel, predictRidge } from './ridge';
+import { trainRidgeModel, predictRidge, targetGroupKey, RidgeRegressor } from './ridge';
+import { L2CS_BLOCK_DIM } from './l2cs/block';
 import {
   applyDistanceCorrectionToFeatures,
   computeDistanceCorrectionRatio,
@@ -332,7 +333,12 @@ export function getLambdaDiagnostics(): LambdaDiagnostics | null {
 //   - `experimentId` diferente → flags de A2 mudaram (isotropicLandmarks etc.)
 //   - `createdAt` > 24 h → oferece revalidação, não bloqueia
 
-const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles';
+// D11 — chave versionada. A redução do vetor de 44 para 12 dims (ver
+// `ACTIVE_FEATURE_SET` em extractor.ts) torna todo perfil anterior
+// incompatível: `predictRidge` lançaria por dimensão divergente e o
+// `mapGaze` cairia em null a 30 Hz. Trocar a chave descarta os antigos de
+// forma limpa, em vez de depender do erro em tempo de inferência.
+const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles.v2';
 const PROFILES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function buildContextKey(): string {
@@ -1127,6 +1133,59 @@ interface TrainingSummary {
   deadFeaturesRightPct: number;
 }
 
+// D10 — diagnóstico de AJUSTE da calibração.
+//
+// Por que isto existe: até aqui a única medida de qualidade era o accuracy
+// test, que roda DEPOIS e mistura três coisas diferentes num número só:
+//   (a) o modelo não consegue nem reproduzir os próprios alvos de treino;
+//   (b) o modelo reproduz o treino mas não generaliza para posições novas;
+//   (c) o modelo generaliza, mas alguma coisa MUDOU entre calibrar e testar
+//       (pose da cabeça, validade do L2CS, iluminação).
+//
+// Estes três casos pedem correções opostas, e o `meanError` sozinho não os
+// distingue. As duas métricas abaixo separam:
+//
+//   trainErrorNorm — erro do modelo nas PRÓPRIAS amostras de treino.
+//                    Alto ⇒ caso (a): os dados de calibração são
+//                    internamente inconsistentes (o usuário não fixou os
+//                    alvos, ou a pose derivou entre pontos). Nenhum ajuste
+//                    de regressor conserta dado contraditório.
+//   looErrorNorm   — erro leave-one-target-out: treina sem um alvo e prevê
+//                    esse alvo. É uma estimativa HONESTA de generalização,
+//                    obtida só com dados de calibração.
+//
+// A comparação com o accuracy test é o que fecha o diagnóstico:
+//   loo ≈ teste  ⇒ caso (b): o limite é o modelo/os dados.
+//   loo << teste ⇒ caso (c): mudou algo entre calibrar e testar.
+//
+// Puramente diagnóstico. Não altera o modelo, não bloqueia, não entra em
+// nenhuma métrica exibida como resultado.
+export interface CalibrationFitDiagnostics {
+  /** Erro médio do modelo nas próprias amostras de treino, em fração de tela. */
+  trainErrorNorm: number;
+  /** Erro leave-one-target-out médio, em fração de tela. */
+  looErrorNorm: number;
+  /** Erro LOO por alvo, na ordem dos alvos únicos. */
+  looByTarget: { x: number; y: number; errorNorm: number; samples: number }[];
+  /** Média e desvio da pose durante TODA a calibração (rad). O desvio é o
+   *  número interessante: pose que varia muito entre alvos vira variável
+   *  confundida com o olhar. */
+  poseMean: { yaw: number; pitch: number; roll: number } | null;
+  poseStd: { yaw: number; pitch: number; roll: number } | null;
+  /** Fração das amostras de treino em que o bloco L2CS estava válido (≠ 0).
+   *  Se isto for < 1, parte do treino viu 7 zeros onde a inferência vai ver
+   *  valores reais (ou vice-versa) — vazamento direto para o erro. */
+  l2csValidFraction: number;
+  /** Amostras aceitas por alvo. Desequilíbrio grande enviesa o ajuste. */
+  samplesPerTarget: number[];
+}
+
+let lastFitDiagnostics: CalibrationFitDiagnostics | null = null;
+
+export function getCalibrationFitDiagnostics(): CalibrationFitDiagnostics | null {
+  return lastFitDiagnostics;
+}
+
 function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): TrainingSummary {
   const trainFeaturesLeft  = trainingProfile.map(p => p.featuresLeft);
   const trainFeaturesRight = trainingProfile.map(p => p.featuresRight);
@@ -1215,7 +1274,152 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }
   }
 
+  lastFitDiagnostics = computeFitDiagnostics(
+    trainFeaturesLeft, trainFeaturesRight, trainTargets, trainingProfile,
+  );
+  const d = lastFitDiagnostics;
+  console.log(
+    `[calib] D10 ajuste — treino=${(d.trainErrorNorm * 100).toFixed(2)}% de tela | ` +
+    `LOO=${(d.looErrorNorm * 100).toFixed(2)}% | L2CS válido=${(d.l2csValidFraction * 100).toFixed(0)}% | ` +
+    `amostras/alvo=[${d.samplesPerTarget.join(',')}]`,
+  );
+  if (d.poseStd) {
+    console.log(
+      `[calib] D10 pose durante a calibração — desvio yaw=${d.poseStd.yaw.toFixed(4)} ` +
+      `pitch=${d.poseStd.pitch.toFixed(4)} roll=${d.poseStd.roll.toFixed(4)} rad`,
+    );
+  }
+
   return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
+}
+
+/** D10 — calcula `CalibrationFitDiagnostics`. Isolada e pura para poder ser
+ *  testada sem passar por `completeCalibration`. */
+export function computeFitDiagnostics(
+  featuresLeft: number[][],
+  featuresRight: number[][],
+  targets: { screenX: number; screenY: number }[],
+  profile?: readonly CalibrationPoint[],
+): CalibrationFitDiagnostics {
+  const n = featuresLeft.length;
+
+  // Predição binocular idêntica à de `mapGaze` sem pesos: média simples.
+  const binocular = (
+    sl: StandardScaler, sr: StandardScaler,
+    ml: RidgeModel, mr: RidgeModel,
+    fl: number[], fr: number[],
+  ) => {
+    const a = predictRidge(ml, sl.transformSingle(fl));
+    const b = predictRidge(mr, sr.transformSingle(fr));
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  };
+
+  const fitPair = (idx: number[]) => {
+    const fl = idx.map((i) => featuresLeft[i]);
+    const fr = idx.map((i) => featuresRight[i]);
+    const tg = idx.map((i) => targets[i]);
+    const groups = tg.map(targetGroupKey);
+    const sl = new StandardScaler(); sl.fit(fl);
+    const sr = new StandardScaler(); sr.fit(fr);
+    const rl = new RidgeRegressor(); rl.train(sl.transform(fl), tg.map(t => t.screenX), tg.map(t => t.screenY));
+    const rr = new RidgeRegressor(); rr.train(sr.transform(fr), tg.map(t => t.screenX), tg.map(t => t.screenY));
+    void groups;
+    return {
+      sl, sr,
+      ml: rl.getModel() as RidgeModel,
+      mr: rr.getModel() as RidgeModel,
+    };
+  };
+
+  // ── erro de treino ────────────────────────────────────────────────────
+  let trainErrorNorm = 0;
+  if (n > 0 && regressorLeft && regressorRight) {
+    let sum = 0;
+    for (let i = 0; i < n; i++) {
+      const a = regressorLeft.predict(featureScalerLeft.transformSingle(featuresLeft[i]));
+      const b = regressorRight.predict(featureScalerRight.transformSingle(featuresRight[i]));
+      sum += Math.hypot((a.x + b.x) / 2 - targets[i].screenX, (a.y + b.y) / 2 - targets[i].screenY);
+    }
+    trainErrorNorm = sum / n;
+  }
+
+  // ── agrupamento por alvo ──────────────────────────────────────────────
+  const byTarget = new Map<string, number[]>();
+  for (let i = 0; i < n; i++) {
+    const k = targetGroupKey(targets[i]);
+    const arr = byTarget.get(k);
+    if (arr) arr.push(i); else byTarget.set(k, [i]);
+  }
+  const keys = [...byTarget.keys()];
+  const samplesPerTarget = keys.map((k) => byTarget.get(k)!.length);
+
+  // ── leave-one-target-out ──────────────────────────────────────────────
+  const looByTarget: CalibrationFitDiagnostics['looByTarget'] = [];
+  let looSum = 0, looCount = 0;
+  if (keys.length >= 3) {
+    for (const k of keys) {
+      const test = byTarget.get(k)!;
+      const train: number[] = [];
+      for (let i = 0; i < n; i++) if (targetGroupKey(targets[i]) !== k) train.push(i);
+      try {
+        const f = fitPair(train);
+        let s = 0;
+        for (const i of test) {
+          const p = binocular(f.sl, f.sr, f.ml, f.mr, featuresLeft[i], featuresRight[i]);
+          s += Math.hypot(p.x - targets[i].screenX, p.y - targets[i].screenY);
+        }
+        const e = s / test.length;
+        looByTarget.push({ x: targets[test[0]].screenX, y: targets[test[0]].screenY, errorNorm: e, samples: test.length });
+        looSum += e; looCount++;
+      } catch {
+        looByTarget.push({ x: targets[test[0]].screenX, y: targets[test[0]].screenY, errorNorm: NaN, samples: test.length });
+      }
+    }
+  }
+  const looErrorNorm = looCount > 0 ? looSum / looCount : NaN;
+
+  // ── pose e validade do L2CS durante a calibração ──────────────────────
+  let poseMean: CalibrationFitDiagnostics['poseMean'] = null;
+  let poseStd: CalibrationFitDiagnostics['poseStd'] = null;
+  if (profile && profile.length > 0) {
+    const ys: number[] = [], ps: number[] = [], rs: number[] = [];
+    for (const p of profile) {
+      const q = p.quality as { yaw?: number; pitch?: number; roll?: number } | null | undefined;
+      if (q && typeof q.yaw === 'number' && typeof q.pitch === 'number' && typeof q.roll === 'number') {
+        ys.push(q.yaw); ps.push(q.pitch); rs.push(q.roll);
+      }
+    }
+    if (ys.length > 1) {
+      const m = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+      const sd = (v: number[], mu: number) => Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / (v.length - 1));
+      const my = m(ys), mp = m(ps), mr2 = m(rs);
+      poseMean = { yaw: my, pitch: mp, roll: mr2 };
+      poseStd = { yaw: sd(ys, my), pitch: sd(ps, mp), roll: sd(rs, mr2) };
+    }
+  }
+
+  // O bloco L2CS ocupa as últimas L2CS_BLOCK_DIM dimensões do vetor. Inválido
+  // é representado por 7 zeros exatos (ver `buildL2CSBlock`).
+  let l2csValid = 0;
+  for (let i = 0; i < n; i++) {
+    const f = featuresLeft[i];
+    if (f.length < L2CS_BLOCK_DIM) continue;
+    let allZero = true;
+    for (let j = f.length - L2CS_BLOCK_DIM; j < f.length; j++) {
+      if (f[j] !== 0) { allZero = false; break; }
+    }
+    if (!allZero) l2csValid++;
+  }
+
+  return {
+    trainErrorNorm,
+    looErrorNorm,
+    looByTarget,
+    poseMean,
+    poseStd,
+    l2csValidFraction: n > 0 ? l2csValid / n : 0,
+    samplesPerTarget,
+  };
 }
 
 // D4.1 (ROADMAP §5) — detecção de ponto outlier na calibração.

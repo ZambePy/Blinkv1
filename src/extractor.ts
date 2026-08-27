@@ -255,6 +255,75 @@ export function getRecentBlinkRatePerMinute(windowMs: number = 60000): number {
 // pipeline invalida perfis salvos (ex: ligar isotropicLandmarks muda o vetor).
 export const RECORDING_FORMAT_VERSION = 2;
 
+// ─── D11 — conjunto de features ativo ───────────────────────────────────────
+//
+// LAYOUT do vetor produzido por `extractCompactFeatures` (por olho):
+//
+//   [0]      offsetX      deslocamento horizontal da íris vs. centro do olho
+//   [1]      offsetY      idem vertical
+//   [2]      relX         offsetX normalizado pela largura do olho
+//   [3]      relY         offsetY normalizado pela altura do olho
+//   [4..11]  contorno da íris — 4 pontos × (x,y) no frame da cabeça
+//   [12..19] cantos do olho — interno, externo, topo, base × (x,y)
+//   [20]     ear (altura/largura do olho)
+//   [21]     irisRadius
+//   [22..24] yaw, pitch, roll da cabeça
+//   [25..36] interações pose × offset (12 termos, Sprint 3)
+//   [37..43] bloco L2CS (7 termos, D3) — só quando o engine passa gaze
+//
+// POR QUE REDUZIR — medido por replay em DUAS gravações reais
+// (`fixtures/replay/ci-baseline.jsonl` e `sweep-expand_1.4_oculos_simples.jsonl`),
+// treinando na janela de calibração e medindo na janela do teste de precisão:
+//
+//   posições de calibração    4     6     8    10    12    14
+//   erro com 44 dims        422   302   249   234   200   165   px
+//   erro com 12 dims        320   194   165   152   140   117   px
+//
+// 12 dims venceu em TODOS os k, nas DUAS gravações. A razão é de
+// condicionamento, não de informação: 9 alvos distintos não determinam 45
+// parâmetros por olho, e as 32 dimensões extras dão ao Ridge liberdade para
+// separar os 9 aglomerados usando ruído intra-fixação. O sintoma medido é
+// inequívoco — segurar amostras aleatórias dá 22 px de erro, segurar um alvo
+// INTEIRO dá 140 px: o modelo memoriza aglomerados em vez de aprender um mapa.
+//
+// O que sai e por quê:
+//   cantos [12..19]  → geometria da órbita, não do olhar; move com a pose.
+//   ear, irisRadius  → abertura da pálpebra e distância; sem sinal de direção.
+//   pose  [22..24]   → a pose já entra via offset (que é medido no frame da
+//                      cabeça); repetir a pose crua dá ao Ridge um atalho para
+//                      explicar alvo por postura, que é o confundimento
+//                      central (a cabeça se move ~metade da amplitude do olho).
+//   interações [25..36] → 12 dims quadráticas sobre 9 restrições.
+//   L2CS [37..43]    → ver `sourceDimensions` em l2cs/crop.ts: entre D3 e D10
+//                      este bloco era constante (crop preto). A medição acima
+//                      foi feita nesse estado, então ele NÃO foi avaliado
+//                      funcionando. Fica fora do default e disponível em
+//                      'compact' para re-medir quando houver gravação nova.
+export type FeatureSet = 'iris12' | 'compact';
+
+/** Índices mantidos por `iris12`: offset, rel e contorno da íris. */
+export const IRIS12_DIMS = 12;
+
+/** Conjunto ativo. Ver a tabela acima para a evidência. */
+export const ACTIVE_FEATURE_SET: FeatureSet = 'iris12';
+
+/**
+ * D11 — projeta o vetor completo do extractor no conjunto ativo.
+ *
+ * Pura e total: com `compact` devolve a entrada intacta (contrato pré-D11),
+ * com `iris12` devolve as 12 primeiras dimensões. Um vetor mais curto que 12
+ * (extractor devolveu vazio por falta de landmarks) passa sem alteração — quem
+ * trata frame sem rosto é o caller.
+ */
+export function projectFeatureSet(
+  full: number[],
+  set: FeatureSet = ACTIVE_FEATURE_SET,
+): number[] {
+  if (set === 'compact') return full;
+  if (full.length <= IRIS12_DIMS) return full;
+  return full.slice(0, IRIS12_DIMS);
+}
+
 export function extractEyeFeatures(
   landmarks: Point3D[],
   faceMatrix?: Float32Array,

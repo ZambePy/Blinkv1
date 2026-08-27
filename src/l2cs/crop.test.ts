@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   computeSquareBBox,
+  cropFaceToTensor,
   preprocess448FromRGBA,
   EXPAND_FACTOR,
   IMAGENET_MEAN,
@@ -126,5 +127,58 @@ describe('preprocess448FromRGBA', () => {
       if (ta[i] !== tb[i]) { identical = false; break; }
     }
     expect(identical).toBe(true);
+  });
+});
+
+// ── D10 — regressão do crop preto ───────────────────────────────────────────
+//
+// Entre D3 e D10 o L2CS recebeu uma imagem 448×448 inteiramente PRETA em todos
+// os frames. Causa: `cropFaceToTensor` lia `source.width`, que num
+// HTMLVideoElement é o ATRIBUTO HTML `width` (0 quando só o CSS define o
+// tamanho — que é exatamente como `GazeContext` cria o vídeo). Com w=h=0 todo
+// landmark virava px 0, o bbox saía com lado 0, e `drawImage` com sw/sh=0 é um
+// no-op silencioso: sobrava o `fillRect('#000')`.
+//
+// Sintoma medido em fixtures/replay/*.jsonl: yaw e pitch CONSTANTES em -82,0°
+// e -50,6° ao longo de 780 frames válidos (min = mediana = máx).
+//
+// Estes testes travam as duas metades do conserto: a fonte é medida pela
+// dimensão intrínseca, e uma fonte sem dimensão falha alto em vez de produzir
+// um tensor preto.
+describe('D10 — dimensões da fonte de pixels', () => {
+  // Stub mínimo: só o que `cropFaceToTensor` lê antes de tocar no canvas.
+  const fakeVideo = (attrW: number, attrH: number, vidW: number, vidH: number) =>
+    ({ width: attrW, height: attrH, videoWidth: vidW, videoHeight: vidH }) as unknown as Parameters<typeof cropFaceToTensor>[0];
+
+  const landmarks = [
+    { x: 0.4, y: 0.4 }, { x: 0.6, y: 0.4 },
+    { x: 0.4, y: 0.6 }, { x: 0.6, y: 0.6 },
+  ];
+
+  it('vídeo com atributos width/height zerados falha alto (não devolve tensor preto)', () => {
+    // O caso real: CSS define o tamanho, o atributo HTML fica 0, e videoWidth
+    // ainda não chegou (metadata não carregada).
+    expect(() => cropFaceToTensor(fakeVideo(0, 0, 0, 0), { landmarks, isMirrored: false }))
+      .toThrow(/dimensões utilizáveis/);
+  });
+
+  it('bbox degenerado (landmarks coincidentes) falha alto', () => {
+    const same = [{ x: 0.5, y: 0.5 }, { x: 0.5, y: 0.5 }];
+    expect(() => cropFaceToTensor(fakeVideo(0, 0, 1280, 720), { landmarks: same, isMirrored: false }))
+      .toThrow(/bbox degenerado/);
+  });
+
+  it('computeSquareBBox com dimensões 0 produz lado 0 — a origem do bug', () => {
+    // Documenta POR QUE o guarda acima é necessário: sem ele, este bbox seguia
+    // para drawImage e virava no-op.
+    const bbox = computeSquareBBox(landmarks, 0, 0, EXPAND_FACTOR);
+    expect(bbox.side).toBe(0);
+  });
+
+  it('com videoWidth/videoHeight reais o bbox tem lado plausível', () => {
+    // 1280×720, rosto ocupando 20% da largura → 256 px, × 1.4 = 358.4
+    const bbox = computeSquareBBox(landmarks, 1280, 720, EXPAND_FACTOR);
+    expect(bbox.side).toBeCloseTo(0.2 * 1280 * EXPAND_FACTOR, 6);
+    expect(bbox.side).toBeGreaterThan(0);
   });
 });

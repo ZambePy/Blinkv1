@@ -192,7 +192,31 @@ export interface EngineDiagnostics {
     iod: number;
     faceCenter: { x: number; y: number };
     specularRatio: number;
+    /** Etapa 2 — distância entre os cantos externos dos olhos em PIXELS DE
+     *  VÍDEO. Diferente de `iod`, que é normalizado (e anisotrópico, porque x
+     *  divide por largura e y por altura). A avaliação de setup precisa da
+     *  grandeza em px porque o que governa a precisão é quantos pixels de
+     *  sensor caem sobre o olho. */
+    iodPx: number;
   };
+  /** Etapa 2 — qualidade do crop ocular no frame corrente. Já era calculada
+   *  por `qualityAnalyzer` e consumida pelos portões da calibração; passa a
+   *  ser exposta para a tela de pré-calibração poder mostrar e travar. */
+  quality: {
+    brightness: number;
+    contrast: number;
+    blur: number;
+    detectorConfidence: number;
+  };
+  /** Etapa 2 — resolução REAL negociada com a câmera. */
+  video: { width: number; height: number };
+  /** Etapa 2 — histórico recente do brilho do crop ocular, na CADÊNCIA DE
+   *  FRAME (não amostrado pela UI). O detector de cintilação precisa disso:
+   *  amostrar a 10 Hz na tela faria o batimento de 10 Hz da rede de 50 Hz
+   *  aliasar para 0 e desaparecer. Mais antigo primeiro. */
+  brightnessHistory: number[];
+  /** fps efetivo da série acima, para converter bin em Hz. */
+  brightnessHistoryFps: number;
 }
 
 export interface GazeEngine {
@@ -371,6 +395,14 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let latestIod = 0;
   let latestFaceCenter = { x: 0.5, y: 0.5 };
   let latestSpecularRatio = 0;
+  let latestIodPx = 0;
+  let latestQuality = { brightness: 0, contrast: 0, blur: 0, detectorConfidence: 0 };
+  // Etapa 2 — anel de brilho na cadência de frame, para o detector de
+  // cintilação. 96 amostras a ~30 fps ≈ 3,2 s: suficiente para resolver 10 Hz
+  // com folga e barato de manter.
+  const BRIGHTNESS_HISTORY_LEN = 96;
+  const brightnessHistory: number[] = [];
+  const brightnessHistoryTs: number[] = [];
   let latestHasFace = false;
   let diagBlink = false;
   let diagL2csYaw = 0;
@@ -457,6 +489,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         latestIod = 0;
         latestFaceCenter = { x: 0.5, y: 0.5 };
         latestSpecularRatio = 0;
+        latestIodPx = 0;
         // A1-4 — face perdida zera o timer de degradação; sem rosto o problema
         // é 'no_face', não 'degraded'. Quando o rosto voltar, começa uma nova
         // janela de 500 ms antes de considerar degradado novamente.
@@ -520,6 +553,13 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         calibration.feedFaceMetrics(true, rawIod);
         latestHasFace = true;
         latestIod = rawIod;
+        // Etapa 2 — versão em px de vídeo. `rawIod` acima mistura escalas (x
+        // normalizado por largura, y por altura); aqui desfazemos isso antes
+        // de medir, senão a distância muda com a inclinação da cabeça.
+        latestIodPx = Math.hypot(
+          (landmarks[33].x - landmarks[263].x) * (videoEl?.videoWidth ?? 0),
+          (landmarks[33].y - landmarks[263].y) * (videoEl?.videoHeight ?? 0),
+        );
         latestFaceCenter = { x: landmarks[1].x, y: landmarks[1].y };
 
         const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
@@ -581,6 +621,18 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // no extractor.
           const cropQuality = qualityAnalyzer.analyze(videoEl, landmarks);
           latestSpecularRatio = cropQuality.specularRatio ?? 0;
+          latestQuality = {
+            brightness: cropQuality.brightnessEstimate ?? 0,
+            contrast: cropQuality.contrastEstimate ?? 0,
+            blur: cropQuality.blurEstimate ?? 0,
+            detectorConfidence: cropQuality.detectorConfidence ?? 0,
+          };
+          brightnessHistory.push(latestQuality.brightness);
+          brightnessHistoryTs.push(performance.now());
+          while (brightnessHistory.length > BRIGHTNESS_HISTORY_LEN) {
+            brightnessHistory.shift();
+            brightnessHistoryTs.shift();
+          }
           // Hotfix — pose viaja no `quality` para que `feedRawData` possa
           // rejeitar amostras de calibração cuja cabeça se afastou do
           // baseline do ponto (fonte principal do colapso da coluna
@@ -878,7 +930,41 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           iod: latestIod,
           faceCenter: latestFaceCenter,
           specularRatio: latestSpecularRatio,
+          iodPx: latestIodPx,
         },
+        quality: latestQuality,
+        video: {
+          width: videoEl?.videoWidth ?? 0,
+          height: videoEl?.videoHeight ?? 0,
+        },
+        brightnessHistory: [...brightnessHistory],
+        // fps medido da própria série, não o nominal: se o loop cair para 24
+        // fps o aliasing muda, e converter bin→Hz com 30 daria a frequência
+        // errada — e frequência errada leva à rede elétrica errada.
+        brightnessHistoryFps: (() => {
+          const n = brightnessHistoryTs.length;
+          if (n < 2) return 0;
+          // MEDIANA dos intervalos, não o vão total dividido por N-1.
+          //
+          // A série só cresce quando há rosto e não há piscada. Uma perda de
+          // rosto de 2 s deixa um buraco no meio: pelo vão total, 96 amostras
+          // em 5,2 s dariam ~18 fps, quando a taxa real era 30. E como o
+          // detector de cintilação converte bin→Hz usando este fps, um erro
+          // aqui vira frequência errada, que vira REDE ELÉTRICA errada — e o
+          // ajuste automático mandaria a câmera para 50 Hz quando era 60.
+          const gaps: number[] = [];
+          for (let i = 1; i < n; i++) gaps.push(brightnessHistoryTs[i] - brightnessHistoryTs[i - 1]);
+          gaps.sort((a, b) => a - b);
+          const mid = gaps.length >> 1;
+          const medianGap = gaps.length % 2 ? gaps[mid] : (gaps[mid - 1] + gaps[mid]) / 2;
+          if (!(medianGap > 0)) return 0;
+          // Descarta a série inteira se houver buraco grande: amostragem
+          // irregular espalha energia por todos os bins da DFT e produziria
+          // uma "frequência dominante" que não existe.
+          const maxGap = gaps[gaps.length - 1];
+          if (maxGap > medianGap * 4) return 0;
+          return 1000 / medianGap;
+        })(),
       };
     },
 

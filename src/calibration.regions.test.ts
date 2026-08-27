@@ -222,18 +222,39 @@ describe('D9 — precisão por região (centro, bordas, cantos, transições)', 
   const targets = NEW_TARGETS;
 
   // Limites medidos no simulador com as 3 sementes de SEEDS, na geometria de
-  // referência (23,6" a 60 cm, orçamento de 16°). Valor observado entre
-  // parênteses; folga de ~50% para não virar teste flaky.
-  //
-  // Entre parênteses também o valor do protocolo antigo (5%/95%), para deixar
-  // registrado no próprio teste o tamanho do ganho:
+  // referência (23,6" a 60 cm, orçamento de 16°) e no conjunto de features
+  // ATIVO (D11 — `iris12`). Valor observado entre parênteses; folga de ~50%
+  // para não virar teste flaky. Entre parênteses também o protocolo antigo
+  // (5%/95%), que é o que este teste protege contra regressão:
   const BOUNDS: Record<Region, number> = {
-    centro: 20,       // observado 9,5 px  (legado 10,1)
-    bordas: 28,       // observado 15,6 px (legado 65,3)
-    cantos: 32,       // observado 18,0 px (legado 117,9)
-    transicoes: 58,   // observado 37,7 px (legado 103,6)
-    gradeDoTeste: 58, // observado 36,7 px (legado 106,7)
+    centro: 55,        // observado 32,3 px (legado 34,5)
+    bordas: 85,        // observado 52,7 px (legado 93,6)
+    cantos: 90,        // observado 56,6 px (legado 138,6)
+    transicoes: 140,   // observado 88,3 px (legado 156,0)
+    gradeDoTeste: 145, // observado 91,6 px (legado 154,3)
   };
+
+  // ⚠️ LIMITE HONESTO DO SIMULADOR — leia antes de usar estes números para
+  // decidir qualquer coisa sobre o vetor de features.
+  //
+  // Na questão "44 dims vs 12 dims", o simulador diz o OPOSTO das gravações
+  // reais. Aqui, com 44 dims os mesmos limites ficavam em 9,5/15,6/18,0/37,7 px
+  // — bem melhores que os 32,3/52,7/56,6/88,3 de agora. Nas duas gravações
+  // reais, 12 dims venceu 44 dims em TODOS os k (117 vs 165 px em k=14).
+  //
+  // Por que divergem: o simulador gera as 44 dimensões como funções limpas do
+  // olhar mais ruído. Nesse mundo, mais dimensões são sempre mais informação.
+  // Na captura real, 32 das 44 são nocivas — 7 do bloco L2CS estavam
+  // literalmente constantes (bug do crop preto, ver l2cs/crop.ts) e as de pose
+  // e interações estão confundidas com a posição do alvo, porque a cabeça se
+  // move ~metade da amplitude do olho e correlacionada com o alvo. O simulador
+  // não modela esse confundimento; já havia falhado antes em reproduzir o viés
+  // de -106 px em X e a variação entre sessões.
+  //
+  // CONSEQUÊNCIA PRÁTICA: este teste serve para travar regressão de REGIÃO sob
+  // configuração fixa — centro vs bordas vs cantos. NÃO serve para escolher o
+  // conjunto de features. Essa escolha se decide por replay de gravação real
+  // (`fixtures/replay/*.jsonl`), não aqui.
 
   for (const region of Object.keys(BOUNDS) as Region[]) {
     it(`${region}: erro médio dentro do limite de regressão`, () => {

@@ -1,11 +1,14 @@
-import React, { useRef, useState, useEffect, useMemo } from 'react';
+import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, Ruler, Lightbulb, Loader2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Eye, Loader2, AlertTriangle } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 import { useSettings } from '../../context/SettingsContext';
+import { SetupReadinessPanel } from '../../components/ui/SetupReadinessPanel';
+import type { ReadinessReport, EffectiveDistance } from '@tracker/setupReadiness';
+import { effectiveViewingDistanceCm } from '@tracker/setupReadiness';
 import { BackButton } from '../../components/ui/BackButton';
 import { startAccuracyTest } from '@tracker/accuracy';
-import { buildAutoTestMeta } from '../../utils/autoTestMeta';
+import { buildAutoTestMeta, readinessMetaFrom } from '../../utils/autoTestMeta';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 
 // D6.1 — a lista canônica de alvos passou a viver em `src/calibration.ts`
@@ -89,6 +92,19 @@ export const CalibrationCheck: React.FC = () => {
   const [stage, setStage] = useState<
     'pre-calibration' | 'tutorial' | 'calibrating' | 'testing' | 'transitioning'
   >('pre-calibration');
+
+  // Etapa 2 — último veredito do posto de uso. Serve para (a) liberar o
+  // botão de avançar e (b) gravar as CONDIÇÕES MEDIDAS no relatório, no
+  // lugar dos hardcodes que havia no `RunMeta`.
+  const readinessRef = useRef<ReadinessReport | null>(null);
+  // Distância efetiva escolhida no início desta calibração. Congelada aqui
+  // para a grade e o relatório usarem exatamente o mesmo número.
+  const sessionDistanceRef = useRef<EffectiveDistance | null>(null);
+  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
+  const handleReadiness = useCallback((r: ReadinessReport) => {
+    readinessRef.current = r;
+    setReadiness(r);
+  }, []);
 
   const [currentIndex, setCurrentIndex]       = useState(0);
   const [completedList, setCompletedList]     = useState<number[]>([]);
@@ -213,13 +229,23 @@ export const CalibrationCheck: React.FC = () => {
     const meta = buildAutoTestMeta({
       sessionUptimeMs: getSessionUptimeMs(),
       opticalCondition: calibration.getActiveOpticalCondition?.() ?? 'desconhecido',
-      // D9 — geometria configurada pelo cuidador (Configurações → Teste de
-      // precisão), persistida em SettingsContext. A distância segue digitada
-      // e não medida; D5/S1-1 ainda vale para trocá-la por medida via
-      // faceMatrix[14].
-      distanciaCm: settings.viewingDistanceCm,
+      // D9 — diagonal configurada pelo cuidador (Configurações → Teste de
+      // precisão) ou lida do EDID, persistida em SettingsContext.
+      // Etapa 1 — a MESMA distância que posicionou a grade. Se o relatório
+      // convertesse px→graus com um número diferente do que montou os alvos,
+      // as duas metades do diagnóstico falariam de geometrias distintas.
+      distanciaCm: sessionDistanceRef.current?.cm ?? settings.viewingDistanceCm,
       telaPolegadas: settings.screenDiagonalIn,
     });
+    meta.screenScaleFactor = settings.screenScaleFactor;
+
+    // Etapa 2 — sobrescreve com as condições MEDIDAS nesta sessão. Precisa vir
+    // DEPOIS de buildAutoTestMeta: aquela função preenche `iluminacao: 'boa'`,
+    // `movimentoCabeca: 'parada'` e deriva `oculos` da condição que o cuidador
+    // escolheu na tela — todos independentes do que a câmera estava vendo.
+    // Comparar sessões com metadado inventado é pior que não ter metadado: dá
+    // aparência de rastreabilidade sem o conteúdo.
+    Object.assign(meta, readinessMetaFrom(readinessRef.current));
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
       if (action === 'redo') {
@@ -317,6 +343,25 @@ export const CalibrationCheck: React.FC = () => {
 
     // startCalibrationMode ANTES do useMemo reagir — chamamos aqui e a lista
     // ativa vem via getCalibrationTargets() na hora do startNextPoint.
+    // Etapa 1 → pipeline: a distância MEDIDA nesta sessão manda, quando existe.
+    //
+    // `viewingDistanceCm` posiciona os alvos pelo orçamento de excentricidade.
+    // Enquanto era só digitado, um paciente que sentasse 10 cm mais perto
+    // recebia a grade montada para a distância de ontem — e as duas gravações
+    // reais do repositório diferiam 30% em tamanho de rosto, exatamente esse
+    // efeito. Fica registrado em `sessionDistanceRef` para o relatório usar a
+    // MESMA distância que a grade usou.
+    const dist = effectiveViewingDistanceCm(
+      readinessRef.current?.measured.estimatedDistanceCm ?? null,
+      settings.viewingDistanceCm,
+    );
+    sessionDistanceRef.current = dist;
+    if (dist.rejectedReason) {
+      console.warn(`[Etapa1] ${dist.rejectedReason}; usando ${dist.cm} cm configurado.`);
+    } else {
+      console.log(`[Etapa1] distância da sessão: ${dist.cm.toFixed(1)} cm (${dist.source}).`);
+    }
+
     calibration.startCalibrationMode?.({
       quick,
       opticalCondition,
@@ -324,7 +369,7 @@ export const CalibrationCheck: React.FC = () => {
       // falar da mesma tela.
       geometry: {
         screenDiagonalIn: settings.screenDiagonalIn,
-        viewingDistanceCm: settings.viewingDistanceCm,
+        viewingDistanceCm: dist.cm,
       },
     });
 
@@ -420,52 +465,44 @@ export const CalibrationCheck: React.FC = () => {
                   Antes de começar
                 </h1>
                 <p style={{ fontSize: '1.05rem', color: TEXT_DIM, margin: 0, lineHeight: 1.6 }}>
-                  Verifique as condições para que o sistema funcione bem.
+                  A câmera está conferindo as condições. Ajuste o que estiver
+                  marcado antes de calibrar.
                 </p>
               </div>
 
-              {/* Cards de instrução — frases curtas, ícones grandes */}
-              {([
-                { icon: <Ruler size={30} color={ACCENT} />, title: '📏  50 a 60 cm da tela', body: 'Fique confortável. Não precisa se aproximar muito.' },
-                { icon: <Lightbulb size={30} color={ACCENT} />, title: '💡  Rosto bem iluminado', body: 'Evite luz forte atrás de você ou reflexo nos óculos.' },
-                { icon: <Eye size={30} color={ACCENT} />, title: '👁  Olhos abertos, cabeça parada', body: 'Mova só os olhos ao seguir o ponto. Não vire a cabeça.' },
-              ] as { icon: React.ReactNode; title: string; body: string }[]).map((card, i) => (
-                <div key={i} style={{
-                  display: 'flex', alignItems: 'center', gap: '1.25rem',
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.10)',
-                  padding: '1.1rem 1.4rem',
-                  borderRadius: '1.25rem',
-                }}>
-                  <div style={{
-                    width: 52, height: 52, borderRadius: '0.875rem',
-                    background: ACCENT_DIM,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                  }}>
-                    {card.icon}
-                  </div>
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '1rem', marginBottom: '0.2rem' }}>{card.title}</div>
-                    <div style={{ fontSize: '0.9rem', color: TEXT_DIM, lineHeight: 1.5 }}>{card.body}</div>
-                  </div>
-                </div>
-              ))}
+              {/* Etapa 2 — verificação AO VIVO do posto de uso. Substituiu três
+                  cards de texto fixo que diziam "fique a 50-60 cm", "rosto bem
+                  iluminado" e "cabeça parada": conselhos corretos, mas que o
+                  usuário não tinha como saber se estava cumprindo. Agora os
+                  mesmos três itens são medidos e mostrados com o valor real. */}
+              <SetupReadinessPanel onReport={handleReadiness} />
 
+              {/* Só "sem rosto" / "câmera inadequada" desabilitam de verdade —
+                  nessas condições a calibração não tem como funcionar. Avisos
+                  mudam o rótulo do botão mas deixam seguir (regra 2 do
+                  projeto: a UI não prende o usuário). */}
               <button
                 type="button"
+                disabled={readiness?.blockedHard ?? false}
                 onClick={() => setStage('tutorial')}
                 style={{
-                  background: ACCENT, color: '#fff',
+                  background: readiness?.blockedHard ? 'rgba(255,255,255,0.10)' : ACCENT,
+                  color: readiness?.blockedHard ? TEXT_DIM : '#fff',
                   border: 'none', padding: '1rem 3rem',
                   borderRadius: '2rem', fontSize: '1.15rem', fontWeight: 800,
-                  cursor: 'pointer', alignSelf: 'center',
-                  boxShadow: '0 8px 24px rgba(27, 84, 168, 0.40)',
+                  cursor: readiness?.blockedHard ? 'not-allowed' : 'pointer',
+                  alignSelf: 'center',
+                  boxShadow: readiness?.blockedHard ? 'none' : '0 8px 24px rgba(27, 84, 168, 0.40)',
                   transition: 'transform 0.15s, box-shadow 0.15s',
                 }}
-                onMouseOver={e => { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; }}
-                onMouseOut={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; }}
+                onMouseOver={e => { if (!readiness?.blockedHard) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } }}
+                onMouseOut={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = readiness?.blockedHard ? 'none' : '0 8px 24px rgba(27, 84, 168, 0.40)'; }}
               >
-                Entendi ✓
+                {readiness?.blockedHard
+                  ? 'Ajuste a câmera para continuar'
+                  : readiness && !readiness.canStart
+                    ? 'Continuar mesmo assim'
+                    : 'Tudo certo ✓'}
               </button>
             </div>
           </div>

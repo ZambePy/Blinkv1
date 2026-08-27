@@ -25,6 +25,8 @@ import {
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
+import { deriveHorizontalFovDeg } from '@tracker/cameraTuner';
+import { effectiveViewingDistanceCm, estimateDistanceCm } from '@tracker/setupReadiness';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { api, ApiError } from '../utils/api';
@@ -140,7 +142,7 @@ export const SettingsScreen: React.FC = () => {
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const { calibration, recording, setFilterPreset, getSessionUptimeMs } = useGaze();
+  const { calibration, recording, setFilterPreset, getSessionUptimeMs, getDiagnostics } = useGaze();
   const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
 
   // Fase 0.1 — estado local do gravador de sessão. `active` é derivado do
@@ -293,11 +295,23 @@ export const SettingsScreen: React.FC = () => {
     // (para simular um teste de deriva), a escolha manual é preservada.
     // D9 — a geometria SEMPRE vem das settings, mesmo que o state local esteja
     // defasado (ex.: cuidador mudou a tela noutra aba da tela de config).
+    // Etapa 1 — mesma regra do fluxo automático: a distância MEDIDA manda
+    // quando existe. Sem isto os dois caminhos reportariam graus calculados
+    // com geometrias diferentes, e o histórico ficaria incomparável consigo
+    // mesmo dependendo de por onde o teste foi disparado.
+    const dLive = getDiagnostics();
+    const medida = dLive && dLive.framing.hasFace
+      ? estimateDistanceCm(dLive.framing.iodPx, dLive.video.width, settings.cameraHorizontalFovDeg)
+      : null;
+    const dist = effectiveViewingDistanceCm(medida, settings.viewingDistanceCm);
+    if (dist.rejectedReason) console.warn(`[Etapa1] ${dist.rejectedReason}`);
+
     const metaWithUptime = applyUptimeToRunMetaIfDefault(
       {
         ...accuracyMeta,
-        distanciaCm: settings.viewingDistanceCm,
+        distanciaCm: dist.cm,
         telaPolegadas: settings.screenDiagonalIn,
+        screenScaleFactor: settings.screenScaleFactor,
       },
       getSessionUptimeMs(),
     );
@@ -1329,7 +1343,8 @@ export const SettingsScreen: React.FC = () => {
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   if (!Number.isFinite(v) || v <= 0) return;
-                  updateSettings({ screenDiagonalIn: v });
+                  // Etapa 1 — edição manual passa a ser soberana sobre o EDID.
+                  updateSettings({ screenDiagonalIn: v, screenGeometrySource: 'manual' });
                   setAccuracyMeta({ ...accuracyMeta, telaPolegadas: v });
                 }}
                 style={{
@@ -1340,6 +1355,72 @@ export const SettingsScreen: React.FC = () => {
                 }}
               />
             </label>
+          </div>
+
+          {/* Etapa 1 — calibração do campo de visão da câmera.
+              Nenhuma API expõe o FOV da lente, e sem ele o medidor de distância
+              da pré-calibração não tem como converter "tamanho do rosto no
+              frame" em centímetros. Derivamos UMA vez: o cuidador mede a
+              distância com fita, o app lê o tamanho do rosto naquele instante,
+              e a geometria devolve o FOV. Depois disso o app estima a distância
+              sozinho em toda sessão. */}
+          <div style={{
+            marginTop: '1rem', padding: '0.9rem 1rem',
+            borderRadius: '0.75rem',
+            border: '2px solid var(--color-card-border)',
+            display: 'flex', flexDirection: 'column', gap: '0.6rem',
+          }}>
+            <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text-base)' }}>
+              Campo de visão da câmera
+            </div>
+            <div style={{ fontSize: '0.82rem', opacity: 0.8, lineHeight: 1.5 }}>
+              {settings.cameraHorizontalFovDeg !== null
+                ? `Calibrado: ${settings.cameraHorizontalFovDeg.toFixed(1)}°. O medidor de distância da pré-calibração está ativo.`
+                : 'Não calibrado — o medidor de distância da pré-calibração fica inativo. '
+                  + 'Meça a distância do rosto até a CÂMERA com fita, digite acima em "Distância (cm)", '
+                  + 'sente na posição de uso e clique abaixo.'}
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const d = getDiagnostics();
+                if (!d || !d.framing.hasFace || d.video.width <= 0) {
+                  toast.error('Rosto não detectado. Sente-se de frente para a câmera e tente de novo.');
+                  return;
+                }
+                const fov = deriveHorizontalFovDeg(
+                  d.framing.iodPx, d.video.width, settings.viewingDistanceCm,
+                );
+                if (fov === null) {
+                  toast.error('Não foi possível derivar o campo de visão. Confira a distância digitada.');
+                  return;
+                }
+                updateSettings({ cameraHorizontalFovDeg: fov });
+                toast.success(`Campo de visão calibrado: ${fov.toFixed(1)}°`);
+              }}
+              style={{
+                alignSelf: 'flex-start',
+                padding: '0.6rem 1.2rem', borderRadius: '1.5rem',
+                border: 'none', background: 'var(--color-accent, #1B54A8)', color: '#fff',
+                fontSize: '0.88rem', fontWeight: 700, cursor: 'pointer',
+              }}
+            >
+              Calibrar campo de visão
+            </button>
+            {settings.cameraHorizontalFovDeg !== null && (
+              <button
+                type="button"
+                onClick={() => updateSettings({ cameraHorizontalFovDeg: null })}
+                style={{
+                  alignSelf: 'flex-start', padding: '0.35rem 0',
+                  border: 'none', background: 'transparent',
+                  color: 'var(--color-text-base)', opacity: 0.6,
+                  fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline',
+                }}
+              >
+                Limpar calibração
+              </button>
+            )}
           </div>
 
           <button

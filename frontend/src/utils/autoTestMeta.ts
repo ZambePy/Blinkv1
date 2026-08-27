@@ -28,6 +28,7 @@
 
 import type { RunMeta } from '@tracker/accuracy';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
+import type { ReadinessReport } from '@tracker/setupReadiness';
 
 export interface AutoTestMetaInput {
   /** Tempo em ms desde o `engine.start()` bem-sucedido. Origem:
@@ -106,5 +107,32 @@ export function applyUptimeToRunMetaIfDefault(
     ...meta,
     minutosDeSessao: autoMinutos,
     observacoes: (meta.observacoes ?? '') + suffix,
+  };
+}
+
+/**
+ * Etapa 2 — traduz o veredito do posto de uso para os campos do `RunMeta`.
+ *
+ * `iluminacao` fica 'boa' apenas quando a checagem de luz E a de contraste
+ * passam; qualquer aviso vira 'ruim'. É grosseiro de propósito — o campo é
+ * binário no schema e mentir para o lado otimista é o que tornava o histórico
+ * inútil. `oculos` passa a vir do reflexo especular medido, não da resposta do
+ * cuidador, que descrevia a intenção e não o que a câmera via.
+ */
+export function readinessMetaFrom(r: ReadinessReport | null): Partial<RunMeta> {
+  if (!r) return {};
+  const statusOf = (id: string) => r.checks.find((c) => c.id === id)?.status;
+  const luzOk = statusOf('lighting') === 'ok' && statusOf('contrast') === 'ok';
+  const posturaOk = statusOf('headPose') === 'ok';
+  const m = r.measured;
+  return {
+    iluminacao: luzOk ? 'boa' : 'ruim',
+    oculos: m.glassesLikely,
+    movimentoCabeca: posturaOk ? 'parada' : 'livre',
+    observacoes:
+      `auto (pré-calibração medida: rosto=${(m.iodFraction * 100).toFixed(1)}% do frame, ` +
+      `brilho=${m.brightness.toFixed(3)}, contraste=${m.contrast.toFixed(3)}` +
+      (m.estimatedDistanceCm !== null ? `, distância medida≈${m.estimatedDistanceCm.toFixed(0)}cm` : ', distância não medida') +
+      `, avisos=${r.checks.filter((c) => c.status !== 'ok').map((c) => c.id).join('|') || 'nenhum'})`,
   };
 }

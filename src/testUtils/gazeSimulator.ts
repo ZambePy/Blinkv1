@@ -4,7 +4,8 @@
 // versionada contra a qual medir precisão por região. Sem isto, qualquer
 // afirmação sobre "melhorou nos cantos" seria opinião. Este módulo gera um
 // vetor de features com a MESMA estrutura de `extractCompactFeatures`
-// (44 dims/olho: 37 do bloco geométrico + 7 do bloco L2CS) a partir de um
+// (44 dims/olho: 37 do bloco geométrico + 7 do bloco L2CS), PROJETADO no
+// conjunto de features ativo (`ACTIVE_FEATURE_SET`), a partir de um
 // alvo de tela conhecido, para que `StandardScaler` + `RidgeRegressor` reais
 // possam ser treinados e medidos ponta a ponta.
 //
@@ -42,6 +43,8 @@
 // hipometria vem de dois pontos de uma única sessão. Números absolutos deste
 // simulador não são previsões de campo — ele serve para comparar variantes do
 // pipeline sob condições idênticas e para travar regressões por região.
+
+import { projectFeatureSet } from '../extractor';
 
 /** PRNG determinístico (mulberry32) — mesma semente, mesma sequência. */
 export function mulberry32(a: number): () => number {
@@ -147,7 +150,7 @@ export class GazeSimSession {
   }
 
   /** Um frame com o usuário TENTANDO olhar para (sx, sy) em fração de tela.
-   *  Devolve `[featuresLeft, featuresRight]` com 44 dims cada. */
+   *  Devolve `[featuresLeft, featuresRight]` já projetados no conjunto ativo. */
   frame(sx: number, sy: number): [number[], number[]] {
     this.stepDrift();
     const o = this.o;
@@ -213,7 +216,12 @@ export class GazeSimSession {
       return vec;
     };
 
-    return [build(1), build(-1)];
+    // D11 — emite o MESMO conjunto que o pipeline de produção entrega ao
+    // modelo. O `build()` acima monta o vetor completo na ordem real do
+    // extractor (offset, rel, contorno, cantos, ear, raio, pose, interações,
+    // L2CS), e a projeção aqui garante que o benchmark meça o que roda de
+    // verdade — não uma configuração que não existe mais.
+    return [projectFeatureSet(build(1)), projectFeatureSet(build(-1))];
   }
 }
 

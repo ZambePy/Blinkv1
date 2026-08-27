@@ -117,10 +117,47 @@ export interface CropOptions {
   context?: CropContext;
 }
 
+// D10 — dimensões REAIS da fonte de pixels.
+//
+// BUG: `source.width` num HTMLVideoElement é o atributo HTML `width`, que vale
+// 0 quando ninguém o define — e `GazeContext` cria o vídeo só com `style`
+// (CSS), nunca com o atributo. Resultado: w = h = 0, todo landmark virava
+// px 0, o bbox saía com lado 0, e `drawImage` com sw/sh = 0 é um NO-OP
+// silencioso. O canvas ficava com o `fillRect('#000')` e o L2CS recebia uma
+// imagem 448×448 PRETA em todos os frames desde que foi integrado (D3).
+//
+// Evidência (fixtures/replay/*.jsonl, 780 frames válidos): yaw e pitch
+// constantes em -82,0° e -50,6° — min = mediana = máx, variância zero. Os 7
+// termos de `buildL2CSBlock` saturavam o clamp de ±45° em 100% dos frames,
+// virando [-1, -1, -d, -d, 1, 1, 1]: cinco constantes literais e dois termos
+// que só variam com a distância da cabeça. Zero informação de olhar.
+//
+// A intrínseca de um vídeo é `videoWidth`/`videoHeight`; para canvas é
+// `width`/`height`. Preferimos a primeira quando existe.
+function sourceDimensions(source: CropSource): { w: number; h: number } {
+  const v = source as Partial<HTMLVideoElement>;
+  if (typeof v.videoWidth === 'number' && v.videoWidth > 0 &&
+      typeof v.videoHeight === 'number' && v.videoHeight > 0) {
+    return { w: v.videoWidth, h: v.videoHeight };
+  }
+  return { w: source.width, h: source.height };
+}
+
 export function cropFaceToTensor(source: CropSource, opts: CropOptions): Float32Array {
-  const w = source.width;
-  const h = source.height;
+  const { w, h } = sourceDimensions(source);
+  // Falhar alto: um crop degenerado produzia um tensor preto e um gaze
+  // constante que o regressor tratava como sinal. Melhor não submeter nada.
+  if (!(w > 0) || !(h > 0)) {
+    throw new Error(
+      `[l2cs] fonte sem dimensões utilizáveis (w=${w}, h=${h}). ` +
+      `Num <video>, use videoWidth/videoHeight — o atributo width vale 0 quando ` +
+      `só o CSS define o tamanho.`,
+    );
+  }
   const bbox = computeSquareBBox(opts.landmarks, w, h, opts.expandFactor ?? EXPAND_FACTOR);
+  if (!(bbox.side > 0)) {
+    throw new Error('[l2cs] bbox degenerado (lado 0) — landmarks vazios ou coincidentes.');
+  }
   const ctx = opts.context ?? createCropContext();
   const g = ctx.ctx;
 
@@ -161,8 +198,7 @@ export function cropFaceToTensor(source: CropSource, opts: CropOptions): Float32
 // Helper para debug/validação: só a etapa BBox → 448 RGBA (sem normalização).
 // Útil para inspecionar visualmente o crop no browser.
 export function cropFaceToRGBA(source: CropSource, opts: CropOptions): Uint8ClampedArray {
-  const w = source.width;
-  const h = source.height;
+  const { w, h } = sourceDimensions(source);
   const bbox = computeSquareBBox(opts.landmarks, w, h, opts.expandFactor ?? EXPAND_FACTOR);
   const ctx = opts.context ?? createCropContext();
   const g = ctx.ctx;

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest';
-import { buildAutoTestMeta, opticalConditionToOculos, applyUptimeToRunMetaIfDefault } from './autoTestMeta';
+import { buildAutoTestMeta, opticalConditionToOculos, applyUptimeToRunMetaIfDefault , readinessMetaFrom } from './autoTestMeta';
 import type { RunMeta } from '@tracker/accuracy';
+import type { ReadinessReport } from '@tracker/setupReadiness';
 
 // D2 (ROADMAP.md) — critério de aceite: "teste unitário garantindo que
 // `RunMeta` não usa mais valores hardcoded para `minutosDeSessao`". A regressão
@@ -187,5 +188,91 @@ describe('opticalConditionToOculos', () => {
 
   it('desconhecido preserva o default anterior (false) para não mudar baseline silenciosamente', () => {
     expect(opticalConditionToOculos('desconhecido')).toBe(false);
+  });
+});
+
+// ─── Etapa 2 — metadados medidos, não presumidos ───────────────────────────
+describe('readinessMetaFrom', () => {
+  const build = (over: Partial<ReadinessReport> = {}): ReadinessReport => ({
+    checks: [
+      { id: 'face', status: 'ok', value: 0.99, message: '' },
+      { id: 'lighting', status: 'ok', value: 0.45, message: '' },
+      { id: 'contrast', status: 'ok', value: 0.2, message: '' },
+      { id: 'headPose', status: 'ok', value: 0.01, message: '' },
+      { id: 'glasses', status: 'ok', value: 0, message: '' },
+    ],
+    canStart: true,
+    blockedHard: false,
+    measured: {
+      iodFraction: 0.18,
+      estimatedDistanceCm: null,
+      brightness: 0.45,
+      contrast: 0.2,
+      glassesLikely: false,
+    },
+    ...over,
+  });
+
+  it('sem veredito não sobrescreve nada (mantém o comportamento anterior)', () => {
+    expect(readinessMetaFrom(null)).toEqual({});
+  });
+
+  it('posto de uso bom → iluminacao boa, cabeça parada, sem óculos', () => {
+    const m = readinessMetaFrom(build());
+    expect(m.iluminacao).toBe('boa');
+    expect(m.movimentoCabeca).toBe('parada');
+    expect(m.oculos).toBe(false);
+  });
+
+  it('qualquer aviso de luz OU contraste derruba iluminacao para ruim', () => {
+    // Binário no schema: mentir para o lado otimista foi o que tornou o
+    // histórico de relatórios inútil para comparar sessões.
+    const luzRuim = build({
+      checks: [
+        { id: 'lighting', status: 'warn', value: 0.236, message: '' },
+        { id: 'contrast', status: 'ok', value: 0.2, message: '' },
+      ],
+    });
+    expect(readinessMetaFrom(luzRuim).iluminacao).toBe('ruim');
+
+    const contrasteRuim = build({
+      checks: [
+        { id: 'lighting', status: 'ok', value: 0.45, message: '' },
+        { id: 'contrast', status: 'warn', value: 0.094, message: '' },
+      ],
+    });
+    expect(readinessMetaFrom(contrasteRuim).iluminacao).toBe('ruim');
+  });
+
+  it('óculos vem do reflexo MEDIDO, não da resposta do cuidador', () => {
+    const m = readinessMetaFrom(build({
+      measured: { ...build().measured, glassesLikely: true },
+    }));
+    expect(m.oculos).toBe(true);
+  });
+
+  it('postura fora de esquadro marca movimentoCabeca como livre', () => {
+    const m = readinessMetaFrom(build({
+      checks: [{ id: 'headPose', status: 'warn', value: 0.14, message: '' }],
+    }));
+    expect(m.movimentoCabeca).toBe('livre');
+  });
+
+  it('observacoes carrega os valores medidos e a lista de avisos', () => {
+    const m = readinessMetaFrom(build({
+      checks: [
+        { id: 'lighting', status: 'warn', value: 0.236, message: '' },
+        { id: 'distance', status: 'warn', value: 0.099, message: '' },
+      ],
+      measured: { ...build().measured, brightness: 0.236, iodFraction: 0.099 },
+    }));
+    expect(m.observacoes).toContain('0.236');
+    expect(m.observacoes).toContain('9.9%');
+    expect(m.observacoes).toContain('lighting');
+    expect(m.observacoes).toContain('distance');
+  });
+
+  it('sem avisos, observacoes diz explicitamente "nenhum"', () => {
+    expect(readinessMetaFrom(build()).observacoes).toContain('nenhum');
   });
 });

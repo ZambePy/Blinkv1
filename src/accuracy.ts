@@ -7,7 +7,10 @@
 //   • Erro em pixels ao lado de cada par
 //   • Resumo de métricas + controles (Espaço para continuar, R para recalibrar)
 
-import { mapGaze, setGazeCorrections, resetSessionBias, getCalibrationTargets } from './calibration';
+import {
+  mapGaze, setGazeCorrections, resetSessionBias, getCalibrationTargets,
+  getCalibrationFitDiagnostics,
+} from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { EXPERIMENT } from './config/experiment';
 
@@ -92,11 +95,17 @@ export interface RunMeta {
   minutosDeSessao: number;    // 0, 20, 40 para curva de deriva
   usuario?: string;           // Identificador opcional do participante
   observacoes?: string;
-  /** Distância olho→tela MEDIDA com fita métrica, em cm. Obrigatório para
-   *  que o erro angular tenha significado fora desta máquina. */
+  /** Distância olho→tela em cm, usada para converter px em graus.
+   *
+   *  Etapa 1 — desde a introdução de `effectiveViewingDistanceCm`, este campo
+   *  pode vir MEDIDO (estimado do tamanho do rosto no frame, uma vez que o
+   *  campo de visão da câmera tenha sido calibrado) em vez de digitado. Qual
+   *  dos dois foi usado fica registrado em `observacoes`. */
   distanciaCm: number;
   /** Diagonal física do monitor em polegadas. */
   telaPolegadas: number;
+  /** Etapa 1 — fator de escala do SO (1 = 100%, 1.5 = 150%). Documental. */
+  screenScaleFactor?: number | null;
 }
 
 interface PointDiagnostic {
@@ -589,6 +598,9 @@ function finishTest(
 
   let distPx = ASSUMED_DIST_PX;
   let geometryAssumed = true;
+  // Escala do display, quando o caller informou (Etapa 1). Puramente
+  // documental — ver o comentário no bloco `geometry` abaixo.
+  const displayScaleFactor = meta?.screenScaleFactor ?? null;
   let pxPorCm = 0;
 
   if (meta && meta.distanciaCm && meta.telaPolegadas) {
@@ -711,6 +723,13 @@ function finishTest(
     gazeCorrectionApplied: EXPERIMENT.applyGazeCorrection,
   };
 
+  // D10 — diagnóstico do AJUSTE da calibração que gerou este modelo. É o que
+  // permite ler o relatório e saber se o erro medido vem do modelo, dos dados
+  // de calibração, ou de algo que mudou entre calibrar e testar. Ver
+  // `CalibrationFitDiagnostics` em calibration.ts. Null quando o teste roda
+  // sobre um perfil carregado do disco (o ajuste aconteceu noutra sessão).
+  const fit = getCalibrationFitDiagnostics();
+
   const jsonReport = JSON.stringify({
     timestamp: new Date().toISOString(),
     resolution: `${vw}x${vh}`,
@@ -718,7 +737,29 @@ function finishTest(
     pipeline,
     result,
     diagnostics,
-    geometry: { assumed: geometryAssumed, distPx, pxPorCm: pxPorCm || undefined }
+    calibrationFit: fit
+      ? {
+          ...fit,
+          // Versões em px na resolução desta tela, para comparar direto com
+          // `result.meanError` sem o leitor ter que multiplicar na cabeça.
+          trainErrorPx: fit.trainErrorNorm * Math.hypot(vw, vh),
+          looErrorPx: fit.looErrorNorm * Math.hypot(vw, vh),
+        }
+      : null,
+    geometry: {
+      assumed: geometryAssumed, distPx, pxPorCm: pxPorCm || undefined,
+      // Etapa 1, item 2 — configuração de display do SO. NÃO participa da
+      // conversão px→cm (a escala se cancela: o erro é medido em px CSS e a
+      // tela cobre um número fixo de px CSS). Fica registrado porque
+      // "1280×800 numa tela de 23,6 polegadas" é a assinatura de escala em
+      // 150%, e sem esta anotação quem lê o histórico meses depois conclui
+      // que a resolução estava errada.
+      screenScaleFactor: displayScaleFactor ?? undefined,
+      viewportPx: `${vw}x${vh}`,
+      screenPx: typeof window !== 'undefined' && window.screen
+        ? `${window.screen.width}x${window.screen.height}`
+        : undefined,
+    }
   }, null, 2);
 
   // Preferir gravar direto na raiz do projeto (via middleware do Vite dev):

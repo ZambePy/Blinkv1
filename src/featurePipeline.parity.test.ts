@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractEyeFeatures, extractCompactFeatures } from './extractor';
+import { extractEyeFeatures, extractCompactFeatures, projectFeatureSet } from './extractor';
 import { extractFeatures, USE_COMPACT_FEATURES } from './featurePipeline';
 import type { Point3D } from './extractor';
 
@@ -28,18 +28,26 @@ describe('featurePipeline: parity with the active extractor', () => {
       : extractEyeFeatures(landmarks);
     const piped = extractFeatures(landmarks);
 
-    // Length must match — a silent truncation or extension would break stored profiles
-    expect(piped.featuresLeft.length).toBe(direct.featuresLeft.length);
-    expect(piped.featuresRight.length).toBe(direct.featuresRight.length);
+    // D11 — a paridade agora é contra a PROJEÇÃO do extractor no conjunto ativo,
+    // não contra o vetor bruto. A truncagem deixou de ser acidente e passou a
+    // ser contrato (ver `ACTIVE_FEATURE_SET` em extractor.ts); o que continua
+    // sendo bug é o pipeline mexer nos valores ou na ORDEM.
+    const expected = {
+      left: projectFeatureSet(direct.featuresLeft),
+      right: projectFeatureSet(direct.featuresRight),
+    };
+
+    expect(piped.featuresLeft.length).toBe(expected.left.length);
+    expect(piped.featuresRight.length).toBe(expected.right.length);
 
     // Element-by-element exact equality — any field reordering is a real bug:
     // profiles calibrated before the refactor encode dimensions in the original order,
     // and a mismatch here would cause silent wrong predictions without any visible error.
-    for (let i = 0; i < direct.featuresLeft.length; i++) {
-      expect(piped.featuresLeft[i]).toBe(direct.featuresLeft[i]);
+    for (let i = 0; i < expected.left.length; i++) {
+      expect(piped.featuresLeft[i]).toBe(expected.left[i]);
     }
-    for (let i = 0; i < direct.featuresRight.length; i++) {
-      expect(piped.featuresRight[i]).toBe(direct.featuresRight[i]);
+    for (let i = 0; i < expected.right.length; i++) {
+      expect(piped.featuresRight[i]).toBe(expected.right[i]);
     }
   });
 });

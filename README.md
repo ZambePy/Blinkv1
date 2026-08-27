@@ -1,84 +1,185 @@
 # IrisFlow
 
-IrisFlow é uma tecnologia assistiva de rastreamento ocular (*eye tracking*) desenvolvida para pessoas com Esclerose Lateral Amiotrófica (ELA) e outras condições severas de restrição motora. O sistema permite navegação, comunicação e lazer utilizando apenas o movimento dos olhos através de uma webcam comum, sem hardware especializado.
+Tecnologia assistiva de rastreamento ocular por webcam comum, desenvolvida para pessoas com Esclerose Lateral Amiotrófica (ELA) e outras condições severas de restrição motora.
 
-Todo o processamento — visão computacional, machine learning e calibração — ocorre **100% localmente** no dispositivo, sem enviar nenhum dado para a nuvem.
+![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![Electron](https://img.shields.io/badge/Electron-43-47848F?logo=electron&logoColor=white)
+![ONNX Runtime](https://img.shields.io/badge/ONNX%20Runtime-Web-005CED?logo=onnx&logoColor=white)
+![MediaPipe](https://img.shields.io/badge/MediaPipe-Tasks%20Vision-00897B?logo=google&logoColor=white)
+[![CI](https://github.com/ZambePy/demo01/actions/workflows/ci.yml/badge.svg)](https://github.com/ZambePy/demo01/actions/workflows/ci.yml)
+[![Licença: GPL v3](https://img.shields.io/badge/licen%C3%A7a-GPLv3-blue.svg)](LICENSE)
+![Processamento](https://img.shields.io/badge/processamento-100%25%20local-informational)
 
 ---
 
-## 🧠 Pipeline de Rastreamento Ocular
+## Visão Geral
 
-O pipeline combina MediaPipe com L2CS-Net e regressão Ridge treinada em tempo real:
+O IrisFlow estima o ponto de fixação do olhar na tela a partir de imagens de uma webcam comum, sem hardware especializado. O usuário navega, se comunica e interage usando apenas o movimento dos olhos.
+
+O sistema combina detecção de landmarks faciais (MediaPipe), uma rede neural de estimativa de olhar (L2CS-Net, executada via ONNX Runtime no browser) e um regressor treinado em tempo real durante uma calibração personalizada. **Todo o processamento ocorre localmente no dispositivo** — nenhuma imagem, dado facial ou perfil de calibração é enviado para a nuvem.
+
+Domínios de aplicação: comunicação aumentativa e alternativa (CAA), acessibilidade computacional, e pesquisa em interação humano-computador.
+
+---
+
+## Principais Recursos
+
+### Calibração Personalizada
+
+Grade de pontos de fixação cuja posição é derivada de um **orçamento de excentricidade angular**, não de frações fixas da tela. A posição dos alvos depende do tamanho físico do monitor e da distância de uso, porque o olho humano apresenta hipometria — subalcance sistemático — em excentricidades altas. Modo completo (9 pontos) e modo rápido (4 cantos) para recalibração pontual.
+
+### Preparação Automática do Posto de Uso
+
+Antes da calibração, o sistema mede as condições reais de captura e as corrige quando possível:
+
+- **Ajuste automático da câmera em malha fechada** — mede o tamanho do rosto no frame e ajusta zoom, brilho e contraste até atingir a densidade-alvo de pixels sobre o olho. Quando o driver não expõe esses controles, o sistema informa qual ação física é necessária em vez de fingir que ajustou.
+- **Verificação de prontidão ao vivo** — distância, enquadramento, postura da cabeça, iluminação, contraste, reflexo em lentes e cintilação da rede elétrica, todos medidos e exibidos antes de gastar tempo de coleta com dado ruim.
+- **Geometria física lida do sistema** — a diagonal do monitor vem do EDID, não de digitação, porque errar esse número faz o erro angular reportado divergir do real.
+
+### Estimativa de Olhar por Rede Neural
+
+L2CS-Net treinada no dataset Gaze360, exportada para ONNX e executada em Web Worker. Entrada: recorte facial 448×448 normalizado (ImageNet). Saída: ângulos *yaw* e *pitch* decodificados de 90 bins por eixo via expectativa da softmax.
+
+### Interface para CAA
+
+Fundo escuro de alto contraste, alvos grandes, linguagem direta sem jargão. Seleção por *dwell* (fixação prolongada) com tempo configurável, bloqueio automático em estado degradado e botão de emergência com prioridade máxima.
+
+---
+
+## Arquitetura
+
+![Pipeline de rastreamento ocular do IrisFlow](docs/assets/pipeline.png)
+
+O diagrama acima resume o fluxo. Em detalhe:
 
 ```
-Câmera (getUserMedia)
+Câmera (getUserMedia, 1920×1080)
+    │
+    ├── Ajuste automático da câmera ──→ zoom / brilho / contraste / anticintilação
+    │       Malha fechada sobre o tamanho do rosto no frame.
     │
     ├── MediaPipe FaceLandmarker ──→ 478 landmarks 3D normalizados [0..1]
     │
-    ├── L2CS-Net (ONNX, Web Worker) ──→ yaw / pitch do olhar (cadência 100ms)
-    │       ⚠️ Núcleo obrigatório do pipeline — não é fallback. O worker deve
-    │       estar 'ready' antes de iniciar a calibração.
+    ├── L2CS-Net (ONNX, Web Worker) ──→ yaw / pitch do olhar (cadência 100 ms)
+    │       Ângulos implausíveis são rejeitados, não clampeados.
     │
-    ├── extractCompactFeatures ──→ ~44 dims/olho
-    │   (offsets de íris, cantos, EAR, pose 3D, interações + bloco angular L2CS)
+    ├── extractCompactFeatures ──→ vetor completo (37 dims + bloco angular)
+    │       └── projeção no conjunto ativo ──→ 12 dims/olho
+    │           (offsets de íris, posições relativas, contorno da íris)
     │
-    ├── EyeQualityAnalyzer ──→ brightness / contrast / blur / specularRatio
-    │   (filtra frames ruins antes de armazenar na calibração)
+    ├── EyeQualityAnalyzer ──→ brilho / contraste / borrão / reflexo especular
+    │       Filtra frames ruins antes de armazenar na calibração.
     │
-    ├── Calibração (grade 3×3, 9 pontos)
-    │   StandardScaler + RidgeRegressor por CV leave-one-target-out
-    │   Soft clamp nas bordas | Correção RBF pós-Ridge
+    ├── Calibração (grade por orçamento de excentricidade)
+    │       StandardScaler + Ridge com penalidade anisotrópica Σ_W,
+    │       λ por validação cruzada leave-one-target-out.
     │
     ├── OneEuroFilter2D ──→ suavização adaptativa jitter × lag
     │
-    └── GazeContext (React) ──→ Cursor Dwell | Navegação | EmergencyEscalation
+    └── GazeContext (React) ──→ Dwell Click | Navegação | Emergência
 ```
 
-**Menor erro registrado:** 57 px / 0.9° (Rodada A, sem óculos, cabeça parada — commit `f9d9252`).
+---
+
+## Estrutura do Repositório
+
+```
+src/                          # Núcleo do pipeline (TypeScript puro, sem DOM onde possível)
+  tracker/engine.ts           # Loop rAF principal, estados e diagnósticos
+  calibration.ts              # Coleta, treino, inferência e diagnóstico de ajuste
+  extractor.ts                # Extração de features e conjunto ativo
+  featurePipeline.ts          # Fronteira consumida pelo engine
+  ridge.ts                    # Ridge com penalidade Σ_W e CV de λ
+  setupReadiness.ts           # Avaliação do posto de uso (puro, testável)
+  cameraTuner.ts              # Lei de controle do ajuste automático da câmera
+  flickerDetector.ts          # Detecção de cintilação da rede elétrica
+  displayGeometry.ts          # Geometria física da tela a partir do EDID
+  qualityAnalyzer.ts          # Métricas de qualidade por frame
+  oneEuroFilter.ts            # Filtro temporal adaptativo
+  accuracy.ts                 # Teste de precisão e relatório de sessão
+  l2cs/                       # Worker L2CS-Net (ONNX), recorte e decodificação
+  testUtils/gazeSimulator.ts  # Simulador determinístico para benchmarks
+
+frontend/src/
+  pages/                      # Telas (calibração, menu, jogos, teclado, emergência)
+  context/GazeContext.tsx     # Estado global de gaze, dwell e câmera
+  components/ui/              # Componentes desenhados para interação ocular
+
+electron/                     # Processo principal, preload e IPC de sistema
+docs/                         # Auditorias, baselines e resultados de sprint
+fixtures/replay/              # Gravações determinísticas (não versionadas)
+```
 
 ---
 
-## 🌟 Funcionalidades
+## Compatibilidade de Plataforma
 
-- **Calibração CAA:** Fundo preto, ponto âmbar de alta visibilidade, linguagem direta sem jargão técnico. Modo completo em grade 3×3 (9 pontos) com filtragem automática de frames de baixa qualidade e detecção de reflexo especular; modo rápido opcional (4 cantos) para recalibração pontual sem repetir a coleta inteira (D6).
-- **Dwell Click:** Seleção de elementos mantendo o olhar fixo por tempo configurável. Bloqueio automático em estado degradado (exceto botão de emergência).
-- **Estado Degradado:** Quando o pipeline perde sinal por >500ms, o cursor muda de cor e o dwell é pausado, evitando cliques acidentais.
-- **Módulos de Comunicação:** Frases rápidas, teclado virtual preditivo, pictogramas.
-- **Lazer:** Jogos adaptados (Estoura Bolhas, Memória, Desenho) e relaxamento.
-- **Botão de Emergência:** Sempre acessível, com dwell reduzido e prioridade máxima.
+| Plataforma | Estado |
+|---|---|
+| Windows 10/11 (Electron) | Testado — inclui leitura de EDID via WMI |
+| Navegador Chromium (Chrome, Edge) | Testado — sem acesso à geometria do sistema |
+| Linux / macOS | Não testado — o núcleo é agnóstico, o IPC de sistema é específico do Windows |
 
----
-
-## 🛠️ Tecnologias
-
-| Camada | Tecnologias |
-|--------|-------------|
-| Frontend | React 19, TypeScript, Vite, React Router, CSS nativo |
-| Visão | `@mediapipe/tasks-vision` (WASM offline), L2CS-Net ONNX Runtime Web |
-| ML (calibração) | Ridge Regression, StandardScaler, OneEuroFilter — TypeScript puro |
-| Desktop | Electron + Node.js (`electron-builder`) |
+Os controles de câmera (`zoom`, `brightness`, `contrast`, `powerLineFrequency`) são constraints opcionais do padrão MediaStream e dependem do driver. O sistema sonda as capacidades disponíveis e degrada informando qual ajuste físico é necessário.
 
 ---
 
-## 🚀 Como Rodar
+## Configuração do Ambiente
+
+Requer Node.js 20 ou superior.
+
+```bash
+git clone <url-do-repositorio>
+cd irisflow
+npm install
+npm --prefix frontend install
+```
+
+---
+
+## Requisitos de Hardware
+
+### Mínimo
+
+| Componente | Especificação |
+|---|---|
+| Webcam | 1280×720 @ 30 fps |
+| Processador | Quad-core com suporte a WebAssembly SIMD |
+| Memória | 8 GB |
+| GPU | Aceleração por WebGL (delegate GPU do MediaPipe) |
+
+### Recomendado
+
+| Componente | Especificação | Motivo |
+|---|---|---|
+| Webcam | 1920×1080, campo de visão estreito | O erro de rastreamento escala com o inverso da densidade de pixels sobre o olho |
+| Posicionamento | Câmera independente do monitor | Permite aproximar a câmera sem aproximar a tela |
+| Iluminação | Luz difusa frontal | Contraste na borda da íris é o que ancora o landmark |
+| Apoio de cabeça | Encosto occipital | Reduz o confundimento entre pose e olhar |
+
+> **Sobre o campo de visão:** webcams grande-angulares (90° ou mais) são projetadas para videochamada e espalham a cena pelo sensor. O rosto ocupa uma fração pequena do frame e o deslocamento da íris — o sinal útil do pipeline inteiro — fica reduzido a poucos pixels. Uma lente mais estreita, ou a câmera mais próxima do rosto, melhora a precisão proporcionalmente.
+
+---
+
+## Executando o IrisFlow
 
 ### Desenvolvimento (Web)
 
 ```bash
-npm install
-npm --prefix frontend install
 npm run dev
 ```
 
-Acesse `http://localhost:5173`. O motor de rastreamento e calibração funcionam via webcam do navegador.
+Acesse `http://localhost:5173`.
 
-### Electron (Desktop)
+### Desktop (Electron)
 
 ```bash
 npm run electron:dev
 ```
 
-Necessário para o módulo de controle de mouse do sistema operacional.
+Necessário para leitura da geometria física da tela e para o controle de mouse do sistema operacional.
 
 ### Gerar Instalador
 
@@ -86,82 +187,97 @@ Necessário para o módulo de controle de mouse do sistema operacional.
 npm run electron:build
 ```
 
-O instalador final é gerado em `release/`.
+O instalador é gerado em `release/`.
 
-### Testes
+### Replay Determinístico
 
 ```bash
-npm test                      # Raiz (Vitest)     — 228 testes
-npm --prefix frontend test    # Frontend (Vitest) — 105 testes
+npm run replay -- <arquivo.jsonl>
 ```
+
+Reexecuta o pipeline sobre uma gravação, permitindo comparar configurações sem introduzir ruído de nova sessão.
 
 ---
 
-## 📂 Estrutura
+## Modelos Pré-treinados
 
-```
-src/                    # Core do pipeline de rastreamento
-  tracker/engine.ts     # Loop rAF principal e estados do sistema
-  calibration.ts        # Coleta, treino e inferência de gaze
-  extractor.ts          # Extração de features (landmarks + L2CS)
-  ridge.ts              # Regressão Ridge com CV lambda
-  oneEuroFilter.ts      # Filtro temporal adaptativo (A2-1: presets v2 em espaço normalizado)
-  l2cs/                 # Worker L2CS-Net (ONNX) + bloco angular
-  qualityAnalyzer.ts    # Filtros de qualidade por frame
-  calibrationProfiles.ts # Perfis por condição óptica (A1-6)
-  invariants.ts         # Invariantes explícitas do sistema (A3-1)
+| Modelo | Arquivo | Tamanho | Origem |
+|---|---|---|---|
+| L2CS-Net | `frontend/public/models/l2cs/l2cs_gaze360.onnx` | 92 MB | Treinado em Gaze360; 90 bins/eixo, entrada 448×448 |
+| Face Landmarker | `frontend/public/mediapipe/models/face_landmarker.task` | 3,6 MB | MediaPipe Tasks Vision, 478 landmarks com íris |
 
-frontend/src/
-  pages/                # Telas do sistema (Calibração, Menu, Jogos, Teclado…)
-  context/GazeContext.tsx # Estado global de gaze e dwell
-  components/           # Componentes otimizados para interação ocular
-
-docs/
-  PIPELINE-ARQUITETURA.md  # Arquitetura detalhada de cada etapa
-  AUDITORIA-SPRINT-0.md    # Auditoria de catch/null silenciosos
-  PONTO-DE-REFERENCIA.md   # Baseline de precisão (condições controladas)
-  RESULTADOS-D2-D8.md      # Consolidação da semana de precisão (D2 → D8)
-
-PLANO-FRENTES-A-B.md   # Roadmap técnico e regras de desenvolvimento
-ROADMAP.md             # Sprints D2–D8 (semana de precisão) com status FEITO por sprint
-```
+Ambos são carregados localmente. O worker L2CS deve estar em estado `ready` antes de iniciar a calibração.
 
 ---
 
-## 📋 Estado Atual do Desenvolvimento
+## Fluxo de Calibração
 
-**Sprint 0 (Auditoria):** ✅ Concluída  
-**Sprint 1 (Robustez do Backend):** ✅ Concluída — A1-1 a A1-6 implementados  
-**Sprint 5 (Precisão + Higiene):** ✅ Concluída — A2-1 a A2-7 atrás de flag; A3-1, A3-2 concluídos  
-**Semana de Precisão (D2 → D8):** ✅ Concluída (2026-08-25) — ver `docs/RESULTADOS-D2-D8.md`
-
-Fixes recentes (Sprint 5):
-- A2-1: One Euro Filter em espaço normalizado (`filterInNormalizedSpace`, presets `-v2`)
-- A2-2: `LowPassFilter` — primeira amostra não puxada para a origem
-- A2-3: `setParams` muta parâmetros sem descartar estado filtrado
-- A2-4: `BlinkDetector` encapsula detecção de piscada com média só de não-piscadas e clamping [0.10, 0.22]
-- A2-5: Correção de anisotropia de aspect ratio (`isotropicLandmarks`, atrás de flag)
-- A2-6: Trava exposição da câmera após aquecimento de 2s (`lockCameraExposure`, atrás de flag)
-- A2-7: Persistência de perfis de calibração em localStorage com invalidação por contexto
-- A3-1: `src/invariants.ts` — 5 invariantes críticas instrumentadas
-- A3-2: Código morto removido (kalman.ts, src/assets/, public/ raiz), README corrigido
-
-Entregas da Semana de Precisão (D2 → D8) — resumo:
-- D2: Loop de medição repetível (`measure_baseline.mjs`, fixture JSONL, `AUTO_TEST_META` auto)
-- D3: L2CS endurecido — presets v2 no replay, `confidence` da softmax como diagnóstico, decisão sobre cadência
-- D4: Detecção de outlier em nível de ponto (LOO+MAD) + ablação de features via `--drop-features`
-- D5: Correção geométrica de distância câmera-rosto (`EXPERIMENT.applyDistanceCorrection`, off por default)
-- D6: Modo rápido de calibração (4 cantos), UI de condição óptica, indicador de drift ao cuidador
-- D7: Sweep de flags A2 no replay (`--a2-flags`), curva de drift temporal (`--drift-curve`), aviso de fadiga
-- D8: Gate de regressão de precisão no CI, `docs/RESULTADOS-D2-D8.md` consolidado
-
-Nenhuma flag nova foi ligada por padrão — todas as decisões numéricas
-sobre flags (`isotropicLandmarks`, `lockCameraExposure`,
-`applyDistanceCorrection`) aguardam gravação real, documentada em
-`docs/RESULTADOS-D2-D8.md`.
+1. **Pré-calibração.** O usuário se vê na tela enquanto o sistema mede distância, enquadramento, postura, iluminação, contraste, reflexo e cintilação. O ajuste automático da câmera roda em paralelo. Condições fora da faixa geram aviso; apenas ausência de rosto ou câmera inadequada impedem prosseguir.
+2. **Coleta.** Alvos apresentados em ordem embaralhada, com descarte dos primeiros 400 ms de cada ponto (fase de sacada e acomodação). Frames são filtrados por qualidade e por deriva de pose dentro do ponto.
+3. **Treino.** `StandardScaler` seguido de Ridge com penalidade anisotrópica derivada da covariância intra-alvo, com λ escolhido por validação cruzada leave-one-target-out.
+4. **Teste de precisão.** Grade 3×3 em 25/50/75%, deliberadamente disjunta da grade de calibração. Um guarda detecta e reporta qualquer sobreposição entre as duas grades, porque validar nas posições do treino mediria memorização.
+5. **Relatório.** JSON com métricas, diagnósticos por ponto, decomposição afim do erro, diagnóstico de ajuste (erro de treino e leave-one-target-out) e as condições **medidas** da sessão.
 
 ---
 
-## 🤝 Privacidade
+## Precisão e Reprodutibilidade
 
-O IrisFlow não envia imagens, dados faciais ou calibração para a nuvem. Toda inferência ocorre localmente. Nenhuma telemetria é coletada.
+O relatório de sessão registra, além do erro médio:
+
+| Métrica | O que separa |
+|---|---|
+| `calibrationFit.trainErrorPx` | Se o modelo sequer reproduz os próprios alvos de treino |
+| `calibrationFit.looErrorPx` | Generalização estimada apenas com dados de calibração |
+| `affine.residualPx` | Quanto do erro é mapeamento afim errado *versus* ruído incoerente |
+| `poseDrift` | Deriva de pose entre o início do teste e cada ponto |
+| `validationOverlap` | Contaminação entre grade de treino e de validação |
+
+A comparação entre `looErrorPx` e o erro do teste é o que distingue "o modelo é o limite" de "algo mudou entre calibrar e testar".
+
+> **Sobre números de precisão:** o menor erro registrado neste projeto foi 57 px / 0,9°, obtido em condições controladas num notebook de 15,6" (documentado em `docs/PONTO-DE-REFERENCIA.md`). Esse número **não é reproduzível em qualquer configuração** — erro em pixels depende do tamanho da tela, e erro angular depende da distância. Qualquer comparação exige que as condições de captura sejam as mesmas, e é por isso que o relatório grava as condições medidas junto com o resultado.
+
+---
+
+## Documentação
+
+| Documento | Conteúdo |
+|---|---|
+| `docs/PONTO-DE-REFERENCIA.md` | Baseline de precisão e condições exatas de captura |
+| `docs/RESULTADOS-D2-D8.md` | Consolidação da semana de precisão, decisões e pendências |
+| `docs/AUDITORIA-SPRINT-0.md` | Auditoria de tratamento silencioso de erros |
+| `docs/BUG-OCULOS-EVIDENCIA.md` | Investigação do impacto de lentes na precisão |
+| `ROADMAP.md` | Sprints, status e critérios de aceite |
+| `PLANO-FRENTES-A-B.md` | Roadmap técnico e regras de desenvolvimento |
+
+---
+
+## Testes
+
+```bash
+npm test                      # Núcleo do pipeline (Vitest)
+npm --prefix frontend test    # Interface (Vitest + jsdom)
+npm run build                 # Verificação de tipos estrita + build de produção
+```
+
+Todas as etapas acima, mais as verificações de tipo do núcleo e do Electron,
+rodam a cada push e pull request via [GitHub Actions](.github/workflows/ci.yml).
+O badge no topo reflete o estado da branch `main`.
+
+A cobertura concentra-se nos módulos puros, onde os limiares e as leis de controle vivem: avaliação de prontidão, ajuste de câmera, detecção de cintilação, geometria de tela, regressão, filtros e decodificação do L2CS. Benchmarks por região (centro, bordas, cantos e transições) rodam sobre um simulador determinístico.
+
+---
+
+## Privacidade
+
+Nenhuma imagem, dado facial, perfil de calibração ou telemetria sai do dispositivo. Toda inferência é local. A leitura de configurações do sistema operacional (tamanho físico do monitor) só ocorre após consentimento explícito do cuidador.
+
+---
+
+## Licença
+
+Distribuído sob a **GNU General Public License v3.0**. O texto completo está em [`LICENSE`](LICENSE).
+
+A GPLv3 garante que qualquer trabalho derivado permaneça livre e com o código
+aberto. Para uma tecnologia assistiva, isso importa em concreto: se o projeto
+for descontinuado ou bifurcado, quem depende dele para se comunicar continua
+tendo direito ao código que faz o equipamento funcionar.

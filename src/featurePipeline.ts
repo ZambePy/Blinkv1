@@ -1,4 +1,4 @@
-import { extractEyeFeatures, extractCompactFeatures } from './extractor';
+import { extractEyeFeatures, extractCompactFeatures, projectFeatureSet } from './extractor';
 import type { Point3D, AdvancedFrameFeatures, L2CSGazeInput } from './extractor';
 
 export interface FeaturePipelineResult {
@@ -46,9 +46,15 @@ export function extractFeatures(
     ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze)
     : extractEyeFeatures(workingLandmarks, faceMatrix);
 
+  // D11 — a projeção no conjunto ativo mora AQUI, não dentro do extractor.
+  // Motivo: `extractCompactFeatures` é o dono do layout e continua devolvendo
+  // o vetor completo (37 ou 44 dims), o que preserva o contrato dos testes de
+  // paridade e do bloco L2CS. Esta função é a fronteira que o engine e a
+  // calibração consomem, então é o ponto certo para decidir o que o modelo vê.
+  // Ver `ACTIVE_FEATURE_SET` em extractor.ts para a evidência da escolha.
   return {
-    featuresLeft: [...geo.featuresLeft],
-    featuresRight: [...geo.featuresRight],
+    featuresLeft: projectFeatureSet(geo.featuresLeft),
+    featuresRight: projectFeatureSet(geo.featuresRight),
     blinkDetected: geo.blinkDetected,
     advancedFeatures: geo.advancedFeatures,
     leftEAR: geo.leftEAR,

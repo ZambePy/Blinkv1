@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+# Uma execução por branch: um push novo cancela a anterior em vez de
+# enfileirar builds que já nasceram obsoletos.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Tipos, testes e build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: |
+          npm ci
+          npm --prefix frontend ci
+
+      # Os pesos do L2CS (92 MB) são gitignored, então o CI roda sem eles.
+      # Isso é intencional e não reduz a cobertura: nenhum teste lê o arquivo
+      # do modelo — a lógica testável do L2CS (recorte, decodificação, bloco
+      # angular, plausibilidade de ângulo) é pura e independe dos pesos.
+      - name: Verificação de tipos (núcleo)
+        run: npx tsc --noEmit -p tsconfig.json
+
+      - name: Verificação de tipos (Electron)
+        run: npx tsc --noEmit -p electron/tsconfig.json
+
+      - name: Testes do núcleo do pipeline
+        run: npm test
+
+      - name: Testes da interface
+        run: npm --prefix frontend test
+
+      # `tsc -b` do build é mais estrito que o `--noEmit` acima (pega imports
+      # não usados, por exemplo), então o build também serve de verificação.
+      - name: Build de produção
+        run: npm run build
+
+      - name: Compilar processo Electron
+        run: npm run electron:compile
+
+      # NOTA: `npm --prefix frontend run lint` (oxlint) fica FORA deste
+      # workflow de propósito. Ele sai com código 1 por warnings pré-existentes
+      # em `frontend/scripts/*.mjs` (console e imports não usados em ferramentas
+      # de desenvolvimento). Adicionar um portão que já nasce vermelho tornaria
+      # o badge inútil — o certo é limpar os warnings e então incluir a etapa.
