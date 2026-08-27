@@ -128,7 +128,7 @@ Os controles de câmera (`zoom`, `brightness`, `contrast`, `powerLineFrequency`)
 
 ## Configuração do Ambiente
 
-Requer Node.js 20 ou superior.
+Requer Node.js 22.12 ou superior (o CI roda em Node 24).
 
 ```bash
 git clone <url-do-repositorio>

@@ -43,9 +43,24 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
 
+      # Node 24 (LTS) e NÃO 20.
+      #
+      # Duas razões, ambas vieram de falha real de CI:
+      #
+      #   1. `package-lock.json` foi gerado pelo npm 11, que aninha
+      #      `@emnapi/core` e `@emnapi/runtime` sob
+      #      `@rolldown/binding-wasm32-wasi/node_modules/`. O npm 10.8.2 que
+      #      acompanha o Node 20 espera esses pacotes no topo e aborta com
+      #      `EUSAGE — Missing: @emnapi/core from lock file`. Node 24 traz o
+      #      npm 11 e lê o lockfile do mesmo jeito que a máquina que o gerou.
+      #
+      #   2. `node-abi` (via electron-builder) declara `engines.node >=22.12.0`.
+      #      No Node 20 isso saía como EBADENGINE em todo install.
+      #
+      # Manter esta versão alinhada com `engines.node` do package.json.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 24
           cache: npm
           cache-dependency-path: |
             package-lock.json
