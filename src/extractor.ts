@@ -303,20 +303,80 @@ export const FEATURE_FORMAT_VERSION = 2;
 // O que sai e por quê:
 //   cantos [12..19]  → geometria da órbita, não do olhar; move com a pose.
 //   ear, irisRadius  → abertura da pálpebra e distância; sem sinal de direção.
-//   pose  [22..24]   → a pose já entra via offset (que é medido no frame da
-//                      cabeça); repetir a pose crua dá ao Ridge um atalho para
-//                      explicar alvo por postura, que é o confundimento
-//                      central (a cabeça se move ~metade da amplitude do olho).
+//   pose  [22..24]   → ver a CORREÇÃO logo abaixo. A justificativa original
+//                      ("a pose já entra via offset") estava errada, e o
+//                      conjunto `iris12+pose` existe para medir o custo dela.
 //   interações [25..36] → 12 dims quadráticas sobre 9 restrições.
 //   L2CS [37..43]    → ver `sourceDimensions` em l2cs/crop.ts: entre D3 e D10
 //                      este bloco era constante (crop preto). A medição acima
 //                      foi feita nesse estado, então ele NÃO foi avaliado
 //                      funcionando. Fica fora do default e disponível em
 //                      'compact' para re-medir quando houver gravação nova.
-export type FeatureSet = 'iris12' | 'compact';
+//
+// ── CORREÇÃO (1.2): "a pose já entra via offset" é falso ────────────────────
+//
+// A frase acima justificava tirar `pose` do vetor dizendo que ela já estava
+// representada em `offset`. Não está, e o motivo é geométrico.
+//
+// `offsetX/offsetY` são a posição da íris MEDIDA NO FRAME DA CABEÇA: o
+// extractor rotaciona os landmarks pela matriz de transformação facial antes
+// de medir (ver `rotS`). É precisamente a construção que torna o offset
+// INVARIANTE à rotação da cabeça — que é o que se quer de uma feature de
+// olhar, e exatamente por isso ela não carrega a pose.
+//
+// A consequência é a que 1.1 mediu: se a cabeça gira Δ e o olho continua
+// parado na órbita, o offset não muda, mas o ponto olhado na tela se desloca
+// `d · tan(Δ)` — 38,5 px por grau na tela de referência. Um modelo que só vê
+// offset não tem como saber disso. Na gravação de baseline a postura migrou
+// 2,38° em yaw e 3,92° em pitch ao longo da calibração (91 px em X, 151 px em
+// Y), com r ≈ 0,96 contra a ordem de coleta.
+//
+// O risco que a justificativa original apontava é real, mas é outro: com a
+// pose no vetor, o Ridge PODE usá-la como atalho para adivinhar o alvo, já que
+// a pose está correlacionada com a ordem de apresentação e a ordem é fixa. Por
+// isso a medição destes conjuntos usa alvo inteiro como holdout, nunca split
+// aleatório de amostras — um split aleatório premiaria justamente a memorização.
+//
+// Nada aqui é decidido por argumento. `ACTIVE_FEATURE_SET` só muda com número
+// de harness; a tabela está em docs/RESULTADOS-D2-D8.md.
+export type FeatureSet = 'iris12' | 'iris12+pose' | 'iris12+posecross' | 'compact';
 
 /** Índices mantidos por `iris12`: offset, rel e contorno da íris. */
 export const IRIS12_DIMS = 12;
+
+/**
+ * 1.2 — índices do vetor completo que cada conjunto seleciona.
+ *
+ * Índices literais e não fatias porque os blocos não são contíguos: pose é
+ * [22..24] e as interações de 1ª ordem são [25..30], com cantos/ear/irisRadius
+ * ([12..21]) descartados no meio.
+ *
+ *   iris12            [0..11]                         12 dims
+ *   iris12+pose       + yaw,pitch,roll                 15 dims
+ *   iris12+posecross  + 6 interações de 1ª ordem       21 dims
+ *
+ * As interações escolhidas são as SEIS de primeira ordem ([25..30]:
+ * offset×yaw, offset×pitch, offset×scale, offset×roll). As seis de segunda
+ * ordem ([31..36]) ficam de fora: 9 alvos já restringem mal 21 parâmetros, e
+ * termos quadráticos são os primeiros a virar memorização.
+ */
+const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly number[]> = {
+  'iris12': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
+  'iris12+pose': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 22, 23, 24],
+  'iris12+posecross': [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    22, 23, 24,
+    25, 26, 27, 28, 29, 30,
+  ],
+};
+
+/** Maior índice que cada conjunto exige do vetor completo. Um vetor mais curto
+ *  que isso não pode ser projetado — ver `projectFeatureSet`. */
+const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
+  'iris12': 12,
+  'iris12+pose': 25,
+  'iris12+posecross': 31,
+};
 
 /** Conjunto ativo. Ver a tabela acima para a evidência. */
 export const ACTIVE_FEATURE_SET: FeatureSet = 'iris12';
@@ -326,7 +386,7 @@ export const ACTIVE_FEATURE_SET: FeatureSet = 'iris12';
  *  usa `var` — quem grava com `compact` não pode confiar em comparação por
  *  dimensão e precisa recomputar. */
 export function activeFeatureDims(set: FeatureSet = ACTIVE_FEATURE_SET): number | 'var' {
-  return set === 'iris12' ? IRIS12_DIMS : 'var';
+  return set === 'compact' ? 'var' : FEATURE_SET_INDICES[set].length;
 }
 
 /**
@@ -363,8 +423,15 @@ export function projectFeatureSet(
   set: FeatureSet = ACTIVE_FEATURE_SET,
 ): number[] {
   if (set === 'compact') return full;
-  if (full.length <= IRIS12_DIMS) return full;
-  return full.slice(0, IRIS12_DIMS);
+  // Vetor curto demais para o conjunto pedido: devolve intacto. Acontece com
+  // frame sem rosto (extractor devolve vazio) e com o path legado
+  // `extractEyeFeatures`, que não produz pose nem interações. Quem trata isso
+  // é o caller — projetar zeros aqui inventaria dados.
+  if (full.length < FEATURE_SET_MIN_LENGTH[set]) return full;
+  const idx = FEATURE_SET_INDICES[set];
+  const out = new Array<number>(idx.length);
+  for (let i = 0; i < idx.length; i++) out[i] = full[idx[i]];
+  return out;
 }
 
 export function extractEyeFeatures(

@@ -43,6 +43,101 @@ Data: **2026-08-25**. Baseline referência: **57 px / 0,9°** (Rodada A, sem
 
 ---
 
+## 1.2 — pose como feature ajustada piora tudo. O coeficiente aprendido diz por quê.
+
+O plano previa que devolver a pose ao vetor recuperaria a deriva medida em 1.1.
+Foi medido; não recupera. Piora em **todas** as métricas.
+
+### Tabela — `fixtures/replay/ci-baseline.jsonl`, `balanceado-v2`, features recomputadas
+
+| conjunto | λ | erro de treino | LOO por alvo | meanErrorInner | p90 | Δ vs iris12 |
+|---|---|---|---|---|---|---|
+| `iris12` (12 dims) | 0,01 | **41,1 px** | **96,9 px** | **144,6 px** | 410,1 | — |
+| `iris12+pose` (15) | 0,01 | 59,0 px | 151,3 px | **157,1 px** | 441,4 | **+8,6%** |
+| `iris12+posecross` (21) | 0,1 | 61,0 px | 151,7 px | **159,6 px** | 466,1 | **+10,3%** |
+
+`meanErrorEdge` segue ausente: esta gravação só tem a grade interior.
+
+Reproduzível com `npm run replay -- --feature-set <conjunto>` (exige features
+recomputadas; o harness rejeita a combinação com `--use-recorded-features`,
+porque as features gravadas já vieram projetadas pelo build que gravou).
+
+### Por que não é ruído: o LOO por alvo
+
+`iris12` erra 41,1 px no treino e 96,9 px quando um alvo INTEIRO sai do ajuste.
+Com pose, 59,0 e 151,3. A distância entre treino e LOO cresce de 2,4× para 2,6×
+— e os dois níveis sobem. Não é overfitting clássico (o treino também piorou):
+é o ajuste inteiro ficando pior.
+
+O LOO é por ALVO, nunca por amostra aleatória. Amostras do mesmo alvo são quase
+idênticas, então segurar algumas delas mede interpolação dentro do aglomerado.
+Com uma feature correlacionada com a ordem de apresentação — que é o caso da
+pose, r ≈ 0,96 — o split aleatório premiaria exatamente a memorização.
+
+### O teste decisivo: o coeficiente aprendido não é geometria
+
+A geometria prevê o que a pose deveria valer. Com o olho parado na órbita e a
+cabeça girando Δ, o ponto olhado se desloca `d · tan(Δ)`: **≈ 38,5 px por grau**
+na tela de referência. Os pixels são quadrados, então esse ganho é **o mesmo nos
+dois eixos** — yaw→X e pitch→Y deveriam ter a mesma magnitude.
+
+| conjunto | yaw → X | pitch → Y | esperado |
+|---|---|---|---|
+| `iris12+pose` | **−83,6 px/grau** | **+11,9 px/grau** | ±38,5 nos dois |
+| `iris12+posecross` | **−97,4 px/grau** | **−4,7 px/grau** | ±38,5 nos dois |
+
+Os dois eixos diferem entre si por um fator de **7×**, quando a geometria exige
+que sejam iguais. Esse argumento não depende de convenção de sinal, e é
+conclusivo: **o modelo não aprendeu compensação de pose.** Ele usou a pose como
+atalho para separar aglomerados de alvo, o que funciona no treino e não
+sobrevive fora dele.
+
+### Dois motivos para o atalho existir, ambos medidos
+
+1. **Confundimento.** A pose deriva monotonicamente com a ORDEM de coleta
+   (r ≈ 0,96) e a ordem dos alvos é fixa, então a pose vira um relógio que
+   identifica o alvo. O coeficiente "certo" nem é identificável: as features de
+   íris já explicam o alvo, e não sobra resíduo geométrico para a pose explicar.
+2. **Extrapolação.** O teste de precisão vem DEPOIS da calibração e a deriva
+   continua. **84,4% dos frames de precisão têm pitch fora da faixa vista no
+   treino** (até 0,97° além). Um coeficiente errado, extrapolado, erra mais.
+
+### Hipótese que eu levantei e a medição derrubou
+
+Suspeitei que a penalidade anisotrópica Σ_W deixaria a pose quase livre, por ela
+ter variância intra-alvo quase nula (0,3° numa sessão de cabeça parada).
+**Falso.** A diagonal normalizada de Σ_W dá à pose peso 0,42–1,05 — em torno da
+média. O que de fato acontece é menor e em outra direção: como `withinTargetPenalty`
+normaliza por `trace/d`, acrescentar dimensões de baixa variância intra-alvo
+endurece a penalidade das demais — as features de íris passam de 0,21–4,36 para
+0,22–4,67 (+7% com pose) e 0,25–5,67 (+30% com posecross). Contribui para o
+treino piorar com λ constante, mas não explica sozinho os +8,6%.
+
+λ não mudou entre `iris12` e `iris12+pose` (0,01 nos dois), então a degradação
+não vem de o CV endurecer a regularização.
+
+### Consequência para 1.3
+
+O problema não é que a pose seja irrelevante — 1.1 mediu 91 px em X e 151 px em
+Y de deriva real. O problema é **ajustar** o coeficiente a partir de dados onde
+ele não é identificável.
+
+1.3 não ajusta nada: aplica `d · tan(Δ)` com o ganho geométrico conhecido,
+na saída. Sem coeficiente livre, não há o que memorizar, e a extrapolação é
+correta por construção. Esta é agora a via principal para o critério de aceite
+da Fase 1, e `ACTIVE_FEATURE_SET` permanece `iris12`.
+
+### Correção de comentário
+
+`extractor.ts` justificava a remoção da pose dizendo que "a pose já entra via
+offset". É falso: `offsetX/offsetY` são medidos **no frame da cabeça** (os
+landmarks são rotacionados pela matriz facial antes da medição), construção que
+os torna deliberadamente INVARIANTES à rotação da cabeça — e por isso mesmo
+incapazes de carregá-la. O comentário foi substituído pela derivação correta e
+pela tabela acima.
+
+---
+
 ## 1.1 — o gate de pose não era o gargalo. A medição diz onde ele está.
 
 A hipótese da Fase 1.1 era: o gate de deriva de pose usa como referência o

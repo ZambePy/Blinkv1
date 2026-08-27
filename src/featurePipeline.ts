@@ -1,5 +1,5 @@
 import { extractEyeFeatures, extractCompactFeatures, projectFeatureSet } from './extractor';
-import type { Point3D, AdvancedFrameFeatures, L2CSGazeInput } from './extractor';
+import type { Point3D, AdvancedFrameFeatures, L2CSGazeInput, FeatureSet } from './extractor';
 
 export interface FeaturePipelineResult {
   featuresLeft:  number[];
@@ -27,6 +27,10 @@ export function extractFeatures(
   l2csGaze?: L2CSGazeInput | null,
   videoWidth?: number,
   videoHeight?: number,
+  /** 1.2 — conjunto de features a projetar. Existe para o harness poder medir
+   *  variantes na MESMA gravação sem recompilar; o app nunca passa este
+   *  argumento e segue no `ACTIVE_FEATURE_SET`. */
+  featureSet?: FeatureSet,
 ): FeaturePipelineResult {
   // extractEyeFeatures (path legado, USE_COMPACT_FEATURES=false) não recebe
   // L2CS por design — só o compact expõe o extension point; se um dia quiser
@@ -53,8 +57,8 @@ export function extractFeatures(
   // calibração consomem, então é o ponto certo para decidir o que o modelo vê.
   // Ver `ACTIVE_FEATURE_SET` em extractor.ts para a evidência da escolha.
   return {
-    featuresLeft: projectFeatureSet(geo.featuresLeft),
-    featuresRight: projectFeatureSet(geo.featuresRight),
+    featuresLeft: projectFeatureSet(geo.featuresLeft, featureSet),
+    featuresRight: projectFeatureSet(geo.featuresRight, featureSet),
     blinkDetected: geo.blinkDetected,
     advancedFeatures: geo.advancedFeatures,
     leftEAR: geo.leftEAR,

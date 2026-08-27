@@ -22,12 +22,21 @@
 
 import { readFile, writeFile } from 'node:fs/promises';
 import { resolve as resolvePath } from 'node:path';
-import { RidgeRegressor } from '../src/ridge';
+import { RidgeRegressor, withinTargetPenalty } from '../src/ridge';
 import { StandardScaler } from '../src/scaler';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2, type FilterPreset, type FilterPresetV2 } from '../src/oneEuroFilter';
 import { extractFeatures } from '../src/featurePipeline';
 import type { Point3D, L2CSGazeInput } from '../src/extractor';
-import { FEATURE_VECTOR_ID } from '../src/extractor';
+import { FEATURE_VECTOR_ID, activeFeatureDims } from '../src/extractor';
+import type { FeatureSet } from '../src/extractor';
+
+/** 1.2 — conjuntos que o harness aceita medir. `compact` fica de fora de
+ *  propósito: seu tamanho varia com a presença do bloco L2CS, então uma tabela
+ *  comparativa com ele dentro compararia vetores de larguras diferentes. */
+const FEATURE_SETS = ['iris12', 'iris12+pose', 'iris12+posecross'] as const;
+function isFeatureSet(v: string | undefined): v is FeatureSet {
+  return !!v && (FEATURE_SETS as readonly string[]).includes(v);
+}
 // 1.1 — os limiares do gate vêm do módulo, não de cópias no harness: um
 // harness com o número duplicado mede o pipeline de ontem em silêncio.
 import {
@@ -124,6 +133,15 @@ interface CliArgs {
    * vindo da gravação — não mudaram e reexecutá-las só somaria ruído.
    */
   regatePose?: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number };
+  /**
+   * 1.2 — conjunto de features a medir, sobrepondo `ACTIVE_FEATURE_SET`.
+   *
+   * Só tem efeito com features RECOMPUTADAS: as gravadas no JSONL já vêm
+   * projetadas pelo build que gravou, e reprojetá-las seria fatiar um vetor
+   * que já perdeu as dimensões pedidas. `--use-recorded-features` junto com
+   * `--feature-set` é rejeitado na entrada por isso.
+   */
+  featureSet?: FeatureSet;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -145,6 +163,15 @@ function parseArgs(argv: string[]): CliArgs {
     // Opt-in explícito para o comportamento antigo. Útil para reproduzir um
     // relatório histórico bit a bit; nunca para medir o pipeline atual.
     else if (a === '--use-recorded-features') args.recomputeFeatures = false;
+    else if (a === '--feature-set') {
+      const raw = argv[++i];
+      if (!isFeatureSet(raw)) {
+        throw new Error(
+          `--feature-set desconhecido: '${raw}'. Válidos: ${FEATURE_SETS.join(', ')}`,
+        );
+      }
+      args.featureSet = raw;
+    }
     // 1.1 — `--regate-pose <yawMax>,<pitchMax>,<rollMax>,<minSamples>` em rad.
     // Sem argumento, usa os valores em vigor no código.
     else if (a === '--regate-pose') {
@@ -310,6 +337,7 @@ function getFeatures(
   dropFeatures: readonly FeatureGroup[],
   videoWidth?: number,
   videoHeight?: number,
+  featureSet?: FeatureSet,
 ): { left: number[]; right: number[] } | null {
   let left: number[];
   let right: number[];
@@ -332,6 +360,7 @@ function getFeatures(
       toL2CSInput(f.l2cs),
       videoWidth,
       videoHeight,
+      featureSet,
     );
     if (geo.blinkDetected) return null;
     left = geo.featuresLeft;
@@ -435,6 +464,7 @@ function splitFrames(
   dropFeatures: readonly FeatureGroup[],
   timeWindow?: { startSec: number; endSec: number },
   regatePose?: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number },
+  featureSet?: FeatureSet,
 ): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
@@ -484,7 +514,7 @@ function splitFrames(
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
-    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH);
+    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet);
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {
@@ -594,11 +624,45 @@ function splitFrames(
 // (sem RBF, sem RLS, sem document). Uma unica fonte de verdade seria melhor
 // — mas calibration.ts esta acoplado ao browser e refatorar por causa do
 // replay agora seria risco maior que o beneficio.
+/**
+ * 1.2 — coeficiente aprendido para as dimensões de pose, em px de tela por grau.
+ *
+ * É o teste que separa "o modelo aprendeu geometria" de "o modelo decorou".
+ * A geometria diz o que esperar: com o olho parado na órbita e a cabeça girando
+ * Δ, o ponto olhado se desloca `d · tan(Δ)` — cerca de +38 px/grau em X para
+ * yaw e em Y para pitch, com sinal DEFINIDO. Um coeficiente com sinal trocado,
+ * ou uma ordem de grandeza fora, não é compensação de pose: é a pose sendo
+ * usada como atalho para adivinhar o alvo.
+ *
+ * A conversão desfaz a padronização: β está em espaço z, então dPred/dx é
+ * β/σ em unidades normalizadas de tela; daí × largura (ou altura) para px e
+ * × π/180 para "por grau".
+ */
+function ganhoPose(
+  m: ReplayRegressor, bruto: number[][], vw: number, vh: number,
+): { yawX: number; pitchY: number } | null {
+  const mod = m.ridgeL.getModel?.();
+  if (!mod || mod.betaX.length < 16 || bruto.length === 0 || bruto[0].length < 15) return null;
+  // σ da dimensão, recalculado aqui porque o scaler não expõe os seus.
+  const sigma = (j: number) => {
+    const v = bruto.map((r) => r[j]);
+    const mu = v.reduce((a, b) => a + b, 0) / v.length;
+    return Math.sqrt(v.reduce((a, b) => a + (b - mu) ** 2, 0) / v.length) || 1;
+  };
+  // ATENÇÃO AO DESLOCAMENTO: `trainRidgeModel` monta `Phi = [1.0, ...f]`, então
+  // `beta[0]` é o viés e o coeficiente da feature `j` mora em `beta[j + 1]`.
+  const porGrau = (beta: number[], j: number, dim: number) =>
+    (beta[j + 1] / sigma(j)) * dim * (Math.PI / 180);
+  // Nos conjuntos com pose a feature 12 é yaw e a 13 é pitch (ver
+  // FEATURE_SET_INDICES: [0..11] de íris, depois 22,23,24 = yaw,pitch,roll).
+  return { yawX: porGrau(mod.betaX, 12, vw), pitchY: porGrau(mod.betaY, 13, vh) };
+}
+
 class ReplayRegressor {
   private scalerL = new StandardScaler();
   private scalerR = new StandardScaler();
-  private ridgeL = new RidgeRegressor();
-  private ridgeR = new RidgeRegressor();
+  ridgeL = new RidgeRegressor();
+  ridgeR = new RidgeRegressor();
   private trained = false;
 
   train(samples: CalibrationSample[]): void {
@@ -616,6 +680,77 @@ class ReplayRegressor {
     this.ridgeL.train(scaledL, tx, ty);
     this.ridgeR.train(scaledR, tx, ty);
     this.trained = true;
+  }
+
+  /**
+   * 1.2 — erro do modelo nas PRÓPRIAS amostras de treino, e o mesmo erro com
+   * um alvo inteiro removido do treino (leave-one-target-out).
+   *
+   * A diferença entre os dois é o que separa aprendizado de memorização, e é a
+   * única forma honesta de julgar features correlacionadas com o alvo. Um split
+   * aleatório de amostras não serve: amostras do mesmo alvo são quase idênticas,
+   * então segurar algumas delas mede interpolação dentro do aglomerado, não
+   * generalização para um alvo novo.
+   *
+   * Em px por eixo, cada eixo convertido pela sua própria dimensão antes de
+   * compor — `hypot` sobre frações de tela infla erro puro de Y numa tela 16:9.
+   */
+  static diagnose(samples: CalibrationSample[], vw: number, vh: number): {
+    trainErrorPx: number; looErrorPx: number; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null;
+  } {
+    const erroDe = (treino: CalibrationSample[], teste: CalibrationSample[]): number => {
+      const m = new ReplayRegressor();
+      m.train(treino);
+      let soma = 0;
+      for (const t of teste) {
+        const p = m.predictPx(t.featuresLeft, t.featuresRight, vw, vh);
+        soma += Math.hypot(p.x - t.targetXNorm * vw, p.y - t.targetYNorm * vh);
+      }
+      return soma / teste.length;
+    };
+
+    const chave = (t: CalibrationSample) => `${Math.round(t.targetXPx)},${Math.round(t.targetYPx)}`;
+    const alvos = [...new Set(samples.map(chave))];
+
+    let looSoma = 0, looN = 0;
+    for (const alvo of alvos) {
+      const treino = samples.filter((t) => chave(t) !== alvo);
+      const teste = samples.filter((t) => chave(t) === alvo);
+      // Menos de 3 alvos no treino não fecha o sistema; pular é mais honesto
+      // que reportar um número que veio de um ajuste degenerado.
+      if (new Set(treino.map(chave)).size < 3 || teste.length === 0) continue;
+      looSoma += erroDe(treino, teste); looN++;
+    }
+
+    // λ escolhido pelo CV. Relatado porque λ é compartilhado por TODAS as
+    // dimensões do vetor: uma feature nova que ganha muita variância depois da
+    // padronização força λ para cima e encolhe também as features úteis. Sem
+    // este número, esse efeito é indistinguível de "a feature não informa".
+    const cheio = new ReplayRegressor();
+    cheio.train(samples);
+
+    // 1.2 — diagonal de Σ_W normalizada, no espaço padronizado.
+    //
+    // É o peso da penalidade que CADA dimensão recebe. `withinTargetPenalty`
+    // divide por trace/d, então o valor 1,0 é a média: bem abaixo de 1 quer
+    // dizer "esta dimensão é quase livre, o Ridge pode carregar o coeficiente
+    // que quiser nela". Uma feature com variância intra-alvo quase nula — pose
+    // numa sessão de cabeça parada — cai exatamente nesse regime, E puxa a
+    // média para baixo, endurecendo a penalidade de todas as outras.
+    const sc = new StandardScaler();
+    const bruto = samples.map((t) => t.featuresLeft);
+    sc.fit(bruto);
+    const P = withinTargetPenalty(sc.transform(bruto), samples.map(chave));
+
+    return {
+      trainErrorPx: erroDe(samples, samples),
+      looErrorPx: looN > 0 ? looSoma / looN : NaN,
+      targets: alvos.length,
+      lambdaL: cheio.ridgeL.getModel?.()?.lambda ?? NaN,
+      lambdaR: cheio.ridgeR.getModel?.()?.lambda ?? NaN,
+      penaltyDiag: P ? P.map((linha, j) => Number(linha[j].toFixed(4))) : null,
+      poseGainPxPorGrau: ganhoPose(cheio, bruto, vw, vh),
+    };
   }
 
   // Retorna coordenadas em px de tela ja com clamp normalizado, sem filtro
@@ -671,7 +806,7 @@ interface Report {
     legacyNoDecision: number;
     regatePose?: RegateInfo;
   };
-  calibration: { uniqueTargets: number };
+  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null };
   accuracy: {
     n: number;
     meanErrorPx: number;
@@ -740,6 +875,21 @@ async function runInner(args: CliArgs): Promise<number> {
   //
   // Só morde quando o usuário pediu explicitamente as features GRAVADAS: se
   // vamos recomputar a partir dos landmarks, o vetor da gravação é irrelevante.
+  if (args.featureSet && !args.recomputeFeatures) {
+    console.error(
+      `
+ERRO: --feature-set ${args.featureSet} pede features recomputadas.
+` +
+      `As features gravadas no JSONL já vieram projetadas pelo build que gravou;
+` +
+      `reprojetá-las fatiaria um vetor que já perdeu as dimensões pedidas, e o
+` +
+      `número sairia sem que nada acusasse. Remova --use-recorded-features.
+`,
+    );
+    return 2;
+  }
+
   if (!args.recomputeFeatures) {
     const gravado = rec.header.featureVectorId;
     if (gravado !== FEATURE_VECTOR_ID) {
@@ -765,7 +915,7 @@ async function runInner(args: CliArgs): Promise<number> {
     return 2;
   }
 
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
   if (split.timeWindow) {
@@ -795,6 +945,11 @@ async function runInner(args: CliArgs): Promise<number> {
   const uniqueTargets = new Set(
     split.calibration.map((s) => `${s.targetXNorm.toFixed(4)},${s.targetYNorm.toFixed(4)}`),
   ).size;
+
+  // 1.2 — treino vs leave-one-target-out. A distância entre os dois é a medida
+  // de memorização, e é o número que decide se uma feature nova ajuda ou só
+  // dá ao Ridge um jeito melhor de decorar os aglomerados.
+  const diagCalib = ReplayRegressor.diagnose(split.calibration, vw, vh);
 
   // D3.2 — resolve config v1 (pixel) ou v2 (normalized). No caminho v2, o
   // filtro opera em [0, 1] antes de converter para pixel — exatamente o que
@@ -897,7 +1052,7 @@ async function runInner(args: CliArgs): Promise<number> {
       // é a marca de que o relatório honrou as decisões gravadas.
       regatePose: split.regate,
     },
-    calibration: { uniqueTargets },
+    calibration: { uniqueTargets, ...diagCalib },
     accuracy: accSection,
     config: {
       assumedDistPx: ASSUMED_DIST_PX,
@@ -905,6 +1060,10 @@ async function runInner(args: CliArgs): Promise<number> {
       onlineRls: false,
       source: 'src/',
       featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded',
+      // 1.2 — qual conjunto ESTE relatório mediu. Sem isto uma tabela de
+      // variantes vira um monte de números sem etiqueta.
+      featureSet: args.featureSet ?? 'iris12 (ACTIVE_FEATURE_SET)',
+      featureDims: activeFeatureDims(args.featureSet),
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio
       // que nao diz isso vira decisao tomada sobre configuracao errada.
       featureVectorId: FEATURE_VECTOR_ID,
