@@ -15,7 +15,8 @@
     "replay": "node scripts/replay.mjs",
     "electron:compile": "node electron/build.mjs",
     "electron:dev": "node electron/dev.mjs",
-    "electron:build": "npm run build && node electron/build.mjs && node electron/package-app.mjs"
+    "electron:build": "npm run build && node electron/build.mjs && node electron/package-app.mjs",
+    "doctor": "npx react-doctor@latest"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",
