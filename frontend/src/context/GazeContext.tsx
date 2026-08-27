@@ -71,6 +71,11 @@ interface GazeContextValue {
    *  não rodou. Consumido pela pré-calibração para dizer ao cuidador o que
    *  o software já resolveu e o que ainda exige ação física. */
   getCameraTuning: () => TuningStep | null;
+  /** Mensagem acionável quando a câmera não pôde ser aberta. `null` no caminho
+   *  feliz. Existe porque a falha era só um `console.error`: o app ficava
+   *  parado sem rastrear e sem dizer por quê — num software assistivo, quem
+   *  está na frente da tela não tem como abrir o DevTools. */
+  cameraError: string | null;
   // D2 — tempo em ms desde o start bem-sucedido do engine. 0 antes do start.
   // Consumido pelo AUTO_TEST_META do fluxo pós-calibração para preencher
   // `RunMeta.minutosDeSessao` em vez de hardcode 0.
@@ -89,6 +94,92 @@ export const useGaze = (): GazeContextValue => {
   return ctx;
 };
 
+/**
+ * Abre a câmera tentando resoluções em ordem decrescente.
+ *
+ * POR QUE UMA ESCADA E NÃO UM PEDIDO SÓ
+ *
+ * O pipeline quer 1080p: o sinal útil é o deslocamento da íris no frame, e ele
+ * escala com a densidade de pixels sobre o olho (ver o comentário de
+ * `cameraTuner.ts`). Mas pedir 1080p e desistir se falhar deixa o usuário sem
+ * rastreamento nenhum — e para software assistivo isso é pior que rastrear com
+ * menos precisão.
+ *
+ * Duas armadilhas que a escada evita:
+ *
+ *   • `min` é constraint DURA. `width: { min: 640 }` faz o browser recusar a
+ *     câmera inteira se ela não puder garantir o mínimo, com
+ *     OverconstrainedError. A primeira tentativa aqui usa só `ideal`, que
+ *     negocia em vez de falhar.
+ *   • Alguns drivers do Windows anunciam 1080p mas não conseguem INICIAR nesse
+ *     modo, e o Chrome reporta isso como `NotReadableError` — o mesmo erro de
+ *     "câmera em uso por outro app". Sem tentar uma resolução menor não dá para
+ *     distinguir os dois casos.
+ */
+async function openCameraWithFallback(): Promise<MediaStream> {
+  const tentativas: { rotulo: string; constraints: MediaStreamConstraints }[] = [
+    {
+      rotulo: '1920×1080',
+      constraints: {
+        video: {
+          width: { ideal: 1920 },
+          height: { ideal: 1080 },
+          facingMode: 'user',
+          frameRate: { ideal: 30 },
+        },
+      },
+    },
+    {
+      rotulo: '1280×720',
+      constraints: {
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          facingMode: 'user',
+          frameRate: { ideal: 30 },
+        },
+      },
+    },
+    // Última tentativa sem nenhuma preferência: se a câmera abre de algum jeito,
+    // o rastreamento roda (pior, mas roda). O ajuste automático da Etapa 1 vai
+    // tentar subir a resolução depois, já com as capabilities em mãos.
+    { rotulo: 'padrão da câmera', constraints: { video: true } },
+  ];
+
+  let ultimoErro: unknown = null;
+  for (const { rotulo, constraints } of tentativas) {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia(constraints);
+      const t = stream.getVideoTracks()[0]?.getSettings();
+      console.log(`[IrisFlow] câmera aberta (pedido: ${rotulo}) → ${t?.width}×${t?.height} @ ${t?.frameRate ?? '?'}fps`);
+      return stream;
+    } catch (e) {
+      ultimoErro = e;
+      const nome = (e as DOMException)?.name ?? 'Error';
+      // Permissão negada não melhora tentando outra resolução — abortar já
+      // evita três diálogos seguidos na cara do usuário.
+      if (nome === 'NotAllowedError' || nome === 'SecurityError') break;
+      console.warn(`[IrisFlow] tentativa "${rotulo}" falhou (${nome}); tentando resolução menor…`);
+    }
+  }
+
+  const nome = (ultimoErro as DOMException)?.name ?? 'Error';
+  const causa =
+    nome === 'NotAllowedError' || nome === 'SecurityError'
+      ? 'Permissão de câmera negada. Autorize o acesso nas configurações do navegador e recarregue.'
+      : nome === 'NotFoundError' || nome === 'DevicesNotFoundError'
+      ? 'Nenhuma câmera encontrada. Conecte a webcam e recarregue.'
+      : nome === 'NotReadableError' || nome === 'TrackStartError'
+      ? 'A câmera existe mas não pôde ser iniciada — quase sempre porque OUTRO PROGRAMA está usando ela ' +
+        '(OBS, Teams, Zoom, Meet, ou outra aba deste navegador). Feche o outro programa e recarregue.'
+      : nome === 'OverconstrainedError'
+      ? 'A câmera não suporta nenhum dos formatos solicitados.'
+      : `Falha ao abrir a câmera (${nome}).`;
+
+  console.error(`[IrisFlow] ${causa}`);
+  throw new Error(causa, { cause: ultimoErro });
+}
+
 export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { settings } = useSettings();
   const engineRef = useRef<GazeEngine | null>(null);
@@ -99,6 +190,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isDwelling, setIsDwelling] = useState(false);
   const [isComposing, setIsComposing] = useState(false);
   const [isDegraded, setIsDegraded] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
   const isDegradedRef = useRef(false);
   const wasDwellingRef = useRef(false);
 
@@ -593,36 +685,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       try {
         console.log('[IrisFlow] solicitando getUserMedia...');
-        const stream = await navigator.mediaDevices.getUserMedia({
-          // A2-6 — solicitar frameRate explícito para evitar que o auto-rate
-          // do driver oscile entre 15-60 Hz conforme a luminosidade ambiente.
-          // 30fps é o target; 24fps é o mínimo para rastreamento aceitável.
-          //
-          // D10 — resolução subiu de 1280×720 para 1920×1080.
-          //
-          // MOTIVO (medido em fixtures/replay/*.jsonl): o sinal ÚTIL do
-          // pipeline inteiro é o deslocamento do centro da íris no frame, e ele
-          // vale 6,8 px em X para a tela toda a 1280×720. Todo o resto — 44
-          // features, Ridge, filtros — opera em cima desses 6,8 px. A relação
-          // medida é de 141 px de TELA por 1 px de CÂMERA; o piso de ruído de
-          // 22 px que o pipeline exibe corresponde a ~0,15 px de tremor de
-          // landmark, ou seja, já está no limite do sensor.
-          //
-          // Pedir 1080p numa câmera que entrega 1080p multiplica a densidade
-          // linear por 1,5× e divide por 1,5× a contribuição do tremor de
-          // landmark no erro final. É o maior ganho disponível sem tocar em
-          // nenhuma lógica do pipeline.
-          //
-          // `ideal` (não `exact`) de propósito: numa webcam que só faça 720p o
-          // browser negocia para baixo em vez de falhar com
-          // OverconstrainedError e deixar o app sem câmera nenhuma.
-          video: {
-            width: { ideal: 1920, min: 640 },
-            height: { ideal: 1080, min: 480 },
-            facingMode: 'user',
-            frameRate: { ideal: 30, min: 24 },
-          },
-        });
+        const stream = await openCameraWithFallback();
         video.srcObject = stream;
         console.log('[IrisFlow] stream obtido, aguardando loadeddata...');
         await new Promise<void>((resolve) => {
@@ -693,6 +756,13 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         void autoTuneCamera(stream, engine, () => cancelled);
       } catch (err) {
         console.error('[IrisFlow] Falha ao inicializar câmera/engine:', err);
+        if (!cancelled) {
+          setCameraError(
+            err instanceof Error && err.message
+              ? err.message
+              : 'Falha ao inicializar a câmera. Recarregue a página.',
+          );
+        }
       }
     }
 
@@ -805,8 +875,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isComposing,
       setIsComposing,
       isDegraded,
+      cameraError,
     }),
-    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing, isDegraded],
+    [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing, isDegraded, cameraError],
   );
 
   return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;

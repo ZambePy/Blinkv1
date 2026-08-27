@@ -69,7 +69,7 @@ export interface SetupReadinessPanelProps {
 }
 
 export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onReport }) => {
-  const { getDiagnostics, getCameraStream, getCameraTuning } = useGaze();
+  const { getDiagnostics, getCameraStream, getCameraTuning, cameraError } = useGaze();
   const { settings, updateSettings } = useSettings();
   // Etapa 1 → Etapa 2: o campo de visão calibrado é o que habilita o medidor
   // de distância e o alvo "posicione a câmera a X cm". Sem ele o painel ainda
@@ -156,6 +156,35 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
   }, [getDiagnostics, onReport, horizontalFovDeg, getCameraTuning]);
 
   const checks = report?.checks ?? [];
+  // `warn` e `fail` primeiro e por extenso; `ok` vira selo compacto.
+  const problemas = checks.filter((c) => c.status === 'warn' || c.status === 'fail');
+  const aprovados = checks.filter((c) => c.status === 'ok');
+
+  // Falha de câmera manda em tudo: sem stream não há prontidão a avaliar, e a
+  // causa quase sempre é externa ao app (outro programa segurando o
+  // dispositivo). Mostrar isto no lugar das checagens evita o pior cenário —
+  // uma tela cheia de indicadores cinzas e nenhuma explicação.
+  if (cameraError) {
+    return (
+      <div
+        role="alert"
+        style={{
+          padding: '1.25rem',
+          borderRadius: '1rem',
+          background: `${DANGER}14`,
+          border: `1px solid ${DANGER}66`,
+          display: 'flex', flexDirection: 'column', gap: '0.6rem',
+        }}
+      >
+        <div style={{ fontWeight: 800, fontSize: '1.05rem', color: DANGER }}>
+          Câmera indisponível
+        </div>
+        <div style={{ fontSize: '0.95rem', color: TEXT_PRIMARY, lineHeight: 1.55 }}>
+          {cameraError}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
@@ -167,6 +196,11 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
         border: `1px solid rgba(255,255,255,0.10)`,
         background: '#000',
         aspectRatio: '16 / 9',
+        // Teto de altura: a 600 px de largura o 16:9 renderiza ~337 px e
+        // sozinho empurrava metade das checagens para fora da tela. O
+        // enquadramento continua legível bem menor — quem precisa de detalhe é
+        // o pipeline, não o olho humano conferindo se está centralizado.
+        maxHeight: '38vh',
       }}>
         <video
           ref={videoRef}
@@ -195,13 +229,22 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
         )}
       </div>
 
-      {/* Lista de checagens */}
+      {/* Lista de checagens.
+          Só os itens que PEDEM AÇÃO aparecem por extenso. Os que já estão OK
+          viram uma linha compacta de rótulos.
+
+          Motivo: com 9 checagens expandidas o painel passava da altura da tela
+          e empurrava o botão de avançar para fora — o usuário não conseguia
+          seguir. Mas o problema real não era só a rolagem: quem opera isto usa
+          os OLHOS, e rolar é caro. Mostrar oito linhas verdes que não pedem
+          nada e esconder a única laranja que pede é o oposto do que a tela
+          precisa fazer. */}
       <div
         role="status"
         aria-live="polite"
         style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}
       >
-        {checks.map((c) => {
+        {problemas.map((c) => {
           const color = COLOR_BY_STATUS[c.status];
           return (
             <div
@@ -210,8 +253,8 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
                 display: 'flex', alignItems: 'flex-start', gap: '0.75rem',
                 padding: '0.6rem 0.85rem',
                 borderRadius: '0.75rem',
-                background: c.status === 'ok' ? 'rgba(255,255,255,0.04)' : `${color}14`,
-                border: `1px solid ${c.status === 'ok' ? 'rgba(255,255,255,0.08)' : `${color}55`}`,
+                background: `${color}14`,
+                border: `1px solid ${color}55`,
               }}
             >
               <span
@@ -236,6 +279,30 @@ export const SetupReadinessPanel: React.FC<SetupReadinessPanelProps> = ({ onRepo
             </div>
           );
         })}
+
+        {aprovados.length > 0 && (
+          <div style={{
+            display: 'flex', flexWrap: 'wrap', gap: '0.4rem',
+            padding: '0.5rem 0.15rem',
+          }}>
+            {aprovados.map((c) => (
+              <span
+                key={c.id}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: '0.3rem',
+                  padding: '0.25rem 0.6rem', borderRadius: '1rem',
+                  background: 'rgba(255,255,255,0.05)',
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  fontSize: '0.78rem', color: TEXT_DIM, whiteSpace: 'nowrap',
+                }}
+              >
+                <span aria-hidden="true" style={{ color: SUCCESS, fontWeight: 900 }}>✓</span>
+                {LABEL_BY_ID[c.id] ?? c.id}
+              </span>
+            ))}
+          </div>
+        )}
+
         {checks.length === 0 && (
           <div style={{ fontSize: '0.9rem', color: TEXT_DIM, padding: '0.6rem 0.85rem' }}>
             Iniciando a câmera…

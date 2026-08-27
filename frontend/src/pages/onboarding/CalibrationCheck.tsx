@@ -444,10 +444,23 @@ export const CalibrationCheck: React.FC = () => {
 
         {/* ─── PRÉ-CALIBRAÇÃO ──────────────────────────────────────────── */}
         {stage === 'pre-calibration' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div style={{
+            // `overflow-y: auto` + `alignItems: flex-start` + `margin: auto` no
+            // filho: a combinação que centraliza quando há espaço E permite
+            // rolar quando não há.
+            //
+            // `alignItems: 'center'` sozinho (como estava) transborda para os
+            // DOIS lados quando o conteúdo passa da altura da tela — topo e
+            // rodapé ficam inalcançáveis, inclusive o botão de avançar. O
+            // `<main>` tem `overflow: hidden`, então a rolagem precisa
+            // acontecer aqui dentro.
+            flex: 1, minHeight: 0,
+            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
+            padding: '2rem', overflowY: 'auto',
+          }}>
             <div style={{
-              maxWidth: 600, width: '100%',
-              display: 'flex', flexDirection: 'column', gap: '1.75rem',
+              maxWidth: 600, width: '100%', margin: 'auto',
+              display: 'flex', flexDirection: 'column', gap: '1.25rem',
               animation: 'cfFadeUp 0.4s ease-out both',
             }}>
               {/* Cabeçalho CAA */}
