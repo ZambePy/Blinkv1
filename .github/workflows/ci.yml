@@ -18,8 +18,30 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
+    env:
+      # `electron/build.mjs` marca `electron` como external — o compile é só
+      # esbuild sobre main.ts/preload.ts e nunca executa o binário. Sem esta
+      # variável o `npm ci` baixaria ~359 MB no postinstall para nada, somando
+      # tempo e mais um ponto de falha de rede.
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1
+
     steps:
       - uses: actions/checkout@v4
+
+      # `canvas` NÃO é dependência decorativa: `qualityAnalyzer.a1-5.test.ts`
+      # renderiza canvas 2D de verdade dentro do jsdom para exercitar o
+      # analisador de qualidade com pixels reais, e o jsdom delega `getContext`
+      # a este módulo nativo.
+      #
+      # O install dele é `prebuild-install -r napi || node-gyp rebuild`. O
+      # prebuild costuma existir para linux-x64, mas quando não existe o
+      # fallback compila — e aí precisa destas bibliotecas. Instalar antes custa
+      # ~15 s e elimina um modo de falha que só apareceria como `npm ci`
+      # quebrado, sem indicar a causa.
+      - name: Bibliotecas de sistema para o canvas nativo
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev
 
       - uses: actions/setup-node@v4
         with:
@@ -29,10 +51,19 @@ jobs:
             package-lock.json
             frontend/package-lock.json
 
-      - name: Instalar dependências
-        run: |
-          npm ci
-          npm --prefix frontend ci
+      # NENHUM passo abaixo usa `npm --prefix <dir> <cmd>`.
+      #
+      # Esse formato quebrou o primeiro CI: o npm do runner interpretou
+      # `frontend` como argumento POSICIONAL de `ci` (virou `npm ci frontend`)
+      # e imprimiu o usage em vez de instalar. A combinação `--prefix` + `ci` é
+      # ambígua entre versões de npm; `working-directory` do próprio Actions
+      # não passa pelo parser de argumentos do npm e não tem esse problema.
+      - name: Instalar dependências (raiz)
+        run: npm ci
+
+      - name: Instalar dependências (frontend)
+        working-directory: frontend
+        run: npm ci
 
       # Os pesos do L2CS (92 MB) são gitignored, então o CI roda sem eles.
       # Isso é intencional e não reduz a cobertura: nenhum teste lê o arquivo
@@ -48,18 +79,20 @@ jobs:
         run: npm test
 
       - name: Testes da interface
-        run: npm --prefix frontend test
+        working-directory: frontend
+        run: npm test
 
-      # `tsc -b` do build é mais estrito que o `--noEmit` acima (pega imports
-      # não usados, por exemplo), então o build também serve de verificação.
+      # `tsc -b` é mais estrito que o `--noEmit` acima (pega imports não usados,
+      # por exemplo), então o build também serve de verificação de tipos.
       - name: Build de produção
+        working-directory: frontend
         run: npm run build
 
       - name: Compilar processo Electron
         run: npm run electron:compile
 
-      # NOTA: `npm --prefix frontend run lint` (oxlint) fica FORA deste
-      # workflow de propósito. Ele sai com código 1 por warnings pré-existentes
-      # em `frontend/scripts/*.mjs` (console e imports não usados em ferramentas
-      # de desenvolvimento). Adicionar um portão que já nasce vermelho tornaria
-      # o badge inútil — o certo é limpar os warnings e então incluir a etapa.
+      # NOTA: `npm run lint` (oxlint) fica FORA deste workflow de propósito.
+      # Ele sai com código 1 por warnings pré-existentes em
+      # `frontend/scripts/*.mjs` (console e imports não usados em ferramentas de
+      # desenvolvimento). Adicionar um portão que já nasce vermelho tornaria o
+      # badge inútil — o certo é limpar os warnings e então incluir a etapa.
