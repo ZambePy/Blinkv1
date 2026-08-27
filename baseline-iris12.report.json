@@ -1,0 +1,126 @@
+{
+  "replayVersion": 1,
+  "generatedAt": "2026-08-27T20:24:31.123Z",
+  "input": {
+    "path": "C:\\Users\\gabri\\OneDrive\\Desktop\\PROJETO STARTUP\\fixtures\\replay\\ci-baseline.jsonl",
+    "startedAt": "2026-08-26T01:17:30.209Z",
+    "formatVersion": 2
+  },
+  "resolution": {
+    "w": 1920,
+    "h": 1080
+  },
+  "filter": {
+    "preset": "balanceado-v2",
+    "mincutoff": 0.5,
+    "beta": 5,
+    "normalizedSpace": true
+  },
+  "frames": {
+    "totalInJsonl": 3147,
+    "droppedInRecording": 0,
+    "calibration": 514,
+    "accuracy": 455,
+    "live": 2070,
+    "discarded": 5,
+    "rejectedByDecision": 103,
+    "legacyNoDecision": 0
+  },
+  "calibration": {
+    "uniqueTargets": 9
+  },
+  "accuracy": {
+    "n": 455,
+    "meanErrorPx": 144.64460465371536,
+    "medianErrorPx": 71.25024886638741,
+    "p90ErrorPx": 410.0677735027509,
+    "maxErrorPx": 1014.8308599550386,
+    "meanErrorDeg": 3.5863022129269546,
+    "medianErrorDeg": 1.799381106211671,
+    "p90ErrorDeg": 10.248692801418324,
+    "perPoint": [
+      {
+        "targetXPx": 480,
+        "targetYPx": 270,
+        "count": 50,
+        "meanErrorPx": 115.93338682468467,
+        "medianErrorPx": 107.20850340820951,
+        "meanErrorDeg": 2.925613214851708
+      },
+      {
+        "targetXPx": 960,
+        "targetYPx": 270,
+        "count": 51,
+        "meanErrorPx": 91.97714407902428,
+        "medianErrorPx": 75.16516240188112,
+        "meanErrorDeg": 2.320262665221468
+      },
+      {
+        "targetXPx": 1440,
+        "targetYPx": 270,
+        "count": 50,
+        "meanErrorPx": 147.36412323397542,
+        "medianErrorPx": 77.15255077935828,
+        "meanErrorDeg": 3.6923621081309284
+      },
+      {
+        "targetXPx": 480,
+        "targetYPx": 540,
+        "count": 51,
+        "meanErrorPx": 246.70353578019643,
+        "medianErrorPx": 79.64869884136392,
+        "meanErrorDeg": 5.982118588930264
+      },
+      {
+        "targetXPx": 960,
+        "targetYPx": 540,
+        "count": 50,
+        "meanErrorPx": 111.43940896593234,
+        "medianErrorPx": 55.66492957435601,
+        "meanErrorDeg": 2.7986735855883222
+      },
+      {
+        "targetXPx": 1440,
+        "targetYPx": 540,
+        "count": 50,
+        "meanErrorPx": 129.22557633714084,
+        "medianErrorPx": 68.12323351759596,
+        "meanErrorDeg": 3.238837338917755
+      },
+      {
+        "targetXPx": 480,
+        "targetYPx": 810,
+        "count": 51,
+        "meanErrorPx": 232.29161386188477,
+        "medianErrorPx": 63.74808695352914,
+        "meanErrorDeg": 5.625961416861873
+      },
+      {
+        "targetXPx": 960,
+        "targetYPx": 810,
+        "count": 51,
+        "meanErrorPx": 96.91672306275413,
+        "medianErrorPx": 60.18805781901455,
+        "meanErrorDeg": 2.439001758623307
+      },
+      {
+        "targetXPx": 1440,
+        "targetYPx": 810,
+        "count": 51,
+        "meanErrorPx": 128.48687241915775,
+        "medianErrorPx": 63.92777652205243,
+        "meanErrorDeg": 3.2207574234480023
+      }
+    ]
+  },
+  "config": {
+    "assumedDistPx": 2268,
+    "rbfApplied": false,
+    "onlineRls": false,
+    "source": "src/",
+    "featuresSource": "recomputed",
+    "featureVectorId": "iris12:12",
+    "recordedFeatureVectorId": null,
+    "droppedFeatureGroups": []
+  }
+}

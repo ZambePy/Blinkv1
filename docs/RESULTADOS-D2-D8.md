@@ -10,6 +10,80 @@ Data: **2026-08-25**. Baseline referência: **57 px / 0,9°** (Rodada A, sem
 óculos, cabeça parada — commit `f9d9252`, documentado em
 `docs/PONTO-DE-REFERENCIA.md`).
 
+---
+
+> ## ⚠️ LEIA ANTES DE USAR QUALQUER NÚMERO DESTE DOCUMENTO
+>
+> **Tudo abaixo desta caixa descreve o vetor de features de 44 dims.**
+>
+> O commit `c3ade68` reduziu o vetor para 12 dims (`ACTIVE_FEATURE_SET = 'iris12'`).
+> Os relatórios que embasaram as decisões desta semana — `ci-baseline-a2.report.json`
+> e `ci-baseline-ablation.report.json` — foram gerados em **2026-08-26 às 14:38**,
+> horas antes daquele commit, e com `featuresSource: "recorded"`: usaram as features
+> gravadas no JSONL, que naquele momento eram as de 44 dims.
+>
+> Nada acusou a mudança. O replay seguia rodando e produzindo números como se o
+> pipeline não tivesse mudado, porque o default era usar as features gravadas e não
+> havia nenhuma verificação de compatibilidade.
+>
+> **Decisões que NÃO valem para a configuração atual:**
+>
+> | Decisão | Onde | Por que não vale |
+> |---|---|---|
+> | D3.2 — manter `expandFactor` em 1,4 | §Decisões | Varreu o parâmetro do crop do L2CS, cujo bloco angular nem entra mais no vetor ativo |
+> | D4 — não remover nenhum grupo de features | §Decisões | A ablação media grupos (pose-linear, pose-cross, quadratic, l2cs) que `iris12` **já removeu** |
+> | A2-5 — `isotropicLandmarks` OFF | §Flags | Medido sobre 44 dims; o efeito no vetor reduzido é desconhecido |
+>
+> Nenhuma dessas decisões foi *revertida* — elas apenas deixaram de ter medição que
+> as sustente. Refazer a medição é o item que as reabilita.
+>
+> A partir de 0.1, três coisas impedem que isto se repita:
+> `FEATURE_VECTOR_ID` no cabeçalho do JSONL, o replay abortando em incompatibilidade,
+> e `recomputeFeatures` como padrão.
+
+---
+
+## Baseline verdadeiro do pipeline atual (0.4)
+
+Primeiro número gerado pelo código de hoje, para a configuração de hoje.
+
+**Arquivo:** `baseline-iris12.report.json` — reproduzível com:
+
+```bash
+npm run replay -- --jsonl fixtures/replay/ci-baseline.jsonl --filter balanceado-v2 --report baseline-iris12.report.json
+```
+
+| variante | vetor | mean | mediana | p90 | max |
+|---|---|---|---|---|---|
+| **baseline-iris12** (balanceado-v2, recomputado) | `iris12:12` | **144,6 px** | 71,3 | 410,1 | 1014,8 |
+| ci-baseline-a2 (balanceado-v2, features gravadas) | 44 dims | 150,3 px | 76,4 | 470,9 | — |
+
+O vetor de 12 dims sai ligeiramente melhor que o de 44 nesta gravação, e a diferença
+é maior na cauda (p90: 410 contra 471) do que na média. Mesma gravação, mesmo harness,
+mesmo filtro — a comparação é legítima.
+
+### Três ressalvas sobre este baseline
+
+**1. Não mede borda.** O anel de 4 cantos adicionado em 0.3 só existe no teste ao vivo.
+O replay reexecuta os alvos que estão gravados no JSONL, e a gravação tem apenas a
+grade interior 25/50/75. `meanErrorEdge` só aparece depois de uma calibração nova
+feita no app.
+
+**2. Os graus não são comparáveis com o teste ao vivo.** O replay converte pixels em
+graus com `ASSUMED_DIST_PX = 2268` (60 cm a 96 DPI, hardcoded), enquanto o teste ao
+vivo usa a geometria configurada — 2205 px para 23,6" a 60 cm. São 2,9% de diferença
+na distância assumida, o que faz 144,6 px virar 3,59° no replay e 3,75° ao vivo.
+**Compare em pixels.**
+
+**3. Não é o mesmo número do teste ao vivo, e nem deveria ser.** O relatório
+`accuracy-report-1787858613170` mede 103 px na mesma configuração de código. As duas
+medidas diferem porque a gravação é de outra sessão, com outro posto de uso — a
+gravação tem brilho 0,236 e rosto ocupando 9,9% do frame; a sessão ao vivo mais
+recente tem 0,496 e 15,4%. O replay serve para comparar VARIANTES do pipeline sob
+dados idênticos, não para prever o erro de campo.
+
+---
+
 **Regras que governaram a semana (de `PLANO-FRENTES-A-B.md`):**
 
 1. Fail loud, não silent.
