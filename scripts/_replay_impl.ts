@@ -27,6 +27,7 @@ import { StandardScaler } from '../src/scaler';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2, type FilterPreset, type FilterPresetV2 } from '../src/oneEuroFilter';
 import { extractFeatures } from '../src/featurePipeline';
 import type { Point3D, L2CSGazeInput } from '../src/extractor';
+import { FEATURE_VECTOR_ID } from '../src/extractor';
 import { parseJSONL } from '../src/telemetry/recorder';
 import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/types';
 
@@ -107,7 +108,14 @@ interface CliArgs {
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: false, dropFeatures: [] };
+  // 0.1 — `recomputeFeatures` nasce TRUE.
+  //
+  // O default antigo (usar as features gravadas) é o que permitiu que
+  // `ci-baseline-a2.report.json` e `ci-baseline-ablation.report.json` medissem
+  // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
+  // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
+  // relatório descrever o pipeline que está no build.
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [] };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -115,6 +123,9 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === '--filter') args.filter = argv[++i] as AnyFilterPreset;
     else if (a === '--verbose' || a === '-v') args.verbose = true;
     else if (a === '--recompute-features') args.recomputeFeatures = true;
+    // Opt-in explícito para o comportamento antigo. Útil para reproduzir um
+    // relatório histórico bit a bit; nunca para medir o pipeline atual.
+    else if (a === '--use-recorded-features') args.recomputeFeatures = false;
     else if (a === '--drop-features') {
       const raw = argv[++i];
       const parts = raw.split(',').map((s) => s.trim()).filter(Boolean);
@@ -155,7 +166,7 @@ function parseArgs(argv: string[]): CliArgs {
 function printHelp(): void {
   process.stdout.write(`
 Uso:
-  npm run replay -- --jsonl <path> [--report <path>] [--filter <preset>] [-v] [--recompute-features] [--drop-features <grupos>]
+  npm run replay -- --jsonl <path> [--report <path>] [--filter <preset>] [-v] [--use-recorded-features] [--drop-features <grupos>]
 
 Argumentos:
   --jsonl <path>    Arquivo .jsonl produzido pelo gravador (Fase 0.1). Obrigatorio.
@@ -166,7 +177,14 @@ Argumentos:
                     v2 (espaço normalizado):  estavel-v2 | balanceado-v2 | responsivo-v2
                     Default do engine desde D1-1 é balanceado-v2 — use v2 para
                     baseline comparável com o accuracy test ao vivo.
-  --recompute-features Ignora features gravados e recomputa a partir de landmarks.
+  --recompute-features Recomputa features a partir dos landmarks. JA E O PADRAO
+                    desde 0.1 — a flag continua aceita por compatibilidade.
+  --use-recorded-features
+                    Usa as features gravadas no JSONL em vez de recomputar.
+                    So para reproduzir um relatorio historico: as features
+                    gravadas descrevem o pipeline da epoca da gravacao, nao o
+                    do build atual. Exige que o featureVectorId bata, ou o
+                    replay aborta.
   --drop-features <grupos>
                     Ablação (D4.3): zera dimensões dos grupos indicados no
                     vetor de features ANTES do treino/predição. Lista separada
@@ -539,6 +557,28 @@ async function runInner(args: CliArgs): Promise<number> {
     process.stderr.write(`ERRO: nao foi possivel parsear ${args.jsonl} como JSONL da Fase 0.1.\n`);
     return 2;
   }
+  // 0.1 — guarda de compatibilidade do vetor de features.
+  //
+  // Só morde quando o usuário pediu explicitamente as features GRAVADAS: se
+  // vamos recomputar a partir dos landmarks, o vetor da gravação é irrelevante.
+  if (!args.recomputeFeatures) {
+    const gravado = rec.header.featureVectorId;
+    if (gravado !== FEATURE_VECTOR_ID) {
+      process.stderr.write(
+        `ERRO: incompatibilidade de vetor de features.\n` +
+        `  gravacao: ${gravado ?? '(anterior ao campo — vetor desconhecido)'}\n` +
+        `  build   : ${FEATURE_VECTOR_ID}\n` +
+        `\n` +
+        `As features gravadas descrevem um pipeline diferente do que esta no\n` +
+        `codigo. Medir assim produz um numero que nao corresponde a nenhuma\n` +
+        `configuracao real — foi o que aconteceu com ci-baseline-a2.report.json.\n` +
+        `\n` +
+        `Rode sem --use-recorded-features para recomputar a partir dos landmarks.\n`,
+      );
+      return 2;
+    }
+  }
+
   const vw = rec.header.resolution.w;
   const vh = rec.header.resolution.h;
   if (!vw || !vh) {
@@ -683,6 +723,10 @@ async function runInner(args: CliArgs): Promise<number> {
       onlineRls: false,
       source: 'src/',
       featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded',
+      // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio
+      // que nao diz isso vira decisao tomada sobre configuracao errada.
+      featureVectorId: FEATURE_VECTOR_ID,
+      recordedFeatureVectorId: rec.header.featureVectorId ?? null,
       droppedFeatureGroups: args.dropFeatures,
       timeWindow: split.timeWindow
         ? {

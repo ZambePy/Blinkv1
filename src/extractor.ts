@@ -307,6 +307,35 @@ export const IRIS12_DIMS = 12;
 /** Conjunto ativo. Ver a tabela acima para a evidência. */
 export const ACTIVE_FEATURE_SET: FeatureSet = 'iris12';
 
+/** Número de dimensões por olho que o conjunto ativo entrega ao modelo.
+ *  `compact` é variável (37 sem bloco L2CS, 44 com), então o identificador
+ *  usa `var` — quem grava com `compact` não pode confiar em comparação por
+ *  dimensão e precisa recomputar. */
+export function activeFeatureDims(set: FeatureSet = ACTIVE_FEATURE_SET): number | 'var' {
+  return set === 'iris12' ? IRIS12_DIMS : 'var';
+}
+
+/**
+ * Identificador do vetor de features que ESTE build produz.
+ *
+ * POR QUE EXISTE
+ *
+ * As gravações em `fixtures/replay/*.jsonl` guardam `featuresLeft`/`featuresRight`
+ * já calculados. Quando o conjunto ativo muda — como na redução de 44 para 12
+ * dims — as features gravadas passam a descrever um pipeline que não existe
+ * mais, e o replay segue rodando e produzindo números como se nada tivesse
+ * acontecido.
+ *
+ * Foi exatamente o que ocorreu: `ci-baseline-a2.report.json` e
+ * `ci-baseline-ablation.report.json` foram gerados às 14:38 de 2026-08-26, e o
+ * commit que reduziu o vetor entrou no mesmo dia. Todas as decisões tomadas
+ * sobre aqueles relatórios descrevem o vetor de 44 dims.
+ *
+ * Com este identificador gravado no cabeçalho do JSONL, o replay consegue
+ * detectar a divergência e ABORTAR em vez de mentir.
+ */
+export const FEATURE_VECTOR_ID = `${ACTIVE_FEATURE_SET}:${activeFeatureDims()}`;
+
 /**
  * D11 — projeta o vetor completo do extractor no conjunto ativo.
  *

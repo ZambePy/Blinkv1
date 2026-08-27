@@ -17,6 +17,7 @@
 // Persistência (Blob, download, fs.writeFile) NÃO é responsabilidade daqui.
 // A UI que chama exportAsJSONL() decide como escrever o resultado.
 
+import { FEATURE_VECTOR_ID } from '../extractor';
 import {
   MAX_FRAMES,
   RECORDING_FORMAT_VERSION,
@@ -36,13 +37,16 @@ export function isRecording(): boolean {
 
 // Header parcial — formatVersion e startedAt são preenchidos aqui para o
 // caller não conseguir gravar um valor errado por engano.
-export type StartRecordingInput = Omit<RecordingHeader, 'formatVersion' | 'startedAt'>;
+export type StartRecordingInput = Omit<RecordingHeader, 'formatVersion' | 'startedAt' | 'featureVectorId'>;
 
 export function startRecording(input: StartRecordingInput): void {
   frames = [];
   dropped = 0;
   header = {
     formatVersion: RECORDING_FORMAT_VERSION,
+    // Preenchido aqui, junto do formatVersion, pela mesma razão: o caller não
+    // pode gravar um valor errado por engano.
+    featureVectorId: FEATURE_VECTOR_ID,
     startedAt: new Date().toISOString(),
     ...input,
   };

@@ -28,6 +28,19 @@ export const MAX_FRAMES = 30000;
 
 export interface RecordingHeader {
   formatVersion: number;
+  /**
+   * Identificador do vetor de features do build que gravou (`iris12:12`).
+   *
+   * Fica no CABEÇALHO e não em cada `RecordedFrame` de propósito: é uma
+   * constante de compilação, não pode variar entre frames da mesma gravação, e
+   * repeti-la em 30 mil linhas seria redundância pura num arquivo que já passa
+   * de 90 MB. O replay lê daqui e compara com o próprio build.
+   *
+   * Opcional para as gravações anteriores a esta mudança, que não têm o campo —
+   * o replay trata ausência como "desconhecido, recompute" em vez de assumir
+   * compatibilidade.
+   */
+  featureVectorId?: string;
   startedAt: string;                      // ISO 8601 UTC
   resolution: { w: number; h: number };   // viewport CSS px
   videoResolution: { w: number; h: number };
