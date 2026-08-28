@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   deslocamentoCm, compensarTranslacao, centroDeReferencia,
-  IOD_CM, SINAL_X, SINAL_Y,
+  CANTHAL_DISTANCE_CM, SINAL_X, SINAL_Y,
 } from './translationCompensation';
 
 const escala = { iodPx: 100, videoWidth: 1280, videoHeight: 720 };
@@ -13,14 +13,14 @@ describe('deslocamentoCm', () => {
       .toEqual({ x: 0, y: 0 });
   });
 
-  it('um deslocamento de exatamente 1 IOD vale IOD_CM', () => {
-    // 100 px de IOD em 1280 px de largura = 0,078125 em normalizado.
-    const umIod = escala.iodPx / escala.videoWidth;
-    const d = deslocamentoCm({ x: 0.5 + umIod, y: 0.6 }, { x: 0.5, y: 0.6 }, escala);
-    expect(d.x).toBeCloseTo(IOD_CM, 9);
+  it('um deslocamento de exatamente 1 IOD vale CANTHAL_DISTANCE_CM', () => {
+    // 100 px de distância cantal em 1280 px de largura = 0,078125 em normalizado.
+    const umCantal = escala.iodPx / escala.videoWidth;
+    const d = deslocamentoCm({ x: 0.5 + umCantal, y: 0.6 }, { x: 0.5, y: 0.6 }, escala);
+    expect(d.x).toBeCloseTo(CANTHAL_DISTANCE_CM, 9);
   });
 
-  it('o FOV não aparece: dobrar o IOD em px pela metade a distância', () => {
+  it('o FOV não aparece: dobrar a escala em px reduz à metade os centímetros', () => {
     // Aproximar-se da câmera dobra `iodPx`. O MESMO deslocamento normalizado
     // passa a representar metade dos centímetros — sem que FOV ou distância
     // entrem na conta em lugar nenhum.
@@ -33,8 +33,8 @@ describe('deslocamentoCm', () => {
     // MediaPipe normaliza x por largura e y por altura; tratar as duas como a
     // mesma escala distorce o eixo vertical em 1,78× num vídeo 16:9.
     const d = deslocamentoCm({ x: 0.5, y: 0.7 }, { x: 0.5, y: 0.6 }, escala);
-    expect(d.y).toBeCloseTo((IOD_CM * 0.1 * escala.videoHeight) / escala.iodPx, 9);
-    expect(d.y).not.toBeCloseTo((IOD_CM * 0.1 * escala.videoWidth) / escala.iodPx, 3);
+    expect(d.y).toBeCloseTo((CANTHAL_DISTANCE_CM * 0.1 * escala.videoHeight) / escala.iodPx, 9);
+    expect(d.y).not.toBeCloseTo((CANTHAL_DISTANCE_CM * 0.1 * escala.videoWidth) / escala.iodPx, 3);
   });
 
   it('entrada faltando ou degenerada devolve zero, nunca NaN', () => {
@@ -53,10 +53,10 @@ describe('deslocamentoCm', () => {
 describe('compensarTranslacao', () => {
   it('é 1:1 — não escala por distância de tela, ao contrário de 1.3', () => {
     // O olho anda 1 cm, o ponto olhado anda 1 cm, esteja a tela perto ou longe.
-    const umIod = escala.iodPx / escala.videoWidth;
+    const umCantal = escala.iodPx / escala.videoWidth;
     const r = compensarTranslacao(0.5, 0.5,
-      { x: 0.5 + umIod, y: 0.6 }, { x: 0.5, y: 0.6 }, escala, PX_POR_CM, 1920, 1080);
-    expect(r.x).toBeCloseTo(0.5 + (SINAL_X * IOD_CM * PX_POR_CM) / 1920, 6);
+      { x: 0.5 + umCantal, y: 0.6 }, { x: 0.5, y: 0.6 }, escala, PX_POR_CM, 1920, 1080);
+    expect(r.x).toBeCloseTo(0.5 + (SINAL_X * CANTHAL_DISTANCE_CM * PX_POR_CM) / 1920, 6);
   });
 
   it('respeita os sinais da imagem não espelhada', () => {

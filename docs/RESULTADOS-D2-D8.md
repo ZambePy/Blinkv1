@@ -64,8 +64,8 @@ Dividindo, `D` e `tanH` somem dos dois lados:
     X_cm = IOD_cm · Δx_norm · larguraVideo / iod_px
 
 Medir o deslocamento do nariz **em unidades da distância interocular** e
-multiplicar pela distância interocular física. Sobra uma única suposição — o IOD
-de 6,3 cm — e ela é muito menos incerta que o FOV, que é justamente o parâmetro
+multiplicar pela distância interocular física. Sobra uma única suposição — a
+distância cantal de 9,0 cm — e ela é muito menos incerta que o FOV, que é justamente o parâmetro
 duvidoso do setup (a webcam declara 90°, número que fabricantes costumam dar na
 diagonal e inflar).
 
@@ -76,10 +76,10 @@ incerteza. Esta não depende.
 
 | janela | amplitude X | amplitude Y | p90 do desvio |
 |---|---|---|---|
-| calibração (514 frames) | 0,49 cm | 0,53 cm | 0,23 / 0,27 cm |
-| teste de precisão (455 frames) | **0,25 cm** | **0,15 cm** | 0,10 / 0,06 cm |
+| calibração (514 frames) | 0,70 cm | 0,76 cm | 0,33 / 0,38 cm |
+| teste de precisão (455 frames) | **0,36 cm** | **0,21 cm** | 0,14 / 0,09 cm |
 
-A 36,8 px/cm, os 0,25 cm do teste inteiro são **9 px** de tela, contra 144,6 px
+A 36,8 px/cm, os 0,36 cm do teste inteiro são **13 px** de tela, contra 144,6 px
 de erro. Coerente com 1.1: a cabeça do usuário-alvo fica parada.
 
 ### Tabela — mesma gravação, mesmo filtro
@@ -87,25 +87,25 @@ de erro. Coerente com 1.1: a cabeça do usuário-alvo fica parada.
 | variante | meanErrorInner | mediana | p90 | Δ |
 |---|---|---|---|---|
 | sem compensação | 144,6 px | 71,3 | 410,1 | — |
-| **1.4 translação lateral** | **138,6 px** | 63,1 | 409,9 | **−4,2%** |
+| **1.4 translação lateral** | **136,5 px** | 61,0 | — | **−5,6%** |
 | 1.3 + 1.4 juntas | 161,7 px | 91,4 | 431,6 | +11,8% |
 
 Reproduzível com `npm run replay -- --translation-compensation`.
 
 ### O mesmo controle de 1.3, e o mesmo veredito
 
-A correção aplicada tem média (−4,5, −13,9) px e amplitude (9,6, 5,7) px. A
+A correção aplicada tem média (−6,4, −19,9) px e amplitude (13,7, 8,2) px. A
 média domina a variação, o que já sugere deslocamento fixo com outro nome:
 
 | variante | meanErrorInner | mediana | Δ |
 |---|---|---|---|
 | sem nada | 144,6 px | 71,3 | — |
-| 1.4 translação lateral (usa o rosto) | 138,6 px | 63,1 | −4,2% |
-| **CONTROLE: deslocamento fixo (−4,5, −13,9) px** | **139,1 px** | 63,6 | **−3,9%** |
+| 1.4 translação lateral (usa o rosto) | 136,5 px | 61,0 | −5,6% |
+| **CONTROLE: deslocamento fixo (−6,4, −19,9) px** | **137,1 px** | 61,9 | **−5,2%** |
 
-Dos 6,0 px de ganho, **5,5 px são remoção de viés** que um deslocamento fixo
-reproduz sem olhar o rosto. Sobram ~0,5 px vindos de rastrear a translação de
-verdade — dentro do ruído, e coerente com os 9 px de amplitude física medidos.
+Dos 8,1 px de ganho, **7,5 px são remoção de viés** que um deslocamento fixo
+reproduz sem olhar o rosto. Sobram ~0,6 px vindos de rastrear a translação de
+verdade — dentro do ruído, e coerente com os 13 px de amplitude física medidos.
 
 Diferente de 1.3, 1.4 não piora. Mas também não está validada: a gravação não
 tem translação suficiente para testá-la.
@@ -121,15 +121,16 @@ medindo o viés, não o efeito que modelam.
 
 ### Pista sobre a distância assumida, que 2.1 tem que resolver
 
-A estimativa de distância câmera→rosto na gravação dá **~32 cm**, não os 60 cm
-que `ASSUMED_DIST_PX = 2268` embute. Se estiver certa, o ganho geométrico de 1.3
-seria ~20 px/grau em vez de 39,6 — **exatamente o fator ~0,5 que a varredura de
-1.3 encontrou como ótimo em Y**.
+A estimativa de distância câmera→rosto na gravação dá **45,3 cm**, não os 60 cm
+que `ASSUMED_DIST_PX = 2268` embute. O ganho geométrico de 1.3 seria então
+29 px/grau em vez de 39,6 — na direção do fator ~0,5 que a varredura de 1.3
+achou como ótimo em Y (16–24 px/grau), mas **acima** dele: a distância explica
+parte do excesso, não todo.
 
-A convergência é sugestiva, mas a estimativa depende do FOV de 90° declarado
-pelo fabricante: com 60° reais ela viraria ~55 cm. **Não é conclusão, é a razão
-pela qual 2.1 (calibrar o FOV) deixou de ser limpeza e virou pré-requisito.**
-Com a distância certa, 1.3 pode deixar de ser um parâmetro para virar geometria.
+E a estimativa depende do FOV de 90° declarado pelo fabricante; com 60° reais
+ela viraria ~68 cm, invertendo a conclusão. **Não é conclusão, é a razão pela
+qual calibrar o FOV virou pré-requisito** — ver 2.1, onde essa tentativa foi
+feita e o que a bloqueou está medido.
 
 ---
 

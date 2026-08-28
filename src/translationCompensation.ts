@@ -27,14 +27,14 @@
  *
  * Seja `D` a distância câmera→rosto e `tanH = tan(FOV_h / 2)`. Um deslocamento
  * normalizado `Δx` na imagem corresponde a `X = 2 · Δx · D · tanH` no mundo. A
- * distância interocular física obedece à mesma relação: `IOD_cm = 2 · iod_norm
- * · D · tanH`. Dividindo uma pela outra, `D` e `tanH` somem dos dois lados:
+ * distância cantal física obedece à mesma relação. Dividindo uma pela outra,
+ * `D` e `tanH` somem dos dois lados:
  *
- *     X_cm = IOD_cm · Δx_norm · larguraVideo / iod_px
+ *     X_cm = CANTHAL_cm · Δx_norm · larguraVideo / iod_px
  *
- * Ou seja: medir o deslocamento do nariz EM UNIDADES DA DISTÂNCIA INTEROCULAR
- * e multiplicar pela distância interocular física. Sobra uma única suposição —
- * o IOD físico — e ela é bem menos incerta que o FOV.
+ * Ou seja: medir o deslocamento do nariz EM UNIDADES DA DISTÂNCIA CANTAL e
+ * multiplicar pela distância cantal física. Sobra uma única suposição —
+ * a distância cantal — e ela é bem menos incerta que o FOV.
  *
  * ── Derivação dos sinais ───────────────────────────────────────────────────
  *
@@ -50,13 +50,18 @@
  * cresce para baixo), e o olho sobe, ou seja Y de tela MENOR. Sinal positivo.
  */
 
-/** Distância interocular física assumida, em cm.
+/** Distância entre os CANTOS EXTERNOS dos olhos (bi-ectocanthion), em cm.
  *
- *  63 mm é a média adulta e a mesma constante que a estimativa de distância do
- *  `setupReadiness` usa — se um dia virar medida por usuário, tem que mudar nos
- *  dois lugares juntos. O erro típico entre adultos é de ~4 mm, ou seja ~6%, e
- *  entra proporcionalmente na correção: numa translação de 1 cm são 0,6 mm. */
-export const IOD_CM = 6.3;
+ *  ⚠️ Tem que casar com o que `escala.iodPx` de fato mede. `tracker/engine.ts`
+ *  calcula `latestIodPx` entre os landmarks 33 e 263, que são os cantos
+ *  externos — NÃO as pupilas. A primeira versão deste módulo usava 6,3 cm, a
+ *  distância interpupilar, contra uma medida cantal: 43% de erro de escala em
+ *  toda a correção.
+ *
+ *  Reexportada de `setupReadiness` em vez de duplicada, para que trocar a
+ *  constante num lugar não deixe o outro medindo outra coisa. */
+export { CANTHAL_DISTANCE_CM } from './setupReadiness';
+import { CANTHAL_DISTANCE_CM } from './setupReadiness';
 
 /** Sinais derivados da convenção da imagem não espelhada. Ver o bloco acima. */
 export const SINAL_X = -1;
@@ -69,7 +74,7 @@ export interface CentroFacial {
 }
 
 export interface EscalaFacial {
-  /** Distância interocular MEDIDA no quadro, em pixels de vídeo. */
+  /** Distância CANTAL medida no quadro, em pixels de vídeo (landmarks 33↔263). */
   iodPx: number;
   videoWidth: number;
   videoHeight: number;
@@ -95,8 +100,8 @@ export function deslocamentoCm(
   // Normalizado → pixels de vídeo (x pela largura, y pela altura) → múltiplos
   // da distância interocular → cm.
   return {
-    x: (IOD_CM * dx * videoWidth) / iodPx,
-    y: (IOD_CM * dy * videoHeight) / iodPx,
+    x: (CANTHAL_DISTANCE_CM * dx * videoWidth) / iodPx,
+    y: (CANTHAL_DISTANCE_CM * dy * videoHeight) / iodPx,
   };
 }
 
