@@ -747,10 +747,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             face ? { yaw: face.yaw, pitch: face.pitch, roll: face.roll } : undefined,
           );
 
-          // D5.2 — passa currentCameraDistance para mapGaze aplicar a
-          // correção geométrica se `EXPERIMENT.applyDistanceCorrection`
-          // estiver ligado. Undefined quando não há advancedFeatures (ex.:
-          // frame antes do face landmarker acordar) → mapGaze pula correção.
+          // D12 — o quarto argumento é herança: `mapGaze` não o lê mais (a
+          // compensação de distância passou a usar `setCurrentFrameGeometry` +
+          // `setCameraFovDeg`, que dão centímetros). Mantido na chamada só
+          // porque a assinatura ainda o aceita, por compatibilidade com os
+          // testes de regressão.
           const calibrated = calibration.mapGaze(
             featuresLeft,
             featuresRight,

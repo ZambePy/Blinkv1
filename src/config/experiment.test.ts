@@ -74,6 +74,5 @@ describe('EXPERIMENT (snapshot)', () => {
     expect(EXPERIMENT).toHaveProperty('l2csCadenceMs');
     expect(EXPERIMENT).toHaveProperty('isotropicLandmarks');
     expect(EXPERIMENT).toHaveProperty('lockCameraExposure');
-    expect(EXPERIMENT).toHaveProperty('applyDistanceCorrection');
   });
 });

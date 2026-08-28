@@ -8,6 +8,54 @@
 //           __irisflowExp.reset()                     → volta aos defaults
 //           __irisflowExp.dump()                      → estado atual (vai no relatório)
 
+// ── 2.6 — INVENTÁRIO DAS FLAGS ────────────────────────────────────────────
+//
+// Três flags foram removidas por não terem nenhum leitor em código:
+//
+//   dwellGraceMs, dwellSnapPx   zero referências fora deste arquivo. O dwell
+//                               nunca as consultou.
+//   applyDistanceCorrection     a única referência era um COMENTÁRIO em
+//                               `engine.ts`. D12 trocou a compensação de
+//                               distância de "escalar as features" para
+//                               "corrigir a saída", e o caminho antigo saiu —
+//                               mas a flag ficou. Pior: o helper que ela
+//                               governava depende dos índices 25..34, que
+//                               deixaram de existir quando o vetor virou
+//                               `iris12`; ligá-la teria corrigido dimensões
+//                               erradas em silêncio.
+//
+// As que ficaram, e o que a medição diz de cada uma
+// (`fixtures/replay/ci-baseline.jsonl`, `--filter balanceado-v2`):
+//
+//   expandFactor        parâmetro do crop do L2CS. INATIVA enquanto
+//   l2csCadenceMs       `enableL2CS` for false — mas são exatamente os
+//                       parâmetros necessários para reavaliar o L2CS, então
+//                       removê-las custaria mais que mantê-las.
+//
+//   isotropicLandmarks  TEM efeito, e o efeito é PIORAR: 140,7 → 154,9 px
+//                       (+10,1%). Contraintuitivo depois de 2.1 e 2.2 terem
+//                       achado problemas de anisotropia, mas coerente: um
+//                       modelo linear ABSORVE uma anisotropia constante nos
+//                       coeficientes, então "corrigi-la" só perturba o que o
+//                       ajuste já compensava. Onde a anisotropia machuca é na
+//                       comparação contra CONSTANTES — o limiar de piscada de
+//                       2.2 — que nenhum coeficiente pode absorver.
+//
+//   applyGazeCorrection VIVA no app (`applyGazeCorrection()` em `mapGaze`), e
+//                       o harness é ESTRUTURALMENTE CEGO a ela: o replay tem
+//                       `rbfApplied: false` fixo e não passa pelo `mapGaze` do
+//                       módulo de calibração. Medir OFF vs ON no replay dá
+//                       140,7 px nos dois lados — o que NÃO significa que a
+//                       flag não faz nada, significa que este harness não a
+//                       alcança. Ponto cego registrado.
+//
+//   enableDistanceLog   diagnóstico, um leitor em `calibration.ts`.
+//   lockCameraExposure  um leitor em `GazeContext.tsx`. Só afeta a câmera ao
+//                       vivo; o replay é no-op por construção.
+//
+//   geometricPoseCompensation (1.3), lateralTranslationCompensation (1.4),
+//   enableL2CS (2.5) — ver os blocos de cada uma abaixo.
+
 export interface ExperimentConfig {
   /** Fator de expansão da bbox facial antes do resize 448². Ver §E3. */
   expandFactor: number;
@@ -18,10 +66,6 @@ export interface ExperimentConfig {
   applyGazeCorrection: boolean;
   /** Log de distância ao fecho convexo (caro: O(n·d) por frame). Ver A10. */
   enableDistanceLog: boolean;
-  /** Janela de tolerância em que o dwell continua contando fora do alvo. Ver A8. */
-  dwellGraceMs: number;
-  /** Raio de snap magnético em px. 0 = desligado. */
-  dwellSnapPx: number;
   /**
    * A2-5 — correção de anisotropia de aspect ratio.
    * O MediaPipe normaliza x pela largura e y pela altura. Em 1920×1080 as
@@ -44,21 +88,6 @@ export interface ExperimentConfig {
    * DEFAULT false — nem toda webcam exposes essas capabilities.
    */
   lockCameraExposure: boolean;
-  /**
-   * D5.2 (ROADMAP §5) — correção geométrica de distância câmera-rosto.
-   *
-   * `cameraDistanceEstimate` já é calculada em `extractor.ts` mas só alimenta
-   * o bloco L2CS. Esta flag, quando LIGADA, escala as dims de offset de íris
-   * do vetor de features por `(currentDistance / calibrationRefDistance)`
-   * ANTES do StandardScaler.transformSingle — reduzindo a discrepância
-   * quando o usuário se afasta/aproxima da câmera após calibrar.
-   *
-   * DEFAULT false. O ROADMAP prevê medição em cenário de movimento
-   * controlado antes de ligar por default (regra 4). Quando desligada, a
-   * função pura `applyDistanceCorrectionToFeatures` continua exportada e
-   * testável, mas mapGaze passa direto sem tocar no vetor.
-   */
-  applyDistanceCorrection: boolean;
   /**
    * 1.3 — compensação geométrica de pose na saída (`src/poseCompensation.ts`).
    *
@@ -107,11 +136,8 @@ const DEFAULTS: ExperimentConfig = {
   l2csCadenceMs: 100,
   applyGazeCorrection: false,
   enableDistanceLog: false,
-  dwellGraceMs: 0,
-  dwellSnapPx: 0,
   isotropicLandmarks: false,  // A2-5 — desligado até medição confirmar melhora
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
-  applyDistanceCorrection: false, // D5.2 — desligado até gravação com aproximação/afastamento comprovar ganho
   geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
   lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
   enableL2CS: false, // 2.5 — desligado: a saída não entra no vetor ativo, e custa 91 MB + crop por quadro
