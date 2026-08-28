@@ -186,6 +186,15 @@ interface CliArgs {
    *  medir se a redundância do vetor custa. 0 = desligado. */
   pca: number;
   /**
+   * 3.1 - mantem apenas estes indices do vetor projetado.
+   *
+   * Diferente de --pca: aqui as dimensoes sao escolhidas por ANALISE (quais sao
+   * redundantes por construcao), nao ordenadas por variancia. A distincao
+   * importa porque a PCA truncada piorou em todo k justamente por descartar
+   * direcoes de baixa variancia, que e onde o sinal de olhar mora.
+   */
+  keepDims?: number[];
+  /**
    * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
    *
    * Nasce TRUE, porque é o que o app faz. O harness que descreve outro
@@ -225,6 +234,14 @@ function parseArgs(argv: string[]): CliArgs {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v <= 0) throw new Error(`--lambda espera um número > 0; recebi '${argv[i]}'`);
       args.lambda = v;
+    }
+    else if (a === '--keep-dims') {
+      const raw = argv[++i];
+      const idx = (raw ?? '').split(',').map((x) => Number(x.trim()));
+      if (idx.length === 0 || idx.some((x) => !Number.isInteger(x) || x < 0)) {
+        throw new Error(`--keep-dims espera indices inteiros separados por virgula; recebi '${raw}'`);
+      }
+      args.keepDims = idx;
     }
     else if (a === '--pca') {
       const k = Number(argv[++i]);
@@ -479,6 +496,7 @@ function getFeatures(
   videoHeight?: number,
   featureSet?: FeatureSet,
   blinkDetector?: BlinkDetector,
+  keepDims?: number[],
 ): { left: number[]; right: number[] } | null {
   let left: number[];
   let right: number[];
@@ -511,6 +529,13 @@ function getFeatures(
   if (dropFeatures.length > 0) {
     left = applyDropGroups(left, dropFeatures);
     right = applyDropGroups(right, dropFeatures);
+  }
+  // 3.1 - corte por indice, DEPOIS da projecao do conjunto. Indice fora do
+  // alcance e ignorado em vez de virar undefined: um NaN aqui contaminaria o
+  // scaler e degeneraria o regressor em silencio.
+  if (keepDims && keepDims.length > 0) {
+    left = keepDims.filter((i) => i < left.length).map((i) => left[i]);
+    right = keepDims.filter((i) => i < right.length).map((i) => right[i]);
   }
   return { left, right };
 }
@@ -607,6 +632,7 @@ function splitFrames(
   timeWindow?: { startSec: number; endSec: number },
   regatePose?: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number },
   featureSet?: FeatureSet,
+  keepDims?: number[],
 ): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
@@ -663,7 +689,7 @@ function splitFrames(
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
-    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet, blinkDetector);
+    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet, blinkDetector, keepDims);
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {
@@ -960,6 +986,30 @@ class ProjecaoPCA {
   }
 }
 
+/** 3.1 - matriz de correlacao das features, arredondada para leitura. */
+function matrizCorrelacao(amostras: number[][]): number[][] | null {
+  const m = amostras.length;
+  if (m < 2) return null;
+  const d = amostras[0].length;
+  const media = new Array<number>(d).fill(0);
+  for (const a of amostras) for (let j = 0; j < d; j++) media[j] += a[j];
+  for (let j = 0; j < d; j++) media[j] /= m;
+  const desvio = new Array<number>(d).fill(0);
+  for (const a of amostras) for (let j = 0; j < d; j++) desvio[j] += (a[j] - media[j]) ** 2;
+  for (let j = 0; j < d; j++) desvio[j] = Math.sqrt(desvio[j] / m) || 1;
+  const R: number[][] = Array.from({ length: d }, () => new Array<number>(d).fill(0));
+  for (const a of amostras) {
+    for (let i = 0; i < d; i++) {
+      const zi = (a[i] - media[i]) / desvio[i];
+      for (let j = i; j < d; j++) R[i][j] += zi * ((a[j] - media[j]) / desvio[j]);
+    }
+  }
+  for (let i = 0; i < d; i++) for (let j = i; j < d; j++) {
+    R[i][j] = Number((R[i][j] / m).toFixed(4)); R[j][i] = R[i][j];
+  }
+  return R;
+}
+
 function espectroDeFeatures(amostras: number[][]): {
   dims: number; autovalores: number[]; participacao: number; acima1pct: number; condicao: number;
 } | null {
@@ -1051,7 +1101,7 @@ class ReplayRegressor {
    * compor — `hypot` sobre frações de tela infla erro puro de Y numa tela 16:9.
    */
   static diagnose(samples: CalibrationSample[], vw: number, vh: number): {
-    trainErrorPx: number; looErrorPx: number; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>;
+    trainErrorPx: number; looErrorPx: number; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null;
   } {
     const erroDe = (treino: CalibrationSample[], teste: CalibrationSample[]): number => {
       const m = new ReplayRegressor();
@@ -1106,6 +1156,9 @@ class ReplayRegressor {
       penaltyDiag: P ? P.map((linha, j) => Number(linha[j].toFixed(4))) : null,
       poseGainPxPorGrau: ganhoPose(cheio, bruto, vw, vh),
       espectro: espectroDeFeatures(bruto),
+      // 3.1 — matriz de correlacao inteira, para ver QUAIS pares sao redundantes.
+      // O posto efetivo diz quanta redundancia existe; isto diz onde ela mora.
+      correlacao: matrizCorrelacao(bruto),
     };
   }
 
@@ -1162,7 +1215,7 @@ interface Report {
     legacyNoDecision: number;
     regatePose?: RegateInfo;
   };
-  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures> };
+  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null };
   accuracy: {
     n: number;
     meanErrorPx: number;
@@ -1299,7 +1352,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   ReplayRegressor.pcaK = args.pca;
   RidgeRegressor.lambdaOverride = args.lambda ?? null;
   RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
   if (split.timeWindow) {
@@ -1613,6 +1666,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       translationCompensation: args.translationCompensation,
       featureDims: activeFeatureDims(args.featureSet),
       pca: args.pca,
+      keepDims: args.keepDims ?? null,
       lambda: args.lambda ?? 'CV',
       axisWeightedCv: args.axisWeightedCv,
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio

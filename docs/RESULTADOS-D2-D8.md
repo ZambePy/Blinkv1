@@ -453,6 +453,55 @@ ponderado por (1080/1920)^2 = 0,32 do que vale para o usuário.
 independente do teste de precisão, então não é ajuste na base de avaliação. É
 correção de unidade, não sintonia.
 
+### Segunda metade: remover a redundância ANALÍTICA também não funciona
+
+A PCA ordena por variância, então truncar podia estar descartando o sinal por
+acidente. A objeção é legítima, e o teste separado é remover as dimensões que
+são redundantes **por construção**, escolhidas por análise e não por variância.
+
+A matriz de correlação mostra onde a redundância mora:
+
+| par | \|r\| |
+|---|---|
+| offX ↔ relX | **0,9998** |
+| offX ↔ p1x, p2x, p3x | 0,991 – 0,995 |
+| p0x ↔ p1x, p2x, p3x | 0,997 – 0,999 |
+| offY ↔ relY | 0,94 |
+| offY ↔ p3y | **0,47** |
+
+**Os seis canais de X são a mesma variável** (todos \|r\| ≥ 0,99). Os de Y são
+fracamente correlacionados entre si — e isso não é riqueza de informação: é cada
+canal dominado pelo próprio ruído de oclusão da pálpebra (2.1), não por um sinal
+compartilhado.
+
+Ablando por índice (`--keep-dims`):
+
+| variante | lambda | treino | LOO/alvo | accuracy | delta |
+|---|---|---|---|---|---|
+| todas as 12 | 0,00464 | 38,3 | 92,5 | **140,7** | — |
+| sem `relX`/`relY` (10) | 0,00464 | 40,4 | 91,8 | 145,5 | **+3,4%** |
+| sem contorno X redundante (8) | 0,01 | 53,8 | 107,8 | 157,9 | +12,2% |
+| offset + rel, sem contorno (4) | 0,1 | 115,0 | 255,0 | 176,0 | +25,0% |
+| 1 canal X + todos os Y (6) | 0,01 | 61,9 | 140,6 | 177,4 | +26,1% |
+| só os canais X (6) | 0,00464 | 143,7 | 277,8 | 203,5 | +44,6% |
+| só offset (2) | 0,0215 | 150,8 | 224,1 | 219,3 | +55,8% |
+| só os canais Y (6) | 0,0001 | 153,8 | 510,6 | 308,5 | +119,2% |
+
+**Remover `relX`/`relY` custa 3,4%** — e `relX` tem r = 0,9998 com `offX`. Uma
+feature que explica 99,96% da variância de outra ainda carrega algo que importa.
+
+A explicação é a mesma da PCA, e agora fica geral: **correlação e variância são
+calculadas sobre a variação TOTAL, que é dominada por pose, escala e ruído.** O
+sinal de olhar é uma fração minúscula disso — 5,7 px de excursão da íris — e vive
+justamente no resíduo que essas duas medidas chamam de nada. Nenhum critério
+não-supervisionado de redução vai preservá-lo.
+
+**Conclusão de 3.1: o posto efetivo de 2,2 é real e não é acionável.** As 12 dims
+ficam. O caminho para reduzir dimensão sem perder sinal teria que ser
+supervisionado (ordenar direções por variância entre-alvos sobre intra-alvo, e
+não por variância total) — que é exatamente o que a penalidade Sigma_W já tenta
+fazer dentro do Ridge.
+
 ### O que eu afirmei e a medição derrubou
 
 Propus que o CV super-regularizava por ser dominado pelo eixo Y, que tem sinal
