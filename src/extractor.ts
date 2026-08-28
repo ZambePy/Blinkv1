@@ -439,6 +439,8 @@ export function extractEyeFeatures(
   faceMatrix?: Float32Array,
   videoWidth?: number,
   videoHeight?: number,
+  /** 2.2 — ver `blinkDetector` em `extractCompactFeatures`. */
+  blinkDetector?: BlinkDetector,
 ): ExtractorResult {
   if (landmarks.length < 478) {
     return { featuresLeft: [], featuresRight: [], blinkDetected: false };
@@ -592,7 +594,16 @@ export function extractEyeFeatures(
 
   const ear = (leftEAR + rightEAR) / 2;
   
-  const blinkDetected = _blinkDetector.update(ear);
+  // 2.2 — o detector injetado tem precedência sobre o singleton do módulo.
+  //
+  // O limiar de piscada é ADAPTATIVO: aprende o EAR de repouso dos quadros
+  // anteriores. Enquanto isso vivia num singleton, `extractFeatures` não era
+  // pura — o mesmo quadro podia sair `blinkDetected` true ou false conforme o
+  // que tinha sido extraído antes no mesmo processo. O replay descarta quadro
+  // com piscada, então duas variantes que filtram diferente alimentavam o
+  // detector com populações diferentes, o limiar divergia, e o conjunto de
+  // quadros medido mudava por um motivo alheio ao que se estava medindo.
+  const blinkDetected = (blinkDetector ?? _blinkDetector).update(ear);
 
   // 3. Geometry Extractions
   const irisCenterL = landmarks[468];
@@ -666,8 +677,10 @@ export function extractCompactFeatures(
   landmarks: Point3D[],
   faceMatrix?: Float32Array,
   l2csGaze?: L2CSGazeInput | null,
+  /** 2.2 — detector de piscada a usar. Sem ele vale o singleton do módulo. */
+  blinkDetector?: BlinkDetector,
 ): ExtractorResult {
-  const baseResult = extractEyeFeatures(landmarks, faceMatrix);
+  const baseResult = extractEyeFeatures(landmarks, faceMatrix, undefined, undefined, blinkDetector);
   if (baseResult.featuresLeft.length === 0) return baseResult;
 
   const leftCorner = landmarks[33];

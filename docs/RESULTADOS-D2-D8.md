@@ -123,6 +123,74 @@ constante — algo que um modelo linear absorve no coeficiente. Uma atenuação 
 
 ---
 
+## 2.2 — o detector de piscada: estado global removido, e dois pontos cegos medidos
+
+### O que foi corrigido
+
+`extractFeatures` mutava um singleton de módulo (`_blinkDetector`). Como o limiar
+de piscada é adaptativo — aprende o EAR de repouso dos quadros anteriores — a
+função não era pura: o mesmo quadro podia sair `blinkDetected` true ou false
+conforme o que tinha sido extraído antes no mesmo processo.
+
+Isso importa porque o replay descarta quadro com piscada. Duas variantes que
+filtram diferente alimentariam o detector com populações diferentes, o limiar
+divergiria, e o conjunto de quadros medido mudaria por um motivo alheio ao que
+se está medindo.
+
+Agora o detector é injetável, o harness cria um por execução, e o app segue no
+singleton. Baseline inalterado (**144,6 px**), como uma refatoração de pureza tem
+que ser.
+
+### Ponto cego 1 — o limiar "adaptativo" nunca adapta
+
+| medida na gravação | valor |
+|---|---|
+| EAR de repouso (mediana) | **0,551** |
+| `blinkRatio × repouso` | 0,44 |
+| `thrMax` (clamp) | **0,22** |
+
+0,44 está muito acima do clamp, então o limiar é **sempre 0,22**. Para adaptar
+de fato, o repouso teria que cair em [0,125, 0,275]. O detector é, na prática,
+um limiar fixo — e todo o mecanismo adaptativo é código morto para este usuário.
+
+### Ponto cego 2 — repouso abaixo de `thrMax` trava o detector para sempre
+
+O histórico só cresce com quadros de NÃO-piscada. Se o repouso do usuário já
+está abaixo de 0,22, **todo** quadro é piscada, nada entra no histórico, o limiar
+nunca sai do default, e o estado é absorvente.
+
+O comentário do módulo diz que `thrMax` existe "para não confundir olho
+semi-fechado (ptose) com piscada". É exatamente o usuário com ptose que cai
+neste buraco — e o público-alvo tem ELA, onde ptose é comum.
+
+### A causa raiz dos dois: o EAR está na escala errada
+
+Os landmarks do MediaPipe têm x normalizado pela LARGURA e y pela ALTURA. Num
+vídeo 16:9 uma distância vertical vale 1,78× o que deveria, e o EAR — que é
+vertical sobre horizontal — sai inflado pelo mesmo fator.
+
+| EAR | mediana | p10 | mínimo |
+|---|---|---|---|
+| anisotrópico (o que o código vê) | **0,551** | 0,491 | 0,090 |
+| isotrópico (pixels reais) | **0,314** | 0,280 | 0,065 |
+
+Razão medida: **1,754**, contra 1,778 do 16:9.
+
+0,314 é exatamente o EAR de olho aberto de manual, e os limiares 0,10/0,22
+foram claramente escolhidos para essa escala. Alimentados com a escala
+anisotrópica, `thrMax = 0,22` equivale a um EAR real de **0,124** — olho quase
+fechado. Consequência: **0,16% dos quadros são classificados como piscada, onde
+a escala correta daria 0,48%** — 3× menos.
+
+Não é um quadro perdido aqui ou ali: piscada parcial e olho semicerrado entram
+no regressor como fixação válida, que é precisamente o modo de falha descrito no
+comentário de A2-4 como "indefensável".
+
+**Corrigir a escala é mudança de pipeline e precisa da sua própria medição
+antes/depois — fica como item próprio, não entra de carona nesta refatoração.**
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito

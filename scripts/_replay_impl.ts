@@ -27,7 +27,7 @@ import { StandardScaler } from '../src/scaler';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2, type FilterPreset, type FilterPresetV2 } from '../src/oneEuroFilter';
 import { extractFeatures } from '../src/featurePipeline';
 import type { Point3D, L2CSGazeInput } from '../src/extractor';
-import { FEATURE_VECTOR_ID, activeFeatureDims } from '../src/extractor';
+import { FEATURE_VECTOR_ID, activeFeatureDims, BlinkDetector } from '../src/extractor';
 import type { FeatureSet } from '../src/extractor';
 
 /** 1.2 — conjuntos que o harness aceita medir. `compact` fica de fora de
@@ -452,6 +452,7 @@ function getFeatures(
   videoWidth?: number,
   videoHeight?: number,
   featureSet?: FeatureSet,
+  blinkDetector?: BlinkDetector,
 ): { left: number[]; right: number[] } | null {
   let left: number[];
   let right: number[];
@@ -475,6 +476,7 @@ function getFeatures(
       videoWidth,
       videoHeight,
       featureSet,
+      blinkDetector,
     );
     if (geo.blinkDetected) return null;
     left = geo.featuresLeft;
@@ -599,6 +601,13 @@ function splitFrames(
   let legacyNoDecision = 0;
   let accuracyFilteredOutByWindow = 0;
 
+  // 2.2 — detector de piscada PRÓPRIO desta execução.
+  //
+  // Antes, `extractFeatures` mexia num singleton de módulo. Com um detector por
+  // execução, o limiar adaptativo não pode vazar entre variantes nem para o
+  // resto do processo, e o replay volta a ser função só do JSONL e das flags.
+  const blinkDetector = new BlinkDetector();
+
   // 1.1 — estado do re-gate offline. Uma referência por alvo, fixada no
   // primeiro frame elegível daquele alvo, exatamente como ao vivo.
   const regate = regatePose;
@@ -628,7 +637,7 @@ function splitFrames(
   for (const f of rec.frames) {
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
-    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet);
+    const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet, blinkDetector);
     if (!feats) { discarded++; continue; }
 
     if (f.target?.kind === 'calibration') {

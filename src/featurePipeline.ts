@@ -1,5 +1,6 @@
 import { extractEyeFeatures, extractCompactFeatures, projectFeatureSet } from './extractor';
 import type { Point3D, AdvancedFrameFeatures, L2CSGazeInput, FeatureSet } from './extractor';
+import type { BlinkDetector } from './extractor';
 
 export interface FeaturePipelineResult {
   featuresLeft:  number[];
@@ -31,6 +32,10 @@ export function extractFeatures(
    *  variantes na MESMA gravação sem recompilar; o app nunca passa este
    *  argumento e segue no `ACTIVE_FEATURE_SET`. */
   featureSet?: FeatureSet,
+  /** 2.2 — detector de piscada a usar. Sem ele vale o singleton do módulo,
+   *  que é o comportamento do app. O harness passa um por execução, para que
+   *  medir uma variante não altere o limiar adaptativo que a próxima veria. */
+  blinkDetector?: BlinkDetector,
 ): FeaturePipelineResult {
   // extractEyeFeatures (path legado, USE_COMPACT_FEATURES=false) não recebe
   // L2CS por design — só o compact expõe o extension point; se um dia quiser
@@ -47,8 +52,8 @@ export function extractFeatures(
   }
 
   const geo = USE_COMPACT_FEATURES
-    ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze)
-    : extractEyeFeatures(workingLandmarks, faceMatrix);
+    ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze, blinkDetector)
+    : extractEyeFeatures(workingLandmarks, faceMatrix, undefined, undefined, blinkDetector);
 
   // D11 — a projeção no conjunto ativo mora AQUI, não dentro do extractor.
   // Motivo: `extractCompactFeatures` é o dono do layout e continua devolvendo
