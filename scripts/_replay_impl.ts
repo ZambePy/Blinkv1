@@ -194,6 +194,8 @@ interface CliArgs {
    * direcoes de baixa variancia, que e onde o sinal de olhar mora.
    */
   keepDims?: number[];
+  /** 3.2 — modo de fusao binocular. Ver `ModoFusao`. */
+  fusao: ModoFusao;
   /**
    * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
    *
@@ -215,7 +217,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -234,6 +236,14 @@ function parseArgs(argv: string[]): CliArgs {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v <= 0) throw new Error(`--lambda espera um número > 0; recebi '${argv[i]}'`);
       args.lambda = v;
+    }
+    else if (a === '--fusion') {
+      const m = argv[++i];
+      const validos: ModoFusao[] = ['media', 'esquerdo', 'direito', 'confianca', 'concatenado'];
+      if (!validos.includes(m as ModoFusao)) {
+        throw new Error(`--fusion desconhecido: '${m}'. Validos: ${validos.join(', ')}`);
+      }
+      args.fusao = m as ModoFusao;
     }
     else if (a === '--keep-dims') {
       const raw = argv[++i];
@@ -533,6 +543,12 @@ function getFeatures(
   // 3.1 - corte por indice, DEPOIS da projecao do conjunto. Indice fora do
   // alcance e ignorado em vez de virar undefined: um NaN aqui contaminaria o
   // scaler e degeneraria o regressor em silencio.
+  // 3.2 — no modo concatenado os dois "olhos" recebem o MESMO vetor de 24 dims.
+  // Assim um unico Ridge ve os dois olhos, e a media na saida vira identidade.
+  if (ReplayRegressor.fusao === 'concatenado' && left.length > 0 && right.length > 0) {
+    const junto = [...left, ...right];
+    left = junto; right = junto;
+  }
   if (keepDims && keepDims.length > 0) {
     left = keepDims.filter((i) => i < left.length).map((i) => left[i]);
     right = keepDims.filter((i) => i < right.length).map((i) => right[i]);
@@ -1048,7 +1064,35 @@ function espectroDeFeatures(amostras: number[][]): {
   };
 }
 
+/**
+ * 3.2 — como as predicoes dos dois olhos viram uma.
+ *
+ *   'media'        media simples. E o que o replay fazia, e o caso base do app
+ *                  quando nao ha `perEyeWeight`.
+ *   'esquerdo'     so o olho esquerdo. Diagnostico: diz quanto cada olho vale
+ *                  sozinho, e portanto se a fusao esta somando ou diluindo.
+ *   'direito'      so o olho direito.
+ *   'confianca'    media ponderada pelo inverso da variancia do residuo de cada
+ *                  olho, medida NO TREINO. E a ponderacao otima para dois
+ *                  estimadores nao-enviesados e independentes; o quanto ela
+ *                  ajuda mede o quanto os dois olhos diferem em qualidade.
+ *   'concatenado'  UM modelo sobre os 24 dims dos dois olhos juntos, em vez de
+ *                  dois modelos de 12 promediados. Nao e a mesma coisa: media
+ *                  de dois ajustes independentes ignora a correlacao entre os
+ *                  olhos, que um ajuste conjunto pode explorar.
+ */
+type ModoFusao = 'media' | 'esquerdo' | 'direito' | 'confianca' | 'concatenado';
+
+// O default e 'confianca', porque e o que o app faz desde 3.2. Um harness que
+// descreve outro pipeline que nao o do build ja custou caro uma vez -- ver
+// FEATURE_VECTOR_ID. `--fusion media` reproduz o comportamento anterior.
+
 class ReplayRegressor {
+  /** 3.2 — modo de fusao binocular. Estatico pelo mesmo motivo de `pcaK`. */
+  static fusao: ModoFusao = 'media';
+  /** Pesos por olho derivados do residuo de treino, no modo 'confianca'. */
+  private pesoL = 0.5;
+  private pesoR = 0.5;
   /** 3.1 — k componentes principais, ou 0 para usar as features cruas.
    *  Estático porque `diagnose` instancia o regressor internamente e a
    *  variante tem que valer para todas as instâncias da execução. */
@@ -1085,6 +1129,29 @@ class ReplayRegressor {
     this.ridgeL.train(scaledL, tx, ty);
     this.ridgeR.train(scaledR, tx, ty);
     this.trained = true;
+
+    // 3.2 — pesos por olho, do residuo de treino de cada um.
+    //
+    // Para dois estimadores nao-enviesados e independentes, o peso otimo e o
+    // inverso da variancia. Independencia aqui e aproximacao grosseira (os dois
+    // olhos veem a mesma cabeca e o mesmo ruido de landmark), mas o que se quer
+    // medir e se ha diferenca de qualidade entre os olhos que a media simples
+    // esteja jogando fora.
+    if (ReplayRegressor.fusao === 'confianca') {
+      const varDe = (ridge: RidgeRegressor, z: number[][]) => {
+        let soma = 0;
+        for (let i = 0; i < z.length; i++) {
+          const p = ridge.predict(z[i]);
+          soma += (p.x - tx[i]) ** 2 + (p.y - ty[i]) ** 2;
+        }
+        return soma / Math.max(1, z.length);
+      };
+      const vL = varDe(this.ridgeL, scaledL) || 1e-12;
+      const vR = varDe(this.ridgeR, scaledR) || 1e-12;
+      const iL = 1 / vL, iR = 1 / vR;
+      this.pesoL = iL / (iL + iR);
+      this.pesoR = iR / (iL + iR);
+    }
   }
 
   /**
@@ -1170,8 +1237,18 @@ class ReplayRegressor {
     const sR = this.scalerR.transformSingle(this.pcaR ? this.pcaR.transform(fR) : fR);
     const pL = this.ridgeL.predict(sL);
     const pR = this.ridgeR.predict(sR);
-    const baseX = (pL.x + pR.x) / 2;
-    const baseY = (pL.y + pR.y) / 2;
+    let baseX: number, baseY: number;
+    switch (ReplayRegressor.fusao) {
+      case 'esquerdo': baseX = pL.x; baseY = pL.y; break;
+      case 'direito':  baseX = pR.x; baseY = pR.y; break;
+      case 'confianca':
+        baseX = pL.x * this.pesoL + pR.x * this.pesoR;
+        baseY = pL.y * this.pesoL + pR.y * this.pesoR;
+        break;
+      // 'concatenado' junta os vetores ANTES do treino, entao aqui os dois
+      // "olhos" ja carregam a mesma predicao conjunta e a media e identidade.
+      default: baseX = (pL.x + pR.x) / 2; baseY = (pL.y + pR.y) / 2;
+    }
     const normX = Math.min(1, Math.max(0, baseX));
     const normY = Math.min(1, Math.max(0, baseY));
     return { x: normX * vw, y: normY * vh };
@@ -1350,6 +1427,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   }
 
   ReplayRegressor.pcaK = args.pca;
+  ReplayRegressor.fusao = args.fusao;
   RidgeRegressor.lambdaOverride = args.lambda ?? null;
   RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
   const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims);
@@ -1667,6 +1745,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       featureDims: activeFeatureDims(args.featureSet),
       pca: args.pca,
       keepDims: args.keepDims ?? null,
+      fusao: args.fusao,
       lambda: args.lambda ?? 'CV',
       axisWeightedCv: args.axisWeightedCv,
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio

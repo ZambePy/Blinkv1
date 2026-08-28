@@ -517,6 +517,61 @@ erro que 1.2 documentou.
 
 ---
 
+## 3.2 — a média binocular saiu pior que o olho bom sozinho
+
+### Os dois olhos não são equivalentes
+
+| fusão | dims | treino | LOO/alvo | accuracy | mediana | delta |
+|---|---|---|---|---|---|---|
+| média simples (antes) | 12 | 38,3 | 92,5 | **140,7** | 67,0 | — |
+| **só olho esquerdo** | 12 | 36,2 | 77,4 | **134,9** | 58,8 | **−4,2%** |
+| só olho direito | 12 | 52,6 | 128,7 | 164,8 | 102,8 | +17,1% |
+| **ponderada por confiança** | 12 | 35,2 | **80,7** | **134,8** | **58,6** | **−4,2%** |
+| UM modelo, 24 dims | 24 | 33,8 | 110,1 | 144,6 | 68,9 | +2,8% |
+
+A média simples supõe os dois olhos igualmente bons. Não são — e a média saiu
+**pior que o olho bom sozinho**, arrastada pelo ruim.
+
+### O que NÃO explica a diferença
+
+A razão sinal-ruído bruta da íris é praticamente idêntica nos dois olhos:
+
+| olho | excursão X | ruído intra-alvo (p90) | SNR |
+|---|---|---|---|
+| esquerdo | 6,10 px | 0,198 px | **30,8** |
+| direito | 5,21 px | 0,166 px | **31,3** |
+
+Levantei a hipótese de que o olho direito captaria menos sinal. **Falso.** A
+diferença está no ajuste (erro de treino 36,2 contra 52,6), não no sinal
+captado. Não dá para prever qual olho será melhor a partir da física — e é
+exatamente por isso que a resposta é **medir**, não supor.
+
+### A solução não pode piorar um setup simétrico
+
+Peso pelo inverso da variância do resíduo de TREINO — o ótimo para dois
+estimadores não-enviesados e independentes. A independência é aproximação
+grosseira (os dois olhos veem a mesma cabeça), mas o efeito útil não depende
+disso: **com olhos igualmente bons os pesos dão ~0,5/0,5 e o comportamento
+anterior volta**. É o que o teste unitário fixa.
+
+O peso vem só do treino, nunca do teste de precisão — e o LOO por alvo, que é
+independente, melhora junto (92,5 → 80,7). Não é ajuste na base de avaliação.
+
+Ele multiplica os pesos que já existiam em vez de substituí-los: `perEyeWeight`
+é disponibilidade INSTANTÂNEA (o olho está aberto agora?), a confiabilidade é
+qualidade do MODELO daquele olho. Um olho aberto cujo modelo é ruim continua
+sendo um voto ruim.
+
+### Um modelo conjunto de 24 dims é pior
+
+Treinar UM Ridge sobre os dois olhos concatenados dá o melhor erro de treino da
+tabela (33,8) e o segundo pior LOO (110,1). É a assinatura conhecida: 24
+parâmetros por saída contra nove alvos de restrição vira memorização. A média de
+dois modelos pequenos é uma forma barata de regularização, e vale a pena
+mantê-la.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito

@@ -381,6 +381,14 @@ function finalizeSessionPoseBaseline(): boolean {
 }
 let poseDriftRejects = 0;
 
+/** 3.2 — peso relativo de cada olho, do residuo de treino. `null` antes de
+ *  qualquer calibracao, e nesse caso a fusao volta a ser media simples. */
+let eyeReliability: { left: number; right: number } | null = null;
+
+export function getEyeReliability(): { left: number; right: number } | null {
+  return eyeReliability;
+}
+
 /** 2.4 — campos de qualidade que o gate consulta. Lista explícita para o aviso
  *  de ausência poder nomear o que faltou. */
 const QUALITY_FIELDS = [
@@ -1180,6 +1188,7 @@ export function startCalibrationMode(
   calibrationReferencePose = null;
   calibrationReferenceCenter = null;
   acceptedDistancesCm = [];
+  eyeReliability = null;
   qualityGapWarned = false;
   profile = [];
   regressorLeft = null;
@@ -1807,6 +1816,50 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
 
   scaledProfileLeft  = scaledFeaturesLeft;
   scaledProfileRight = scaledFeaturesRight;
+
+  // 3.2 — confiabilidade POR OLHO, do residuo de treino de cada modelo.
+  //
+  // A fusao binocular era media simples (com peso de EAR e dominancia por
+  // cima). Media simples supoe os dois olhos igualmente bons, e na gravacao de
+  // referencia eles nao sao nem de perto:
+  //
+  //   so olho esquerdo   134,9 px    (treino 36,2 | LOO 77,4)
+  //   so olho direito    164,8 px    (treino 52,6 | LOO 128,7)
+  //   media dos dois     140,7 px    (treino 38,3 | LOO 92,5)
+  //
+  // A media saiu PIOR que o olho bom sozinho: o olho ruim foi arrastando.
+  //
+  // O que NAO explica: a razao sinal-ruido bruta da iris e praticamente igual
+  // nos dois (excursao/ruido intra-alvo 30,8 contra 31,3). A diferenca esta no
+  // ajuste, nao no sinal captado, e nao da para prever qual olho sera melhor a
+  // partir da fisica. Por isso a resposta e MEDIR, nao supor.
+  //
+  // Peso pelo inverso da variancia do residuo — o otimo para dois estimadores
+  // nao-enviesados e independentes. Independencia e aproximacao grossa aqui (os
+  // dois olhos veem a mesma cabeca), mas o efeito util nao depende disso: com
+  // olhos igualmente bons os pesos dao ~0,5/0,5 e o comportamento antigo volta.
+  {
+    const residuo = (r: typeof regressorLeft, z: number[][]) => {
+      if (!r) return 1;
+      let soma = 0;
+      for (let i = 0; i < z.length; i++) {
+        const p = r.predict(z[i]);
+        soma += (p.x - targetsX[i]) ** 2 + (p.y - targetsY[i]) ** 2;
+      }
+      return soma / Math.max(1, z.length);
+    };
+    const vL = residuo(regressorLeft, scaledFeaturesLeft) || 1e-12;
+    const vR = residuo(regressorRight, scaledFeaturesRight) || 1e-12;
+    const iL = 1 / vL, iR = 1 / vR;
+    if (Number.isFinite(iL) && Number.isFinite(iR) && iL + iR > 0) {
+      eyeReliability = { left: iL / (iL + iR), right: iR / (iL + iR) };
+      console.log(
+        `[calib] 3.2 confiabilidade por olho — esquerdo ${(eyeReliability.left * 100).toFixed(0)}% ` +
+        `direito ${(eyeReliability.right * 100).toFixed(0)}% ` +
+        `(residuo de treino ${Math.sqrt(vL).toFixed(4)} vs ${Math.sqrt(vR).toFixed(4)})`,
+      );
+    }
+  }
 
   // A1-3 — sinal de dado ruim que o CV já detecta mas não era propagado.
   // A0-5 observou λ=1 num olho e λ=0.01 no outro com óculos (ratio 100).
@@ -2767,6 +2820,15 @@ export function mapGaze(
   // também o multiplicador da dominância ocular do usuário.
   let wL = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.left) : 1;
   let wR = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.right) : 1;
+  // 3.2 — confiabilidade medida na calibracao, multiplicada pelos pesos que ja
+  // existiam. Sao coisas diferentes e se compoem: `perEyeWeight` e disponibilidade
+  // INSTANTANEA (o olho esta aberto agora?), a confiabilidade e qualidade do
+  // MODELO daquele olho (quao bem ele mapeia iris para tela). Um olho aberto
+  // cujo modelo e ruim continua sendo um voto ruim.
+  if (eyeReliability) {
+    wL *= Math.max(MIN_EYE_WEIGHT, eyeReliability.left);
+    wR *= Math.max(MIN_EYE_WEIGHT, eyeReliability.right);
+  }
   if (eyeDominance === 'left')  wL *= DOMINANCE_GAIN;
   if (eyeDominance === 'right') wR *= DOMINANCE_GAIN;
   const wSum = wL + wR;
