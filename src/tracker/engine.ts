@@ -664,6 +664,13 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           if (face) {
             diagPose = { yaw: face.yaw, pitch: face.pitch, roll: face.roll };
           }
+          // 1.3 — pose do quadro para a compensação geométrica em `mapGaze`.
+          // Enviada sempre, inclusive `null`: a flag decide se é usada, e uma
+          // pose velha guardada de um quadro sem rosto compensaria pelo lugar
+          // errado.
+          calibration.setCurrentFramePose(
+            face ? { yaw: face.yaw, pitch: face.pitch, roll: face.roll } : null,
+          );
 
           calibration.feedRawData(featuresLeft, featuresRight, quality);
           latestFeaturesLeft = featuresLeft;

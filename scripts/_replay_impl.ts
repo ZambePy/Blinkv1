@@ -42,6 +42,7 @@ function isFeatureSet(v: string | undefined): v is FeatureSet {
 import {
   POSE_DRIFT_YAW_MAX, POSE_DRIFT_PITCH_MAX, POSE_DRIFT_ROLL_MAX, MIN_ACCEPTED_SAMPLES,
 } from '../src/calibration';
+import { compensarPredicao, poseDeReferencia } from '../src/poseCompensation';
 import { parseJSONL } from '../src/telemetry/recorder';
 import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/types';
 
@@ -49,6 +50,17 @@ import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/
 // aqui também — replay tem que usar EXATAMENTE o mesmo valor para os graus
 // baterem com os do teste online).
 const ASSUMED_DIST_PX = 2268;
+
+/**
+ * 1.3 — ganho geométrico da pose, em px de tela por grau de rotação da cabeça.
+ *
+ * Com o olho parado na órbita e a cabeça girando Δ, o ponto olhado se desloca
+ * `d · tan(Δ)`. Em pixels a distância já é `ASSUMED_DIST_PX`, então o ganho é
+ * `ASSUMED_DIST_PX · tan(1°)` — e como os pixels são quadrados, é o MESMO nos
+ * dois eixos. Essa igualdade entre eixos é o que tornou conclusiva a medição de
+ * 1.2: o coeficiente ajustado diferia entre eixos por 7×.
+ */
+const GANHO_GEOMETRICO_PX_POR_GRAU = ASSUMED_DIST_PX * Math.tan(Math.PI / 180);
 
 // D3.2 (ROADMAP §5) — o replay aceita presets v1 (pixel space) e v2
 // (normalized space). Presets v2 são o default do engine desde D1-1, e sem
@@ -142,6 +154,31 @@ interface CliArgs {
    * `--feature-set` é rejeitado na entrada por isso.
    */
   featureSet?: FeatureSet;
+  /** 1.3 — liga a compensação geométrica de pose na saída. */
+  poseCompensation: boolean;
+  /**
+   * 1.3 — escala aplicada à distância geométrica, para MEDIR o quanto a
+   * geometria pura superestima. 1,0 é a geometria sem ajuste e é o único valor
+   * que pode ser enviado ao produto; qualquer outro é diagnóstico, porque
+   * escolher esse número pela medição é ajustar um parâmetro livre — o mesmo
+   * erro que 1.2 documentou.
+   */
+  poseCompensationGain: number;
+  /** 1.3 — ablação por eixo. Não é parâmetro ajustável do produto: serve para
+   *  separar qual eixo carrega o viés, já que a análise de resíduo indicou que
+   *  quase todo ele está em Y. */
+  poseCompensationAxes: 'x' | 'y' | 'xy';
+  /**
+   * 1.3 — CONTROLE. Desloca a predição por um vetor fixo em px, sem olhar a
+   * pose.
+   *
+   * Existe para responder uma pergunta que a compensação sozinha não responde:
+   * se a pose é praticamente constante durante o teste, `d · tan(Δ)` degenera
+   * num deslocamento fixo, e qualquer ganho medido seria remoção de viés
+   * disfarçada de geometria. Se este controle igualar a compensação, a pose não
+   * contribuiu com nada.
+   */
+  constantShiftPx?: { x: number; y: number };
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -152,7 +189,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [] };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -163,6 +200,29 @@ function parseArgs(argv: string[]): CliArgs {
     // Opt-in explícito para o comportamento antigo. Útil para reproduzir um
     // relatório histórico bit a bit; nunca para medir o pipeline atual.
     else if (a === '--use-recorded-features') args.recomputeFeatures = false;
+    else if (a === '--pose-compensation') args.poseCompensation = true;
+    else if (a === '--pose-compensation-gain') {
+      const g = Number(argv[++i]);
+      if (!Number.isFinite(g)) throw new Error(`--pose-compensation-gain espera um número; recebi '${argv[i]}'`);
+      args.poseCompensation = true;
+      args.poseCompensationGain = g;
+    }
+    else if (a === '--pose-compensation-axes') {
+      const eixos = argv[++i];
+      if (eixos !== 'x' && eixos !== 'y' && eixos !== 'xy') {
+        throw new Error(`--pose-compensation-axes espera x, y ou xy; recebi '${eixos}'`);
+      }
+      args.poseCompensation = true;
+      args.poseCompensationAxes = eixos;
+    }
+    else if (a === '--constant-shift') {
+      const raw = argv[++i];
+      const n = (raw ?? '').split(',').map((x) => Number(x.trim()));
+      if (n.length !== 2 || n.some((x) => !Number.isFinite(x))) {
+        throw new Error(`--constant-shift espera <dxPx>,<dyPx>; recebi '${raw}'`);
+      }
+      args.constantShiftPx = { x: n[0], y: n[1] };
+    }
     else if (a === '--feature-set') {
       const raw = argv[++i];
       if (!isFeatureSet(raw)) {
@@ -310,6 +370,28 @@ interface CalibrationSample {
   targetYNorm: number;
   targetXPx: number;
   targetYPx: number;
+  /** 1.3 — pose da cabeça no frame, quando gravada. A compensação geométrica
+   *  precisa dela nos DOIS lados: para fixar a referência da calibração e para
+   *  medir o desvio no frame que está sendo predito. */
+  pose?: Pose;
+}
+
+interface Pose { yaw: number; pitch: number; roll: number }
+
+/** 1.3 — pose gravada no frame, ou null se o gravador não a tinha. */
+function poseDoFrame(f: RecordedFrame): Pose | undefined {
+  const q = f.quality;
+  if (!q || typeof q.yaw !== 'number' || typeof q.pitch !== 'number' || typeof q.roll !== 'number') return undefined;
+  return { yaw: q.yaw, pitch: q.pitch, roll: q.roll };
+}
+
+/** Média por eixo das poses presentes. É a referência à qual o modelo foi
+ *  ajustado: o centróide da distribuição de treino, não um frame escolhido. */
+function poseMedia(poses: (Pose | undefined)[]): Pose | null {
+  const v = poses.filter((p): p is Pose => !!p);
+  if (v.length === 0) return null;
+  const m = (pick: (p: Pose) => number) => v.reduce((a, b) => a + pick(b), 0) / v.length;
+  return { yaw: m((p) => p.yaw), pitch: m((p) => p.pitch), roll: m((p) => p.roll) };
 }
 
 interface AccuracySample {
@@ -318,6 +400,7 @@ interface AccuracySample {
   target: RecordedTarget;
   captureTs: number;
   frameIdx: number;
+  pose?: Pose;
 }
 
 // Extrai (ou re-extrai) features do frame. Se o JSONL ja tem featuresLeft/Right,
@@ -553,6 +636,7 @@ function splitFrames(
         legacyNoDecision++;   // v1: comportamento antigo, mas avisa no relatório
       }
       calibration.push({
+        pose: poseDoFrame(f),
         featuresLeft: feats.left,
         featuresRight: feats.right,
         targetXNorm: f.target.xPx / vw,
@@ -573,6 +657,7 @@ function splitFrames(
         }
       }
       accuracy.push({
+        pose: poseDoFrame(f),
         featuresLeft: feats.left,
         featuresRight: feats.right,
         target: f.target,
@@ -818,6 +903,26 @@ interface Report {
     p90ErrorDeg: number;
     perPoint: PerPointStat[];
   } | null;
+  /** 1.3 — resposta do resíduo à pose, nos frames do teste de precisão.
+   *  `null` quando a gravação não tem pose ou tem poucos frames. */
+  residuoVsPose: {
+    n: number;
+    refPose: Pose;
+    yawParaX: { pxPorGrau: number; r: number };
+    pitchParaY: { pxPorGrau: number; r: number };
+    /** Estimador within-alvo: a média de cada alvo é removida dos dois lados
+     *  antes de regredir, isolando a resposta geométrica do erro por alvo. */
+    dentroDoAlvo: {
+      n: number;
+      yawParaX: { pxPorGrau: number; r: number };
+      pitchParaY: { pxPorGrau: number; r: number };
+      amplitudeYawGraus: number;
+      amplitudePitchGraus: number;
+    } | null;
+    residuoMedioPx: { x: number; y: number };
+    desvioPoseMedioGraus: { yaw: number; pitch: number };
+    esperadoPxPorGrau: number;
+  } | null;
   config: {
     assumedDistPx: number;
     rbfApplied: false;
@@ -961,9 +1066,30 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   const filter = new OneEuroFilter2D(60, fc.mincutoff, fc.beta);
   const filterInNormalizedSpace = fc.filterInNormalizedSpace;
 
+  // 1.3 — pose média das amostras de calibração ACEITAS: o centróide contra o
+  // qual o Ridge minimizou o erro, e portanto a única referência coerente.
+  const poseRefCalib = poseDeReferencia(split.calibration.map((c) => c.pose));
+
   const errors: FrameError[] = [];
   for (const s of split.accuracy) {
-    const raw = regr.predictPx(s.featuresLeft, s.featuresRight, vw, vh);
+    const bruto = regr.predictPx(s.featuresLeft, s.featuresRight, vw, vh);
+    // Compensação ANTES do filtro temporal: ela corrige o ponto predito, e
+    // filtrar depois trata o resultado corrigido como qualquer predição. Na
+    // ordem inversa o filtro suavizaria um sinal que ainda vai ser deslocado.
+    const raw = args.poseCompensation
+      ? (() => {
+          const c = compensarPredicao(
+            bruto.x / vw, bruto.y / vh, s.pose, poseRefCalib,
+            ASSUMED_DIST_PX * args.poseCompensationGain, vw, vh,
+          );
+          return {
+            x: args.poseCompensationAxes === 'y' ? bruto.x : c.x * vw,
+            y: args.poseCompensationAxes === 'x' ? bruto.y : c.y * vh,
+          };
+        })()
+      : args.constantShiftPx
+        ? { x: bruto.x + args.constantShiftPx.x, y: bruto.y + args.constantShiftPx.y }
+        : bruto;
     // Timestamp em segundos (OneEuro usa segundos). captureTs vem de
     // performance.now() em ms — divide por 1000.
     const smooth = filterInNormalizedSpace
@@ -992,6 +1118,104 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       );
     }
   }
+
+  // 1.3 — o resíduo do modelo responde à pose?
+  //
+  // Esta é a pergunta que decide se compensar geometricamente pode funcionar.
+  // Se a cabeça gira Δ e o olho fica parado na órbita, o ponto olhado se desloca
+  // `d · tan(Δ)`, e o modelo — que só vê a íris no frame da cabeça — não tem como
+  // saber. Então o erro DEVE crescer com o desvio de pose, com inclinação igual
+  // ao ganho geométrico. Se não crescer, não há o que compensar e a Fase 1.3
+  // não tem premissa.
+  //
+  // Regressão simples do resíduo por eixo contra o desvio de pose, em px/grau,
+  // com o r de Pearson junto: inclinação sem correlação é ruído.
+  const residuoVsPose = (() => {
+    const ref = poseMedia(split.calibration.map((c) => c.pose));
+    if (!ref) return null;
+    const pares: { dyaw: number; dpitch: number; rx: number; ry: number }[] = [];
+    for (let i = 0; i < split.accuracy.length; i++) {
+      const p = split.accuracy[i].pose;
+      const e = errors[i];
+      if (!p || !e) continue;
+      pares.push({
+        dyaw: p.yaw - ref.yaw, dpitch: p.pitch - ref.pitch,
+        rx: e.predictedXPx - e.targetXPx, ry: e.predictedYPx - e.targetYPx,
+      });
+    }
+    if (pares.length < 10) return null;
+    const ajuste = (x: number[], y: number[]) => {
+      const n = x.length;
+      const mx = x.reduce((a, b) => a + b, 0) / n, my = y.reduce((a, b) => a + b, 0) / n;
+      let sxy = 0, sxx = 0, syy = 0;
+      for (let i = 0; i < n; i++) { sxy += (x[i] - mx) * (y[i] - my); sxx += (x[i] - mx) ** 2; syy += (y[i] - my) ** 2; }
+      if (sxx === 0) return { pxPorGrau: NaN, r: NaN };
+      // slope está em px/rad; × π/180 dá px/grau.
+      return { pxPorGrau: (sxy / sxx) * (Math.PI / 180), r: syy > 0 ? sxy / Math.sqrt(sxx * syy) : 0 };
+    };
+    const x = ajuste(pares.map((p) => p.dyaw), pares.map((p) => p.rx));
+    const y = ajuste(pares.map((p) => p.dpitch), pares.map((p) => p.ry));
+
+    // A regressão acima é CONTAMINADA e não serve para dimensionar a correção.
+    //
+    // A pose deriva monotonicamente com o tempo e os alvos do teste também são
+    // apresentados em ordem fixa, então "pose" e "qual alvo" andam juntos. A
+    // inclinação bruta mistura a resposta geométrica com o erro que o modelo
+    // já tem em cada alvo.
+    //
+    // O estimador WITHIN remove a média de cada alvo dos dois lados antes de
+    // regredir. Sobra só a variação de pose DENTRO de um mesmo alvo, que não
+    // pode ser explicada por qual alvo é — é a resposta geométrica isolada.
+    const porAlvo = new Map<string, typeof pares>();
+    for (let i = 0; i < split.accuracy.length; i++) {
+      const p = split.accuracy[i].pose; const e = errors[i];
+      if (!p || !e) continue;
+      const k = `${Math.round(e.targetXPx)},${Math.round(e.targetYPx)}`;
+      const arr = porAlvo.get(k);
+      const item = { dyaw: p.yaw - ref.yaw, dpitch: p.pitch - ref.pitch,
+                     rx: e.predictedXPx - e.targetXPx, ry: e.predictedYPx - e.targetYPx };
+      if (arr) arr.push(item); else porAlvo.set(k, [item]);
+    }
+    const centrado: typeof pares = [];
+    for (const grupo of porAlvo.values()) {
+      if (grupo.length < 3) continue;
+      const m = (pick: (q: typeof grupo[0]) => number) => grupo.reduce((a, b) => a + pick(b), 0) / grupo.length;
+      const my = m((q) => q.dyaw), mp = m((q) => q.dpitch), mrx = m((q) => q.rx), mry = m((q) => q.ry);
+      for (const q of grupo) {
+        centrado.push({ dyaw: q.dyaw - my, dpitch: q.dpitch - mp, rx: q.rx - mrx, ry: q.ry - mry });
+      }
+    }
+    const dentro = centrado.length >= 10 ? {
+      n: centrado.length,
+      yawParaX: ajuste(centrado.map((p) => p.dyaw), centrado.map((p) => p.rx)),
+      pitchParaY: ajuste(centrado.map((p) => p.dpitch), centrado.map((p) => p.ry)),
+      /** Amplitude de pose que sobra depois de remover a média do alvo. Se for
+       *  ínfima, a inclinação WITHIN é ruído dividido por ruído. */
+      amplitudeYawGraus: (Math.max(...centrado.map((p) => p.dyaw)) - Math.min(...centrado.map((p) => p.dyaw))) * 180 / Math.PI,
+      amplitudePitchGraus: (Math.max(...centrado.map((p) => p.dpitch)) - Math.min(...centrado.map((p) => p.dpitch))) * 180 / Math.PI,
+    } : null;
+
+    return {
+      n: pares.length,
+      refPose: ref,
+      yawParaX: x, pitchParaY: y,
+      dentroDoAlvo: dentro,
+      // 1.3 — o que a compensação geométrica de fato aplicaria nesta gravação,
+      // ao lado do viés que existe para ser corrigido. O desvio de pose durante
+      // o teste é quase constante, então `d · tan(Δ)` vira um deslocamento
+      // aproximadamente fixo: ele só ajuda se casar com o resíduo médio.
+      residuoMedioPx: {
+        x: pares.reduce((a, b) => a + b.rx, 0) / pares.length,
+        y: pares.reduce((a, b) => a + b.ry, 0) / pares.length,
+      },
+      desvioPoseMedioGraus: {
+        yaw: (pares.reduce((a, b) => a + b.dyaw, 0) / pares.length) * 180 / Math.PI,
+        pitch: (pares.reduce((a, b) => a + b.dpitch, 0) / pares.length) * 180 / Math.PI,
+      },
+      // Ganho geométrico esperado, para comparação direta na mesma unidade.
+      esperadoPxPorGrau: GANHO_GEOMETRICO_PX_POR_GRAU,
+    };
+  })();
 
   const accSection: Report['accuracy'] = errors.length === 0 ? null : (() => {
     const errPx = errors.map((e) => e.errorPx);
@@ -1054,6 +1278,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
     },
     calibration: { uniqueTargets, ...diagCalib },
     accuracy: accSection,
+    residuoVsPose,
     config: {
       assumedDistPx: ASSUMED_DIST_PX,
       rbfApplied: false,
@@ -1063,6 +1288,10 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       // 1.2 — qual conjunto ESTE relatório mediu. Sem isto uma tabela de
       // variantes vira um monte de números sem etiqueta.
       featureSet: args.featureSet ?? 'iris12 (ACTIVE_FEATURE_SET)',
+      poseCompensation: args.poseCompensation,
+      poseCompensationGain: args.poseCompensationGain,
+      poseCompensationAxes: args.poseCompensationAxes,
+      constantShiftPx: args.constantShiftPx ?? null,
       featureDims: activeFeatureDims(args.featureSet),
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio
       // que nao diz isso vira decisao tomada sobre configuracao errada.

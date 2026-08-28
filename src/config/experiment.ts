@@ -59,6 +59,19 @@ export interface ExperimentConfig {
    * testável, mas mapGaze passa direto sem tocar no vetor.
    */
   applyDistanceCorrection: boolean;
+  /**
+   * 1.3 — compensação geométrica de pose na saída (`src/poseCompensation.ts`).
+   *
+   * Desloca a predição por `d · tan(Δ)` contra a pose média da calibração. Não
+   * há coeficiente ajustado: o ganho vem da geometria, então não há o que
+   * memorizar — que é como 1.2 falhou ao dar a pose ao Ridge como feature.
+   *
+   * DEFAULT false, e a medição em `docs/RESULTADOS-D2-D8.md` explica por quê:
+   * na gravação de referência a direção prevista está certa nos dois eixos,
+   * mas a magnitude geométrica SUPERESTIMA a correção necessária. Ligar exige
+   * gravação com movimento de cabeça deliberado, que a base atual não tem.
+   */
+  geometricPoseCompensation: boolean;
 }
 
 const DEFAULTS: ExperimentConfig = {
@@ -71,6 +84,7 @@ const DEFAULTS: ExperimentConfig = {
   isotropicLandmarks: false,  // A2-5 — desligado até medição confirmar melhora
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
   applyDistanceCorrection: false, // D5.2 — desligado até gravação com aproximação/afastamento comprovar ganho
+  geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
 };
 
 const STORAGE_KEY = 'irisflow.experiment';

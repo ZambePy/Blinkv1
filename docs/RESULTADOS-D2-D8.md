@@ -43,6 +43,100 @@ Data: **2026-08-25**. Baseline referência: **57 px / 0,9°** (Rodada A, sem
 
 ---
 
+## 1.3 — a compensação geométrica está implementada, e esta gravação não consegue testá-la
+
+`src/poseCompensation.ts` aplica `d · tan(Δ)` na saída, contra a pose média das
+amostras que treinaram o modelo. Sem coeficiente ajustado — era esse o ponto,
+depois de 1.2 mostrar que ajustar um coeficiente de pose produz memorização.
+
+Os sinais **não** foram escolhidos por medirem melhor. Vêm da convenção com que
+`extractor.ts` extrai os ângulos: a coluna 2 da matriz facial é a direção do
+nariz `f`, com `yaw = atan2(f_x, f_z)` e `pitch = asin(−f_y)`. Virar a cabeça
+para a própria esquerda dá yaw maior e X de tela menor (sinal negativo em X);
+nariz para baixo dá pitch maior e Y de tela maior (sinal positivo em Y).
+
+### Tabela — mesma gravação, mesmo filtro
+
+| variante | meanErrorInner | mediana | p90 | Δ vs baseline |
+|---|---|---|---|---|
+| sem compensação | **144,6 px** | 71,3 | 410,1 | — |
+| geometria pura (ganho 1,0) | **152,8 px** | 80,8 | 427,8 | **+5,6%** |
+| só em X (yaw), ganho 1,0 | 147,2 px | — | — | +1,8% |
+| só em Y (pitch), ganho 1,0 | 148,8 px | — | — | +2,9% |
+
+A geometria pura piora. Reproduzível com `npm run replay -- --pose-compensation`.
+
+### Varredura de ganho — e por que o ótimo não pode ser embarcado
+
+| ganho | só X (yaw) | só Y (pitch) |
+|---|---|---|
+| 0,2 | 144,4 (−0,1%) | 138,0 (−4,6%) |
+| 0,4 | 144,6 (−0,0%) | **134,6 (−6,9%)** |
+| 0,6 | 145,1 (+0,3%) | 135,2 (−6,5%) |
+| 0,8 | 146,0 (+0,9%) | 140,1 (−3,1%) |
+| 1,0 | 147,2 (+1,8%) | 148,8 (+2,9%) |
+
+Os dois eixos discordam: X não ganha nada em ganho nenhum, Y tem ótimo em ~0,4.
+Isso **refuta** a explicação mais natural para o excesso — um erro de escala nos
+ângulos de pose (por exemplo, intrínsecos de câmera errados no MediaPipe, com a
+webcam de 90° de FOV) afetaria os dois eixos pelo mesmo fator.
+
+Escolher 0,4 pela medição seria ajustar um parâmetro livre na própria gravação
+em que se está avaliando — o erro que 1.2 documentou. Não entra no produto.
+
+### O controle que fecha a questão
+
+Se a pose é quase constante durante o teste, `d · tan(Δ)` degenera em um
+deslocamento FIXO, e qualquer ganho seria remoção de viés disfarçada de
+geometria. O desvio médio de pose no teste é yaw +0,76° e pitch −2,43° — de
+fato quase constante. Então:
+
+| variante | meanErrorInner | Δ |
+|---|---|---|
+| sem nada | 144,6 px | — |
+| compensação geométrica, só Y, ganho 0,4 | 134,6 px | −6,9% |
+| **CONTROLE: deslocamento fixo (0, −36) px, sem pose** | **133,4 px** | **−7,8%** |
+
+Um deslocamento constante, **sem usar pose nenhuma**, é melhor que a
+compensação ajustada. A pose não contribuiu com nada.
+
+### Conclusão
+
+**Esta gravação não consegue testar compensação de pose.** Não porque a
+compensação seja errada, mas porque a gravação não tem o sinal necessário: a
+pose durante o teste de precisão é essencialmente um deslocamento fixo em
+relação à calibração, não uma variável. Testar de verdade exige uma gravação com
+movimento de cabeça deliberado DURANTE o teste.
+
+`geometricPoseCompensation` fica **desligada** por default, com o módulo
+implementado, testado (14 testes) e ligado tanto em `mapGaze` quanto no harness,
+para que essa gravação possa ser feita e medida sem reescrever nada.
+
+### Achado colateral que merece investigação própria
+
+O viés vertical de **+36 px** entre calibração e teste de precisão é real e
+constante. Ele responde por quase todo o ganho do controle. Não foi corrigido
+com uma constante mágica — de onde ele vem é uma pergunta em aberto, e
+mascará-lo agora esconderia a causa.
+
+### Estado do critério de aceite da Fase 1
+
+−30% em `meanErrorInner` **não foi atingido**, por 1.1, 1.2 nem 1.3. As três
+tarefas atacavam a deriva de pose por três vias diferentes, e as três mediram
+que a pose não é o gargalo nesta gravação:
+
+| via | resultado medido |
+|---|---|
+| 1.1 rejeitar frames por pose | gate inerte: cabeça parada dentro do ponto (0,3°) |
+| 1.2 ajustar coeficiente de pose | +8,6%: coeficiente vira atalho para o alvo |
+| 1.3 compensar por geometria | +5,6%; e um deslocamento fixo bate a versão ajustada |
+
+O gargalo está em outro lugar. As candidatas com evidência independente são as
+da Fase 3: colinearidade do `iris12` (posto efetivo ~4 sobre 12 dims) e
+densidade de alvos. E o viés vertical acima.
+
+---
+
 ## 1.2 — pose como feature ajustada piora tudo. O coeficiente aprendido diz por quê.
 
 O plano previa que devolver a pose ao vetor recuperaria a deriva medida em 1.1.

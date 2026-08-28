@@ -14,6 +14,8 @@ import { L2CS_BLOCK_DIM } from './l2cs/block';
 import {
 } from './distanceCorrection';
 import { EXPERIMENT } from './config/experiment';
+import { compensarPredicao, poseDeReferencia } from './poseCompensation';
+import type { Pose } from './poseCompensation';
 import { estimateDistanceCm } from './setupReadiness';
 import {
   evaluateDistanceRange,
@@ -454,6 +456,39 @@ export function setCameraFovDeg(fov: number | null): void {
 export function setCurrentFrameGeometry(iodPx: number, videoWidth: number): void {
   currentIodPx = iodPx;
   currentVideoWidth = videoWidth;
+}
+
+// ── 1.3 — estado da compensação geométrica de pose ─────────────────────────
+
+/** Pose do quadro corrente. Alimentada por `setCurrentFramePose`; `null` até o
+ *  primeiro quadro com matriz facial válida. */
+let latestPose: Pose | null = null;
+/** Pose média das amostras que treinaram o modelo. É a referência contra a
+ *  qual o desvio é medido — o mapeamento íris→tela só vale nela. */
+let calibrationReferencePose: Pose | null = null;
+
+export function setCurrentFramePose(pose: Pose | null): void {
+  latestPose = pose;
+}
+
+export function getCalibrationReferencePose(): Pose | null {
+  return calibrationReferencePose;
+}
+
+/**
+ * Distância olho→tela em PIXELS, que é a unidade em que `d · tan(Δ)` sai em px.
+ *
+ * Converte a distância em cm pela densidade da tela configurada. Usa a
+ * distância medida na calibração quando existe, e a configurada quando não —
+ * a compensação é relativa à pose de calibração, então a geometria daquele
+ * momento é a coerente.
+ */
+function screenDistancePx(): number {
+  const g = currentCalibrationGeometry();
+  const diagPx = Math.hypot(g.screenWidthPx, g.screenHeightPx);
+  const pxPerCm = g.screenDiagonalIn > 0 ? diagPx / (g.screenDiagonalIn * 2.54) : 0;
+  const distCm = calibrationScreenDistanceCm ?? g.viewingDistanceCm;
+  return distCm > 0 && pxPerCm > 0 ? distCm * pxPerCm : 0;
 }
 
 /** Distância câmera→rosto do quadro corrente, em cm. `null` sem FOV calibrado. */
@@ -1067,6 +1102,7 @@ export function startCalibrationMode(
   sessionBaselinePose = null;
   sessionPoseSamples = [];
   sessionPoseByTarget = [];
+  calibrationReferencePose = null;
   profile = [];
   regressorLeft = null;
   regressorRight = null;
@@ -1656,6 +1692,18 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
       console.log('[calib] Regressor online (RLS) inicializado a partir do Ridge offline.');
     }
   }
+
+  // 1.3 — fixa a pose de referência a partir das amostras que de fato treinaram
+  // o modelo. `trainingProfile` e não `profile`: se alguma amostra foi
+  // descartada antes do ajuste, a referência tem que descrever o que entrou.
+  calibrationReferencePose = poseDeReferencia(
+    trainingProfile.map((a) => {
+      const q = a.quality;
+      return q && typeof q.yaw === 'number' && typeof q.pitch === 'number' && typeof q.roll === 'number'
+        ? { yaw: q.yaw, pitch: q.pitch, roll: q.roll }
+        : null;
+    }),
+  );
 
   lastFitDiagnostics = computeFitDiagnostics(
     trainFeaturesLeft, trainFeaturesRight, trainTargets, trainingProfile,
@@ -2622,8 +2670,27 @@ export function mapGaze(
   lastDistanceRange = range;
   const compensado = applyDistanceRatioToPrediction(baseX, baseY, 1, 1, range.ratio);
 
-  const avgNormX = softClamp(compensado.x);
-  const avgNormY = softClamp(compensado.y);
+  // 1.3 — compensação geométrica de pose, também antes do softClamp e pelo
+  // mesmo motivo. DESLIGADA por default: ver `geometricPoseCompensation` e a
+  // medição em docs/RESULTADOS-D2-D8.md, onde a geometria pura mede 5,6% PIOR
+  // e um deslocamento fixo sem pose nenhuma bate a versão ajustada.
+  //
+  // Fica ligável porque a gravação de referência não consegue testá-la: a pose
+  // é quase constante durante o teste de precisão, então `d · tan(Δ)` degenera
+  // em deslocamento fixo. Testar de verdade exige gravação com movimento de
+  // cabeça deliberado.
+  const comPose = EXPERIMENT.geometricPoseCompensation
+    ? compensarPredicao(
+        compensado.x, compensado.y,
+        latestPose, calibrationReferencePose,
+        screenDistancePx(),
+        document.documentElement.clientWidth,
+        document.documentElement.clientHeight,
+      )
+    : compensado;
+
+  const avgNormX = softClamp(comPose.x);
+  const avgNormY = softClamp(comPose.y);
 
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
