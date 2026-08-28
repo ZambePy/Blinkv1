@@ -140,7 +140,7 @@ const DEFAULTS: ExperimentConfig = {
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
   geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
   lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
-  enableL2CS: false, // 2.5 — desligado: a saída não entra no vetor ativo, e custa 91 MB + crop por quadro
+  enableL2CS: true, // ligado a pedido. ⚠️ inerte enquanto ACTIVE_FEATURE_SET='iris12' descartar [37..43] — ver 2.5
 };
 
 const STORAGE_KEY = 'irisflow.experiment';
