@@ -11,8 +11,9 @@ import { feedAccuracyRaw, getCurrentTargetPx as getAccuracyTargetPx } from '../a
 import { EyeQualityAnalyzer } from '../qualityAnalyzer';
 import { createL2CSClient, type L2CSClient } from '../l2cs/client';
 import { createCropContext, cropFaceToTensor, type CropContext } from '../l2cs/crop';
+import { L2CSHealthMonitor } from '../l2cs/block';
 import type { L2CSGazeInput } from '../extractor';
-import { getRecentBlinkRatePerMinute } from '../extractor';
+import { getRecentBlinkRatePerMinute, ACTIVE_FEATURE_SET } from '../extractor';
 import * as recorder from '../telemetry/recorder';
 import type { RecordedQuality, RecordedTarget } from '../telemetry/types';
 import { EXPERIMENT } from '../config/experiment';
@@ -22,7 +23,10 @@ import { EXPERIMENT } from '../config/experiment';
 // com o worker 'loading' treina o Ridge com o bloco de 7 dims em zero
 // (buildL2CSBlock(valid=false)) e depois, quando o worker liga, o vetor muda
 // e o modelo fica dessincronizado.
-export type L2CSStatus = 'loading' | 'ready' | 'error';
+/** 2.5 — `disabled` é o estado default: o caminho do L2CS não é iniciado
+ *  porque a saída dele não entra no vetor de features ativo. Distinto de
+ *  `error`, que é o worker tendo tentado e falhado. */
+export type L2CSStatus = 'loading' | 'ready' | 'error' | 'disabled';
 
 export interface GazeSample {
   x: number;
@@ -390,6 +394,8 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let l2csFramesSubmitted = 0;
   let l2csFramesValid = 0;
   let l2csFramesStale = 0;
+  // 2.5 — vigia de saída travada. Ver `L2CSHealthMonitor`.
+  const l2csHealth = new L2CSHealthMonitor();
 
   // Diagnostics counters
   let diagRenderFps = 0;
@@ -458,6 +464,27 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   // getL2CSStatus() e mostrar erro/impedir calibração.
   function initL2CSAsync(): void {
     if (l2csClient) return; // já iniciado
+    // 2.5 — o caminho inteiro é opcional, e o default é DESLIGADO.
+    //
+    // O bloco angular do L2CS ocupa os índices [37..43] do vetor completo, e
+    // `ACTIVE_FEATURE_SET = 'iris12'` seleciona [0..11]. A saída não chega ao
+    // modelo. Enquanto isso custa 91 MB de download, `getImageData` de 448² a
+    // 10 Hz e um worker por quadro.
+    //
+    // Medido na gravação de referência: 1563 quadros marcados `valid`, e o yaw
+    // com UM único valor distinto — −1,4315 rad (−82,0°). É a assinatura do
+    // crop preto (bug de `sourceDimensions`, desde corrigido): o modelo inferia
+    // sobre imagem vazia e devolvia constante. `isGazePlausible` zerava o bloco
+    // (±0,61 rad), mas o contador de válidos seguia subindo e a UI seguia
+    // dizendo "pronto" — a falha era invisível no nível do sistema.
+    if (!EXPERIMENT.enableL2CS) {
+      setL2CSStatus('disabled');
+      console.log(
+        '[L2CS] desligado (EXPERIMENT.enableL2CS=false) — o bloco angular não entra ' +
+        `em '${ACTIVE_FEATURE_SET}', então o worker seria custo puro.`,
+      );
+      return;
+    }
     cropCtx = createCropContext();
     l2csClient = createL2CSClient();
     l2csClient.start().then(
@@ -605,6 +632,17 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           const g = l2csClient.getLatestGaze(startTimeMs);
           l2csGaze = { yaw: g.yaw, pitch: g.pitch, valid: g.valid, confidence: g.confidence };
           if (g.valid) l2csFramesValid++; else l2csFramesStale++;
+          // 2.5 — saída idêntica por segundos é pipeline quebrado, não fisiologia.
+          if (l2csHealth.observe(g.yaw, g.valid)) {
+            setL2CSStatus('error');
+            console.error(
+              `[L2CS] SAÍDA TRAVADA — yaw constante em ${g.yaw.toFixed(4)} rad ` +
+              `(${((g.yaw * 180) / Math.PI).toFixed(1)}°) por dezenas de quadros. ` +
+              `O modelo está inferindo sobre imagem inútil (crop preto ou congelado). ` +
+              `Foi exatamente assim que a falha passou despercebida na gravação de ` +
+              `baseline: 1563 quadros marcados válidos, um único valor de yaw.`,
+            );
+          }
           diagL2csYaw = g.yaw;
           diagL2csPitch = g.pitch;
         }

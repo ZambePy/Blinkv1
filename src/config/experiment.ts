@@ -85,6 +85,21 @@ export interface ExperimentConfig {
    * ou ~9 px de tela contra 144,6 px de erro.
    */
   lateralTranslationCompensation: boolean;
+  /**
+   * 2.5 — liga o caminho do L2CS-Net (worker ONNX + crop 448²).
+   *
+   * DEFAULT false, porque a saída dele NÃO CHEGA AO MODELO: o bloco angular
+   * ocupa os índices [37..43] do vetor completo, e `ACTIVE_FEATURE_SET =
+   * 'iris12'` seleciona [0..11]. Enquanto isso, o caminho custa 91 MB de
+   * download do modelo, um `getImageData` de 448² a 10 Hz e um worker por
+   * quadro.
+   *
+   * Não é remoção: o crop tinha um bug (`sourceDimensions`, corrigido) que
+   * fazia a inferência rodar sobre imagem preta, então o L2CS nunca foi
+   * avaliado FUNCIONANDO. Ligar esta flag com `--feature-set` incluindo o
+   * bloco é como essa avaliação vai ser feita.
+   */
+  enableL2CS: boolean;
 }
 
 const DEFAULTS: ExperimentConfig = {
@@ -99,6 +114,7 @@ const DEFAULTS: ExperimentConfig = {
   applyDistanceCorrection: false, // D5.2 — desligado até gravação com aproximação/afastamento comprovar ganho
   geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
   lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
+  enableL2CS: false, // 2.5 — desligado: a saída não entra no vetor ativo, e custa 91 MB + crop por quadro
 };
 
 const STORAGE_KEY = 'irisflow.experiment';

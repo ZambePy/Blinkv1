@@ -309,6 +309,66 @@ disparava antes nem depois nesta gravação.
 
 ---
 
+## 2.5 — o L2CS custava 91 MB para produzir uma constante que ninguém lia
+
+### Nunca chegou ao modelo
+
+O bloco angular do L2CS ocupa os índices **[37..43]** do vetor completo.
+`ACTIVE_FEATURE_SET = 'iris12'` seleciona **[0..11]**. A saída é descartada
+antes de qualquer regressão.
+
+Enquanto isso o caminho custa, por sessão: **91 MB** de download do modelo ONNX,
+um `getImageData` de 448² a 10 Hz, e uma consulta ao worker por quadro.
+
+### E o que produzia era uma constante
+
+Medido em `fixtures/replay/ci-baseline.jsonl`:
+
+| | |
+|---|---|
+| quadros com bloco `l2cs` | 3147 |
+| marcados **`valid`** | **1563** |
+| valores distintos de yaw | **1** |
+| o valor | **−1,4315 rad = −82,0°** |
+
+É a assinatura do crop preto — o bug de `sourceDimensions` (desde corrigido):
+o modelo inferia sobre imagem vazia e devolvia sempre a mesma resposta.
+
+`isGazePlausible` (±0,61 rad) zerava o bloco, então o vetor de features não foi
+contaminado. Mas o contador `l2csFramesValid` seguia subindo, a UI seguia
+dizendo "pronto", e o diagnóstico seguia mostrando −82°. **A falha era invisível
+no nível do sistema.**
+
+### O guarda que faltava
+
+`isGazePlausible` pega ângulo fora da faixa fisiológica. Não pega o modo de
+falha que ocorreu de verdade — e não pegaria se a imagem preta tivesse produzido
+0,3 rad em vez de −1,43, o que é sorte, não projeto.
+
+`L2CSHealthMonitor` acusa saída idêntica bit a bit por dezenas de quadros
+(~6 s a 10 Hz). Micro-sacadas e ruído do modelo garantem variação num olho
+humano; constância exata é hardware ou pipeline quebrado, nunca fisiologia. Ao
+acusar, o status vira `error` e o console explica o quê.
+
+### Desligado, não removido
+
+`EXPERIMENT.enableL2CS` nasce `false`. Não é remoção porque o L2CS **nunca foi
+avaliado funcionando** — todas as medições anteriores foram feitas com o crop
+preto. Ligar a flag junto com um `--feature-set` que inclua o bloco é como essa
+avaliação vai ser feita.
+
+Baseline inalterado: **144,6 px** — o replay já não usava o bloco.
+
+### Um bug que a mudança quase criou
+
+`l2csReady = l2csStatus === 'ready'` é o booleano que **destrava o botão de
+começar a calibração**. Com o caminho desligado o status vira `'disabled'`, e
+sem tratar isso o usuário ficaria preso na tela de pré-calibração para sempre,
+esperando um modelo que ninguém pediu para carregar. `'disabled'` agora libera
+tanto quanto `'ready'`.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito

@@ -86,7 +86,14 @@ export const CalibrationCheck: React.FC = () => {
   // diferentes, e numa tela de 23,6" o erro angular saía 34% menor que o real.
   const { settings } = useSettings();
 
-  const l2csReady  = l2csStatus === 'ready';
+  // 2.5 — `disabled` libera a calibração tanto quanto `ready`.
+  //
+  // Este booleano destrava o botão de começar. Quando o caminho do L2CS passou
+  // a ser opcional (default desligado, porque o bloco angular não entra em
+  // `iris12`), o status virou 'disabled' — e sem esta linha o usuário ficaria
+  // preso na tela de pré-calibração para sempre, esperando um modelo que nunca
+  // vai carregar porque ninguém pediu que carregasse.
+  const l2csReady  = l2csStatus === 'ready' || l2csStatus === 'disabled';
   const l2csFailed = l2csStatus === 'error';
 
   const [stage, setStage] = useState<

@@ -86,3 +86,63 @@ export function buildL2CSBlock(
     ty * tp,
   ];
 }
+
+/**
+ * 2.5 — vigia de saída CONSTANTE do L2CS.
+ *
+ * `isGazePlausible` pega ângulo fora da faixa fisiológica. Não pega o modo de
+ * falha que de fato ocorreu: inferência sobre imagem preta, que devolve um
+ * ângulo perfeitamente plausível — só que sempre o MESMO.
+ *
+ * Medido em `fixtures/replay/ci-baseline.jsonl`: 1563 quadros marcados `valid`,
+ * yaw com UM único valor distinto (−1,4315 rad). O bloco angular era zerado
+ * pela guarda de plausibilidade, mas o contador de quadros válidos seguia
+ * subindo e a UI seguia dizendo "pronto". A falha era invisível.
+ *
+ * Um olho humano nunca fica exatamente parado: micro-sacadas e ruído do modelo
+ * garantem variação. Saída idêntica bit a bit ao longo de segundos é hardware
+ * ou pipeline quebrado, nunca fisiologia.
+ */
+export class L2CSHealthMonitor {
+  private ultimoYaw: number | null = null;
+  private repeticoes = 0;
+  private avisou = false;
+
+  /** Quantos quadros idênticos seguidos antes de acusar. A 10 Hz de submissão,
+   *  60 são ~6 s — tempo de sobra para descartar coincidência e curto o
+   *  bastante para o problema aparecer antes de uma calibração inteira. */
+  private readonly limite: number;
+  constructor(limite = 60) {
+    this.limite = limite;
+  }
+
+  /** Devolve `true` quando ACABOU de detectar travamento (uma vez só). */
+  observe(yaw: number, valid: boolean): boolean {
+    if (!valid || !Number.isFinite(yaw)) {
+      this.ultimoYaw = null;
+      this.repeticoes = 0;
+      return false;
+    }
+    if (this.ultimoYaw !== null && yaw === this.ultimoYaw) {
+      this.repeticoes++;
+    } else {
+      this.repeticoes = 0;
+    }
+    this.ultimoYaw = yaw;
+    if (this.repeticoes >= this.limite && !this.avisou) {
+      this.avisou = true;
+      return true;
+    }
+    return false;
+  }
+
+  get travado(): boolean {
+    return this.avisou;
+  }
+
+  reset(): void {
+    this.ultimoYaw = null;
+    this.repeticoes = 0;
+    this.avisou = false;
+  }
+}
