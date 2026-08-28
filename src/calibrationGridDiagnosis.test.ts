@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { diagnosticarGrade, RAZAO_PERIFERIA_LIMITE, CENTRO_RUIM_PX } from './calibrationGridDiagnosis';
+import { diagnosticarGrade, RAZAO_PERIFERIA_LIMITE, CENTRO_RUIM_PX, PIOR_ALVO_PX } from './calibrationGridDiagnosis';
 
 // Os dois casos que importam são medições reais, não sintéticos. Os limiares
 // foram escolhidos para separar estes dois; se um terceiro caso real aparecer e
@@ -103,5 +103,48 @@ describe('diagnosticarGrade — os outros casos', () => {
       ...a, x: 0.5 + (a.x - 0.5) * 0.3, y: 0.5 + (a.y - 0.5) * 0.3,
     }));
     expect(diagnosticarGrade(estreitaRuim).veredicto).toBe('periferia_fora_de_alcance');
+  });
+});
+
+/** Terceira sessao real: razao 2,43 -- ABAIXO do limiar de 2,5 -- e mesmo assim
+ *  ruim, com LOO global 186,6 e um alvo em 564 px. Foi ela que mostrou que a
+ *  razao periferia/centro sozinha nao basta: a media da periferia diluiu o
+ *  alvo catastrofico entre os vizinhos bons. */
+const SESSAO_C = [
+  { x: 0.182, y: 0.05, errorPx: 564.4, samples: 65 },
+  { x: 0.500, y: 0.05, errorPx: 220.0, samples: 29 },
+  { x: 0.818, y: 0.05, errorPx: 155.5, samples: 64 },
+  { x: 0.182, y: 0.50, errorPx: 86.6, samples: 53 },
+  { x: 0.500, y: 0.50, errorPx: 66.5, samples: 38 },
+  { x: 0.818, y: 0.50, errorPx: 68.5, samples: 53 },
+  { x: 0.182, y: 0.95, errorPx: 197.8, samples: 65 },
+  { x: 0.500, y: 0.95, errorPx: 96.7, samples: 52 },
+  { x: 0.818, y: 0.95, errorPx: 223.3, samples: 60 },
+];
+
+describe('a terceira sessao, que a razao sozinha deixou passar', () => {
+  it('a razao dela fica ABAIXO do limiar — por isso o criterio do pior alvo existe', () => {
+    const d = diagnosticarGrade(SESSAO_C);
+    expect(d.razao).toBeLessThan(RAZAO_PERIFERIA_LIMITE);
+    expect(d.piorAlvoPx).toBeGreaterThan(PIOR_ALVO_PX);
+  });
+
+  it('e agora ela e acusada, pelo alvo inaprendivel', () => {
+    const d = diagnosticarGrade(SESSAO_C);
+    expect(d.veredicto).toBe('alvo_inaprendivel');
+    expect(d.mensagem).toContain('RECALIBRE');
+  });
+
+  it('a gravacao boa continua passando — o criterio novo nao gera falso positivo', () => {
+    const d = diagnosticarGrade(GRAVACAO_BOA);
+    expect(d.piorAlvoPx).toBeLessThan(PIOR_ALVO_PX);
+    expect(d.veredicto).toBe('ok');
+  });
+
+  it('as tres sessoes separam com folga no pior alvo', () => {
+    // 143 px na boa contra 564 e 615 nas ruins. O limiar de 300 fica no meio.
+    expect(diagnosticarGrade(GRAVACAO_BOA).piorAlvoPx).toBeLessThan(PIOR_ALVO_PX / 1.8);
+    expect(diagnosticarGrade(SESSAO_RUIM).piorAlvoPx).toBeGreaterThan(PIOR_ALVO_PX * 1.8);
+    expect(diagnosticarGrade(SESSAO_C).piorAlvoPx).toBeGreaterThan(PIOR_ALVO_PX * 1.8);
   });
 });

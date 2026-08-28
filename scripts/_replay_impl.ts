@@ -33,7 +33,7 @@ import type { FeatureSet } from '../src/extractor';
 /** 1.2 — conjuntos que o harness aceita medir. `compact` fica de fora de
  *  propósito: seu tamanho varia com a presença do bloco L2CS, então uma tabela
  *  comparativa com ele dentro compararia vetores de larguras diferentes. */
-const FEATURE_SETS = ['iris12', 'iris12+pose', 'iris12+posecross'] as const;
+const FEATURE_SETS = ['iris12', 'iris12+pose', 'iris12+posecross', 'iris12+l2cs', 'iris12+l2cs+pose'] as const;
 function isFeatureSet(v: string | undefined): v is FeatureSet {
   return !!v && (FEATURE_SETS as readonly string[]).includes(v);
 }
@@ -253,6 +253,15 @@ interface CliArgs {
    */
   keepAcclimation: boolean;
   /**
+   * Mantem apenas quadros com L2CS valido E plausivel.
+   *
+   * Sem isto, comparar `iris12` com `iris12+l2cs` compara "sem bloco" contra
+   * "bloco em metade dos quadros e sete zeros na outra metade" -- uma feature
+   * bimodal, que e pior que feature nenhuma por motivo alheio ao L2CS. Com o
+   * filtro, os dois bracos veem os MESMOS quadros e a diferenca e so o bloco.
+   */
+  requireL2CS: boolean;
+  /**
    * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
    *
    * Nasce TRUE, porque é o que o app faz. O harness que descreve outro
@@ -273,7 +282,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca', balanceTargets: false, keepAcclimation: false };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca', balanceTargets: false, keepAcclimation: false, requireL2CS: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -295,6 +304,7 @@ function parseArgs(argv: string[]): CliArgs {
     }
     else if (a === '--balance-targets') args.balanceTargets = true;
     else if (a === '--keep-acclimation') args.keepAcclimation = true;
+    else if (a === '--require-l2cs') args.requireL2CS = true;
     else if (a === '--tail-analysis') {
       const proximo = argv[i + 1];
       args.tailAnalysis = proximo && !proximo.startsWith('--') ? argv[++i] : 'tail-analysis.jsonl';
@@ -725,6 +735,7 @@ function splitFrames(
   keepDims?: number[],
   keepTargets?: number[],
   keepAcclimation = false,
+  requireL2CS = false,
 ): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
@@ -794,6 +805,11 @@ function splitFrames(
 
   for (const f of rec.frames) {
     if (f.blink) desdeAPiscada = 0; else desdeAPiscada++;
+    if (requireL2CS) {
+      const g = f.l2cs;
+      const ok = g && g.valid && Math.abs(g.yaw) <= 0.61 && Math.abs(g.pitch) <= 0.61;
+      if (!ok) { discarded++; continue; }
+    }
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
     const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet, blinkDetector, keepDims);
@@ -1597,7 +1613,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   RidgeRegressor.balanceTargets = args.balanceTargets;
   RidgeRegressor.lambdaOverride = args.lambda ?? null;
   RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims, args.keepTargets, args.keepAcclimation);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims, args.keepTargets, args.keepAcclimation, args.requireL2CS);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
   if (split.timeWindow) {

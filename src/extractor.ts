@@ -357,7 +357,7 @@ export const FEATURE_FORMAT_VERSION = 2;
 //
 // Nada aqui é decidido por argumento. `ACTIVE_FEATURE_SET` só muda com número
 // de harness; a tabela está em docs/RESULTADOS-D2-D8.md.
-export type FeatureSet = 'iris12' | 'iris12+pose' | 'iris12+posecross' | 'compact';
+export type FeatureSet = 'iris12' | 'iris12+pose' | 'iris12+posecross' | 'iris12+l2cs' | 'iris12+l2cs+pose' | 'compact';
 
 /** Índices mantidos por `iris12`: offset, rel e contorno da íris. */
 export const IRIS12_DIMS = 12;
@@ -386,6 +386,22 @@ const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly numbe
     22, 23, 24,
     25, 26, 27, 28, 29, 30,
   ],
+  // O bloco angular do L2CS, [37..43]. Existe para responder uma pergunta que
+  // nunca pôde ser feita: até `90231ab` o crop entregava imagem preta e o
+  // modelo devolvia sempre o mesmo ângulo; esse commit corrigiu o crop e, na
+  // mesma leva, tirou o bloco do conjunto ativo. O L2CS nunca esteve
+  // simultaneamente funcionando e dentro do vetor.
+  'iris12+l2cs': [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    37, 38, 39, 40, 41, 42, 43,
+  ],
+  // Pose e L2CS juntos: um mede para onde a CABEÇA aponta, o outro para onde o
+  // OLHAR aponta. São informações diferentes e podem se somar.
+  'iris12+l2cs+pose': [
+    0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
+    22, 23, 24,
+    37, 38, 39, 40, 41, 42, 43,
+  ],
 };
 
 /** Maior índice que cada conjunto exige do vetor completo. Um vetor mais curto
@@ -394,6 +410,8 @@ const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
   'iris12': 12,
   'iris12+pose': 25,
   'iris12+posecross': 31,
+  'iris12+l2cs': 44,
+  'iris12+l2cs+pose': 44,
 };
 
 /** Conjunto ativo. Ver a tabela acima para a evidência. */

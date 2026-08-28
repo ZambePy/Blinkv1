@@ -40,7 +40,7 @@ export interface AlvoLOO {
   samples: number;
 }
 
-export type VeredictoGrade = 'ok' | 'periferia_fora_de_alcance' | 'sessao_ruim' | 'indeterminado';
+export type VeredictoGrade = 'ok' | 'alvo_inaprendivel' | 'periferia_fora_de_alcance' | 'sessao_ruim' | 'indeterminado';
 
 export interface DiagnosticoGrade {
   veredicto: VeredictoGrade;
@@ -51,6 +51,9 @@ export interface DiagnosticoGrade {
   /** periferia / centro. Adimensional, então não depende de distância nem de
    *  tela — é o que torna o diagnóstico transferível entre setups. */
   razao: number;
+  /** Maior LOO entre os alvos. Um único alvo inaprendível não move muito a
+   *  média, mas está DENTRO do treino dos outros e corrompe o ajuste todo. */
+  piorAlvoPx: number;
   /** Mensagem pronta para o operador, ou `null` quando está tudo bem. */
   mensagem: string | null;
 }
@@ -68,6 +71,25 @@ export const RAZAO_PERIFERIA_LIMITE = 2.5;
 /** Acima disto a sessão inteira está ruim, periferia ou não. O centro é a parte
  *  mais fácil da tela; se ele já erra tanto, o problema não é a grade. */
 export const CENTRO_RUIM_PX = 150;
+
+/**
+ * Acima disto, UM alvo sozinho é considerado inaprendível.
+ *
+ * A razão periferia/centro não basta, e uma sessão real provou isso: ela deu
+ * razão 2,43 — abaixo do limiar de 2,5 — e passou como `ok`, apesar de ter um
+ * alvo com LOO de 564 px e LOO global de 186,6. A média da periferia diluiu o
+ * alvo catastrófico entre os vizinhos bons.
+ *
+ * Três sessões medidas separam com folga:
+ *
+ *   gravação boa   pior alvo 143 px   razão 1,5   LOO global  80,7   -> ok
+ *   sessão A       pior alvo 615 px   razão 3,6   LOO global 224,9   -> ruim
+ *   sessão B       pior alvo 564 px   razão 2,4   LOO global 186,6   -> ruim
+ *
+ * 300 px fica entre 143 e 564, longe dos dois. Continua sendo um limiar de
+ * três pontos, não de teoria — revisar quando houver mais sessões.
+ */
+export const PIOR_ALVO_PX = 300;
 
 /** Mediana simples. Mediana e não média porque um único alvo catastrófico
  *  (615 px na sessão ruim) arrastaria a média e mascararia o padrão. */
@@ -91,7 +113,7 @@ export function diagnosticarGrade(alvos: readonly AlvoLOO[]): DiagnosticoGrade {
   if (validos.length < 4) {
     return {
       veredicto: 'indeterminado',
-      centroPx: NaN, periferiaPx: NaN, razao: NaN,
+      centroPx: NaN, periferiaPx: NaN, razao: NaN, piorAlvoPx: NaN,
       mensagem: null,
     };
   }
@@ -101,16 +123,18 @@ export function diagnosticarGrade(alvos: readonly AlvoLOO[]): DiagnosticoGrade {
   const centro = validos.filter((a) => raio(a) <= corte).map((a) => a.errorPx);
   const periferia = validos.filter((a) => raio(a) > corte).map((a) => a.errorPx);
   if (centro.length === 0 || periferia.length === 0) {
-    return { veredicto: 'indeterminado', centroPx: NaN, periferiaPx: NaN, razao: NaN, mensagem: null };
+    return { veredicto: 'indeterminado', centroPx: NaN, periferiaPx: NaN, razao: NaN, piorAlvoPx: NaN, mensagem: null };
   }
 
   const centroPx = mediana(centro);
   const periferiaPx = mediana(periferia);
   const razao = centroPx > 0 ? periferiaPx / centroPx : Infinity;
+  const piorAlvoPx = Math.max(...validos.map((a) => a.errorPx));
+  const pior = validos.find((a) => a.errorPx === piorAlvoPx)!;
 
   if (centroPx > CENTRO_RUIM_PX) {
     return {
-      veredicto: 'sessao_ruim', centroPx, periferiaPx, razao,
+      veredicto: 'sessao_ruim', centroPx, periferiaPx, razao, piorAlvoPx,
       mensagem:
         `O erro está alto até no centro da tela (${centroPx.toFixed(0)} px), que é a parte mais fácil. ` +
         `Isso não é a grade estar larga demais — é a sessão inteira. ` +
@@ -120,7 +144,7 @@ export function diagnosticarGrade(alvos: readonly AlvoLOO[]): DiagnosticoGrade {
 
   if (razao > RAZAO_PERIFERIA_LIMITE) {
     return {
-      veredicto: 'periferia_fora_de_alcance', centroPx, periferiaPx, razao,
+      veredicto: 'periferia_fora_de_alcance', centroPx, periferiaPx, razao, piorAlvoPx,
       mensagem:
         `O centro da tela está bom (${centroPx.toFixed(0)} px) mas a periferia erra ` +
         `${razao.toFixed(1)}× mais (${periferiaPx.toFixed(0)} px). O padrão é de alvos ` +
@@ -130,5 +154,21 @@ export function diagnosticarGrade(alvos: readonly AlvoLOO[]): DiagnosticoGrade {
     };
   }
 
-  return { veredicto: 'ok', centroPx, periferiaPx, razao, mensagem: null };
+  // Checado DEPOIS da razão: quando os dois disparam, "a periferia inteira saiu
+  // do alcance" é o diagnóstico mais útil, porque o conselho é o mesmo e cobre
+  // mais alvos. Um alvo isolado catastrófico é o caso que a razão não vê.
+  if (piorAlvoPx > PIOR_ALVO_PX) {
+    return {
+      veredicto: 'alvo_inaprendivel', centroPx, periferiaPx, razao, piorAlvoPx,
+      mensagem:
+        `Um dos alvos de calibração ficou inaprendível: ${piorAlvoPx.toFixed(0)} px de erro ` +
+        `em (${(pior.x * 100).toFixed(0)}%, ${(pior.y * 100).toFixed(0)}% da tela), contra ` +
+        `${centroPx.toFixed(0)} px no centro. Ele está DENTRO do treino dos outros oito, ` +
+        `então corrompe o ajuste inteiro, não só aquele canto. ` +
+        `RECALIBRE e, quando o ponto aparecer nessa região, confirme que consegue ` +
+        `olhar direto para ele sem virar a cabeça — se não conseguir, afaste-se da tela.`,
+    };
+  }
+
+  return { veredicto: 'ok', centroPx, periferiaPx, razao, piorAlvoPx, mensagem: null };
 }
