@@ -26,13 +26,31 @@ export interface FaceFeatures {
   cameraDistanceEstimate: number;
 }
 
+/**
+ * 2.4 — campos OPCIONAIS de propósito: ausente significa "não medido".
+ *
+ * Antes eram obrigatórios, e o extractor os preenchia com constantes
+ * (`detectorConfidence: 1.0`, `brightnessEstimate: 0.5`, `contrastEstimate:
+ * 0.5`, `blurEstimate: 0.0`) que o `EyeQualityAnalyzer` deveria sobrescrever
+ * com medida real. Quando o analisador FALHA — canvas sem contexto 2d, crop
+ * degenerado — as constantes sobreviviam ao spread em `engine.ts` e chegavam ao
+ * gate de calibração parecendo medição. E não são valores neutros: passam em
+ * todos os seis critérios do gate, `detectorConfidence: 1.0` inclusive, que
+ * afirma confiança máxima justamente quando nada foi medido.
+ *
+ * `undefined` força o consumidor a decidir o que fazer com a ausência, em vez
+ * de decidir por ele com um número plausível.
+ */
 export interface QualityFeatures {
-  detectorConfidence: number;
-  brightnessEstimate: number;
-  contrastEstimate: number;
-  blurEstimate: number;
-  occlusionEstimate: number;
-  irisVisibilityPercentage: number;
+  detectorConfidence?: number;
+  brightnessEstimate?: number;
+  contrastEstimate?: number;
+  blurEstimate?: number;
+  occlusionEstimate?: number;
+  /** Medido de verdade, a partir do EAR — ver a ressalva de escala em 2.2:
+   *  `ear / 0.25` satura em 1,0 porque o EAR chega anisotrópico (mediana
+   *  0,551 onde a escala isotrópica daria 0,314). */
+  irisVisibilityPercentage?: number;
   // A1-5 — fração de pixels do crop ocular com luminância > SPECULAR_LUMINANCE
   // (default 0.95). Pele e esclera raramente saturam sob exposição correta;
   // lente refletindo a tela, sim. Opcional para compat com testes/perfis
@@ -671,12 +689,12 @@ export function extractEyeFeatures(
     cameraDistanceEstimate: 1.0 / (scale3D + 1e-9)
   };
 
+  // 2.4 — só o que este módulo realmente sabe.
+  //
+  // `irisVisibilityPercentage` sai do EAR, que é calculado aqui. Os demais
+  // dependem dos PIXELS do crop ocular, que o extractor não vê — quem mede é
+  // o `EyeQualityAnalyzer`. Preencher com constantes era fabricar medição.
   const quality: QualityFeatures = {
-    detectorConfidence: 1.0,
-    brightnessEstimate: 0.5,
-    contrastEstimate: 0.5,
-    blurEstimate: 0.0,
-    occlusionEstimate: 0.0,
     irisVisibilityPercentage: Math.min(1.0, ear / 0.25),
     specularRatio: 0, // A1-5 — sobrescrito por qualityAnalyzer quando disponível
   };

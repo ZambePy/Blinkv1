@@ -57,7 +57,11 @@ export class EyeQualityAnalyzer {
     if (this.canvas.width !== vw) this.canvas.width = vw;
     if (this.canvas.height !== vh) this.canvas.height = vh;
     if (!this.ctx) {
-      return { detectorConfidence: 1.0, brightnessEstimate: 0.5, contrastEstimate: 0.5, blurEstimate: 0.0 };
+      // 2.4 — sem contexto 2d nada foi medido. Devolver
+      // `{confidence: 1.0, brightness: 0.5, contrast: 0.5, blur: 0.0}` afirmava
+      // confiança máxima e passava nos seis critérios do gate de calibração,
+      // tornando a falha invisível. Objeto vazio é a verdade.
+      return {};
     }
 
     // Bounding box em coordenadas normalizadas [0,1]
@@ -110,7 +114,10 @@ export class EyeQualityAnalyzer {
       const data = imageData.data;
       const N = cropW * cropH;
       if (N === 0) {
-        return { detectorConfidence, brightnessEstimate: 0.5, contrastEstimate: 0.0, blurEstimate: 0.5 };
+        // 2.4 — crop degenerado: `detectorConfidence` foi medido de verdade
+        // (vem do deslocamento de landmarks entre quadros) e vale reportar; o
+        // resto não foi.
+        return { detectorConfidence };
       }
 
       const lum = new Float32Array(N);

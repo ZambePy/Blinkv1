@@ -381,6 +381,15 @@ function finalizeSessionPoseBaseline(): boolean {
 }
 let poseDriftRejects = 0;
 
+/** 2.4 — campos de qualidade que o gate consulta. Lista explícita para o aviso
+ *  de ausência poder nomear o que faltou. */
+const QUALITY_FIELDS = [
+  'irisVisibilityPercentage', 'detectorConfidence',
+  'brightnessEstimate', 'contrastEstimate', 'blurEstimate',
+] as const;
+/** Avisa uma vez por sessão, não a 30 Hz. */
+let qualityGapWarned = false;
+
 let profile: CalibrationPoint[] = [];
 export let isCalibrating = false;
 let isCollecting = false;
@@ -1171,6 +1180,7 @@ export function startCalibrationMode(
   calibrationReferencePose = null;
   calibrationReferenceCenter = null;
   acceptedDistancesCm = [];
+  qualityGapWarned = false;
   profile = [];
   regressorLeft = null;
   regressorRight = null;
@@ -1396,11 +1406,29 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
     return;
   }
 
-  // Sprint 1.1 — filtros de qualidade agora usam valores reais medidos no
-  // crop dos olhos por `EyeQualityAnalyzer` (não mais constantes hardcoded).
+  // Sprint 1.1 — filtros de qualidade sobre valores medidos no crop dos olhos
+  // por `EyeQualityAnalyzer`.
   //
-  // Thresholds iniciais, conservadores. Precisam ser refinados com base nos
-  // valores observados durante a coleta de baseline:
+  // ⚠️ 2.4 — MEDIDO: NENHUM destes seis critérios dispara na gravação de
+  // referência. As distribuições ficam longe demais dos limiares:
+  //
+  //   critério                        limiar   medido (min..max)   folga
+  //   irisVisibility < 0,3               0,30   0,900 .. 1,000      3,0×
+  //   detectorConfidence < 0,4           0,40   0,909 .. 1,000      2,3×
+  //   brightness < 0,08                  0,08   0,199 .. 0,260      2,5×
+  //   brightness > 0,92                  0,92          max 0,260    3,5×
+  //   contrast < 0,02                    0,02   0,079 .. 0,106      4,0×
+  //   blur > 0,85                        0,85   sempre 0,000          —
+  //
+  // As decisões gravadas confirmam: 514 aceitos, 103 rejeitados por acomodação,
+  // ZERO por qualidade. O gate só pega falha catastrófica — câmera tapada,
+  // escuro total. Não é necessariamente errado (rejeitar quadro bom custa
+  // caro), mas o comentário abaixo dizia que os limiares seriam "refinados com
+  // base nos valores observados durante a coleta de baseline", e a coleta
+  // aconteceu: são estes os valores. Apertá-los é mudança de pipeline e precisa
+  // de medição antes/depois própria — não entra aqui.
+  //
+  // Limiares e a intenção de cada um:
   //   - detectorConfidence < 0.4 → landmarks muito instáveis (movimento brusco)
   //   - brightness  < 0.08       → região do olho quase preta (câmera obstruída
   //                                ou usuário no escuro total)
@@ -1409,12 +1437,33 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   //   - blur        > 0.85       → foco perdido / rosto muito distante
   //   - irisVisibilityPercentage < 0.3 → pálpebra semi-fechada / piscada
   if (quality) {
+    // 2.4 — cada critério só vale se o valor foi MEDIDO.
+    //
+    // `irisVisibilityPercentage` e `detectorConfidence` eram comparados sem
+    // guarda de tipo. Como `undefined < 0.3` é false, um valor ausente passava
+    // silenciosamente — e desde 2.4 a ausência é possível de verdade, porque o
+    // analisador parou de fabricar constantes quando falha.
+    //
+    // A decisão é ACEITAR o quadro quando a medida falta, e avisar uma vez. O
+    // contrário — rejeitar tudo — deixaria o app inutilizável num browser onde
+    // o canvas é tainted, e o público-alvo não tem como contornar. Mas a
+    // degradação passa a ser visível no console em vez de silenciosa.
+    const medido = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v);
+    const ausentes = QUALITY_FIELDS.filter((k) => !medido(quality[k]));
+    if (ausentes.length > 0 && !qualityGapWarned) {
+      qualityGapWarned = true;
+      console.warn(
+        `[calib] 2.4 — qualidade não medida: ${ausentes.join(', ')}. ` +
+        `Estes critérios do gate ficam INATIVOS nesta sessão; os quadros são aceitos ` +
+        `sem eles. Causa provável: canvas sem contexto 2d ou crop ocular degenerado.`,
+      );
+    }
     if (
-      quality.irisVisibilityPercentage < 0.3 ||
-      quality.detectorConfidence < 0.4 ||
-      (typeof quality.brightnessEstimate === 'number' && (quality.brightnessEstimate < 0.08 || quality.brightnessEstimate > 0.92)) ||
-      (typeof quality.contrastEstimate === 'number' && quality.contrastEstimate < 0.02) ||
-      (typeof quality.blurEstimate === 'number' && quality.blurEstimate > 0.85)
+      (medido(quality.irisVisibilityPercentage) && quality.irisVisibilityPercentage < 0.3) ||
+      (medido(quality.detectorConfidence) && quality.detectorConfidence < 0.4) ||
+      (medido(quality.brightnessEstimate) && (quality.brightnessEstimate < 0.08 || quality.brightnessEstimate > 0.92)) ||
+      (medido(quality.contrastEstimate) && quality.contrastEstimate < 0.02) ||
+      (medido(quality.blurEstimate) && quality.blurEstimate > 0.85)
     ) {
       lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'quality' };
       return; // Ignora frame ruim

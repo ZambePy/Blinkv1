@@ -245,6 +245,70 @@ preciso construir rotações sintéticas com frame explícito para vê-la.
 
 ---
 
+## 2.4 — qualidade fabricada: o gate inteiro nunca dispara, e a falha era invisível
+
+### O gate não rejeita nada — medido
+
+| critério | limiar | medido (min..max) | folga |
+|---|---|---|---|
+| `irisVisibility < 0,3` | 0,30 | 0,900 .. 1,000 | 3,0× |
+| `detectorConfidence < 0,4` | 0,40 | 0,909 .. 1,000 | 2,3× |
+| `brightness < 0,08` | 0,08 | 0,199 .. 0,260 | 2,5× |
+| `brightness > 0,92` | 0,92 | máx. 0,260 | 3,5× |
+| `contrast < 0,02` | 0,02 | 0,079 .. 0,106 | 4,0× |
+| `blur > 0,85` | 0,85 | **sempre 0,000** | — |
+
+As decisões gravadas confirmam: **514 aceitos, 103 rejeitados por acomodação,
+zero por qualidade.** O gate só pega falha catastrófica — câmera tapada, escuro
+total. Não é necessariamente errado (rejeitar quadro bom custa caro), mas o
+comentário dizia que os limiares seriam "refinados com base nos valores
+observados durante a coleta de baseline". A coleta aconteceu: são estes os
+valores, e agora estão no código em vez de na intenção.
+
+Apertá-los é mudança de pipeline e precisa de medição própria — não entrou aqui.
+
+### O defeito de verdade: constantes que se passam por medição
+
+O extractor preenchia a qualidade com constantes:
+
+```
+detectorConfidence: 1.0    brightnessEstimate: 0.5
+contrastEstimate:   0.5    blurEstimate:       0.0
+```
+
+O `EyeQualityAnalyzer` deveria sobrescrevê-las com medida real, e no caminho
+feliz sobrescreve. Mas ele tem três saídas, e duas fabricavam também:
+
+| saída | devolvia | consequência |
+|---|---|---|
+| canvas sem contexto 2d | `confidence 1.0, brightness 0.5, contrast 0.5, blur 0.0` | passa nos **seis** critérios |
+| crop degenerado (N=0) | `brightness 0.5, contrast 0.0, blur 0.5` | `contrast 0.0` reprova — acidentalmente correto |
+| canvas tainted (`catch`) | só `{detectorConfidence}` | **correto** — omite o que não mediu |
+
+Quando o analisador falhava, as constantes sobreviviam ao spread em `engine.ts`
+e chegavam ao gate **indistinguíveis de medição**. E não são valores neutros:
+`detectorConfidence: 1.0` afirma confiança máxima exatamente onde nada foi
+medido.
+
+O terceiro caso já fazia o certo. Os outros dois passaram a fazer igual, e os
+campos de `QualityFeatures` viraram opcionais — ausente significa não medido.
+
+### A segunda metade: o gate tratava ausência como aprovação
+
+`quality.irisVisibilityPercentage < 0.3` e `quality.detectorConfidence < 0.4`
+eram comparados sem guarda de tipo. `undefined < 0.3` é `false`, e `NaN < 0.3`
+também — os dois passavam em silêncio. Agora cada critério só vale se o valor
+foi medido, e a ausência gera **um** aviso por sessão nomeando o que faltou.
+
+A escolha é aceitar o quadro quando a medida falta, não rejeitar: um browser com
+canvas tainted deixaria o app inutilizável, e o público-alvo não tem como
+contornar. Mas a degradação passa a ser visível em vez de silenciosa.
+
+Baseline inalterado: **144,6 px** — como tem que ser, já que nenhum critério
+disparava antes nem depois nesta gravação.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito
