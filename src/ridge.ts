@@ -191,6 +191,9 @@ export interface RidgeTrainOptions {
    *  fold e reusa nas 22 tentativas de λ — sem isto, o custo O(m·d²) dominaria
    *  o treino (22× desperdício). `null` força a penalidade isotrópica. */
   penaltyMatrix?: number[][] | null;
+  /** 3.4 - peso de cada amostra nas equacoes normais. Ausente = todas iguais,
+   *  que e o comportamento historico. Ver o bloco em `trainRidgeModel`. */
+  sampleWeights?: number[] | null;
 }
 
 export function trainRidgeModel(
@@ -225,11 +228,24 @@ export function trainRidgeModel(
   // sem ele o mesmo λ regulariza 3× mais fraco numa coleta que reteve 3× mais
   // frames. Multiplicar λ (em vez de dividir A) preserva a escala numérica da
   // matriz — os limiares absolutos de pivô em `solveLinear` continuam válidos.
+  // 3.4 - pesos por amostra, para equilibrar alvos com contagens diferentes.
+  //
+  // Sem pesos, um alvo que reteve 65 quadros restringe o ajuste 1,76x mais que
+  // um que reteve 37 -- e quantos quadros um alvo reteve e acidente de coleta,
+  // nao decisao. O CV de lambda ja media o erro POR ALVO desde D9; o AJUSTE em
+  // si continuava por amostra.
+  //
+  // `w` normalizado para somar `m`, de modo que `reg = lambda * somaW` fique na
+  // mesma escala de antes e o lambda escolhido siga comparavel.
+  const w = options?.sampleWeights ?? null;
+  const somaW = w ? w.reduce((a, b) => a + b, 0) : m;
+  const peso = (k: number) => (w ? (w[k] * m) / somaW : 1);
+
   const reg = lambda * m;
   const A: number[][] = Array.from({ length: nf }, (_, i) =>
     Array.from({ length: nf }, (_, j) => {
       let s = 0;
-      for (let k = 0; k < m; k++) s += Phi[k][i] * Phi[k][j];
+      for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * Phi[k][j];
       // O bias (índice 0) nunca é penalizado.
       if (i === 0 || j === 0) return s;
       if (P) return s + reg * P[i - 1][j - 1];
@@ -240,13 +256,13 @@ export function trainRidgeModel(
   // b = Φᵀy  (para screenX e screenY separadamente)
   const bX = Array.from({ length: nf }, (_, i) => {
     let s = 0;
-    for (let k = 0; k < m; k++) s += Phi[k][i] * targets[k].screenX;
+    for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * targets[k].screenX;
     return s;
   });
 
   const bY = Array.from({ length: nf }, (_, i) => {
     let s = 0;
-    for (let k = 0; k < m; k++) s += Phi[k][i] * targets[k].screenY;
+    for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * targets[k].screenY;
     return s;
   });
 
@@ -335,6 +351,21 @@ export class RidgeRegressor {
    */
   static axisScale: { x: number; y: number } = { x: 1, y: 1 };
 
+  /**
+   * 3.4 - equilibra os alvos no ajuste, dando a cada um o mesmo peso total
+   * independente de quantos quadros ele reteve.
+   *
+   * Default false: e mudanca de pipeline e so entra com medicao antes/depois.
+   */
+  static balanceTargets = false;
+
+  /** Peso por amostra que iguala os alvos: 1/contagem do grupo, normalizado. */
+  private static pesosPorAlvo(groups: string[]): number[] {
+    const conta = new Map<string, number>();
+    for (const g of groups) conta.set(g, (conta.get(g) ?? 0) + 1);
+    return groups.map((g) => 1 / (conta.get(g) ?? 1));
+  }
+
   train(features: number[][], targetsX: number[], targetsY: number[]): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
     // D9 — agrupamento por alvo. Habilita a penalidade branqueada e é o mesmo
@@ -357,6 +388,7 @@ export class RidgeRegressor {
     // 3.1 — override de λ para o harness poder isolar o efeito de uma variante
     // do efeito de o CV ter escolhido outro λ. `null` (default) mantém o CV.
     const bestLambda = RidgeRegressor.lambdaOverride ?? this.selectLambdaCV(features, targets, lambdas, groups);
+    const pesos = RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(groups) : null;
 
     // A1-3 — escalonamento defensivo. O CV pode escolher λ ótimo sobre
     // folds parciais, mas o treino final (com TODAS as amostras) pode ter
@@ -368,7 +400,7 @@ export class RidgeRegressor {
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= MAX_ESCALATIONS; attempt++) {
       try {
-        this.model = trainRidgeModel(features, targets, lambda, { groups });
+        this.model = trainRidgeModel(features, targets, lambda, { groups, sampleWeights: pesos });
         if (attempt > 0) {
           console.warn(`[ridge] λ escalonado ${attempt}× até ${lambda} (CV escolheu ${bestLambda}) — dado provavelmente ruim`);
         }
@@ -419,6 +451,10 @@ export class RidgeRegressor {
       zTest: number[][];
       trainTargets: { screenX: number; screenY: number }[];
       penaltyMatrix: number[][] | null;
+      /** 3.4 - pesos por amostra do fold. Cacheados junto porque `trainGroups`
+       *  so e preenchido na primeira passagem; sem isto o fold reusado
+       *  receberia um vetor de pesos vazio. */
+      pesos: number[] | null;
     }>();
 
     for (const lambda of lambdas) {
@@ -462,13 +498,19 @@ export class RidgeRegressor {
         const penaltyMatrix = cached
           ? cached.penaltyMatrix
           : withinTargetPenalty(zTrain, trainGroups);
+        const pesosFold = cached
+          ? cached.pesos
+          : (RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(trainGroups) : null);
         if (!cached) {
-          foldCache.set(key, { stats, zTrain, zTest, trainTargets, penaltyMatrix });
+          foldCache.set(key, { stats, zTrain, zTest, trainTargets, penaltyMatrix, pesos: pesosFold });
         }
         const foldTargets = cached ? cached.trainTargets : trainTargets;
 
         try {
-          const model = trainRidgeModel(zTrain, foldTargets, lambda, { penaltyMatrix });
+          // 3.4 - o CV treina com os MESMOS pesos do ajuste final. Escolher
+          // lambda sobre um ajuste diferente do que vai ser usado e o tipo de
+          // divergencia que ja custou caro neste projeto.
+          const model = trainRidgeModel(zTrain, foldTargets, lambda, { penaltyMatrix, sampleWeights: pesosFold });
           let sq = 0;
           for (let i = 0; i < zTest.length; i++) {
             const pred = predictRidge(model, zTest[i]);

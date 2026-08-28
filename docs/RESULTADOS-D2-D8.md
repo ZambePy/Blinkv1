@@ -644,6 +644,65 @@ uma gravação nova.
 
 ---
 
+## 3.4 — o mecanismo de equilibrar alvos funciona; o desequilíbrio real é pequeno demais
+
+### O desequilíbrio que existe
+
+O ajuste pesava por AMOSTRA. O CV de lambda já pesava por ALVO desde D9 — só o
+ajuste em si continuava desequilibrado. Quantos quadros um alvo reteve é
+acidente de coleta, não decisão: depende de o rosto ter ficado estável naqueles
+1,4 s.
+
+| alvo | amostras | peso atual | peso igual | mudança |
+|---|---|---|---|---|
+| 1 | 65 | 12,6% | 11,1% | −12,1% |
+| 5 | 58 | 11,3% | 11,1% | −1,5% |
+| 9 | **37** | **7,2%** | 11,1% | **+54,4%** |
+
+Razão entre o maior e o menor: **1,76×**.
+
+### O efeito medido é ruído
+
+| variante | lambda | treino | LOO/alvo | accuracy | mediana | delta |
+|---|---|---|---|---|---|---|
+| peso por amostra (antes) | 0,00464 | 35,2 | **80,7** | **134,8** | 58,6 | — |
+| peso igual por alvo | 0,00464 | 35,3 | 81,0 | 134,5 | 58,8 | **−0,2%** |
+
+Accuracy melhora 0,2%, LOO piora 0,4%. Os dois critérios discordam em magnitude
+menor que a diferença entre execuções. **Não há benefício medido, então a flag
+fica desligada** — a regra do projeto é que mudança de pipeline precisa de ganho
+medido, e “provavelmente não piora” não é ganho.
+
+### Por que quase não muda nada
+
+As amostras dentro de um alvo são quase idênticas — 1.1 mediu dispersão de pose
+de 0,09–0,30° por ponto, e o vetor de features herda isso. Sessenta réplicas de
+um vetor quase constante não restringem o ajuste sessenta vezes mais que uma. O
+que restringe o Ridge são as **nove posições distintas**, e essas nove estão
+todas presentes nas duas variantes.
+
+### Mas o mecanismo funciona, e o teste unitário prova
+
+Separar “não faz efeito” de “o desequilíbrio real é pequeno demais” importa,
+porque o segundo caso pode mudar. Com um alvo faminto — 8 amostras contra 80 — o
+erro NAQUELE alvo cai ao equilibrar. E com contagens iguais o ajuste sai
+idêntico ao histórico, até a sexta casa: **a mudança não pode piorar uma coleta
+saudável.**
+
+O caso que justificaria ligá-la: `MIN_ACCEPTED_SAMPLES` é 15 e um alvo saudável
+retém ~65 — **4,3×** de desequilíbrio, mais que o dobro do que esta gravação
+mostra. Quando uma gravação tiver um alvo perto do mínimo, a medição se refaz
+com `--balance-targets` e a decisão se revisa.
+
+### Assimetria conhecida que ficou de fora
+
+`withinTargetPenalty` monta Sigma_W como média das covariâncias por alvo,
+ponderada por graus de liberdade — ou seja, também por contagem. Equilibrar lá
+também seria coerente, mas mudaria duas coisas de uma vez e tornaria a medição
+ambígua. Fica registrado, não feito.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito

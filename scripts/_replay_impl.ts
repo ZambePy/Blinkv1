@@ -206,6 +206,8 @@ interface CliArgs {
    * saber se a curva ja saturou em 9 -- que e o que decide se vale gravar.
    */
   keepTargets?: number[];
+  /** 3.4 - equilibra os alvos no ajuste, um peso total igual por alvo. */
+  balanceTargets: boolean;
   /**
    * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
    *
@@ -227,7 +229,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca' };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca', balanceTargets: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -247,6 +249,7 @@ function parseArgs(argv: string[]): CliArgs {
       if (!Number.isFinite(v) || v <= 0) throw new Error(`--lambda espera um número > 0; recebi '${argv[i]}'`);
       args.lambda = v;
     }
+    else if (a === '--balance-targets') args.balanceTargets = true;
     else if (a === '--keep-targets') {
       const raw = argv[++i];
       const idx = (raw ?? '').split(',').map((x) => Number(x.trim()));
@@ -1461,6 +1464,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
 
   ReplayRegressor.pcaK = args.pca;
   ReplayRegressor.fusao = args.fusao;
+  RidgeRegressor.balanceTargets = args.balanceTargets;
   RidgeRegressor.lambdaOverride = args.lambda ?? null;
   RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
   const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims, args.keepTargets);
@@ -1780,6 +1784,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       keepDims: args.keepDims ?? null,
       fusao: args.fusao,
       keepTargets: args.keepTargets ?? null,
+      balanceTargets: args.balanceTargets,
       lambda: args.lambda ?? 'CV',
       axisWeightedCv: args.axisWeightedCv,
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio
