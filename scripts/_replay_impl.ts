@@ -197,6 +197,16 @@ interface CliArgs {
   /** 3.2 — modo de fusao binocular. Ver `ModoFusao`. */
   fusao: ModoFusao;
   /**
+   * 3.3 - mantem apenas estes alvos de calibracao, por indice na lista de
+   * alvos unicos ORDENADA (por x, depois y). A ordem e canonica e nao a de
+   * apresentacao, para o subconjunto ser reprodutivel entre gravacoes.
+   *
+   * Serve para medir a curva erro x numero de alvos com os dados que existem.
+   * A gravacao tem 9; nao da para medir 13 sem gravar de novo, mas da para
+   * saber se a curva ja saturou em 9 -- que e o que decide se vale gravar.
+   */
+  keepTargets?: number[];
+  /**
    * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
    *
    * Nasce TRUE, porque é o que o app faz. O harness que descreve outro
@@ -236,6 +246,14 @@ function parseArgs(argv: string[]): CliArgs {
       const v = Number(argv[++i]);
       if (!Number.isFinite(v) || v <= 0) throw new Error(`--lambda espera um número > 0; recebi '${argv[i]}'`);
       args.lambda = v;
+    }
+    else if (a === '--keep-targets') {
+      const raw = argv[++i];
+      const idx = (raw ?? '').split(',').map((x) => Number(x.trim()));
+      if (idx.length === 0 || idx.some((x) => !Number.isInteger(x) || x < 0)) {
+        throw new Error(`--keep-targets espera indices inteiros; recebi '${raw}'`);
+      }
+      args.keepTargets = idx;
     }
     else if (a === '--fusion') {
       const m = argv[++i];
@@ -649,6 +667,7 @@ function splitFrames(
   regatePose?: { yawMax: number; pitchMax: number; rollMax: number; minSamples: number },
   featureSet?: FeatureSet,
   keepDims?: number[],
+  keepTargets?: number[],
 ): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
@@ -778,6 +797,20 @@ function splitFrames(
       live++;
     }
   }
+  // 3.3 - corte por alvo, DEPOIS de toda a filtragem por quadro. Assim o
+  // subconjunto de alvos e a unica coisa que muda entre variantes.
+  if (keepTargets && keepTargets.length > 0) {
+    const chave = (c: CalibrationSample) => `${Math.round(c.targetXPx)},${Math.round(c.targetYPx)}`;
+    const unicos = [...new Set(calibration.map(chave))].sort((a, b) => {
+      const [ax, ay] = a.split(',').map(Number); const [bx, by] = b.split(',').map(Number);
+      return ax - bx || ay - by;
+    });
+    const mantidos = new Set(keepTargets.filter((i) => i < unicos.length).map((i) => unicos[i]));
+    const filtrado = calibration.filter((c) => mantidos.has(chave(c)));
+    calibration.length = 0;
+    calibration.push(...filtrado);
+  }
+
   let regateInfo: RegateInfo | undefined;
   if (regatePose) {
     // 1.1 — MIN_ACCEPTED_SAMPLES ao vivo faz o ponto ser REFEITO. Offline não há
@@ -1430,7 +1463,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   ReplayRegressor.fusao = args.fusao;
   RidgeRegressor.lambdaOverride = args.lambda ?? null;
   RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims, args.keepTargets);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
   if (split.timeWindow) {
@@ -1746,6 +1779,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       pca: args.pca,
       keepDims: args.keepDims ?? null,
       fusao: args.fusao,
+      keepTargets: args.keepTargets ?? null,
       lambda: args.lambda ?? 'CV',
       axisWeightedCv: args.axisWeightedCv,
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio

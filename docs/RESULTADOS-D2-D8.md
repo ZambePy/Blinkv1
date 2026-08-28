@@ -572,6 +572,78 @@ mantê-la.
 
 ---
 
+## 3.3 — a curva de alvos já saturou em 9. Treze não valem os 6,8 s.
+
+A gravação tem 9 alvos, então não dá para medir 13 sem gravar de novo. Mas dá
+para medir a CURVA com os dados que existem, e a curva diz se vale gravar.
+
+Subamostrando os 9 alvos, 6 subconjuntos aleatórios por tamanho (36 execuções):
+
+| alvos | n | accuracy médio | min | max | LOO médio |
+|---|---|---|---|---|---|
+| 3 | 6 | 313,8 px | 179,3 | 495,4 | — |
+| 4 | 6 | 160,1 px | 145,1 | 184,6 | 411,1 |
+| 5 | 6 | 152,9 px | 139,0 | 176,5 | 211,8 |
+| 6 | 6 | 145,0 px | 133,6 | 161,6 | 127,9 |
+| 7 | 6 | 138,9 px | 134,7 | 146,0 | 109,9 |
+| 8 | 6 | 135,1 px | 131,5 | 140,0 | 92,3 |
+| **9** | 1 | **134,8 px** | — | — | **80,7** |
+
+Ganho marginal por alvo acrescentado:
+
+| transição | ganho |
+|---|---|
+| 3 → 4 | **−49,0%** |
+| 4 → 5 | −4,5% |
+| 5 → 6 | −5,2% |
+| 6 → 7 | −4,2% |
+| 7 → 8 | −2,7% |
+| **8 → 9** | **−0,2%** |
+
+O joelho está em 4. De 8 para 9 o ganho é **0,2%** — ruído. Extrapolando a
+tendência, ir de 9 a 13 compraria talvez 1%.
+
+### O custo
+
+Cada alvo custa ~1,7 s (1,4 s de coleta + 0,3 s de transição):
+
+| protocolo | duração |
+|---|---|
+| 9 alvos | 15,3 s |
+| 13 alvos | **22,1 s** (+44%) |
+
+Para um usuário com ELA, fadiga degrada a própria medição que se está tentando
+fazer. **Recomendação: não adicionar alvos.** 1% de ganho estimado por 44% mais
+tempo de calibração é troca ruim, e o 1% é extrapolação, não medida.
+
+### Hipótese que testei e não se sustentou
+
+Nos tamanhos pequenos o espalhamento entre subconjuntos é grande (em k=4, de
+145 a 185 px), o que sugeriria que ONDE os alvos ficam importa mais que
+QUANTOS — e isso seria acionável sem custar tempo. Testado:
+
+| | corr com o erro |
+|---|---|
+| número de alvos | **−0,588** |
+| área coberta | −0,495 |
+| dispersão em torno do centróide | −0,296 |
+
+Com o número de alvos FIXO, a dispersão não explica nada de forma consistente:
+as correlações saltam entre +0,15 e −0,55 sem padrão, e ficam em ~0 nos k
+maiores. Com 6 subconjuntos por tamanho não dá para separar espalhamento de
+contagem — e dentro de cada contagem o espalhamento não aparece. A variável
+dominante é a contagem, e ela saturou.
+
+### O que esta medição NÃO responde
+
+Ela varia a DENSIDADE dentro da mesma extensão espacial. Estender a extensão —
+alvos mais excêntricos, fora da grade 3×3 — é outra pergunta, e esta gravação não
+a alcança: ela só tem a grade interior. É exatamente por isso que 0.3 acrescentou
+o anel de bordas ao teste de precisão. A pergunta continua aberta, e depende de
+uma gravação nova.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito
