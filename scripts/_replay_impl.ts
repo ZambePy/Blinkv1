@@ -43,6 +43,7 @@ import {
   POSE_DRIFT_YAW_MAX, POSE_DRIFT_PITCH_MAX, POSE_DRIFT_ROLL_MAX, MIN_ACCEPTED_SAMPLES,
 } from '../src/calibration';
 import { compensarPredicao, poseDeReferencia } from '../src/poseCompensation';
+import { compensarTranslacao, centroDeReferencia } from '../src/translationCompensation';
 import { parseJSONL } from '../src/telemetry/recorder';
 import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/types';
 
@@ -179,6 +180,8 @@ interface CliArgs {
    * contribuiu com nada.
    */
   constantShiftPx?: { x: number; y: number };
+  /** 1.4 — liga a compensação de translação lateral. */
+  translationCompensation: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -189,7 +192,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy' };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -201,6 +204,7 @@ function parseArgs(argv: string[]): CliArgs {
     // relatório histórico bit a bit; nunca para medir o pipeline atual.
     else if (a === '--use-recorded-features') args.recomputeFeatures = false;
     else if (a === '--pose-compensation') args.poseCompensation = true;
+    else if (a === '--translation-compensation') args.translationCompensation = true;
     else if (a === '--pose-compensation-gain') {
       const g = Number(argv[++i]);
       if (!Number.isFinite(g)) throw new Error(`--pose-compensation-gain espera um número; recebi '${argv[i]}'`);
@@ -374,9 +378,34 @@ interface CalibrationSample {
    *  precisa dela nos DOIS lados: para fixar a referência da calibração e para
    *  medir o desvio no frame que está sendo predito. */
   pose?: Pose;
+  /** 1.4 — ponta do nariz normalizada e escala facial do quadro. */
+  centro?: { x: number; y: number };
+  escala?: { iodPx: number; videoWidth: number; videoHeight: number };
 }
 
 interface Pose { yaw: number; pitch: number; roll: number }
+
+/**
+ * 1.4 — ponta do nariz (landmark 1) e distância interocular em px de vídeo
+ * (cantos externos 33 e 263), recomputadas dos landmarks gravados.
+ *
+ * Não vêm prontas do JSONL: `faceCenter` nunca foi um campo de telemetria. Os
+ * landmarks estão lá, então a medida é reconstruível — e recomputar é o que
+ * garante que ela descreva o pipeline de hoje.
+ */
+function centroEscalaDoFrame(
+  f: RecordedFrame, videoWidth: number, videoHeight: number,
+): { centro?: { x: number; y: number }; escala?: { iodPx: number; videoWidth: number; videoHeight: number } } {
+  const lm = f.landmarks;
+  if (!lm || lm.length < 264 * 3) return {};
+  const centro = { x: lm[1 * 3], y: lm[1 * 3 + 1] };
+  const iodPx = Math.hypot(
+    (lm[33 * 3] - lm[263 * 3]) * videoWidth,
+    (lm[33 * 3 + 1] - lm[263 * 3 + 1]) * videoHeight,
+  );
+  if (!(iodPx > 0)) return { centro };
+  return { centro, escala: { iodPx, videoWidth, videoHeight } };
+}
 
 /** 1.3 — pose gravada no frame, ou null se o gravador não a tinha. */
 function poseDoFrame(f: RecordedFrame): Pose | undefined {
@@ -401,6 +430,8 @@ interface AccuracySample {
   captureTs: number;
   frameIdx: number;
   pose?: Pose;
+  centro?: { x: number; y: number };
+  escala?: { iodPx: number; videoWidth: number; videoHeight: number };
 }
 
 // Extrai (ou re-extrai) features do frame. Se o JSONL ja tem featuresLeft/Right,
@@ -637,6 +668,7 @@ function splitFrames(
       }
       calibration.push({
         pose: poseDoFrame(f),
+        ...centroEscalaDoFrame(f, videoW, videoH),
         featuresLeft: feats.left,
         featuresRight: feats.right,
         targetXNorm: f.target.xPx / vw,
@@ -658,6 +690,7 @@ function splitFrames(
       }
       accuracy.push({
         pose: poseDoFrame(f),
+        ...centroEscalaDoFrame(f, videoW, videoH),
         featuresLeft: feats.left,
         featuresRight: feats.right,
         target: f.target,
@@ -923,6 +956,11 @@ interface Report {
     desvioPoseMedioGraus: { yaw: number; pitch: number };
     esperadoPxPorGrau: number;
   } | null;
+  /** 1.4 — média e amplitude da correção de translação aplicada, em px. */
+  correcaoTranslacao: {
+    mediaPx: { x: number; y: number };
+    amplitudePx: { x: number; y: number };
+  } | null;
   config: {
     assumedDistPx: number;
     rbfApplied: false;
@@ -1069,6 +1107,11 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   // 1.3 — pose média das amostras de calibração ACEITAS: o centróide contra o
   // qual o Ridge minimizou o erro, e portanto a única referência coerente.
   const poseRefCalib = poseDeReferencia(split.calibration.map((c) => c.pose));
+  // 1.4 — mesma lógica de referência para o centro facial.
+  const centroRefCalib = centroDeReferencia(split.calibration.map((c) => c.centro));
+  // Densidade da tela alvo. `ASSUMED_DIST_PX` já assume 96 DPI, então usar a
+  // mesma convenção aqui mantém o harness internamente coerente.
+  const PX_POR_CM = 96 / 2.54;
 
   const errors: FrameError[] = [];
   for (const s of split.accuracy) {
@@ -1090,14 +1133,26 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       : args.constantShiftPx
         ? { x: bruto.x + args.constantShiftPx.x, y: bruto.y + args.constantShiftPx.y }
         : bruto;
+
+    // 1.4 — translação aplicada depois da rotação e antes do filtro: são
+    // efeitos independentes que se somam no mesmo ponto predito.
+    const corrigido = args.translationCompensation
+      ? (() => {
+          const c = compensarTranslacao(
+            raw.x / vw, raw.y / vh, s.centro, centroRefCalib, s.escala,
+            PX_POR_CM, vw, vh,
+          );
+          return { x: c.x * vw, y: c.y * vh };
+        })()
+      : raw;
     // Timestamp em segundos (OneEuro usa segundos). captureTs vem de
     // performance.now() em ms — divide por 1000.
     const smooth = filterInNormalizedSpace
       ? (() => {
-          const sm = filter.filter(raw.x / vw, raw.y / vh, s.captureTs / 1000);
+          const sm = filter.filter(corrigido.x / vw, corrigido.y / vh, s.captureTs / 1000);
           return { x: sm.x * vw, y: sm.y * vh };
         })()
-      : filter.filter(raw.x, raw.y, s.captureTs / 1000);
+      : filter.filter(corrigido.x, corrigido.y, s.captureTs / 1000);
     const dx = smooth.x - s.target.xPx;
     const dy = smooth.y - s.target.yPx;
     const errPx = Math.hypot(dx, dy);
@@ -1118,6 +1173,27 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       );
     }
   }
+
+  // 1.4 — o que a compensação de translação de fato aplicou, em px.
+  //
+  // Média e amplitude juntas, porque só as duas separam compensação de remoção
+  // de viés: se a amplitude for desprezível ao lado da média, a correção é um
+  // deslocamento fixo com outro nome, e um `--constant-shift` a reproduz sem
+  // usar o rosto para nada.
+  const correcaoTranslacao = (() => {
+    if (!centroRefCalib) return null;
+    const xs: number[] = []; const ys: number[] = [];
+    for (const am of split.accuracy) {
+      const c = compensarTranslacao(0, 0, am.centro, centroRefCalib, am.escala, PX_POR_CM, vw, vh);
+      xs.push(c.x * vw); ys.push(c.y * vh);
+    }
+    if (xs.length === 0) return null;
+    const med = (v: number[]) => v.reduce((a, b) => a + b, 0) / v.length;
+    return {
+      mediaPx: { x: med(xs), y: med(ys) },
+      amplitudePx: { x: Math.max(...xs) - Math.min(...xs), y: Math.max(...ys) - Math.min(...ys) },
+    };
+  })();
 
   // 1.3 — o resíduo do modelo responde à pose?
   //
@@ -1279,6 +1355,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
     calibration: { uniqueTargets, ...diagCalib },
     accuracy: accSection,
     residuoVsPose,
+    correcaoTranslacao,
     config: {
       assumedDistPx: ASSUMED_DIST_PX,
       rbfApplied: false,
@@ -1292,6 +1369,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       poseCompensationGain: args.poseCompensationGain,
       poseCompensationAxes: args.poseCompensationAxes,
       constantShiftPx: args.constantShiftPx ?? null,
+      translationCompensation: args.translationCompensation,
       featureDims: activeFeatureDims(args.featureSet),
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio
       // que nao diz isso vira decisao tomada sobre configuracao errada.

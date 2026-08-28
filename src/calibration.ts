@@ -16,6 +16,8 @@ import {
 import { EXPERIMENT } from './config/experiment';
 import { compensarPredicao, poseDeReferencia } from './poseCompensation';
 import type { Pose } from './poseCompensation';
+import { compensarTranslacao, centroDeReferencia } from './translationCompensation';
+import type { CentroFacial, EscalaFacial } from './translationCompensation';
 import { estimateDistanceCm } from './setupReadiness';
 import {
   evaluateDistanceRange,
@@ -453,9 +455,38 @@ export function setCameraFovDeg(fov: number | null): void {
 }
 
 /** Chamado a cada quadro pelo engine. Barato: dois números. */
-export function setCurrentFrameGeometry(iodPx: number, videoWidth: number): void {
+export function setCurrentFrameGeometry(
+  iodPx: number,
+  videoWidth: number,
+  // 1.4 — altura e ponta do nariz. Opcionais para não quebrar os callers de
+  // teste que só exercitam a estimativa de distância (que não precisa delas).
+  videoHeight?: number,
+  centro?: CentroFacial | null,
+): void {
   currentIodPx = iodPx;
   currentVideoWidth = videoWidth;
+  latestFaceScale = iodPx > 0 && videoWidth > 0 && (videoHeight ?? 0) > 0
+    ? { iodPx, videoWidth, videoHeight: videoHeight as number }
+    : null;
+  latestFaceCenter = centro ?? null;
+}
+
+/** 1.4 — ponta do nariz e escala facial do quadro corrente. */
+let latestFaceCenter: CentroFacial | null = null;
+let latestFaceScale: EscalaFacial | null = null;
+/** Centro facial médio das amostras que treinaram o modelo. */
+let calibrationReferenceCenter: CentroFacial | null = null;
+
+export function getCalibrationReferenceCenter(): CentroFacial | null {
+  return calibrationReferenceCenter;
+}
+
+/** Densidade da tela configurada, em px por cm. A translação é 1:1 em
+ *  centímetros, então é isto — e não a distância — que a converte para pixels. */
+function screenPxPerCm(): number {
+  const g = currentCalibrationGeometry();
+  const diagPx = Math.hypot(g.screenWidthPx, g.screenHeightPx);
+  return g.screenDiagonalIn > 0 ? diagPx / (g.screenDiagonalIn * 2.54) : 0;
 }
 
 // ── 1.3 — estado da compensação geométrica de pose ─────────────────────────
@@ -1103,6 +1134,7 @@ export function startCalibrationMode(
   sessionPoseSamples = [];
   sessionPoseByTarget = [];
   calibrationReferencePose = null;
+  calibrationReferenceCenter = null;
   profile = [];
   regressorLeft = null;
   regressorRight = null;
@@ -1701,6 +1733,16 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
       const q = a.quality;
       return q && typeof q.yaw === 'number' && typeof q.pitch === 'number' && typeof q.roll === 'number'
         ? { yaw: q.yaw, pitch: q.pitch, roll: q.roll }
+        : null;
+    }),
+  );
+
+  // 1.4 — centro facial de referência, das mesmas amostras que treinaram.
+  calibrationReferenceCenter = centroDeReferencia(
+    trainingProfile.map((a) => {
+      const q = a.quality;
+      return q && typeof q.faceCenterX === 'number' && typeof q.faceCenterY === 'number'
+        ? { x: q.faceCenterX, y: q.faceCenterY }
         : null;
     }),
   );
@@ -2679,7 +2721,11 @@ export function mapGaze(
   // é quase constante durante o teste de precisão, então `d · tan(Δ)` degenera
   // em deslocamento fixo. Testar de verdade exige gravação com movimento de
   // cabeça deliberado.
-  const comPose = EXPERIMENT.geometricPoseCompensation
+  // 1.4 — translação lateral, aplicada depois da rotação: são efeitos
+  // independentes que se somam no mesmo ponto predito. DESLIGADA por default —
+  // na gravação de referência o rosto translada 0,25 cm no teste inteiro, e o
+  // ganho medido empata com um deslocamento fixo que não olha o rosto.
+  const comPose0 = EXPERIMENT.geometricPoseCompensation
     ? compensarPredicao(
         compensado.x, compensado.y,
         latestPose, calibrationReferencePose,
@@ -2688,6 +2734,16 @@ export function mapGaze(
         document.documentElement.clientHeight,
       )
     : compensado;
+
+  const comPose = EXPERIMENT.lateralTranslationCompensation
+    ? compensarTranslacao(
+        comPose0.x, comPose0.y,
+        latestFaceCenter, calibrationReferenceCenter, latestFaceScale,
+        screenPxPerCm(),
+        document.documentElement.clientWidth,
+        document.documentElement.clientHeight,
+      )
+    : comPose0;
 
   const avgNormX = softClamp(comPose.x);
   const avgNormY = softClamp(comPose.y);

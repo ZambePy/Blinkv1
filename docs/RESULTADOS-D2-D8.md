@@ -43,6 +43,96 @@ Data: **2026-08-25**. Baseline referência: **57 px / 0,9°** (Rodada A, sem
 
 ---
 
+## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
+
+`src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito
+independente da que gira (1.3). Se o olho passa de `e₀` para `e₀ + t` e o usuário
+olha para o mesmo ponto, o modelo — ajustado em `e₀` — prevê `S − t`. A correção
+é somar `t`, **exatamente `t`**, sem escalar por distância: tela e olho transladam
+no mesmo plano, então mover o olho 1 cm move o ponto olhado 1 cm.
+
+### O campo de visão cancela — a tarefa não precisa dele
+
+A tarefa foi descrita como "usar `latestFaceCenter` + o FOV calibrado". O FOV não
+é necessário. Com `D` a distância câmera→rosto e `tanH = tan(FOV_h/2)`:
+
+    X_cm = 2 · Δx_norm · D · tanH          (deslocamento do nariz)
+    IOD_cm = 2 · iod_norm · D · tanH       (a mesma relação, para os olhos)
+
+Dividindo, `D` e `tanH` somem dos dois lados:
+
+    X_cm = IOD_cm · Δx_norm · larguraVideo / iod_px
+
+Medir o deslocamento do nariz **em unidades da distância interocular** e
+multiplicar pela distância interocular física. Sobra uma única suposição — o IOD
+de 6,3 cm — e ela é muito menos incerta que o FOV, que é justamente o parâmetro
+duvidoso do setup (a webcam declara 90°, número que fabricantes costumam dar na
+diagonal e inflar).
+
+Isso importa além de 1.4: qualquer correção que dependesse do FOV herdaria essa
+incerteza. Esta não depende.
+
+### Quanto a cabeça de fato translada
+
+| janela | amplitude X | amplitude Y | p90 do desvio |
+|---|---|---|---|
+| calibração (514 frames) | 0,49 cm | 0,53 cm | 0,23 / 0,27 cm |
+| teste de precisão (455 frames) | **0,25 cm** | **0,15 cm** | 0,10 / 0,06 cm |
+
+A 36,8 px/cm, os 0,25 cm do teste inteiro são **9 px** de tela, contra 144,6 px
+de erro. Coerente com 1.1: a cabeça do usuário-alvo fica parada.
+
+### Tabela — mesma gravação, mesmo filtro
+
+| variante | meanErrorInner | mediana | p90 | Δ |
+|---|---|---|---|---|
+| sem compensação | 144,6 px | 71,3 | 410,1 | — |
+| **1.4 translação lateral** | **138,6 px** | 63,1 | 409,9 | **−4,2%** |
+| 1.3 + 1.4 juntas | 161,7 px | 91,4 | 431,6 | +11,8% |
+
+Reproduzível com `npm run replay -- --translation-compensation`.
+
+### O mesmo controle de 1.3, e o mesmo veredito
+
+A correção aplicada tem média (−4,5, −13,9) px e amplitude (9,6, 5,7) px. A
+média domina a variação, o que já sugere deslocamento fixo com outro nome:
+
+| variante | meanErrorInner | mediana | Δ |
+|---|---|---|---|
+| sem nada | 144,6 px | 71,3 | — |
+| 1.4 translação lateral (usa o rosto) | 138,6 px | 63,1 | −4,2% |
+| **CONTROLE: deslocamento fixo (−4,5, −13,9) px** | **139,1 px** | 63,6 | **−3,9%** |
+
+Dos 6,0 px de ganho, **5,5 px são remoção de viés** que um deslocamento fixo
+reproduz sem olhar o rosto. Sobram ~0,5 px vindos de rastrear a translação de
+verdade — dentro do ruído, e coerente com os 9 px de amplitude física medidos.
+
+Diferente de 1.3, 1.4 não piora. Mas também não está validada: a gravação não
+tem translação suficiente para testá-la.
+
+`lateralTranslationCompensation` fica **desligada**, com o módulo implementado,
+testado (13 testes) e ligado em `mapGaze` e no harness.
+
+### Ligar 1.3 e 1.4 juntas é pior que qualquer uma sozinha
+
++11,8%, contra +5,6% de 1.3 sozinha. As duas correções apontam para o mesmo
+viés sistemático e o corrigem duas vezes. É mais um indício de que ambas estão
+medindo o viés, não o efeito que modelam.
+
+### Pista sobre a distância assumida, que 2.1 tem que resolver
+
+A estimativa de distância câmera→rosto na gravação dá **~32 cm**, não os 60 cm
+que `ASSUMED_DIST_PX = 2268` embute. Se estiver certa, o ganho geométrico de 1.3
+seria ~20 px/grau em vez de 39,6 — **exatamente o fator ~0,5 que a varredura de
+1.3 encontrou como ótimo em Y**.
+
+A convergência é sugestiva, mas a estimativa depende do FOV de 90° declarado
+pelo fabricante: com 60° reais ela viraria ~55 cm. **Não é conclusão, é a razão
+pela qual 2.1 (calibrar o FOV) deixou de ser limpeza e virou pré-requisito.**
+Com a distância certa, 1.3 pode deixar de ser um parâmetro para virar geometria.
+
+---
+
 ## 1.3 — a compensação geométrica está implementada, e esta gravação não consegue testá-la
 
 `src/poseCompensation.ts` aplica `d · tan(Δ)` na saída, contra a pose média das

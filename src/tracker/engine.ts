@@ -571,7 +571,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         latestFaceCenter = { x: landmarks[1].x, y: landmarks[1].y };
         // D12 — alimenta a compensação de distância. Dois números por quadro;
         // `mapGaze` converte para cm usando o campo de visão calibrado.
-        calibration.setCurrentFrameGeometry(latestIodPx, videoEl?.videoWidth ?? 0);
+        // 1.4 — altura e ponta do nariz também, para a compensação de
+        // translação lateral. `latestFaceCenter` já é o landmark 1.
+        calibration.setCurrentFrameGeometry(
+          latestIodPx, videoEl?.videoWidth ?? 0, videoEl?.videoHeight ?? 0, latestFaceCenter,
+        );
 
         const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
         const faceMatrix = rawMatrix ? new Float32Array(rawMatrix) : undefined;
@@ -659,6 +663,13 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             // ratio de correção geométrica (flag off por default). Viaja
             // junto do `quality` pra não exigir um novo canal só pra isso.
             cameraDistanceEstimate: face?.cameraDistanceEstimate,
+            // 1.4 — centro facial e escala viajam junto do `quality` pelo mesmo
+            // motivo que `cameraDistanceEstimate`: evita um canal novo só para
+            // isso, e assim entram em `profile[].quality`, que é de onde a
+            // referência de calibração é calculada.
+            faceCenterX: latestFaceCenter.x,
+            faceCenterY: latestFaceCenter.y,
+            iodPx: latestIodPx,
           };
 
           if (face) {

@@ -72,6 +72,19 @@ export interface ExperimentConfig {
    * gravação com movimento de cabeça deliberado, que a base atual não tem.
    */
   geometricPoseCompensation: boolean;
+  /**
+   * 1.4 — compensação de TRANSLAÇÃO lateral da cabeça
+   * (`src/translationCompensation.ts`).
+   *
+   * Independente de 1.3: aquela corrige a cabeça girando, esta a cabeça
+   * deslizando. A correção é 1:1 em centímetros e não depende do FOV — ele
+   * cancela na álgebra, ver o módulo.
+   *
+   * DEFAULT false. Não por medir pior, mas por não haver o que medir: na
+   * gravação de referência o rosto translada 0,25 cm durante o teste inteiro,
+   * ou ~9 px de tela contra 144,6 px de erro.
+   */
+  lateralTranslationCompensation: boolean;
 }
 
 const DEFAULTS: ExperimentConfig = {
@@ -85,6 +98,7 @@ const DEFAULTS: ExperimentConfig = {
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
   applyDistanceCorrection: false, // D5.2 — desligado até gravação com aproximação/afastamento comprovar ganho
   geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
+  lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
 };
 
 const STORAGE_KEY = 'irisflow.experiment';
