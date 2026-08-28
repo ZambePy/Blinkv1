@@ -527,10 +527,43 @@ export function extractEyeFeatures(
     featuresRight.push(p.x, p.y, p.z);
   }
 
-  // Basic Euler angles from landmarks
-  let yaw = Math.atan2(xAxis.y, xAxis.x);
-  let pitch = Math.atan2(-xAxis.z, Math.sqrt(yAxis.z ** 2 + zAxis.z ** 2));
-  let roll = Math.atan2(yAxis.z, zAxis.z);
+  // 2.3 — ângulos de Euler a partir dos landmarks, quando não há matriz facial.
+  //
+  // A versão anterior era:
+  //     yaw   = atan2(xAxis.y, xAxis.x)                    ← isto é ROLL
+  //     pitch = atan2(-xAxis.z, hypot(yAxis.z, zAxis.z))   ← isto é YAW
+  //     roll  = atan2(yAxis.z, zAxis.z)                    ← isto é PITCH
+  //
+  // Permutação cíclica. `xAxis` é a linha entre os cantos externos dos olhos: o
+  // ângulo dela NO PLANO DA IMAGEM é a inclinação da cabeça (roll), e o
+  // componente z dela cresce quando a cabeça VIRA (yaw). Quem mede pitch é o
+  // eixo vertical inclinando para perto ou longe da câmera.
+  //
+  // A causa é uma troca de FRAME. Os landmarks vêm em coordenadas de imagem
+  // (x direita, y para BAIXO, z negativo em direção à câmera), enquanto a
+  // matriz facial do MediaPipe vem em coordenadas métricas (y para CIMA, z na
+  // direção do observador). Passar de um para o outro é uma rotação de 180°
+  // em torno de X:
+  //
+  //     F = diag(1, −1, −1)      R_métrico = F · R_imagem
+  //
+  // Com `R_imagem = [xAxis | yAxis | zAxis]`, aplicar F é negar as linhas y e z,
+  // e daí valem as MESMAS fórmulas do caminho da matriz logo abaixo
+  // (pitch = asin(−R12), yaw = atan2(R02, R22), roll = atan2(R10, R11)):
+  //
+  //     R12 = −zAxis.y   R02 = zAxis.x   R22 = −zAxis.z
+  //     R10 = −xAxis.y   R11 = −yAxis.y
+  //
+  // Os dois caminhos passam a concordar, o que o teste em extractor.euler.test.ts
+  // exige em quatro rotações conhecidas.
+  //
+  // ⚠️ ALCANCE REAL: este fallback não roda no app. `outputFacialTransformationMatrixes`
+  // está ligado e a gravação de referência tem matriz válida em 100% dos 3147
+  // quadros. É bug latente — só apareceria se o MediaPipe deixasse de entregar
+  // a matriz, e aí em silêncio, com a pose girada de eixo.
+  let pitch = Math.asin(Math.max(-1, Math.min(1, zAxis.y)));
+  let yaw = Math.atan2(zAxis.x, -zAxis.z);
+  let roll = Math.atan2(-xAxis.y, -yAxis.y);
 
   let pos3D = eyeCenter;
   let scale3D = interEyeDistRaw;

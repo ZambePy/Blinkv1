@@ -191,6 +191,60 @@ antes/depois — fica como item próprio, não entra de carona nesta refatoraç�
 
 ---
 
+## 2.3 — os três ângulos de Euler do fallback estavam trocados entre si
+
+Quando não há `facialTransformationMatrixes`, o extractor deriva a pose dos
+próprios landmarks. As três linhas eram:
+
+| escrito | é de fato |
+|---|---|
+| `yaw = atan2(xAxis.y, xAxis.x)` | **roll** |
+| `pitch = atan2(−xAxis.z, hypot(yAxis.z, zAxis.z))` | **yaw** |
+| `roll = atan2(yAxis.z, zAxis.z)` | **pitch** |
+
+Permutação cíclica. `xAxis` é a linha entre os cantos externos dos olhos: o
+ângulo dela no plano da imagem é a inclinação da cabeça (roll), e o componente
+z dela cresce quando a cabeça vira (yaw). Quem mede pitch é o eixo vertical
+inclinando para perto ou longe da câmera.
+
+### A causa: troca de frame, não três erros independentes
+
+Os landmarks vêm em coordenadas de **imagem** (x direita, y para BAIXO, z
+negativo em direção à câmera). A matriz facial vem em coordenadas **métricas**
+(y para CIMA, z na direção do observador). Entre os dois há uma rotação de 180°
+em torno de X:
+
+    F = diag(1, −1, −1)        R_métrico = F · R_imagem
+
+O fallback extraía Euler das coordenadas de imagem como se já fossem métricas.
+Aplicando F — negar as linhas y e z de `R = [xAxis | yAxis | zAxis]` — valem as
+MESMAS fórmulas do caminho da matriz, e os dois passam a concordar:
+
+    pitch = asin(zAxis.y)      yaw = atan2(zAxis.x, −zAxis.z)
+    roll  = atan2(−xAxis.y, −yAxis.y)
+
+O teste exige concordância entre os dois caminhos em quatro rotações conhecidas
+(yaw ±12°, roll 10°, pitch 8°) e que a cabeça de frente devolva zero nos três
+eixos — o que a versão antiga não fazia: dava 3,4° de pitch com a cabeça reta.
+
+### Alcance real: bug latente, não ativo
+
+| | |
+|---|---|
+| `outputFacialTransformationMatrixes` | ligado em `engine.ts` |
+| quadros da gravação com matriz válida | **3147 / 3147 (100%)** |
+| quadros que caem no fallback | **0** |
+
+Baseline inalterado: **144,6 px**. O fallback só rodaria se o MediaPipe deixasse
+de entregar a matriz — e aí em silêncio, com a pose girada de eixo, alimentando
+o gate de pose, a telemetria e as compensações de 1.3/1.4 com os eixos trocados.
+
+Vale registrar que a versão antiga não era detectável pelos testes existentes
+justamente porque nunca roda: nenhum caminho de produção a exercita. Foi
+preciso construir rotações sintéticas com frame explícito para vê-la.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito
