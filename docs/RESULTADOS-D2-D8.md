@@ -369,6 +369,105 @@ tanto quanto `'ready'`.
 
 ---
 
+## 3.1 — o posto efetivo é 2,2, e a redundância NÃO é o problema
+
+### O espectro
+
+Autovalores da matriz de correlação das features de calibração (Jacobi, 12x12):
+
+| | `iris12` (12 dims) | `iris12+pose` (15) |
+|---|---|---|
+| posto efetivo (razão de participação) | **2,20** | 2,84 |
+| autovalores > 1% do maior | 4 | 5 |
+| componentes para 99% da variância | 4 | 5 |
+| número de condição | 3,58 x 10^5 | 6,86 x 10^5 |
+
+Autovalores do `iris12`: 6,42 · 4,89 · 0,51 · 0,16 · 0,010 · 0,002 · ...
+
+Doze dimensões carregam ~2,2 dimensões de informação. Faz sentido pela
+construção: `relX = offsetX / largura` com largura quase constante é múltiplo
+escalar de `offsetX`; e os quatro pontos do contorno da íris transladam juntos,
+duplicando o offset.
+
+### A hipótese era que isso desperdiçava capacidade. É falso.
+
+Projetando nas k primeiras componentes principais:
+
+| variante | lambda | treino | LOO/alvo | accuracy | delta |
+|---|---|---|---|---|---|
+| `iris12` completo | 0,01 | 41,1 | 96,9 | **144,6** | — |
+| PCA k=2 | 0,1 | 257,4 | 379,6 | 262,9 | **+81,7%** |
+| PCA k=3 | 0,215 | 149,5 | 297,7 | 190,8 | +31,9% |
+| PCA k=4 | 0,0215 | 69,7 | 123,7 | 181,8 | +25,7% |
+| PCA k=6 | 0,0001 | 50,6 | 93,5 | 151,7 | +4,9% |
+| PCA k=8 | 0,0001 | 48,6 | 107,1 | 148,2 | +2,4% |
+| PCA k=12 (rotação pura) | 0,0001 | 35,9 | 93,1 | 132,8 | −8,2% |
+
+**Truncar piora em todo k.** Mesmo k=6, que captura mais de 99,9% da variância,
+custa 4,9%.
+
+A razão é que PCA ordena por VARIÂNCIA, não por relevância ao alvo — e aqui o
+sinal de olhar mora nas direções de baixa variância. É coerente com o orçamento
+de pixels já conhecido: a íris percorre ~5,7 px de vídeo entre as colunas
+extremas de alvos, enquanto pose, escala e ruído produzem variação muito maior.
+**Descartar variância pequena descarta exatamente o sinal.**
+
+### Os −8,2% de k=12 eram o lambda, não a rotação
+
+Com lambda fixo nos dois lados:
+
+| | lambda = 0,0001 | lambda = 0,01 |
+|---|---|---|
+| features cruas | 134,5 px | 146,7 px |
+| PCA k=12 | 132,7 px | 132,8 px |
+
+A rotação vale 1,8 px. O resto era o CV ter escolhido lambda diferente para cada
+uma. E isso levantou a pergunta que rendeu.
+
+### O achado que rendeu: o lambda era escolhido em fração de tela
+
+A varredura de lambda nas features cruas é **monótona**:
+
+| lambda | 0,0001 | 0,001 | 0,00464 | **0,01** | 0,1 | 1 |
+|---|---|---|---|---|---|---|
+| accuracy | 134,5 | 139,3 | 143,2 | **146,7** | 158,2 | 187,7 |
+| LOO/alvo | 85,8 | **81,4** | 84,3 | 89,0 | 120,0 | 218,7 |
+
+O CV escolhia 0,01 — pior que 0,001 no próprio critério LOO por alvo, que é o
+que ele deveria estar otimizando.
+
+A causa é uma conflação de unidades, a mesma família de um erro que já apareceu
+antes neste projeto: `selectLambdaCV` somava `dx^2 + dy^2` com `screenX/screenY`
+em **fração de tela**. Fração de tela não é uma grandeza única — numa tela 16:9
+uma unidade de x vale 1920 px e uma de y vale 1080. O erro em X entrava
+ponderado por (1080/1920)^2 = 0,32 do que vale para o usuário.
+
+### Resultado
+
+| variante | lambda | treino | LOO/alvo | accuracy | mediana | p90 |
+|---|---|---|---|---|---|---|
+| CV em fração de tela (antes) | 0,01 | 41,1 | 96,9 | **144,6** | 71,3 | 410,1 |
+| **CV em pixels (novo default)** | 0,00464 | 38,3 | **92,5** | **140,7** | **67,0** | 415,3 |
+
+**−2,7%.** Modesto, mas melhora nos DOIS critérios — e o LOO por alvo é
+independente do teste de precisão, então não é ajuste na base de avaliação. É
+correção de unidade, não sintonia.
+
+### O que eu afirmei e a medição derrubou
+
+Propus que o CV super-regularizava por ser dominado pelo eixo Y, que tem sinal
+6x atenuado (2.1). **Não se sustenta.** Uma varredura em dados sintéticos com
+ruído assimétrico mostra a ponderação escolhendo lambda **maior**, não menor: a
+direção depende de qual eixo é mais difícil no conjunto. O que está estabelecido
+é que a unidade estava errada e que corrigi-la melhora esta gravação nos dois
+critérios. O porquê da direção, não.
+
+Pelo mesmo motivo, lambda = 0,0001 — que mede melhor de todos — **não** foi
+adotado: escolhê-lo pelo teste de precisão seria ajustar na base de avaliação, o
+erro que 1.2 documentou.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito

@@ -1782,6 +1782,24 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   const targetsX = trainTargets.map(t => t.screenX);
   const targetsY = trainTargets.map(t => t.screenY);
 
+  // 3.1 — o λ passa a ser escolhido pelo erro em PIXELS, não em fração de tela.
+  //
+  // `screenX/screenY` são frações, e fração de tela não é uma grandeza única:
+  // numa tela 16:9 uma unidade de x vale 1920 px e uma de y vale 1080. O CV
+  // somava `dx² + dy²` cru, subponderando o erro em X por (1920/1080)² = 3,16×
+  // e escolhendo λ quase só pelo eixo Y — justamente o eixo com sinal 6×
+  // atenuado pela pálpebra (ver 2.1). Daí regularização excessiva.
+  //
+  // Medido: o λ escolhido cai de 0,01 para 0,00464, e melhora nos DOIS
+  // critérios — accuracy 144,6 → 140,7 px e LOO por alvo 96,9 → 92,5 px. O LOO
+  // é independente do teste de precisão, então não é ajuste na base de avaliação.
+  {
+    const g = currentCalibrationGeometry();
+    if (g.screenWidthPx > 0 && g.screenHeightPx > 0) {
+      RidgeRegressor.axisScale = { x: g.screenWidthPx, y: g.screenHeightPx };
+    }
+  }
+
   regressorLeft = createRegressor(REGRESSOR_MODE);
   regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY);
   regressorRight = createRegressor(REGRESSOR_MODE);

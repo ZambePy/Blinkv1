@@ -320,6 +320,21 @@ export class RidgeRegressor {
     this.model = model ?? null;
   }
 
+  /** 3.1 — quando não é `null`, substitui o λ escolhido por validação cruzada.
+   *  Só o harness escreve aqui; o app nunca toca. Existe porque comparar duas
+   *  variantes com λ diferentes mistura duas mudanças numa medição só. */
+  static lambdaOverride: number | null = null;
+
+  /**
+   * 3.1 — pesos por eixo na escolha de λ, em pixels de tela.
+   *
+   * O default `{1, 1}` reproduz o comportamento histórico (fração de tela
+   * tratada como grandeza única). O caller que conhece a geometria passa a
+   * largura e a altura reais, e aí o λ é escolhido pelo erro que o usuário de
+   * fato vê.
+   */
+  static axisScale: { x: number; y: number } = { x: 1, y: 1 };
+
   train(features: number[][], targetsX: number[], targetsY: number[]): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
     // D9 — agrupamento por alvo. Habilita a penalidade branqueada e é o mesmo
@@ -339,7 +354,9 @@ export class RidgeRegressor {
       100, 215, 464,
       1000,
     ];
-    const bestLambda = this.selectLambdaCV(features, targets, lambdas, groups);
+    // 3.1 — override de λ para o harness poder isolar o efeito de uma variante
+    // do efeito de o CV ter escolhido outro λ. `null` (default) mantém o CV.
+    const bestLambda = RidgeRegressor.lambdaOverride ?? this.selectLambdaCV(features, targets, lambdas, groups);
 
     // A1-3 — escalonamento defensivo. O CV pode escolher λ ótimo sobre
     // folds parciais, mas o treino final (com TODAS as amostras) pode ter
@@ -455,8 +472,16 @@ export class RidgeRegressor {
           let sq = 0;
           for (let i = 0; i < zTest.length; i++) {
             const pred = predictRidge(model, zTest[i]);
-            const dx = pred.x - testTargets[i].screenX;
-            const dy = pred.y - testTargets[i].screenY;
+            // 3.1 — cada eixo pesa pela SUA dimensão em pixels.
+            //
+            // `screenX/screenY` são frações de tela, e fração de tela não é uma
+            // grandeza única: numa tela 16:9 uma unidade de x vale 1920 px e uma
+            // de y vale 1080. Somar `dx² + dy²` cru subponderava o erro em X por
+            // (1920/1080)² = 3,16×, então o λ era escolhido quase só pelo eixo Y
+            // — que é justamente o eixo com sinal 6× atenuado (ver 2.1). O
+            // resultado era regularização excessiva.
+            const dx = (pred.x - testTargets[i].screenX) * RidgeRegressor.axisScale.x;
+            const dy = (pred.y - testTargets[i].screenY) * RidgeRegressor.axisScale.y;
             sq += dx * dx + dy * dy;
           }
           foldErrorSum += zTest.length > 0 ? sq / zTest.length : 0;

@@ -182,6 +182,20 @@ interface CliArgs {
   constantShiftPx?: { x: number; y: number };
   /** 1.4 — liga a compensação de translação lateral. */
   translationCompensation: boolean;
+  /** 3.1 — projeta as features nas k primeiras componentes principais, para
+   *  medir se a redundância do vetor custa. 0 = desligado. */
+  pca: number;
+  /**
+   * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
+   *
+   * Nasce TRUE, porque é o que o app faz. O harness que descreve outro
+   * pipeline que não o do build é como `ci-baseline-a2` mediu 44 dims horas
+   * depois do commit que reduziu para 12 — ver `FEATURE_VECTOR_ID`.
+   * `--normalized-cv` reproduz o comportamento antigo, para comparação.
+   */
+  axisWeightedCv: boolean;
+  /** 3.1 — força um λ, em vez de deixar o CV escolher. */
+  lambda?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -192,7 +206,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -205,6 +219,18 @@ function parseArgs(argv: string[]): CliArgs {
     else if (a === '--use-recorded-features') args.recomputeFeatures = false;
     else if (a === '--pose-compensation') args.poseCompensation = true;
     else if (a === '--translation-compensation') args.translationCompensation = true;
+    else if (a === '--axis-weighted-cv') args.axisWeightedCv = true;
+    else if (a === '--normalized-cv') args.axisWeightedCv = false;
+    else if (a === '--lambda') {
+      const v = Number(argv[++i]);
+      if (!Number.isFinite(v) || v <= 0) throw new Error(`--lambda espera um número > 0; recebi '${argv[i]}'`);
+      args.lambda = v;
+    }
+    else if (a === '--pca') {
+      const k = Number(argv[++i]);
+      if (!Number.isInteger(k) || k < 1) throw new Error(`--pca espera um inteiro >= 1; recebi '${argv[i]}'`);
+      args.pca = k;
+    }
     else if (a === '--pose-compensation-gain') {
       const g = Number(argv[++i]);
       if (!Number.isFinite(g)) throw new Error(`--pose-compensation-gain espera um número; recebi '${argv[i]}'`);
@@ -785,7 +811,200 @@ function ganhoPose(
   return { yawX: porGrau(mod.betaX, 12, vw), pitchY: porGrau(mod.betaY, 13, vh) };
 }
 
+/**
+ * 3.1 — autovalores da matriz de correlação das features, por Jacobi.
+ *
+ * Jacobi cíclico e não SVD porque a matriz é simétrica, pequena (12×12 a 21×21)
+ * e o algoritmo cabe em vinte linhas sem dependência — importar uma biblioteca
+ * de álgebra linear para isso seria custo maior que o benefício.
+ *
+ * A entrada é a matriz de CORRELAÇÃO, não a de covariância: as dimensões do
+ * `iris12` têm escalas diferentes (offset em unidades de frame, contorno da
+ * íris em coordenadas rotacionadas), e a covariância deixaria a maior escala
+ * dominar o espectro por um motivo que nada tem a ver com redundância.
+ */
+function autovaloresPorJacobi(A: number[][], iteracoes = 100): number[] {
+  const n = A.length;
+  const M = A.map((linha) => [...linha]);
+  for (let varredura = 0; varredura < iteracoes; varredura++) {
+    let foraDaDiagonal = 0;
+    for (let p = 0; p < n - 1; p++) for (let q = p + 1; q < n; q++) foraDaDiagonal += M[p][q] ** 2;
+    if (foraDaDiagonal < 1e-14) break;
+    for (let p = 0; p < n - 1; p++) {
+      for (let q = p + 1; q < n; q++) {
+        if (Math.abs(M[p][q]) < 1e-15) continue;
+        const theta = (M[q][q] - M[p][p]) / (2 * M[p][q]);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const sJ = t * c;
+        for (let k = 0; k < n; k++) {
+          const mkp = M[k][p], mkq = M[k][q];
+          M[k][p] = c * mkp - sJ * mkq;
+          M[k][q] = sJ * mkp + c * mkq;
+        }
+        for (let k = 0; k < n; k++) {
+          const mpk = M[p][k], mqk = M[q][k];
+          M[p][k] = c * mpk - sJ * mqk;
+          M[q][k] = sJ * mpk + c * mqk;
+        }
+      }
+    }
+  }
+  return M.map((_, i) => M[i][i]).sort((a, b) => b - a);
+}
+
+/**
+ * 3.1 — quanto do vetor de features é redundante.
+ *
+ * `participacao` é a razão de participação `(Σλ)² / Σλ²`. Vale d quando todas as
+ * direções contribuem igualmente e 1 quando uma só domina — é a leitura mais
+ * honesta de "quantas dimensões independentes existem de fato", porque não
+ * depende de escolher um limiar arbitrário.
+ *
+ * `acima1pct` conta autovalores acima de 1% do maior, e serve de segunda
+ * opinião: as duas medidas discordando é sinal de espectro com cauda longa.
+ *
+ * `condicao` é λ_max/λ_min. Acima de ~1e6 a solução do sistema normal perde
+ * metade dos dígitos em precisão dupla.
+ */
+/**
+ * 3.1 — autovetores da matriz de correlação, para projetar o vetor.
+ *
+ * Mesma rotina de Jacobi, mas acumulando a matriz de rotação: as colunas de V
+ * são os autovetores, na mesma ordem dos autovalores.
+ */
+function autoDecomposicao(A: number[][], iteracoes = 100): { lam: number[]; V: number[][] } {
+  const n = A.length;
+  const M = A.map((l) => [...l]);
+  const V: number[][] = Array.from({ length: n }, (_, i) =>
+    Array.from({ length: n }, (_, j) => (i === j ? 1 : 0)));
+  for (let varredura = 0; varredura < iteracoes; varredura++) {
+    let fora = 0;
+    for (let p = 0; p < n - 1; p++) for (let q = p + 1; q < n; q++) fora += M[p][q] ** 2;
+    if (fora < 1e-14) break;
+    for (let p = 0; p < n - 1; p++) {
+      for (let q = p + 1; q < n; q++) {
+        if (Math.abs(M[p][q]) < 1e-15) continue;
+        const theta = (M[q][q] - M[p][p]) / (2 * M[p][q]);
+        const t = Math.sign(theta || 1) / (Math.abs(theta) + Math.sqrt(theta * theta + 1));
+        const c = 1 / Math.sqrt(t * t + 1);
+        const sj = t * c;
+        for (let k = 0; k < n; k++) {
+          const a = M[k][p], b = M[k][q];
+          M[k][p] = c * a - sj * b; M[k][q] = sj * a + c * b;
+        }
+        for (let k = 0; k < n; k++) {
+          const a = M[p][k], b = M[q][k];
+          M[p][k] = c * a - sj * b; M[q][k] = sj * a + c * b;
+        }
+        for (let k = 0; k < n; k++) {
+          const a = V[k][p], b = V[k][q];
+          V[k][p] = c * a - sj * b; V[k][q] = sj * a + c * b;
+        }
+      }
+    }
+  }
+  const ordem = M.map((_, i) => i).sort((a, b) => M[b][b] - M[a][a]);
+  return {
+    lam: ordem.map((i) => M[i][i]),
+    V: V.map((linha) => ordem.map((i) => linha[i])),
+  };
+}
+
+/**
+ * 3.1 — projeção nas k primeiras componentes principais.
+ *
+ * Ajustada SÓ nas amostras de calibração e aplicada também às de precisão, como
+ * qualquer transformação aprendida. É não-supervisionada, então não há
+ * vazamento de alvo — o que ela usa é a estrutura de covariância das features,
+ * não a resposta.
+ */
+class ProjecaoPCA {
+  private media: number[] = [];
+  private desvio: number[] = [];
+  private V: number[][] = [];
+  private k = 0;
+
+  fit(amostras: number[][], k: number): void {
+    const m = amostras.length, d = amostras[0].length;
+    this.k = Math.max(1, Math.min(k, d));
+    this.media = new Array<number>(d).fill(0);
+    for (const a of amostras) for (let j = 0; j < d; j++) this.media[j] += a[j];
+    for (let j = 0; j < d; j++) this.media[j] /= m;
+    this.desvio = new Array<number>(d).fill(0);
+    for (const a of amostras) for (let j = 0; j < d; j++) this.desvio[j] += (a[j] - this.media[j]) ** 2;
+    for (let j = 0; j < d; j++) this.desvio[j] = Math.sqrt(this.desvio[j] / m) || 1;
+
+    const R: number[][] = Array.from({ length: d }, () => new Array<number>(d).fill(0));
+    for (const a of amostras) {
+      for (let i = 0; i < d; i++) {
+        const zi = (a[i] - this.media[i]) / this.desvio[i];
+        for (let j = i; j < d; j++) R[i][j] += zi * ((a[j] - this.media[j]) / this.desvio[j]);
+      }
+    }
+    for (let i = 0; i < d; i++) for (let j = i; j < d; j++) { R[i][j] /= m; R[j][i] = R[i][j]; }
+    this.V = autoDecomposicao(R).V;
+  }
+
+  transform(v: number[]): number[] {
+    const d = this.media.length;
+    const z = new Array<number>(d);
+    for (let j = 0; j < d; j++) z[j] = (v[j] - this.media[j]) / this.desvio[j];
+    const out = new Array<number>(this.k).fill(0);
+    for (let c = 0; c < this.k; c++) {
+      let acc = 0;
+      for (let j = 0; j < d; j++) acc += z[j] * this.V[j][c];
+      out[c] = acc;
+    }
+    return out;
+  }
+}
+
+function espectroDeFeatures(amostras: number[][]): {
+  dims: number; autovalores: number[]; participacao: number; acima1pct: number; condicao: number;
+} | null {
+  const m = amostras.length;
+  if (m < 2) return null;
+  const d = amostras[0].length;
+  if (d === 0) return null;
+
+  const media = new Array<number>(d).fill(0);
+  for (const a of amostras) for (let j = 0; j < d; j++) media[j] += a[j];
+  for (let j = 0; j < d; j++) media[j] /= m;
+  const desvio = new Array<number>(d).fill(0);
+  for (const a of amostras) for (let j = 0; j < d; j++) desvio[j] += (a[j] - media[j]) ** 2;
+  for (let j = 0; j < d; j++) desvio[j] = Math.sqrt(desvio[j] / m) || 1;
+
+  const R: number[][] = Array.from({ length: d }, () => new Array<number>(d).fill(0));
+  for (const a of amostras) {
+    for (let i = 0; i < d; i++) {
+      const zi = (a[i] - media[i]) / desvio[i];
+      for (let j = i; j < d; j++) R[i][j] += zi * ((a[j] - media[j]) / desvio[j]);
+    }
+  }
+  for (let i = 0; i < d; i++) for (let j = i; j < d; j++) { R[i][j] /= m; R[j][i] = R[i][j]; }
+
+  const lam = autovaloresPorJacobi(R).map((v) => Math.max(0, v));
+  const soma = lam.reduce((a, b) => a + b, 0);
+  const somaQuad = lam.reduce((a, b) => a + b * b, 0);
+  const maior = lam[0] || 1;
+  const menor = lam[lam.length - 1];
+  return {
+    dims: d,
+    autovalores: lam.map((v) => Number(v.toFixed(6))),
+    participacao: somaQuad > 0 ? (soma * soma) / somaQuad : 0,
+    acima1pct: lam.filter((v) => v > maior * 0.01).length,
+    condicao: menor > 1e-12 ? maior / menor : Infinity,
+  };
+}
+
 class ReplayRegressor {
+  /** 3.1 — k componentes principais, ou 0 para usar as features cruas.
+   *  Estático porque `diagnose` instancia o regressor internamente e a
+   *  variante tem que valer para todas as instâncias da execução. */
+  static pcaK = 0;
+  private pcaL: ProjecaoPCA | null = null;
+  private pcaR: ProjecaoPCA | null = null;
   private scalerL = new StandardScaler();
   private scalerR = new StandardScaler();
   ridgeL = new RidgeRegressor();
@@ -796,10 +1015,19 @@ class ReplayRegressor {
     if (samples.length < 2) {
       throw new Error(`Precisa de ao menos 2 amostras de calibracao para treinar (recebi ${samples.length})`);
     }
-    const rawL = samples.map((s) => s.featuresLeft);
-    const rawR = samples.map((s) => s.featuresRight);
+    let rawL = samples.map((s) => s.featuresLeft);
+    let rawR = samples.map((s) => s.featuresRight);
     const tx = samples.map((s) => s.targetXNorm);
     const ty = samples.map((s) => s.targetYNorm);
+    // 3.1 — projeção ANTES do scaler. A PCA já padroniza internamente; o
+    // StandardScaler seguinte opera sobre as componentes, que é o que o Ridge
+    // e a penalidade Σ_W esperam receber.
+    if (ReplayRegressor.pcaK > 0 && rawL[0]?.length > 0) {
+      this.pcaL = new ProjecaoPCA(); this.pcaL.fit(rawL, ReplayRegressor.pcaK);
+      this.pcaR = new ProjecaoPCA(); this.pcaR.fit(rawR, ReplayRegressor.pcaK);
+      rawL = rawL.map((v) => this.pcaL!.transform(v));
+      rawR = rawR.map((v) => this.pcaR!.transform(v));
+    }
     this.scalerL.fit(rawL);
     this.scalerR.fit(rawR);
     const scaledL = this.scalerL.transform(rawL);
@@ -823,7 +1051,7 @@ class ReplayRegressor {
    * compor — `hypot` sobre frações de tela infla erro puro de Y numa tela 16:9.
    */
   static diagnose(samples: CalibrationSample[], vw: number, vh: number): {
-    trainErrorPx: number; looErrorPx: number; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null;
+    trainErrorPx: number; looErrorPx: number; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>;
   } {
     const erroDe = (treino: CalibrationSample[], teste: CalibrationSample[]): number => {
       const m = new ReplayRegressor();
@@ -877,6 +1105,7 @@ class ReplayRegressor {
       lambdaR: cheio.ridgeR.getModel?.()?.lambda ?? NaN,
       penaltyDiag: P ? P.map((linha, j) => Number(linha[j].toFixed(4))) : null,
       poseGainPxPorGrau: ganhoPose(cheio, bruto, vw, vh),
+      espectro: espectroDeFeatures(bruto),
     };
   }
 
@@ -884,8 +1113,8 @@ class ReplayRegressor {
   // temporal (filtro e responsabilidade do caller).
   predictPx(fL: number[], fR: number[], vw: number, vh: number): { x: number; y: number } {
     if (!this.trained) throw new Error('ReplayRegressor.predictPx chamado antes de train');
-    const sL = this.scalerL.transformSingle(fL);
-    const sR = this.scalerR.transformSingle(fR);
+    const sL = this.scalerL.transformSingle(this.pcaL ? this.pcaL.transform(fL) : fL);
+    const sR = this.scalerR.transformSingle(this.pcaR ? this.pcaR.transform(fR) : fR);
     const pL = this.ridgeL.predict(sL);
     const pR = this.ridgeR.predict(sR);
     const baseX = (pL.x + pR.x) / 2;
@@ -933,7 +1162,7 @@ interface Report {
     legacyNoDecision: number;
     regatePose?: RegateInfo;
   };
-  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null };
+  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures> };
   accuracy: {
     n: number;
     meanErrorPx: number;
@@ -1067,6 +1296,9 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
     return 2;
   }
 
+  ReplayRegressor.pcaK = args.pca;
+  RidgeRegressor.lambdaOverride = args.lambda ?? null;
+  RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
   const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
@@ -1380,6 +1612,9 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       constantShiftPx: args.constantShiftPx ?? null,
       translationCompensation: args.translationCompensation,
       featureDims: activeFeatureDims(args.featureSet),
+      pca: args.pca,
+      lambda: args.lambda ?? 'CV',
+      axisWeightedCv: args.axisWeightedCv,
       // Sem isto, um relatorio nao diz a que pipeline se refere — e relatorio
       // que nao diz isso vira decisao tomada sobre configuracao errada.
       featureVectorId: FEATURE_VECTOR_ID,
