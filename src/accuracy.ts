@@ -1003,6 +1003,26 @@ function showDiagnosticOverlay(
       : result.colorClass === 'accuracy-regular' ? '#ffcc00'
         : '#ef4444';
 
+  // O diagnóstico da grade é o que transforma "Ruim" em conselho acionável.
+  //
+  // O erro médio diz QUE está ruim; a razão periferia/centro diz POR QUÊ. Numa
+  // sessão real com 125 px de erro, o centro estava em 106 px e a periferia em
+  // 377 px — 3,6×. Não era o pipeline: era a grade pedindo ângulos de olhar
+  // fora do alcance, porque a distância configurada não batia com a real.
+  // Ver `calibrationGridDiagnosis.ts`.
+  const gd = getCalibrationFitDiagnostics()?.gridDiagnosis;
+  const gridAviso = gd && gd.mensagem
+    ? `<div style="margin:0 0 16px; padding:12px 14px; border-radius:10px; line-height:1.5;
+                   background:rgba(255,204,0,0.10); border:1px solid rgba(255,204,0,0.45);
+                   color:#ffd75e; font-size:13px; text-align:left;">
+         <strong style="display:block; margin-bottom:4px;">Por que ficou ruim</strong>
+         ${gd.mensagem}
+         <span style="display:block; margin-top:6px; opacity:0.75; font-size:12px;">
+           centro ${gd.centroPx.toFixed(0)} px · periferia ${gd.periferiaPx.toFixed(0)} px · ${gd.razao.toFixed(1)}× pior
+         </span>
+       </div>`
+    : '';
+
   footer.innerHTML = `
     <div class="diagnostic-card">
       <div class="diagnostic-title">Calibração Concluída</div>
@@ -1047,6 +1067,8 @@ function showDiagnosticOverlay(
         </div>
       </div>
       
+      ${gridAviso}
+
       <div style="text-align:center; font-size:14px; font-weight:600; color:#fff; margin-bottom:16px;">
         Taxa de acerto em alvo de 150 px: <span style="color:${scoreColor}">${result.hitRateByRadius.find(r => r.radiusPx === 150)?.pct.toFixed(0) || 0}%</span>
       </div>

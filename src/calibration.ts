@@ -17,6 +17,8 @@ import { EXPERIMENT } from './config/experiment';
 import { compensarPredicao, poseDeReferencia } from './poseCompensation';
 import type { Pose } from './poseCompensation';
 import { compensarTranslacao, centroDeReferencia } from './translationCompensation';
+import { diagnosticarGrade } from './calibrationGridDiagnosis';
+import type { DiagnosticoGrade } from './calibrationGridDiagnosis';
 import type { CentroFacial, EscalaFacial } from './translationCompensation';
 import { estimateDistanceCm } from './setupReadiness';
 import {
@@ -1726,6 +1728,9 @@ export interface CalibrationFitDiagnostics {
    *  pontos; medido na gravação de referência, o primeiro é 0,3° e o segundo
    *  3,9°, e só o segundo importa. Este campo separa os dois. */
   poseDrift: SessionPoseDrift | null;
+  /** Diagnóstico da GRADE a partir do LOO por alvo: distingue "a periferia saiu
+   *  do alcance" de "a sessão inteira está ruim". Ver `calibrationGridDiagnosis.ts`. */
+  gridDiagnosis: DiagnosticoGrade;
   /** Fração das amostras de treino em que o bloco L2CS estava válido (≠ 0).
    *  Se isto for < 1, parte do treino viu 7 zeros onde a inferência vai ver
    *  valores reais (ou vice-versa) — vazamento direto para o erro. */
@@ -1945,6 +1950,16 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
       `pitch=${d.poseStd.pitch.toFixed(4)} roll=${d.poseStd.roll.toFixed(4)} rad`,
     );
   }
+  // Diagnóstico da grade — o número que transforma "Ruim" em conselho.
+  {
+    const gd = d.gridDiagnosis;
+    console.log(
+      `[calib] grade — LOO centro ${gd.centroPx.toFixed(0)}px | periferia ${gd.periferiaPx.toFixed(0)}px | ` +
+      `razão ${gd.razao.toFixed(1)}× | veredito: ${gd.veredicto}`,
+    );
+    if (gd.mensagem) console.warn(`[calib] ⚠️ ${gd.mensagem}`);
+  }
+
   // 1.1 — a deriva entre alvos em PIXELS, que é a unidade em que ela dói.
   if (d.poseDrift) {
     const pd = d.poseDrift;
@@ -2100,6 +2115,7 @@ export function computeFitDiagnostics(
     poseMean,
     poseStd,
     poseDrift: getSessionPoseDrift(),
+    gridDiagnosis: diagnosticarGrade(looByTarget),
     l2csValidFraction: n > 0 ? l2csValid / n : 0,
     samplesPerTarget,
   };

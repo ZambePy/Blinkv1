@@ -1204,7 +1204,7 @@ class ReplayRegressor {
    * compor — `hypot` sobre frações de tela infla erro puro de Y numa tela 16:9.
    */
   static diagnose(samples: CalibrationSample[], vw: number, vh: number): {
-    trainErrorPx: number; looErrorPx: number; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null;
+    trainErrorPx: number; looErrorPx: number; looPorAlvo: { alvo: string; erroPx: number; amostras: number }[]; targets: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null;
   } {
     const erroDe = (treino: CalibrationSample[], teste: CalibrationSample[]): number => {
       const m = new ReplayRegressor();
@@ -1221,13 +1221,16 @@ class ReplayRegressor {
     const alvos = [...new Set(samples.map(chave))];
 
     let looSoma = 0, looN = 0;
+    const looPorAlvo: { alvo: string; erroPx: number; amostras: number }[] = [];
     for (const alvo of alvos) {
       const treino = samples.filter((t) => chave(t) !== alvo);
       const teste = samples.filter((t) => chave(t) === alvo);
       // Menos de 3 alvos no treino não fecha o sistema; pular é mais honesto
       // que reportar um número que veio de um ajuste degenerado.
       if (new Set(treino.map(chave)).size < 3 || teste.length === 0) continue;
-      looSoma += erroDe(treino, teste); looN++;
+      const e = erroDe(treino, teste);
+      looPorAlvo.push({ alvo, erroPx: Number(e.toFixed(1)), amostras: teste.length });
+      looSoma += e; looN++;
     }
 
     // λ escolhido pelo CV. Relatado porque λ é compartilhado por TODAS as
@@ -1253,6 +1256,10 @@ class ReplayRegressor {
     return {
       trainErrorPx: erroDe(samples, samples),
       looErrorPx: looN > 0 ? looSoma / looN : NaN,
+      // 3.x - LOO POR ALVO. A media esconde o caso que importa: um unico alvo
+      // inaprendivel no meio de oito bons puxa a media pouco, mas corrompe o
+      // ajuste inteiro, porque ele esta DENTRO do treino dos outros.
+      looPorAlvo,
       targets: alvos.length,
       lambdaL: cheio.ridgeL.getModel?.()?.lambda ?? NaN,
       lambdaR: cheio.ridgeR.getModel?.()?.lambda ?? NaN,
@@ -1328,7 +1335,7 @@ interface Report {
     legacyNoDecision: number;
     regatePose?: RegateInfo;
   };
-  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null };
+  calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; looPorAlvo: { alvo: string; erroPx: number; amostras: number }[]; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null };
   accuracy: {
     n: number;
     meanErrorPx: number;
