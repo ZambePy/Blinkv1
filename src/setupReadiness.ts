@@ -197,10 +197,30 @@ export function idealDistanceCm(
 /**
  * Distância câmera→rosto a partir do tamanho do rosto no frame.
  *
- * Requer o campo de visão HORIZONTAL da câmera, que o browser não expõe — a
- * Etapa 1 vai obtê-lo do sistema. Sem ele devolve `null` em vez de inventar
- * um número: uma distância errada é pior que nenhuma, porque alimenta a
- * conversão do erro para graus e a grade de calibração.
+ * Requer o campo de visão HORIZONTAL da câmera. Sem ele devolve `null` em vez
+ * de inventar um número: uma distância errada é pior que nenhuma, porque
+ * alimenta a conversão do erro para graus e a grade de calibração.
+ *
+ * 2.1 — DE ONDE O FOV VEM, E POR QUE NÃO SAI SOZINHO.
+ *
+ * Este comentário dizia que "a Etapa 1 vai obtê-lo do sistema". Não vai, e a
+ * razão é estrutural: uma vista monocular de um objeto de tamanho conhecido dá
+ * UMA equação — `tamanho_px / largura_px = tamanho_cm / (2 · D · tan(FOV/2))` —
+ * com DUAS incógnitas, `D` e `FOV`. Nenhuma quantidade de quadros resolve isso;
+ * todos trazem a mesma equação. O browser também não expõe o FOV: não há campo
+ * em `getCapabilities()` nem em `getSettings()`.
+ *
+ * A saída que FUNCIONA é `deriveHorizontalFovDeg` em `cameraTuner.ts`: medir a
+ * distância uma única vez com fita métrica fecha o sistema, e daí em diante a
+ * distância sai sozinha em toda sessão. É uma etapa de setup, feita uma vez por
+ * hardware.
+ *
+ * A saída que NÃO funciona, e foi medida: usar a excursão da íris entre os
+ * alvos de calibração como segunda equação. A geometria fecharia (o olho gira
+ * um ângulo determinado pela tela, e a íris se desloca `2R·sen θ`), mas o sinal
+ * medido é atenuado — 0,60× no eixo horizontal e 0,16× no vertical, contra a
+ * previsão geométrica. As duas estimativas de distância que daí saem discordam
+ * por 3,7× (102 cm contra 373 cm). Ver docs/RESULTADOS-D2-D8.md §2.1.
  */
 export function estimateDistanceCm(
   iodPx: number,

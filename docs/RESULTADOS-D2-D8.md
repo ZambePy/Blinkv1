@@ -43,6 +43,86 @@ Data: **2026-08-25**. Baseline referência: **57 px / 0,9°** (Rodada A, sem
 
 ---
 
+## 2.1 — o FOV não sai sozinho, e o sinal da íris é atenuado 6× no eixo vertical
+
+Duas metades: uma corrigida, uma bloqueada com prova.
+
+### A metade corrigida — a distância de calibração
+
+A UI congelava a distância chamando `getCurrentCameraDistanceCm()` no instante
+em que a calibração começa: **um quadro**, ainda na janela de preparo, antes de
+qualquer alvo. Esse número vira a referência de toda a compensação de distância
+da sessão.
+
+| | valor |
+|---|---|
+| ruído quadro a quadro no preparo (σ) | 0,13 cm |
+| erro típico de um quadro vs. a mediana dos aceitos | 0,11 cm |
+| pior caso | 0,51 cm (1,1%) |
+
+Na gravação de referência o custo é pequeno — mas é pequeno porque o usuário
+ficou parado, e nada no código garantia isso. Agora a referência é a **mediana
+sobre os quadros aceitos**, uma entrada por amostra (pontos com mais amostras
+pesam mais), substituída em `completeCalibration` e só quando há medição: sem
+FOV calibrado o valor configurado pelo cuidador continua sendo o melhor
+disponível.
+
+### A metade bloqueada — o FOV automático é impossível, e a prova é de uma linha
+
+`estimateDistanceCm` prometia que "a Etapa 1 vai obtê-lo do sistema". Não vai:
+
+    tamanho_px / largura_px = tamanho_cm / (2 · D · tan(FOV/2))
+
+Uma equação, **duas incógnitas** (`D` e `FOV`). Nenhuma quantidade de quadros
+resolve — todos trazem a mesma equação. E o browser não expõe o FOV, nem em
+`getCapabilities()` nem em `getSettings()`.
+
+O que funciona já existe: `deriveHorizontalFovDeg`, que fecha o sistema com uma
+única medida de fita métrica, feita uma vez por hardware.
+
+### A segunda equação que fecharia o sistema — e por que não fecha
+
+A calibração conhece a tela: quando o usuário olha do alvo esquerdo para o
+direito, o olho gira um ângulo determinado pela geometria, e a íris se desloca
+`2R·sen θ` com `R ≈ 12 mm`. Medindo esse deslocamento em unidades da distância
+cantal, `D` e `FOV` cancelam — e sobra uma equação independente.
+
+Medido na gravação de referência (excursão da íris entre as colunas/linhas
+extremas de alvos, em px de vídeo, IOD cantal 127,2 px):
+
+| eixo | previsto a 60 cm | medido | atenuação | distância implícita |
+|---|---|---|---|---|
+| horizontal | 9,41 px | **5,66 px** | **0,60×** | 102 cm |
+| vertical | 7,30 px | **1,20 px** | **0,16×** | 373 cm |
+
+As duas estimativas discordam por **3,7×**. A rota está invalidada: o sinal da
+íris não é a projeção geométrica pura que a dedução assume.
+
+### Por que o eixo vertical perde 84% do sinal — a pálpebra
+
+Da linha de cima para a de baixo da tela:
+
+| medida | deslocamento |
+|---|---|
+| íris | +1,20 px |
+| **pálpebra superior** | **+2,66 px** |
+| abertura do olho | −3,03 px (13,21 → 10,18, **−23%**) |
+
+A pálpebra desce **mais que o dobro** do que a íris, e a abertura encolhe 23%. A
+íris fica progressivamente ocluída em cima e embaixo, e o centro estimado pelo
+MediaPipe é arrastado pelo padrão de oclusão em vez de acompanhar o olho.
+
+**Isto é um teto de precisão no eixo Y que nenhuma regressão remove.** O sinal
+já chega atenuado 6× ao vetor de features; o modelo não pode recuperar o que o
+landmark não carrega. Explica por que Y é sistematicamente o eixo pior, e é
+candidato mais forte que qualquer coisa da Fase 1 para o gargalo real.
+
+O eixo horizontal também perde 40%, mas 0,60× é uma escala aproximadamente
+constante — algo que um modelo linear absorve no coeficiente. Uma atenuação de
+0,16× que varia com a oclusão, não.
+
+---
+
 ## 1.4 — translação lateral: o FOV cancela, e o efeito está abaixo do ruído
 
 `src/translationCompensation.ts` corrige a cabeça que DESLIZA, efeito

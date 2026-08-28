@@ -432,6 +432,41 @@ export function setCalibrationDistancesCm(
   calibrationScreenDistanceCm = screenCm;
 }
 
+// ── 2.1 — distância de calibração medida sobre os quadros ACEITOS ──────────
+//
+// A UI chamava `setCalibrationDistancesCm(getCurrentCameraDistanceCm(), …)` no
+// instante em que a calibração começa — UM quadro, ainda na janela de preparo,
+// antes de qualquer alvo. Esse único número vira a referência de toda a
+// compensação de distância da sessão.
+//
+// Dois problemas, e o segundo é o que importa:
+//   • ruído de quadro único (σ ≈ 0,13 cm na gravação de referência);
+//   • ele descreve a postura de quem acabou de clicar "começar", não a de quem
+//     passou os 15 s seguintes coletando. Na gravação de referência a diferença
+//     é pequena (0,11 cm típico, 0,51 cm no pior caso), mas é pequena porque o
+//     usuário ficou parado — não há nada no código que garanta isso.
+//
+// A mediana sobre os quadros aceitos descreve o que o modelo de fato viu.
+// Mediana e não média: aqui o objetivo é resistir a um quadro com o rosto
+// parcialmente ocluído, que joga o IOD para baixo e a distância para cima.
+
+/** Distâncias câmera→rosto dos quadros aceitos, em cm. Uma por amostra. */
+let acceptedDistancesCm: number[] = [];
+
+/** Mediana das distâncias aceitas, ou `null` se nenhuma foi medida. */
+export function measuredCalibrationDistanceCm(): number | null {
+  if (acceptedDistancesCm.length === 0) return null;
+  const v = [...acceptedDistancesCm].sort((a, b) => a - b);
+  const m = v.length >> 1;
+  return v.length % 2 ? v[m] : (v[m - 1] + v[m]) / 2;
+}
+
+/** Quantos quadros aceitos entraram na mediana. Exposto porque uma mediana de
+ *  3 quadros e uma de 500 merecem confiança diferente. */
+export function measuredCalibrationDistanceSamples(): number {
+  return acceptedDistancesCm.length;
+}
+
 export function getCalibrationDistancesCm(): { cameraCm: number | null; screenCm: number | null } {
   return { cameraCm: calibrationCameraDistanceCm, screenCm: calibrationScreenDistanceCm };
 }
@@ -1135,6 +1170,7 @@ export function startCalibrationMode(
   sessionPoseByTarget = [];
   calibrationReferencePose = null;
   calibrationReferenceCenter = null;
+  acceptedDistancesCm = [];
   profile = [];
   regressorLeft = null;
   regressorRight = null;
@@ -1550,6 +1586,15 @@ function processStaticPoint() {
     }
   }
 
+  // 2.1 — distância deste ponto, uma entrada por amostra aceita, para que
+  // pontos com mais amostras pesem mais na mediana da sessão.
+  {
+    const d = getCurrentCameraDistanceCm();
+    if (d !== null && d > 0) {
+      for (let i = 0; i < collectedFeaturesLeft.length; i++) acceptedDistancesCm.push(d);
+    }
+  }
+
   for (let i = 0; i < collectedFeaturesLeft.length; i++) {
     profile.push({
       screenX: currentTargetX,
@@ -1736,6 +1781,24 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
         : null;
     }),
   );
+
+  // 2.1 — troca a distância de um quadro pela mediana dos quadros aceitos.
+  //
+  // Só sobrescreve quando há medição: sem FOV calibrado `getCurrentCameraDistanceCm`
+  // devolve null o tempo todo, e nesse caso o que a UI congelou (o valor
+  // configurado pelo cuidador) continua sendo o melhor disponível.
+  {
+    const medida = measuredCalibrationDistanceCm();
+    if (medida !== null) {
+      const antes = calibrationCameraDistanceCm;
+      calibrationCameraDistanceCm = medida;
+      console.log(
+        `[calib] 2.1 — distância de calibração: ${medida.toFixed(1)} cm ` +
+        `(mediana de ${measuredCalibrationDistanceSamples()} quadros aceitos` +
+        (antes !== null ? `; o quadro único do início dava ${antes.toFixed(1)} cm` : '') + ')',
+      );
+    }
+  }
 
   // 1.4 — centro facial de referência, das mesmas amostras que treinaram.
   calibrationReferenceCenter = centroDeReferencia(
