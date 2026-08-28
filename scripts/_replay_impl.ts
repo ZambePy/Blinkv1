@@ -53,6 +53,33 @@ import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/
 const ASSUMED_DIST_PX = 2268;
 
 /**
+ * A1 - janela de acomodacao descartada no inicio de CADA alvo de precisao.
+ *
+ * Espelha `ACCLIMATION_MS` em `accuracy.ts`. O teste ao vivo descarta os
+ * primeiros 400 ms de cada ponto; o replay nao descartava nada, e a diferenca
+ * dominava a metrica.
+ *
+ * MEDIDO na gravacao de referencia, erro mediano por posicao dentro da janela
+ * de cada alvo:
+ *
+ *   posicao     0    1    2    3    4    5    6    7    8    9   10   11   12+
+ *   mediana   452  451  450  450  450  454  456  456  304  150   97   90   ~50
+ *
+ * Plano em ~450 px por oito quadros e depois despenca. Sacada em voo daria
+ * RAMPA; isto e o olho ainda parado no alvo anterior. A confirmacao: em 7 das 8
+ * transicoes, nesses primeiros quadros a predicao esta mais perto do alvo
+ * ANTERIOR que do atual -- num caso, 983 px do atual contra 103 px do anterior.
+ *
+ * O comentario que justificava gravar assim dizia que "o dot ja esta visivel ao
+ * usuario, entao qualquer frame gravado tem ground-truth legitimo". O dot estar
+ * visivel nao e o usuario estar olhando: latencia de sacada humana e ~250 ms.
+ *
+ * Custo do erro: a media global cai de 134,8 para 57,9 px (-57%) so descartando
+ * esta janela. Toda a Fase 1 mediu variantes atraves desse ruido.
+ */
+const ACCLIMATION_MS = 400;
+
+/**
  * 1.3 — ganho geométrico da pose, em px de tela por grau de rotação da cabeça.
  *
  * Com o olho parado na órbita e a cabeça girando Δ, o ponto olhado se desloca
@@ -209,6 +236,23 @@ interface CliArgs {
   /** 3.4 - equilibra os alvos no ajuste, um peso total igual por alvo. */
   balanceTargets: boolean;
   /**
+   * A1 - emite um registro por quadro do bloco de precisao, com tudo que pode
+   * explicar a cauda. Analise pura: nao muda predicao nenhuma.
+   *
+   * Existe porque `meanErrorInner` e uma estatistica de CAUDA. No baseline a
+   * mediana e uniforme na tela (55,7 a 107,2 px) e a media global e 144,6 --
+   * razao 2,03. Dois dos nove alvos tem razao media/mediana de 3,1 e 3,6. Toda
+   * a diferenca esta numa minoria de quadros, e nenhuma variante da Fase 1
+   * poderia te-la movido: o efeito delas fica abaixo da variancia da metrica.
+   */
+  tailAnalysis?: string;
+  /**
+   * A1 - inclui a janela de acomodacao de cada alvo de precisao, reproduzindo o
+   * comportamento anterior do harness. Nasce FALSE: o default e espelhar o
+   * teste ao vivo, que descarta.
+   */
+  keepAcclimation: boolean;
+  /**
    * 3.1 — pesa os eixos pelas dimensões reais na escolha de λ.
    *
    * Nasce TRUE, porque é o que o app faz. O harness que descreve outro
@@ -229,7 +273,7 @@ function parseArgs(argv: string[]): CliArgs {
   // o vetor de 44 dims horas antes do commit que o reduziu para 12, sem que
   // nada acusasse. Recomputar a partir dos landmarks é o único modo de o
   // relatório descrever o pipeline que está no build.
-  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca', balanceTargets: false };
+  const args: Partial<CliArgs> = { filter: 'balanceado', verbose: false, recomputeFeatures: true, dropFeatures: [], poseCompensation: false, poseCompensationGain: 1, poseCompensationAxes: 'xy', translationCompensation: false, pca: 0, axisWeightedCv: true, fusao: 'confianca', balanceTargets: false, keepAcclimation: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--jsonl') args.jsonl = argv[++i];
@@ -250,6 +294,11 @@ function parseArgs(argv: string[]): CliArgs {
       args.lambda = v;
     }
     else if (a === '--balance-targets') args.balanceTargets = true;
+    else if (a === '--keep-acclimation') args.keepAcclimation = true;
+    else if (a === '--tail-analysis') {
+      const proximo = argv[i + 1];
+      args.tailAnalysis = proximo && !proximo.startsWith('--') ? argv[++i] : 'tail-analysis.jsonl';
+    }
     else if (a === '--keep-targets') {
       const raw = argv[++i];
       const idx = (raw ?? '').split(',').map((x) => Number(x.trim()));
@@ -506,6 +555,10 @@ interface AccuracySample {
   pose?: Pose;
   centro?: { x: number; y: number };
   escala?: { iodPx: number; videoWidth: number; videoHeight: number };
+  /** A1 - qualidade gravada do quadro, para correlacionar com a cauda. */
+  qualidade?: RecordedQuality;
+  /** A1 - quadros desde a ultima piscada gravada. `Infinity` se nao houve. */
+  desdeAPiscada?: number;
 }
 
 // Extrai (ou re-extrai) features do frame. Se o JSONL ja tem featuresLeft/Right,
@@ -671,6 +724,7 @@ function splitFrames(
   featureSet?: FeatureSet,
   keepDims?: number[],
   keepTargets?: number[],
+  keepAcclimation = false,
 ): {
   calibration: CalibrationSample[];
   accuracy: AccuracySample[];
@@ -680,6 +734,8 @@ function splitFrames(
   legacyNoDecision: number;
   timeWindow?: { startSec: number; endSec: number; filteredOut: number; firstCaptureTs: number };
   regate?: RegateInfo;
+  /** A1 - quantos quadros de precisao cairam na janela de acomodacao. */
+  descartadosPorAcomodacao: number;
 } {
   const vw = rec.header.resolution.w;
   const vh = rec.header.resolution.h;
@@ -724,7 +780,20 @@ function splitFrames(
   const videoW = rec.header.videoResolution?.w ?? vw;
   const videoH = rec.header.videoResolution?.h ?? vh;
 
+  // A1 - quadros desde a ultima piscada GRAVADA. Contado antes de qualquer
+  // descarte: os quadros de reabertura da palpebra sao justamente os que
+  // interessam, e alguns deles sao descartados por outros criterios.
+  let desdeAPiscada = Number.POSITIVE_INFINITY;
+
+  // A1 - inicio da janela do alvo de precisao corrente, para descartar a
+  // acomodacao. A troca e detectada pela mudanca de alvo, nao por um evento:
+  // o JSONL nao grava "comecou o ponto", so o alvo de cada quadro.
+  let alvoAccAtual: string | null = null;
+  let inicioAlvoAccTs = 0;
+  let descartadosPorAcomodacao = 0;
+
   for (const f of rec.frames) {
+    if (f.blink) desdeAPiscada = 0; else desdeAPiscada++;
     if (!f.hasFace) { discarded++; continue; }
     if (f.blink) { discarded++; continue; }
     const feats = getFeatures(f, recomputeFeatures, dropFeatures, videoW, videoH, featureSet, blinkDetector, keepDims);
@@ -787,7 +856,20 @@ function splitFrames(
           continue;
         }
       }
+      // A1 - descarta a janela de acomodacao, espelhando `accuracy.ts`.
+      const chaveAcc = `${Math.round(f.target.xPx)},${Math.round(f.target.yPx)}`;
+      if (chaveAcc !== alvoAccAtual) {
+        alvoAccAtual = chaveAcc;
+        inicioAlvoAccTs = f.captureTs;
+      }
+      if (!keepAcclimation && f.captureTs - inicioAlvoAccTs < ACCLIMATION_MS) {
+        descartadosPorAcomodacao++;
+        continue;
+      }
+
       accuracy.push({
+        qualidade: f.quality,
+        desdeAPiscada: desdeAPiscada,
         pose: poseDoFrame(f),
         ...centroEscalaDoFrame(f, videoW, videoH),
         featuresLeft: feats.left,
@@ -845,6 +927,7 @@ function splitFrames(
   return {
     calibration, accuracy, live, discarded, rejectedByDecision, legacyNoDecision,
     regate: regateInfo,
+    descartadosPorAcomodacao,
     timeWindow: timeWindow && firstCaptureTs !== null
       ? { startSec: timeWindow.startSec, endSec: timeWindow.endSec, filteredOut: accuracyFilteredOutByWindow, firstCaptureTs }
       : undefined,
@@ -1133,6 +1216,8 @@ class ReplayRegressor {
    *  Estático porque `diagnose` instancia o regressor internamente e a
    *  variante tem que valer para todas as instâncias da execução. */
   static pcaK = 0;
+  private treinoL: number[][] = [];
+  private treinoR: number[][] = [];
   private pcaL: ProjecaoPCA | null = null;
   private pcaR: ProjecaoPCA | null = null;
   private scalerL = new StandardScaler();
@@ -1162,6 +1247,9 @@ class ReplayRegressor {
     this.scalerR.fit(rawR);
     const scaledL = this.scalerL.transform(rawL);
     const scaledR = this.scalerR.transform(rawR);
+    // A1 - guardado para `distanciaAoTreino`.
+    this.treinoL = scaledL;
+    this.treinoR = scaledR;
     this.ridgeL.train(scaledL, tx, ty);
     this.ridgeR.train(scaledR, tx, ty);
     this.trained = true;
@@ -1274,6 +1362,40 @@ class ReplayRegressor {
 
   // Retorna coordenadas em px de tela ja com clamp normalizado, sem filtro
   // temporal (filtro e responsabilidade do caller).
+  /** A1 - predicao de CADA olho separadamente, em px, sem fusao.
+   *  A discordancia entre as duas e uma das hipoteses para a cauda. */
+  predictPorOlho(fL: number[], fR: number[], vw: number, vh: number): {
+    esq: { x: number; y: number }; dir: { x: number; y: number };
+  } {
+    const sL = this.scalerL.transformSingle(this.pcaL ? this.pcaL.transform(fL) : fL);
+    const sR = this.scalerR.transformSingle(this.pcaR ? this.pcaR.transform(fR) : fR);
+    const pL = this.ridgeL.predict(sL);
+    const pR = this.ridgeR.predict(sR);
+    const cl = (v: number) => Math.min(1, Math.max(0, v));
+    return {
+      esq: { x: cl(pL.x) * vw, y: cl(pL.y) * vh },
+      dir: { x: cl(pR.x) * vw, y: cl(pR.y) * vh },
+    };
+  }
+
+  /** A1 - distancia ao vizinho mais proximo do conjunto de treino, no espaco
+   *  PADRONIZADO. E a mesma medida que `nearestDistance` em calibration.ts:
+   *  proxy de quao fora do fecho convexo do treino o quadro esta. */
+  distanciaAoTreino(fL: number[], fR: number[]): { esq: number; dir: number } {
+    const sL = this.scalerL.transformSingle(this.pcaL ? this.pcaL.transform(fL) : fL);
+    const sR = this.scalerR.transformSingle(this.pcaR ? this.pcaR.transform(fR) : fR);
+    const menor = (v: number[], pool: number[][]) => {
+      let best = Infinity;
+      for (const p of pool) {
+        let sq = 0;
+        for (let i = 0; i < v.length; i++) sq += (v[i] - p[i]) ** 2;
+        if (sq < best) best = sq;
+      }
+      return Math.sqrt(best);
+    };
+    return { esq: menor(sL, this.treinoL), dir: menor(sR, this.treinoR) };
+  }
+
   predictPx(fL: number[], fR: number[], vw: number, vh: number): { x: number; y: number } {
     if (!this.trained) throw new Error('ReplayRegressor.predictPx chamado antes de train');
     const sL = this.scalerL.transformSingle(this.pcaL ? this.pcaL.transform(fL) : fL);
@@ -1334,6 +1456,7 @@ interface Report {
     rejectedByDecision: number;
     legacyNoDecision: number;
     regatePose?: RegateInfo;
+    descartadosPorAcomodacao: number;
   };
   calibration: { uniqueTargets: number; trainErrorPx: number; looErrorPx: number; looPorAlvo: { alvo: string; erroPx: number; amostras: number }[]; lambdaL: number; lambdaR: number; penaltyDiag: number[] | null; poseGainPxPorGrau: { yawX: number; pitchY: number } | null; espectro: ReturnType<typeof espectroDeFeatures>; correlacao: number[][] | null };
   accuracy: {
@@ -1474,7 +1597,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
   RidgeRegressor.balanceTargets = args.balanceTargets;
   RidgeRegressor.lambdaOverride = args.lambda ?? null;
   RidgeRegressor.axisScale = args.axisWeightedCv ? { x: vw, y: vh } : { x: 1, y: 1 };
-  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims, args.keepTargets);
+  const split = splitFrames(rec, args.recomputeFeatures, args.dropFeatures, args.timeWindow, args.regatePose, args.featureSet, args.keepDims, args.keepTargets, args.keepAcclimation);
   // D7.3 — log honesto quando o filtro corta frames de accuracy: o número
   // de amostras retido é insumo direto para interpretar a curva de drift.
   if (split.timeWindow) {
@@ -1709,6 +1832,48 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
     };
   })();
 
+  // A1 - registro por quadro, para decompor a cauda.
+  if (args.tailAnalysis) {
+    const refPose = poseRefCalib;
+    const linhas: string[] = [];
+    for (let i = 0; i < split.accuracy.length; i++) {
+      const am = split.accuracy[i]; const e = errors[i];
+      if (!e) continue;
+      const olhos = regr.predictPorOlho(am.featuresLeft, am.featuresRight, vw, vh);
+      const dist = regr.distanciaAoTreino(am.featuresLeft, am.featuresRight);
+      const q = am.qualidade ?? {};
+      linhas.push(JSON.stringify({
+        frameIdx: am.frameIdx,
+        alvoX: e.targetXPx, alvoY: e.targetYPx,
+        erroPx: Number(e.errorPx.toFixed(2)),
+        // Predicao de cada olho e a discordancia entre elas (H1).
+        esqX: Number(olhos.esq.x.toFixed(1)), esqY: Number(olhos.esq.y.toFixed(1)),
+        dirX: Number(olhos.dir.x.toFixed(1)), dirY: Number(olhos.dir.y.toFixed(1)),
+        discordanciaPx: Number(Math.hypot(olhos.esq.x - olhos.dir.x, olhos.esq.y - olhos.dir.y).toFixed(2)),
+        erroOlhoEsq: Number(Math.hypot(olhos.esq.x - e.targetXPx, olhos.esq.y - e.targetYPx).toFixed(2)),
+        erroOlhoDir: Number(Math.hypot(olhos.dir.x - e.targetXPx, olhos.dir.y - e.targetYPx).toFixed(2)),
+        // Distancia ao vizinho mais proximo do treino (H2).
+        distTreinoEsq: Number(dist.esq.toFixed(4)), distTreinoDir: Number(dist.dir.toFixed(4)),
+        // Recencia de piscada (H3).
+        desdeAPiscada: Number.isFinite(am.desdeAPiscada ?? Infinity) ? am.desdeAPiscada : null,
+        // Qualidade do quadro.
+        irisVis: q.irisVisibilityPercentage ?? null,
+        blur: q.blurEstimate ?? null,
+        contraste: q.contrastEstimate ?? null,
+        brilho: q.brightnessEstimate ?? null,
+        // Delta de pose contra a media do TREINO (H4).
+        dYaw: refPose && am.pose ? Number((am.pose.yaw - refPose.yaw).toFixed(5)) : null,
+        dPitch: refPose && am.pose ? Number((am.pose.pitch - refPose.pitch).toFixed(5)) : null,
+        dRoll: refPose && am.pose ? Number((am.pose.roll - refPose.roll).toFixed(5)) : null,
+      }));
+    }
+    // NL como String.fromCharCode(10): escrever a sequencia de escape
+    // literalmente aqui ja quebrou este arquivo uma vez.
+    const NL = String.fromCharCode(10);
+    await writeFile(resolvePath(args.tailAnalysis), linhas.join(NL) + NL, 'utf8');
+    process.stdout.write(`${NL}[tail] ${linhas.length} quadros escritos em ${args.tailAnalysis}${NL}`);
+  }
+
   const accSection: Report['accuracy'] = errors.length === 0 ? null : (() => {
     const errPx = errors.map((e) => e.errorPx);
     const errDeg = errors.map((e) => e.errorDeg);
@@ -1767,6 +1932,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       // 1.1 — presente só quando `--regate-pose` foi usado. A ausência do campo
       // é a marca de que o relatório honrou as decisões gravadas.
       regatePose: split.regate,
+      descartadosPorAcomodacao: split.descartadosPorAcomodacao,
     },
     calibration: { uniqueTargets, ...diagCalib },
     accuracy: accSection,
