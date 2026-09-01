@@ -164,22 +164,43 @@ describe('GazeContext — casca DOM do dispatcher', () => {
   });
 
   it('C-23 — um handler que lança não impede o refratário nem re-dispara', () => {
-    render(
-      <GazeProvider>
-        <button data-testid="alvo" onClick={() => { throw new Error('handler quebrado'); }}>
-          Ok
-        </button>
-      </GazeProvider>,
-    );
-    const el = screen.getByTestId('alvo');
-    document.elementFromPoint = vi.fn(() => el);
-    const cliques = vi.fn();
-    el.addEventListener('click', cliques);
+    // O throw abaixo é deliberado, e `dispatchEvent` (por trás de `.click()`)
+    // NÃO o propaga ao chamador: a spec manda reportá-lo como erro global.
+    // Sem cancelar esse reporte, o jsdom o transforma em unhandled error e o
+    // vitest derruba o run inteiro com exit 1, mesmo com todos os testes
+    // verdes. Assumimos a posse do erro aqui — mas só do nosso: qualquer
+    // outro segue borbulhando e continua quebrando a suíte.
+    const lancados: string[] = [];
+    const capturar = (ev: ErrorEvent) => {
+      if ((ev.error as Error | undefined)?.message === 'handler quebrado') {
+        lancados.push(ev.message);
+        ev.preventDefault();
+      }
+    };
+    window.addEventListener('error', capturar);
 
-    // 5 s de olhar contínuo: sem o refratário armado antes do clique, isto
-    // dispararia repetidamente.
-    expect(() => olhar(5000, 0)).not.toThrow();
-    expect(cliques.mock.calls.length).toBeLessThanOrEqual(3);
+    try {
+      render(
+        <GazeProvider>
+          <button data-testid="alvo" onClick={() => { throw new Error('handler quebrado'); }}>
+            Ok
+          </button>
+        </GazeProvider>,
+      );
+      const el = screen.getByTestId('alvo');
+      document.elementFromPoint = vi.fn(() => el);
+      const cliques = vi.fn();
+      el.addEventListener('click', cliques);
+
+      // 5 s de olhar contínuo: sem o refratário armado antes do clique, isto
+      // dispararia repetidamente.
+      expect(() => olhar(5000, 0)).not.toThrow();
+      expect(cliques.mock.calls.length).toBeLessThanOrEqual(3);
+      // O handler realmente chegou a lançar — senão o teste passaria à toa.
+      expect(lancados.length).toBeGreaterThan(0);
+    } finally {
+      window.removeEventListener('error', capturar);
+    }
   });
 
   it('respeita data-no-dwell', () => {
