@@ -1,0 +1,116 @@
+import React from 'react';
+
+/**
+ * F-FE-12 / C-07 — falhas que bloqueiam o controle por olhar precisam ser
+ * VISÍVEIS.
+ *
+ * `cameraError` e `calibrationInvalidated` já eram calculados no `GazeProvider`
+ * e expostos no contexto, mas `grep` não achava nenhum consumidor: ninguém
+ * renderizava. A câmera podia falhar e o app seguia mudo.
+ *
+ * O caso `uncalibrated` passou a ser obrigatório junto com o C-07. Sem
+ * calibração o cursor já era escondido (não há mapeamento para desenhar) e
+ * agora o dwell também está desligado — inclusive para emergência, por decisão
+ * de segurança: sobre o fallback do nariz, permitir emergência é disparar
+ * alarme por acaso. Cursor invisível + nada clicável, sem aviso, é
+ * indistinguível de "o programa travou" — e o usuário-alvo não tem como
+ * reiniciar sozinho. Este banner é o que fecha esse beco.
+ *
+ * Renderizado dentro do `GazeProvider`, que fica FORA do router: por isso não
+ * navega, apenas instrui. Quem age é o cuidador, com mouse ou toque.
+ */
+
+interface Props {
+  /** Estado corrente do engine. */
+  state: string;
+  cameraError: string | null;
+  calibrationInvalidated: string | null;
+}
+
+const WRAP: React.CSSProperties = {
+  position: 'fixed',
+  top: 0,
+  left: 0,
+  right: 0,
+  // Acima de qualquer overlay do app: este aviso não pode ficar escondido.
+  zIndex: 1000000,
+  display: 'flex',
+  justifyContent: 'center',
+  pointerEvents: 'none',
+  padding: '0.75rem',
+};
+
+const CARD: React.CSSProperties = {
+  pointerEvents: 'auto',
+  maxWidth: 760,
+  width: '100%',
+  padding: '1rem 1.4rem',
+  borderRadius: '0.9rem',
+  display: 'flex',
+  alignItems: 'center',
+  gap: '0.9rem',
+  fontSize: '1.05rem',
+  lineHeight: 1.45,
+  boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
+};
+
+export const GazeStatusBanner: React.FC<Props> = ({
+  state,
+  cameraError,
+  calibrationInvalidated,
+}) => {
+  // Ordem de precedência = ordem de gravidade. Sem câmera, nada mais importa.
+  let tom: 'erro' | 'aviso' | null = null;
+  let titulo = '';
+  let detalhe = '';
+
+  if (cameraError) {
+    tom = 'erro';
+    titulo = 'A câmera não está disponível';
+    detalhe = `${cameraError} O controle por olhar está desligado até a câmera voltar.`;
+  } else if (calibrationInvalidated) {
+    tom = 'erro';
+    titulo = 'A calibração deixou de valer';
+    detalhe = `${calibrationInvalidated} É preciso calibrar de novo antes de usar o olhar.`;
+  } else if (state === 'uncalibrated') {
+    tom = 'aviso';
+    titulo = 'Ainda não há calibração';
+    detalhe =
+      'O controle por olhar está desligado, inclusive o botão de emergência — ' +
+      'sem calibração o sistema não sabe para onde você está olhando. ' +
+      'Peça ao cuidador para abrir a calibração e seguir os pontos na tela.';
+  }
+
+  if (!tom) return null;
+
+  const cores =
+    tom === 'erro'
+      ? { bg: '#7f1d1d', border: '#ef4444', fg: '#fee2e2' }
+      : { bg: '#78350f', border: '#f59e0b', fg: '#fef3c7' };
+
+  return (
+    <div style={WRAP} role="status" aria-live="polite" data-testid="gaze-status-banner">
+      <div
+        style={{
+          ...CARD,
+          background: cores.bg,
+          border: `2px solid ${cores.border}`,
+          color: cores.fg,
+        }}
+        // O banner não é alvo de dwell: em `uncalibrated` nada é clicável, e
+        // deixá-lo dwellável criaria a falsa impressão de que o olhar funciona.
+        data-no-dwell="true"
+      >
+        <span aria-hidden="true" style={{ fontSize: '1.7rem', lineHeight: 1 }}>
+          {tom === 'erro' ? '⛔' : '⚠️'}
+        </span>
+        <span>
+          <strong style={{ display: 'block', fontSize: '1.15rem', marginBottom: '0.2rem' }}>
+            {titulo}
+          </strong>
+          {detalhe}
+        </span>
+      </div>
+    </div>
+  );
+};

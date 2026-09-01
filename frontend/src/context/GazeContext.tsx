@@ -10,6 +10,8 @@ import React, {
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
+import { stepDwell, createDwellState, type DwellTarget } from '@tracker/interaction/dwell';
+import { GazeStatusBanner } from '../components/GazeStatusBanner';
 import type { FilterPreset, FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import {
@@ -44,6 +46,13 @@ const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 // (plano A1-4, "exceção obrigatória"). Dwell nesses elementos usa um tempo
 // mais longo (EMERGENCY_DEGRADED_MULT) para reduzir o risco de falso positivo.
 const EMERGENCY_DEGRADED_MULT = 1.8;
+// Janela em que sair e voltar ao mesmo alvo preserva o progresso do dwell.
+const DWELL_GRACE_MS = 300;
+// C-15 — lacuna de amostras válidas acima da qual o progresso é ZERADO em vez
+// de apenas pausado. Também limita quanto tempo um único frame pode acrescentar,
+// o que impede que um salto de relógio (aba em segundo plano, GC longo)
+// complete um dwell de uma vez.
+const DWELL_LOST_RESET_MS = 500;
 
 interface GazeContextValue {
   subscribe: (cb: (sample: GazeSample) => void) => () => void;
@@ -210,12 +219,26 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // Global dwell dispatcher state. Kept in refs to avoid re-renders — the loop
   // runs at 30 Hz and reads/writes these directly from the gaze callback.
   const dwellMsRef = useRef<number>(DWELL_MS_BY_SPEED[settings.dwellSpeed]);
-  const dwellTargetRef = useRef<HTMLElement | null>(null);
-  const dwellStartMsRef = useRef<number>(0);
-  const refractoryUntilRef = useRef<number>(0);
-  const lastDwellTargetRef = useRef<HTMLElement | null>(null);
-  const exitTimeMsRef = useRef<number>(0);
-  const frozenDwellProgressRef = useRef<number>(0);
+  // C-07/C-15 — todo o estado do dwell agora vive num único objeto imutável,
+  // avançado pelo redutor puro de `src/interaction/dwell.ts`. Os sete refs
+  // anteriores (alvo, início, refratário, último alvo, saída, progresso
+  // congelado) eram mutados em pontos diferentes do callback e saíam de sincronia
+  // — foi assim que o dwell passou a completar com os olhos fechados.
+  const dwellStateRef = useRef(createDwellState());
+  // Nó que está com o realce `gaze-hover` aplicado no DOM.
+  const hoveredNodeRef = useRef<HTMLElement | null>(null);
+
+  /** Remove realce e barra de progresso do nó atualmente destacado. */
+  const clearDwellVisuals = React.useCallback(() => {
+    const n = hoveredNodeRef.current;
+    if (n) {
+      // F-FE-33 — nó pode ter sido desmontado sob o olhar; `isConnected` evita
+      // segurar referência a um elemento fora da árvore.
+      n.classList.remove('gaze-hover');
+      n.style.removeProperty('--gaze-dwell-progress');
+    }
+    hoveredNodeRef.current = null;
+  }, []);
 
   useEffect(() => {
     dwellMsRef.current = DWELL_MS_BY_SPEED[settings.dwellSpeed];
@@ -496,125 +519,101 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // cursor itself is pointer-events:none, so it doesn't occlude). If the
       // gaze stays on the same target for dwellMs, fires a real .click() —
       // React's synthetic click handlers respond just like a mouse click.
+      // C-07/C-15/C-23 — a política de dwell mora em `src/interaction/dwell.ts`,
+      // pura e testada (22 casos). Aqui fica só a casca: resolver o alvo no DOM,
+      // aplicar o efeito devolvido e pintar o realce. Antes, ~110 linhas de
+      // mutação de sete refs viviam dentro deste callback, sem nenhum teste —
+      // e é o código que clica em nome do usuário.
       let dwellPct = 0;
       let hitTarget: HTMLElement | null = null;
-      // Dwell dispatcher is entirely disabled during calibration — we don't want
-      // accidental gaze clicks on calibration UI elements.
+
       const engineIsCalibrating = engineRef.current?.getState() === 'calibrating';
-      // A1-4 — em degraded, só permite dwell em botões de emergência.
       const isDegraded = sample.degraded === true;
       if (isDegraded !== isDegradedRef.current) {
         isDegradedRef.current = isDegraded;
         setIsDegraded(isDegraded);
       }
-      const gracePeriodMs = 300;
 
-      if (!engineIsCalibrating && sample.hasFace && now >= refractoryUntilRef.current) {
-        const el = document.elementFromPoint(sample.x, sample.y);
-        const t = el?.closest(DWELL_SELECTOR) as HTMLElement | null;
-        const customDwell = t?.dataset.dwellMs ? parseInt(t.dataset.dwellMs, 10) : null;
-        const isEmergency = !!t && t.dataset.emergency === 'true';
-        const isDisabled =
-          !!t &&
-          ((t as HTMLButtonElement).disabled ||
-            t.getAttribute('aria-disabled') === 'true' ||
-            t.dataset.noDwell === 'true');
-        const blockedByDegraded = isDegraded && !isEmergency;
-
-        if (t && !isDisabled && !blockedByDegraded) {
-          hitTarget = t;
-          const effectiveDwellMs = customDwell || (isDegraded && isEmergency
-            ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
-            : dwellMsRef.current);
-
-          if (t !== dwellTargetRef.current) {
-            // Re-entrada no mesmo botão dentro da janela de tolerância: restaura progresso
-            if (t === lastDwellTargetRef.current && exitTimeMsRef.current > 0 && now - exitTimeMsRef.current < gracePeriodMs) {
-              dwellTargetRef.current = t;
-              t.classList.add('gaze-hover');
-              dwellStartMsRef.current = now - (frozenDwellProgressRef.current * effectiveDwellMs);
-              exitTimeMsRef.current = 0;
-              frozenDwellProgressRef.current = 0;
-            } else {
-              // Mudou de alvo: limpa o anterior imediatamente
-              if (dwellTargetRef.current) {
-                dwellTargetRef.current.classList.remove('gaze-hover');
-                dwellTargetRef.current.style.removeProperty('--gaze-dwell-progress');
-              }
-              if (lastDwellTargetRef.current && lastDwellTargetRef.current !== t) {
-                lastDwellTargetRef.current.classList.remove('gaze-hover');
-                lastDwellTargetRef.current.style.removeProperty('--gaze-dwell-progress');
-              }
-
-              dwellTargetRef.current = t;
-              dwellStartMsRef.current = now;
-              t.classList.add('gaze-hover');
-              lastDwellTargetRef.current = t;
-              exitTimeMsRef.current = 0;
-              frozenDwellProgressRef.current = 0;
-            }
-          }
-
-          if (t === dwellTargetRef.current) {
-            const elapsed = now - dwellStartMsRef.current;
-            dwellPct = Math.min(1, elapsed / effectiveDwellMs);
-            t.style.setProperty('--gaze-dwell-progress', `${dwellPct}`);
-
-            if (elapsed >= effectiveDwellMs) {
-              t.click();
-              try {
-                const rect = t.getBoundingClientRect();
-                const centerX = rect.left + rect.width / 2;
-                const centerY = rect.top + rect.height / 2;
-                engineRef.current?.calibration.feedOnlineSample(centerX, centerY);
-              } catch {
-                // Silencia
-              }
-              t.classList.remove('gaze-hover');
-              t.style.removeProperty('--gaze-dwell-progress');
-              refractoryUntilRef.current = now + REFRACTORY_MS;
-              dwellTargetRef.current = null;
-              lastDwellTargetRef.current = null;
-              dwellStartMsRef.current = 0;
-              exitTimeMsRef.current = 0;
-              frozenDwellProgressRef.current = 0;
-              dwellPct = 0;
-              hitTarget = null;
-            }
-          }
-        } else {
-          handleGazeExit(now);
-        }
+      if (engineIsCalibrating) {
+        // Durante a calibração nada é clicável: um dwell acidental na UI da
+        // própria calibração corromperia a coleta.
+        clearDwellVisuals();
+        dwellStateRef.current = createDwellState();
       } else {
-        handleGazeExit(now);
-      }
+        const el = document.elementFromPoint(sample.x, sample.y);
+        const node = el?.closest(DWELL_SELECTOR) as HTMLElement | null;
 
-      function handleGazeExit(timestamp: number) {
-        if (dwellTargetRef.current) {
-          const t = dwellTargetRef.current;
-          const customDwell = t.dataset.dwellMs ? parseInt(t.dataset.dwellMs, 10) : null;
-          const effectiveDwellMs = customDwell || (isDegraded && t.dataset.emergency === 'true'
-            ? dwellMsRef.current * EMERGENCY_DEGRADED_MULT
-            : dwellMsRef.current);
-          const elapsed = timestamp - dwellStartMsRef.current;
-          frozenDwellProgressRef.current = Math.min(1, elapsed / effectiveDwellMs);
-          exitTimeMsRef.current = timestamp;
-          lastDwellTargetRef.current = dwellTargetRef.current;
-          
-          // Desacopla dwellTarget ativo mas deixa o estilo congelado na tela
-          dwellTargetRef.current = null;
+        // `data-dwell-ms` inválido (NaN) não pode virar dwell instantâneo.
+        const rawCustom = node?.dataset.dwellMs ? parseInt(node.dataset.dwellMs, 10) : NaN;
+        const customDwellMs = Number.isFinite(rawCustom) && rawCustom > 0 ? rawCustom : null;
+
+        const target: DwellTarget | null = node
+          ? {
+              key: node,
+              customDwellMs,
+              isEmergency: node.dataset.emergency === 'true',
+              isDisabled:
+                (node as HTMLButtonElement).disabled ||
+                node.getAttribute('aria-disabled') === 'true' ||
+                node.dataset.noDwell === 'true',
+            }
+          : null;
+
+        const outcome = stepDwell(
+          dwellStateRef.current,
+          {
+            x: sample.x,
+            y: sample.y,
+            // O dwell tem de acompanhar o FLUXO DE AMOSTRAS, não o relógio do
+            // render. Usar `performance.now()` aqui media o tempo de parede do
+            // callback, que é o mesmo defeito do C-15 por outra porta: se o
+            // engine parar de emitir (piscada, rosto perdido, frame dropado), o
+            // relógio segue correndo e o dwell completaria sozinho.
+            // `sample.timestamp` é carimbado pelo engine na emissão.
+            timestamp: Number.isFinite(sample.timestamp) ? sample.timestamp : now,
+            hasFace: sample.hasFace,
+            degraded: isDegraded,
+            // C-07 — sem calibração o ponto é o fallback do nariz. O dispatcher
+            // bloqueia tudo, inclusive emergência.
+            uncalibrated: sample.uncalibrated === true,
+            eyeState: sample.eyeState ?? 'unknown',
+          },
+          target,
+          {
+            dwellMs: dwellMsRef.current,
+            emergencyDegradedMult: EMERGENCY_DEGRADED_MULT,
+            refractoryMs: REFRACTORY_MS,
+            graceMs: DWELL_GRACE_MS,
+            lostResetMs: DWELL_LOST_RESET_MS,
+          },
+        );
+        dwellStateRef.current = outcome.state;
+
+        // Realce: só o alvo apontado pelo outcome fica com `gaze-hover`.
+        const hoverNode = outcome.hoverKey as HTMLElement | null;
+        if (hoverNode !== hoveredNodeRef.current) {
+          clearDwellVisuals();
+          hoveredNodeRef.current = hoverNode;
+          if (hoverNode?.isConnected) hoverNode.classList.add('gaze-hover');
         }
 
-        // Se expirou a tolerância, remove do DOM o estado visual de progresso e hover
-        if (exitTimeMsRef.current > 0 && timestamp - exitTimeMsRef.current >= gracePeriodMs) {
-          if (lastDwellTargetRef.current) {
-            lastDwellTargetRef.current.classList.remove('gaze-hover');
-            lastDwellTargetRef.current.style.removeProperty('--gaze-dwell-progress');
+        if (outcome.effect.type === 'progress') {
+          dwellPct = outcome.effect.pct;
+          hitTarget = hoverNode;
+          if (hoverNode?.isConnected) {
+            hoverNode.style.setProperty('--gaze-dwell-progress', `${dwellPct}`);
           }
-          lastDwellTargetRef.current = null;
-          exitTimeMsRef.current = 0;
-          frozenDwellProgressRef.current = 0;
-          dwellStartMsRef.current = 0;
+        } else if (outcome.effect.type === 'click') {
+          const alvo = outcome.effect.targetKey as HTMLElement;
+          clearDwellVisuals();
+          // C-23 — o refratário já está armado dentro de `outcome.state`, que
+          // foi commitado ACIMA. Se o handler React lançar, o dwell não
+          // re-dispara sob o mesmo olhar e o loop segue vivo.
+          try {
+            if (alvo.isConnected) alvo.click();
+          } catch (err) {
+            console.error('[IrisFlow] handler de clique por dwell lançou:', err);
+          }
         }
       }
 
@@ -674,8 +673,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       });
 
-      // Sincroniza o estado de isDwelling de forma segura sem floodar re-renders
-      const targetExists = dwellTargetRef.current !== null;
+      // Sincroniza o estado de isDwelling de forma segura sem floodar re-renders.
+      // Lê o estado do redutor puro (`dwellStateRef`), que substituiu os sete
+      // refs mutáveis anteriores.
+      const targetExists = dwellStateRef.current.targetKey !== null;
       if (wasDwellingRef.current !== targetExists) {
         wasDwellingRef.current = targetExists;
         setIsDwelling(targetExists);
@@ -849,6 +850,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // 1.1-UI — deriva de pose da calibração recém-treinada, para a tela poder
       // avisar em vez de deixar o usuário seguir com um modelo contaminado.
       getPoseDriftVerdict: () => engineRef.current?.calibration.getPoseDriftVerdict() ?? null,
+      // C-16 — abortar sem treinar e sem descartar o modelo anterior.
+      abort: () => engineRef.current?.calibration.abort(),
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,
       feedOnlineSample: (x, y) => engineRef.current?.calibration.feedOnlineSample(x, y) ?? false,
@@ -915,5 +918,18 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [subscribe, state, l2csStatus, calibration, recording, isDwelling, isComposing, setIsComposing, isDegraded, cameraError, calibrationInvalidated],
   );
 
-  return <GazeContext.Provider value={value}>{children}</GazeContext.Provider>;
+  return (
+    <GazeContext.Provider value={value}>
+      {/* F-FE-12 / C-07 — falhas que desligam o controle por olhar têm de ser
+          visíveis. Sem isto, `cameraError` e `calibrationInvalidated` eram
+          calculados e nunca renderizados, e a ausência de calibração deixava
+          o usuário com cursor invisível e nada clicável, sem explicação. */}
+      <GazeStatusBanner
+        state={state}
+        cameraError={cameraError}
+        calibrationInvalidated={calibrationInvalidated}
+      />
+      {children}
+    </GazeContext.Provider>
+  );
 };

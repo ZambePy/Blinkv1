@@ -55,3 +55,17 @@ frontend/python_scripts/l2cs_validation/
 *.njsproj
 *.sln
 *.sw?
+
+# Documentos de auditoria e planejamento (locais, não versionados por decisão
+# do autor). Os IDs citados em comentários do código (C-xx, F-FE-xx, Q-xx,
+# Exp-n) vivem nestes arquivos — mantenha-os no disco ao trabalhar no pipeline.
+ARCHITECTURE.md
+AUDIT.md
+AUDIT-FRONTEND.md
+BENCHMARKS.md
+DECISIONS.md
+PIPELINE.md
+README-PROPOSED.md
+RESEARCH.md
+ROADMAP.md
+SPRINTS.md

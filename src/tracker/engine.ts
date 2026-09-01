@@ -17,6 +17,7 @@ import { getRecentBlinkRatePerMinute, ACTIVE_FEATURE_SET } from '../extractor';
 import * as recorder from '../telemetry/recorder';
 import type { RecordedQuality, RecordedTarget } from '../telemetry/types';
 import { EXPERIMENT } from '../config/experiment';
+import { runLoopBody, emitToSubscribers } from './loopGuard';
 
 // Status do subsistema L2CS. Exposto via engine.getL2CSStatus() para a UI
 // poder bloquear calibração enquanto o worker não estiver 'ready' — calibrar
@@ -39,12 +40,28 @@ export interface GazeSample {
   // desabilitar dwell exceto para elementos data-emergency, e mostrar aparência
   // distinta. Opcional para compat com consumidores anteriores a A1-4.
   degraded?: boolean;
+  /**
+   * C-07 — `true` quando NUNCA houve calibração: o ponto emitido é o fallback
+   * do nariz, que não tem relação com a direção do olhar. Distinto de
+   * `degraded` (calibrado, mas a predição falhou), porque a política de
+   * interação é diferente: em `degraded` a emergência continua permitida; em
+   * `uncalibrated` nada é clicável, nem a emergência — clicar sobre um sinal
+   * que não segue o olhar é disparar alarme por acaso.
+   */
+  uncalibrated?: boolean;
+  /**
+   * C-15 — estado ocular do frame. O engine antes não emitia NADA durante a
+   * piscada, e o dwell (que media relógio de parede) completava sozinho: fechar
+   * os olhos 2 s sobre um botão clicava ao reabrir. Com o estado explícito, o
+   * dispatcher pausa em vez de continuar contando.
+   */
+  eyeState?: 'open' | 'closed';
 }
 
 // A1-4 — estado 'degraded' distingue "sistema não sabe onde o olhar está" de
 // "sistema funcionando". Usuário-alvo ELA não pode desdizer um clique feito
 // sob cursor errado; melhor bloquear a UI que aceitar seleção aleatória.
-export type EngineState = 'idle' | 'loading' | 'tracking' | 'calibrating' | 'no_face' | 'degraded';
+export type EngineState = 'idle' | 'loading' | 'tracking' | 'calibrating' | 'no_face' | 'degraded' | 'uncalibrated';
 
 // A1-4 — quanto tempo mapGaze pode devolver null antes de considerarmos que
 // a predição está degradada. 500 ms = ~15 frames a 30 fps — tolera glitch
@@ -124,6 +141,12 @@ export interface CalibrationApi {
    * uma postura que mudou no meio da coleta.
    */
   getPoseDriftVerdict(): import('../calibration').VeredictoDeriva | null;
+  /**
+   * C-16 — encerra uma calibração em curso SEM treinar e sem descartar o
+   * modelo anterior. A tela chama no unmount e quando a janela perde o foco;
+   * sem isto, sair no meio da coleta prendia o app em `calibrating`.
+   */
+  abort(): void;
   clear(): void;
   isCalibrated(): boolean;
   // Sprint 4 — recalibração implícita a partir de dwell clicks confirmados.
@@ -449,7 +472,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       lastEmittedY = sample.y;
     }
     lastEmitHadFace = sample.hasFace;
-    gazeSubscribers.forEach(cb => cb(sample));
+    // C-23 — um subscriber que lança não pode abortar a entrega aos demais nem
+    // derrubar o frame. O dispatcher de dwell é um subscriber e chama `.click()`,
+    // executando código React arbitrário: era a rota mais provável de morte.
+    emitToSubscribers(gazeSubscribers, sample);
   }
 
   async function initMediaPipe(): Promise<void> {
@@ -505,7 +531,16 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     );
   }
 
+  // C-23 — `loop()` passou a ser só o invólucro resiliente; o corpo real é
+  // `loopBody()`. O reagendamento vive no `finally` de `runLoopBody`, então
+  // nenhuma exceção de etapa (MediaPipe, qualidade, worker, subscriber) pode
+  // mais matar o rastreamento em silêncio.
   function loop(): void {
+    if (!running || !videoEl || !faceLandmarker) return;
+    runLoopBody(loopBody, () => { rafHandle = requestAnimationFrame(loop); });
+  }
+
+  function loopBody(): void {
     if (!running || !videoEl || !faceLandmarker) return;
 
     const startTimeMs = performance.now();
@@ -545,6 +580,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             y: lastEmittedY,
             timestamp: performance.now(),
             hasFace: false,
+            // C-07 — o dispatcher trata `uncalibrated` como bloqueio total;
+            // omitir aqui deixaria a amostra de perda de rosto parecer válida.
+            uncalibrated: !calibration.isCalibrated(),
           });
         }
         // Fase 0.1 — mesmo sem rosto, gravamos o frame para o replay saber
@@ -826,8 +864,16 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // 'degraded' entra quando mapGaze devolveu null por >500ms seguidos
           // após a calibração estar completa. Sai automaticamente no primeiro
           // frame bem-sucedido.
+          // C-07 — `uncalibrated` é um estado próprio. Antes, um app sem
+          // nenhuma calibração emitia o fallback do nariz como se fosse gaze
+          // (`degraded:false`), e o dwell clicava em qualquer botão sob a ponta
+          // do nariz — com o cursor invisível, porque a UI o esconde quando
+          // não há calibração.
+          const semCalibracao = !calibration.isCalibrated();
           if (calibration.isCalibrating) {
             setState('calibrating');
+          } else if (semCalibracao) {
+            setState('uncalibrated');
           } else if (isDegraded) {
             setState('degraded');
           } else {
@@ -840,6 +886,8 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             timestamp: performance.now(),
             hasFace: true,
             degraded: isDegraded,
+            uncalibrated: semCalibracao,
+            eyeState: 'open',
           });
           framesEmitted++;
 
@@ -853,6 +901,28 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
               extractorResult.advancedFeatures?.quality?.irisVisibilityPercentage,
             yaw: face?.yaw, pitch: face?.pitch, roll: face?.roll,
           };
+        } else if (extractorResult.blinkDetected) {
+          // C-15 — piscada passa a EMITIR, na última posição conhecida e com
+          // `eyeState:'closed'`.
+          //
+          // Antes o engine simplesmente não emitia durante a piscada, e o
+          // dispatcher media o dwell por relógio de parede: fechar os olhos por
+          // 2 s sobre um botão disparava o clique ao reabrir, porque o tempo
+          // decorrido bastava. Fechamento prolongado é comum em fadiga, que é
+          // exatamente a condição do público-alvo.
+          //
+          // A posição NÃO é atualizada (o olho fechado não informa direção); só
+          // o estado muda, para o dispatcher poder pausar em vez de contar.
+          const semCalibracaoBlink = !calibration.isCalibrated();
+          emit({
+            x: lastEmittedX,
+            y: lastEmittedY,
+            timestamp: performance.now(),
+            hasFace: true,
+            degraded: !semCalibracaoBlink && mapGazeNullSinceMs !== null,
+            uncalibrated: semCalibracaoBlink,
+            eyeState: 'closed',
+          });
         }
 
         // Fase 0.1 — recorder hook único do branch hasFace. Fica FORA do
@@ -885,8 +955,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         }
       }
     }
-
-    rafHandle = requestAnimationFrame(loop);
+    // C-23 — o reagendamento saiu daqui e foi para o `finally` de
+    // `runLoopBody`, em `loop()`. Enquanto morava nesta linha, era pulado por
+    // qualquer exceção acima e o loop morria sem deixar rastro.
   }
 
   return {
@@ -1083,6 +1154,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getPoseDriftVerdict() {
         return calibration.avaliarDerivaDePose(calibration.getSessionPoseDrift());
+      },
+      abort(): void {
+        calibration.abortCalibration();
       },
       clear(): void {
         calibration.clearCalibration();

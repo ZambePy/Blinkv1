@@ -98,6 +98,10 @@ export const CalibrationCheck: React.FC = () => {
   const [stage, setStage] = useState<
     'tutorial' | 'calibrating' | 'testing' | 'transitioning' | 'drift-warning'
   >('tutorial');
+  // C-16 — espelho do `stage` para os listeners de visibilidade/blur, que são
+  // registrados uma única vez e fechariam sobre o valor do primeiro render.
+  const stageRef = useRef(stage);
+  useEffect(() => { stageRef.current = stage; }, [stage]);
 
   // 1.1-UI — veredito da deriva de pose da calibração recém-treinada. Não-nulo
   // significa que a cabeça migrou mais que o limiar DURANTE a coleta.
@@ -143,13 +147,43 @@ export const CalibrationCheck: React.FC = () => {
   // de alvos consultada para display. Nulo enquanto nada iniciou.
   const [calibrationMode, setCalibrationMode] = useState<'full' | 'quick' | null>(null);
 
-  // Lista de alvos ATUALMENTE usada pela sessão em curso (ou full por default).
-  // useMemo por segurança contra rerenders desnecessários — a lista muda só
-  // quando calibrationMode muda.
-  const activePoints: CalibrationPointUI[] = useMemo(() => {
-    const targets = calibrationMode === 'quick'
-      ? calibration.getCalibrationTargets?.() ?? []
-      : calibration.getCalibrationTargets?.() ?? [];
+  // C-05 — a lista de alvos da SESSÃO EM CURSO, congelada em `handleStart`
+  // depois de `startCalibrationMode`.
+  //
+  // Antes, `startNextPoint` lia o `activePoints` do render em que `handleStart`
+  // rodou. Nesse render `calibrationMode` ainda era `null`, então a lista era a
+  // que `getCalibrationTargets()` devolvia ANTES do modo ser aplicado — a grade
+  // nominal, calculada no load do módulo com a geometria default. O
+  // `shuffleOrderRef` já era montado sobre a lista NOVA. Os índices de uma lista
+  // indexavam a outra: em modo rápido a UI mostrava 4 cantos e o engine coletava
+  // TL/TC/TR/ML da grade de 9; em modo completo divergiam sempre que a distância
+  // medida da sessão ≠ default (que é o caso normal).
+  //
+  // O ref é a fonte da verdade para o loop (síncrono, imune a render velho); o
+  // state existe só para o JSX redesenhar. Os dois são escritos juntos e nunca
+  // separadamente — ver `commitSessionTargets`.
+  const activePointsRef = useRef<CalibrationPointUI[]>([]);
+  const [sessionPoints, setSessionPoints] = useState<CalibrationPointUI[] | null>(null);
+
+  const toUiPoints = (targets: readonly { x: number; y: number }[]): CalibrationPointUI[] =>
+    targets.map((t) => ({
+      x: t.x * 100,
+      y: t.y * 100,
+      name: POINT_NAME[`${t.x},${t.y}`] ?? '',
+    }));
+
+  /** Congela os alvos desta sessão. Chamado UMA vez, após startCalibrationMode. */
+  const commitSessionTargets = (targets: readonly { x: number; y: number }[]) => {
+    const pts = toUiPoints(targets);
+    activePointsRef.current = pts;
+    setSessionPoints(pts);
+    return pts;
+  };
+
+  // Lista NOMINAL — usada só para o preview do tutorial, antes de qualquer
+  // sessão começar. Nunca alimenta a coleta.
+  const nominalPoints: CalibrationPointUI[] = useMemo(() => {
+    const targets = calibration.getCalibrationTargets?.() ?? [];
     if (targets.length === 0) {
       // Fallback: se o engine ainda não subiu, hardcode a grade full para
       // não quebrar a tela de tutorial. Idêntico ao layout pré-D6.
@@ -159,12 +193,11 @@ export const CalibrationCheck: React.FC = () => {
         { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
       ].map((t) => ({ x: t.x * 100, y: t.y * 100, name: POINT_NAME[`${t.x},${t.y}`] ?? '' }));
     }
-    return targets.map((t) => ({
-      x: t.x * 100,
-      y: t.y * 100,
-      name: POINT_NAME[`${t.x},${t.y}`] ?? '',
-    }));
+    return toUiPoints(targets);
   }, [calibrationMode, calibration]);
+
+  // O que a tela desenha: os alvos da sessão quando existe uma, senão o preview.
+  const activePoints: CalibrationPointUI[] = sessionPoints ?? nominalPoints;
 
   const shuffleOrderRef          = useRef<number[]>([]);
   const isMounted                = useRef(true);
@@ -211,10 +244,46 @@ export const CalibrationCheck: React.FC = () => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
+      // C-16 — sair da tela no meio da coleta deixava `isCalibrating` ligado
+      // para sempre: o engine reportava `calibrating` a cada frame, o dwell
+      // ficava desligado e o cursor oculto em TODO o app, sem recuperação a
+      // não ser completar uma calibração inteira. Abortar não descarta o
+      // modelo anterior — só encerra a sessão em curso.
+      calibration.abort?.();
       // Sair da tela no meio de uma gravação auto-iniciada: descarta pra não
       // deixar JSONL parcial em lugar nenhum.
       finalizeAutoRecordingRef.current(false);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // C-16 — a janela perder o foco durante a coleta é o mesmo problema por outra
+  // porta: os alvos continuam sendo coletados enquanto o usuário olha para
+  // outro lugar, contaminando o modelo com amostras que não correspondem a
+  // alvo nenhum. Aborta e devolve a tela ao início, em vez de treinar sujo.
+  useEffect(() => {
+    const abortarPorPerdaDeFoco = (motivo: string) => {
+      if (document.visibilityState === 'visible' && motivo === 'visibility') return;
+      if (stageRef.current !== 'calibrating') return;
+      console.warn(`[calib] C-16 — calibração abortada por ${motivo}`);
+      calibration.abort?.();
+      finalizeAutoRecordingRef.current(false);
+      if (!isMounted.current) return;
+      setStage('tutorial');
+      setPreparing(false);
+      setCompletedList([]);
+      setSessionPoints(null);
+      setErrorMessage('A calibração foi interrompida porque a janela perdeu o foco. Comece de novo.');
+    };
+    const onVisibility = () => abortarPorPerdaDeFoco('visibility');
+    const onBlur = () => abortarPorPerdaDeFoco('blur');
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('blur', onBlur);
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('blur', onBlur);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const finishAndTransition = () => {
@@ -297,7 +366,20 @@ export const CalibrationCheck: React.FC = () => {
     setErrorMessage(null);
     setLastCompletedPoint(null);
 
-    const pt = activePoints[pointIdx];
+    // C-05 — SEMPRE do ref: `activePoints` aqui seria a lista do render em que
+    // esta closure nasceu, que é anterior a `startCalibrationMode`.
+    const pt = activePointsRef.current[pointIdx];
+    if (!pt) {
+      // Ordem e lista dessincronizadas: abortar é melhor que treinar em alvo
+      // errado — era exatamente esse silêncio que fazia o C-05 passar batido.
+      console.error(
+        `[calib] alvo ${pointIdx} inexistente na lista da sessão ` +
+        `(${activePointsRef.current.length} alvos). Coleta abortada.`,
+      );
+      setErrorMessage('Erro interno na grade de calibração. Tente novamente.');
+      setStage('tutorial');
+      return;
+    }
     calibration.startCollectingPoint?.(pt.x / 100, pt.y / 100, (success: boolean) => {
       if (!isMounted.current) return;
       if (success) {
@@ -380,11 +462,13 @@ export const CalibrationCheck: React.FC = () => {
       },
     });
 
-    // Ordem embaralhada em cima do TAMANHO REAL da lista ativa após o setState
-    // (que ainda não propagou). Como `getCalibrationTargets` já retorna a
-    // lista certa depois de startCalibrationMode, usamos ela direto.
+    // C-05 — UMA leitura de `getCalibrationTargets()`, já com o modo e a
+    // geometria desta sessão aplicados, alimentando ao mesmo tempo a ordem
+    // embaralhada, o loop de coleta e o JSX. Antes, a ordem vinha daqui e os
+    // alvos vinham de uma closure anterior a `startCalibrationMode`.
     const targets = calibration.getCalibrationTargets?.() ?? [];
-    const order = targets.map((_, i) => i);
+    const sessionTargets = commitSessionTargets(targets);
+    const order = sessionTargets.map((_, i) => i);
     for (let i = order.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
       [order[i], order[j]] = [order[j], order[i]];
@@ -708,7 +792,7 @@ export const CalibrationCheck: React.FC = () => {
                 <div style={{ width: `${progressPct}%`, height: '100%', background: ACCENT, transition: 'width 0.5s ease-out', borderRadius: 2 }} />
               </div>
               <span style={{ fontSize: '0.8rem', color: TEXT_DIM, fontVariantNumeric: 'tabular-nums' }}>
-                {completedList.length} / {activePoints.length}
+                {completedList.length} / <span data-testid="calib-progress-total">{activePoints.length}</span>
               </span>
             </div>
 

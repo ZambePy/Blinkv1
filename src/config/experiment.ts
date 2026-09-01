@@ -140,7 +140,19 @@ const DEFAULTS: ExperimentConfig = {
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
   geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
   lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
-  enableL2CS: true, // ligado a pedido. ⚠️ inerte enquanto ACTIVE_FEATURE_SET='iris12' descartar [37..43] — ver 2.5
+  // C-01 — DESLIGADO até o Exp-2 decidir com número.
+  //
+  // Estava `true` sem participar de nada: com `ACTIVE_FEATURE_SET = 'irisCore'`
+  // o vetor entregue ao Ridge é `[0,1,2,3]` e o bloco angular do L2CS
+  // (índices 37..43) é descartado na projeção. O custo era real e o efeito,
+  // zero: 91 MB de download do ONNX no boot, um `getImageData` de 448² a 10 Hz
+  // e memória do worker, tudo para produzir números que ninguém lia.
+  //
+  // Religar é uma decisão do Exp-2 (BENCHMARKS.md), que compara `irisCore`
+  // puro, `irisCore`+pose geométrica, `irisCore`+l2cs e l2cs-only sobre a
+  // gravação B2 — e exige, antes, corrigir o crop (C-11) e o backpressure
+  // do cliente (C-10). Sem isso o L2CS nunca foi avaliado funcionando.
+  enableL2CS: false,
 };
 
 const STORAGE_KEY = 'irisflow.experiment';

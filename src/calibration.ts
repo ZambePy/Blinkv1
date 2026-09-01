@@ -700,7 +700,62 @@ export function isCalibrated(): boolean {
   return regressorLeft !== null && regressorRight !== null;
 }
 
+/**
+ * C-16 — encerra uma sessão de calibração em curso SEM treinar.
+ *
+ * `isCalibrating` só era desligado por `completeCalibration`. Sair da tela no
+ * meio da coleta (voltar, navegar, unmount, fechar a aba) deixava o núcleo
+ * preso em `calibrating` para sempre: o engine reportava esse estado a cada
+ * frame, o dispatcher de dwell ficava desligado e o cursor oculto em todo o
+ * app, sem recuperação a não ser completar uma calibração inteira.
+ *
+ * Derruba TODO o estado de coleta, inclusive o timeout duro do ponto corrente
+ * — que, se sobrevivesse, dispararia `processStaticPoint()` sobre o alvo de uma
+ * sessão que já não existe e chamaria o callback de um componente desmontado.
+ *
+ * Não toca no modelo treinado: abortar uma recalibração tem de deixar a
+ * calibração ANTERIOR intacta. Quem quer descartar o modelo chama
+ * `clearCalibration()`, que agora aborta antes de limpar.
+ */
+export function abortCalibration(): void {
+  if (collectionTimeoutHandle !== null) {
+    clearTimeout(collectionTimeoutHandle);
+    collectionTimeoutHandle = null;
+  }
+  const estavaAtiva = isCalibrating || isCollecting;
+
+  isCalibrating = false;
+  isCollecting = false;
+  pointCompleteCallback = null;
+  currentCalibrationMode = null;
+  currentCalibrationTargets = null;
+
+  // Buffers do ponto em curso.
+  collectedFeaturesLeft = [];
+  collectedFeaturesRight = [];
+  collectedQualities = [];
+  collectionStartTime = 0;
+  lastDecision = null;
+
+  // Contadores e baselines por ponto/sessão: sem isto, a próxima calibração
+  // herdaria o baseline de pose e os contadores de gate da sessão abortada.
+  currentPointBaselinePose = null;
+  currentPointSpecularHits = 0;
+  currentPointFramesAccepted = 0;
+  poseDriftRejects = 0;
+  sessionBaselinePose = null;
+  sessionPoseSamples = [];
+  sessionPoseByTarget = [];
+
+  if (estavaAtiva) {
+    console.log('[calib] calibração abortada — estado de coleta limpo');
+  }
+}
+
 export function clearCalibration() {
+  // C-16 — sem isto, `clearCalibration` limpava o modelo mas deixava
+  // `isCalibrating` ligado, prendendo o app em `calibrating`.
+  abortCalibration();
   profile = [];
   regressorLeft = null;
   regressorRight = null;
