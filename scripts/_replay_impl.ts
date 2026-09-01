@@ -55,6 +55,7 @@ import {
 } from '../src/calibration';
 import { compensarPredicao, poseDeReferencia } from '../src/poseCompensation';
 import { compensarTranslacao, centroDeReferencia } from '../src/translationCompensation';
+import { ACCLIMATION_MS } from '../src/accuracyProtocol';
 import { parseJSONL } from '../src/telemetry/recorder';
 import type { RecordedFrame, Recording, RecordedTarget, RecordedQuality } from '../src/telemetry/types';
 
@@ -66,29 +67,15 @@ const ASSUMED_DIST_PX = 2268;
 /**
  * A1 - janela de acomodacao descartada no inicio de CADA alvo de precisao.
  *
- * Espelha `ACCLIMATION_MS` em `accuracy.ts`. O teste ao vivo descarta os
- * primeiros 400 ms de cada ponto; o replay nao descartava nada, e a diferenca
- * dominava a metrica.
+ * Antes era uma copia local com o valor repetido a mao e um comentario dizendo
+ * "espelha ACCLIMATION_MS em accuracy.ts" -- espelho manual diverge, e quando
+ * diverge o replay e o teste ao vivo passam a medir coisas diferentes em
+ * silencio, que e justamente o que os dois existem para poder comparar. Agora
+ * vem da fonte unica; a medicao que fixa o valor esta la.
  *
- * MEDIDO na gravacao de referencia, erro mediano por posicao dentro da janela
- * de cada alvo:
- *
- *   posicao     0    1    2    3    4    5    6    7    8    9   10   11   12+
- *   mediana   452  451  450  450  450  454  456  456  304  150   97   90   ~50
- *
- * Plano em ~450 px por oito quadros e depois despenca. Sacada em voo daria
- * RAMPA; isto e o olho ainda parado no alvo anterior. A confirmacao: em 7 das 8
- * transicoes, nesses primeiros quadros a predicao esta mais perto do alvo
- * ANTERIOR que do atual -- num caso, 983 px do atual contra 103 px do anterior.
- *
- * O comentario que justificava gravar assim dizia que "o dot ja esta visivel ao
- * usuario, entao qualquer frame gravado tem ground-truth legitimo". O dot estar
- * visivel nao e o usuario estar olhando: latencia de sacada humana e ~250 ms.
- *
- * Custo do erro: a media global cai de 134,8 para 57,9 px (-57%) so descartando
- * esta janela. Toda a Fase 1 mediu variantes atraves desse ruido.
+ * Custo de nao descartar: a media global cai de 134,8 para 57,9 px (-57%) so
+ * com esta janela fora. Toda a Fase 1 mediu variantes atraves desse ruido.
  */
-const ACCLIMATION_MS = 400;
 
 /**
  * 1.3 — ganho geométrico da pose, em px de tela por grau de rotação da cabeça.

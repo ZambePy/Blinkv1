@@ -423,6 +423,33 @@ const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
   'iris12+l2cs+pose': 44,
 };
 
+/** Índices do bloco L2CS no vetor COMPLETO (ver o mapa em [37..43]). */
+const L2CS_FULL_INDICES: readonly number[] = [37, 38, 39, 40, 41, 42, 43];
+
+/**
+ * Posições do bloco L2CS DENTRO do vetor já projetado no conjunto — vazio
+ * quando o conjunto não carrega bloco angular nenhum.
+ *
+ * Existe porque o diagnóstico `l2csValidFraction` perguntava "as últimas
+ * L2CS_BLOCK_DIM dimensões são todas zero?", e essa pergunta erra de dois
+ * jeitos: com `irisCore` (4 dims) o vetor é mais curto que o bloco e a
+ * contagem simplesmente não acontece — o relatório publicava 0%, que se lê
+ * como "o L2CS falhou em 100% das amostras" quando a verdade é que ele não
+ * está no vetor; e com `irisCore+l2cs`, que leva só 2 das 7 dims, "as últimas
+ * 7" invadiria as features de íris.
+ *
+ * `compact` devolve o vetor inteiro, então as posições são os próprios índices.
+ */
+export function l2csSlotsInSet(set: FeatureSet = ACTIVE_FEATURE_SET): number[] {
+  if (set === 'compact') return [...L2CS_FULL_INDICES];
+  const indices = FEATURE_SET_INDICES[set];
+  const slots: number[] = [];
+  for (let pos = 0; pos < indices.length; pos++) {
+    if (L2CS_FULL_INDICES.includes(indices[pos])) slots.push(pos);
+  }
+  return slots;
+}
+
 /** Conjunto ativo padrão (destilado: 4 dimensões essenciais para máxima robustez contra reflexos de óculos). */
 export const ACTIVE_FEATURE_SET: FeatureSet = 'irisCore';
 

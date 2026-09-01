@@ -13,6 +13,8 @@ import {
 } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { EXPERIMENT } from './config/experiment';
+import { ACCLIMATION_MS, COLLECTION_MS } from './accuracyProtocol';
+import { ACTIVE_FEATURE_SET, l2csSlotsInSet } from './extractor';
 
 export interface AccuracyResult {
   meanError: number;      // Erro médio em pixels
@@ -200,9 +202,10 @@ const ALL_VALIDATION_POINTS = [
 // Hotfix pós-Sprint 0 — paridade com o protocolo de calibração: descartar os
 // primeiros ACCLIMATION_MS de cada ponto (fase de sacada + acomodação). Sem
 // isso, o jitter reportado mistura movimento sacádico com fixação real.
-// COLLECTION_MS engloba acomodação + janela útil (400 + 1000 = 1400 ms/ponto).
-const ACCLIMATION_MS = 400;
-const COLLECTION_MS = 1400;
+//
+// As duas constantes moram em `accuracyProtocol.ts`, compartilhadas com o
+// replay — que antes mantinha uma cópia "espelho" à mão. Ver lá a medição que
+// levou a acomodação de 400 para 600 ms.
 
 // Distância estimada usuário–tela para conversão px → graus
 // Assume 60 cm a 96 CSS DPI: 60 × 96 / 2.54 ≈ 2268 px
@@ -795,13 +798,23 @@ function finishTest(
   // do teste (iluminação, óculos, cabeça, minutos de sessão) para que a entrada
   // no BASELINE.md seja auto-descritiva.
   //
-  // pipeline: identifica a versão do pipeline usada. L2CS agora é obrigatório
-  // (não há mais A/B), então o campo é fixo em `l2cs+ridge` — preserva o
-  // shape do JSON para não quebrar leitores externos (script de sumário,
-  // dashboards), mas remove o campo booleano `l2csEnabled` que sinalizava
-  // o toggle antigo.
+  // pipeline: identifica a versão do pipeline usada.
+  //
+  // Era o literal fixo `'l2cs+ridge'`, com um comentário dizendo que "L2CS agora
+  // é obrigatório (não há mais A/B)". Deixou de ser verdade em duas etapas —
+  // `b02de0a` desligou o caminho do L2CS por default, e o conjunto ativo passou
+  // a `irisCore`, que não inclui os índices [37..43]. O relatório seguia
+  // anunciando `l2cs+ridge` num pipeline SEM nenhuma dimensão angular; era o
+  // que o `accuracy-report-1788225161304` dizia enquanto rodava com 4 features
+  // de íris por olho.
+  //
+  // Agora deriva do conjunto ativo, então não tem como voltar a mentir: se
+  // alguém trocar `ACTIVE_FEATURE_SET`, o rótulo acompanha sozinho.
   const pipeline = {
-    variant: 'l2cs+ridge' as const,
+    variant: `${ACTIVE_FEATURE_SET}+${REGRESSOR_MODE}`,
+    featureSet: ACTIVE_FEATURE_SET,
+    /** Dimensões do bloco angular presentes no vetor — 0 quando não há L2CS. */
+    l2csDims: l2csSlotsInSet().length,
     regressor: REGRESSOR_MODE,
     gazeCorrectionApplied: EXPERIMENT.applyGazeCorrection,
   };

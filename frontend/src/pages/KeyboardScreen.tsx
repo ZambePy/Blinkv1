@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { ArrowLeft, Delete, Speech, Trash2 } from 'lucide-react';
+import { ArrowLeft, Delete, Home, Speech, Trash2 } from 'lucide-react';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeButton } from '../components/ui/GazeButton';
 import { GazeGrid } from '../components/ui/GazeGrid';
@@ -9,73 +9,91 @@ import { logSentence } from '../utils/clinicalLogger';
 import { useNavigate } from 'react-router-dom';
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Especificação visual — medida pixel a pixel nas gravações de referência
- * (viewport 1918x1078). Não alterar "no olho": qualquer ajuste deve sair de
- * uma nova medição, senão a tela deixa de bater com a referência.
+ * DIREÇÃO VISUAL
  *
- *   fundo da página e das teclas ............ #000000
- *   separador entre teclas .................. #333333, 10px (gap da grade)
- *   letras / texto digitado / sugestões ..... #c2bde4
- *   ícones e rótulos de ação ................ #d0d0d0
- *   moldura de dwell ........................ #0e183c, borda de 30px
- *   linha sob a barra superior .............. #b4bdd6 esmaecendo em 10px
+ * O material desta tela não são as letras — é a ESPERA. Toda ação custa ao
+ * usuário ~1,5 s de olhar parado, e cada seleção errada custa fadiga real. O
+ * design é organizado em torno disso:
  *
- *   barra superior .......................... 68px de altura
- *   linha/brilho sob a barra ................ 10px  (grade começa em y=78)
- *   área da grade ........................... y 78 → 1016 (2 linhas x 3 colunas)
- *   faixa preta abaixo da grade ............. 62px
+ *  1. Feedback de dwell só na fóvea. A tecla aquece (cor, sem deslocamento) e
+ *     um traço curto cresce sob o glifo. Nada se mexe nas bordas, porque
+ *     movimento periférico dispara sacada reflexa e cancelaria o próprio dwell
+ *     que estava sendo reportado. Ver o bloco `.kb-key` em index.css.
  *
- *   altura de caixa das letras .............. 60px  → 5.25rem
- *   entrelinha do bloco de letras ........... 101px → 1.2
- *   altura de caixa das sugestões ........... 30px  → 2.7rem
- *   entrelinha das sugestões ................ 52px  → 1.21
- *   altura de caixa da barra superior ....... 42px  → 3.75rem
+ *  2. Os dois níveis são cromaticamente distintos. Escolher um GRUPO é frio e
+ *     recuado (nada comprometido ainda); escolher a LETRA é contraste cheio. O
+ *     usuário sabe em que nível está sem ler nada — e "onde estou" é a pergunta
+ *     que mais gera erro numa árvore de dois níveis.
+ *
+ *  3. Quente avança, frio recua. O âmbar é o único acento e marca sempre a
+ *     mesma coisa: compromisso. Aparece no dwell, na confirmação e no texto já
+ *     escrito — nunca em decoração.
+ *
+ *  4. A linha de composição é monoespaçada. É um buffer de texto: cada
+ *     caractere ocupa a mesma largura, então dá para conferir o que se escreveu
+ *     contando posições. As teclas usam uma humanista, de letras inequívocas.
+ *     Duas famílias, dois papéis.
  * ──────────────────────────────────────────────────────────────────────────── */
 const KB = {
-  black: '#000000',
-  gridLine: '#333333',
-  letter: '#c2bde4',
-  action: '#d0d0d0',
-  dwell: '#0e183c',
-  divider: '#b4bdd6',
-  backArrow: '#9aa0ad',
+  /** Quase-preto com viés azul. Preto puro em OLED provoca halação com texto
+   *  claro e cansa numa sessão longa; este recua sem brilhar. */
+  ground: '#0A0D12',
+  key: '#151B24',
+  keyEdge: '#232C3A',
+  /** Contraste cheio — nível 2, a letra que vai ser escrita. */
+  glyph: '#EDF1F7',
+  /** Recuado — nível 1 e chrome de navegação. */
+  glyphDim: '#93A6BF',
+  /** Acento único. Quente avança contra o fundo frio: o dwell "vem para a
+   *  frente" enquanto o repouso recua. */
+  ember: '#F0A030',
+  emberEdge: '#7A5220',
+  emberBright: '#FFD98A',
 };
 
-/* A referência foi renderizada numa sans GEOMÉTRICA em peso bold — `a` e `g` de
- * um andar só. Identifiquei comparando a assinatura métrica de "Apagar" no frame
- * (larg/altura-do-A = 5.07, altura-total/A = 1.36) contra as fontes do sistema:
- * Century Gothic Bold ficou em 1º (erro 0.078), e o `a` de um andar descarta
- * Segoe UI e Candara, que vinham logo atrás. Poppins vem primeiro na pilha para
- * o caso de o projeto passar a embarcá-la; sem ela, o Windows cai em Century
- * Gothic, que é o que a gravação mostra. Nada aqui baixa fonte da rede — este é
- * um app assistivo e não pode depender de CDN para desenhar o teclado. */
-const KB_FONT = "'Poppins', 'Century Gothic', 'Questrial', 'Futura', 'Trebuchet MS', system-ui, sans-serif";
+/** Humanista, aberturas generosas, I/l/1 distinguíveis. Sem webfont: um app
+ *  assistivo não pode depender de CDN para desenhar o teclado. */
+const KB_FONT_KEYS = "'Segoe UI Variable Display', 'Segoe UI', 'Inter', system-ui, sans-serif";
+/** Monoespaçada para o buffer: caracteres em células iguais, conferíveis. */
+const KB_FONT_TEXT = "'Cascadia Mono', 'Consolas', ui-monospace, 'Courier New', monospace";
 
-const TOPBAR_H = 68;
-const DIVIDER_H = 10;
-const GRID_GAP = 10;
-const GRID_BOTTOM = 62;
+/** Barra superior alta o bastante para início/voltar respeitarem o mínimo de
+ *  5° (198 px). Abaixo disso não é alvo de olhar, é enfeite. */
+const TOPBAR_H = 208;
+const NAV_W = 200;
+const NAV_H = 200;
+const GRID_GAP = 18;
 
-const FS_LETTER = '5.25rem';
-const FS_SUGGESTION = '2.7rem';
-const FS_TOPBAR = '3.75rem';
-const LH_LETTER = 1.2;
-const LH_SUGGESTION = 1.21;
-const ICON_SIZE = 80;
+/** Dwell mais longo no chrome que nas teclas. Ir para o início no meio de uma
+ *  frase descarta o que foi escrito; olhar por acaso 1,5 s acontece, fixar
+ *  2,6 s contínuos é decisão. */
+const DWELL_HOME_MS = 2600;
+const DWELL_BACK_MS = 2000;
 
-// A referência mostra 4 palavras padrão (EU / SIM / NÃO / TALVEZ) e no máximo
-// 5 previsões, sempre como lista vertical simples dentro da 6ª tecla.
+const FS_LETTER = '6rem';
+const FS_GROUP = '3.4rem';
+const FS_SUGGESTION = '2.5rem';
+const FS_TEXT = '3.25rem';
+const FS_ACTION = '1.6rem';
+const ICON_SIZE = 68;
+
 const DEFAULT_WORDS = ['EU', 'SIM', 'NÃO', 'TALVEZ'];
 const MAX_SUGGESTIONS = 5;
 
+const GROUPS = [
+  ['A', 'B', 'C', 'D', 'E', 'F'],
+  ['G', 'H', 'I', 'J', 'K', 'L'],
+  ['M', 'N', 'O', 'P', 'Q', 'R'],
+  ['S', 'T', 'U', 'V', 'W', 'X'],
+  ['Y', 'Z', 'Espaço', 'Falar', 'Apagar', 'Limpar'],
+];
+
 /**
- * Glifo de espaço (⌴) desenhado à mão em SVG.
+ * Glifo de espaço (⌴) em SVG.
  *
- * O caractere U+2423 foi a primeira tentativa e saiu errado na captura: cada
- * fonte o desenha num corpo diferente, e na geométrica ele encolhe e cai abaixo
- * da linha de base do "Y Z" ao lado. Em SVG a barra tem sempre a proporção
- * medida na referência — 88×16 px no subgrupo, razão altura/largura 0,18, traço
- * a 7% da largura — independente da fonte que o sistema resolver.
+ * O caractere U+2423 sai com corpo diferente em cada fonte — encolhia e caía
+ * abaixo da linha de base do "Y Z" ao lado. Em SVG a barra tem sempre a mesma
+ * proporção, qualquer que seja a fonte que o sistema resolver.
  */
 const EspacoGlifo: React.FC<{ width: number }> = ({ width }) => {
   const altura = Math.round(width * 0.18);
@@ -85,13 +103,13 @@ const EspacoGlifo: React.FC<{ width: number }> = ({ width }) => {
     <svg
       width={width}
       height={altura}
-      viewBox={`0 0 ${width} ${altura}`}
+      viewBox={'0 0 ' + width + ' ' + altura}
       aria-hidden="true"
       focusable="false"
       style={{ display: 'block' }}
     >
       <path
-        d={`M ${m} 0 V ${altura - m} H ${width - m} V 0`}
+        d={'M ' + m + ' 0 V ' + (altura - m) + ' H ' + (width - m) + ' V 0'}
         fill="none"
         stroke="currentColor"
         strokeWidth={traco}
@@ -102,21 +120,13 @@ const EspacoGlifo: React.FC<{ width: number }> = ({ width }) => {
   );
 };
 
-const GROUPS = [
-  ['A', 'B', 'C', 'D', 'E', 'F'],
-  ['G', 'H', 'I', 'J', 'K', 'L'],
-  ['M', 'N', 'O', 'P', 'Q', 'R'],
-  ['S', 'T', 'U', 'V', 'W', 'X'],
-  ['Y', 'Z', 'Espaço', 'Falar', 'Apagar', 'Limpar']
-];
-
 export const KeyboardScreen: React.FC = () => {
   const { isDwelling, setIsComposing } = useGaze();
   const navigate = useNavigate();
   const [text, setText] = useState('');
   const [lastPressed, setLastPressed] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  // activeGroup: null (main screen) | 0-4 (letter/action groups) | 5 (suggestions group)
+  // activeGroup: null (nível 1) | 0-4 (letras/ações) | 5 (sugestões)
   const [activeGroup, setActiveGroup] = useState<number | null>(null);
 
   useEffect(() => {
@@ -129,20 +139,6 @@ export const KeyboardScreen: React.FC = () => {
     return () => setIsComposing(false);
   }, [text, setIsComposing]);
 
-  const handleSelectSuggestion = (word: string) => {
-    setText((t) => {
-      if (t.endsWith(' ') || t === '') {
-        return t + word + ' ';
-      } else {
-        const words = t.trim().split(/\s+/);
-        words[words.length - 1] = word;
-        return words.join(' ') + ' ';
-      }
-    });
-    triggerFeedback(word);
-    setActiveGroup(null);
-  };
-
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
@@ -154,9 +150,18 @@ export const KeyboardScreen: React.FC = () => {
   const triggerFeedback = (key: string) => {
     setLastPressed(key);
     if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-    feedbackTimeoutRef.current = setTimeout(() => {
-      setLastPressed(null);
-    }, 200);
+    feedbackTimeoutRef.current = setTimeout(() => setLastPressed(null), 200);
+  };
+
+  const handleSelectSuggestion = (word: string) => {
+    setText((t) => {
+      if (t.endsWith(' ') || t === '') return t + word + ' ';
+      const words = t.trim().split(/\s+/);
+      words[words.length - 1] = word;
+      return words.join(' ') + ' ';
+    });
+    triggerFeedback(word);
+    setActiveGroup(null);
   };
 
   const append = (char: string) => {
@@ -189,13 +194,9 @@ export const KeyboardScreen: React.FC = () => {
     }
   };
 
-  const handleBackClick = () => {
-    if (activeGroup !== null) {
-      setActiveGroup(null);
-    } else {
-      navigate('/menu');
-    }
-  };
+  /** Sobe um nível. Só existe quando há nível para subir. */
+  const handleBackClick = () => setActiveGroup(null);
+  const handleHomeClick = () => navigate('/menu');
 
   const handleItemClick = (item: string) => {
     if (item === 'Espaço') {
@@ -219,112 +220,100 @@ export const KeyboardScreen: React.FC = () => {
   const currentSuggestions =
     text.trim().length > 0 && suggestions.length > 0 ? suggestions : DEFAULT_WORDS;
 
-  // Tecla: preta, sem borda; o realce de dwell vem do .kb-key::after (index.css).
-  // O flash de confirmação usa o mesmo azul-marinho da moldura, e não o azul da
-  // marca — na referência a tecla nunca acende em azul claro.
-  const keyStyle = (pressed: boolean): React.CSSProperties => ({
-    height: '100%',
-    width: '100%',
-    background: pressed ? KB.dwell : KB.black,
-  });
+  const keyClass = (variante: 'group' | 'letter' | 'words', pressed = false) =>
+    'kb-key kb-key--' + variante + (pressed ? ' kb-key--fired' : '');
 
-  const letterStyle: React.CSSProperties = {
-    fontSize: FS_LETTER,
-    fontWeight: 700,
-    lineHeight: LH_LETTER,
-    color: KB.letter,
+  const cell: React.CSSProperties = { height: '100%', width: '100%' };
+
+  /** Tracking largo separa as letras do grupo: são itens de uma lista, não uma
+   *  palavra para ler de uma vez. */
+  const groupLabel: React.CSSProperties = {
+    fontSize: FS_GROUP,
+    fontWeight: 600,
+    lineHeight: 1.24,
+    letterSpacing: '0.18em',
+    textIndent: '0.18em',
   };
 
-  const actionLabelStyle: React.CSSProperties = {
+  const letterGlyph: React.CSSProperties = {
     fontSize: FS_LETTER,
-    fontWeight: 700,
-    lineHeight: LH_LETTER,
-    color: KB.action,
+    fontWeight: 500,
+    lineHeight: 1,
+  };
+
+  const actionLabel: React.CSSProperties = {
+    fontSize: FS_ACTION,
+    fontWeight: 600,
+    letterSpacing: '0.12em',
+    textTransform: 'uppercase',
   };
 
   const renderMainGrid = () => {
-    const mainLabels = [
-      { top: 'A B C', bottom: 'D E F' },
-      { top: 'G H I', bottom: 'J K L' },
-      { top: 'M N O', bottom: 'P Q R' },
-      { top: 'S T U', bottom: 'V W X' },
+    const grupos = [
+      ['A B C', 'D E F'],
+      ['G H I', 'J K L'],
+      ['M N O', 'P Q R'],
+      ['S T U', 'V W X'],
     ];
 
     return (
       <GazeGrid columns={3} rows={2} gap={GRID_GAP}>
-        {mainLabels.map((label, idx) => (
+        {grupos.map((linhas, idx) => (
           <GazeButton
-            key={`group-${idx}`}
-            className="kb-key"
+            key={'group-' + idx}
+            className={keyClass('group')}
             onClick={() => setActiveGroup(idx)}
-            noWarn={true}
-            style={keyStyle(false)}
+            noWarn
+            style={cell}
           >
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <span style={letterStyle}>{label.top}</span>
-              <span style={letterStyle}>{label.bottom}</span>
+              {linhas.map((l) => (
+                <span key={l} style={groupLabel}>{l}</span>
+              ))}
             </div>
           </GazeButton>
         ))}
 
-        {/* Bloco 5: Y, Z e as três ações, prévia em ícones */}
+        {/* Grupo 5: Y, Z e as três ações. A prévia mostra o que há dentro. */}
         <GazeButton
           key="group-4"
-          className="kb-key"
+          className={keyClass('group')}
           onClick={() => setActiveGroup(4)}
-          noWarn={true}
-          style={keyStyle(false)}
+          noWarn
+          style={cell}
         >
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-            {/* "Y Z" e a barra de espaço na mesma linha, como na referência. O
-                glifo desce até a base do texto, daí o alinhamento pelo fim. */}
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.35em', ...letterStyle }}>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: '0.4em', ...groupLabel }}>
               <span>Y Z</span>
-              <span style={{ paddingBottom: '0.3em' }}>
-                <EspacoGlifo width={54} />
+              <span style={{ paddingBottom: '0.34em' }}>
+                <EspacoGlifo width={40} />
               </span>
             </div>
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.25rem',
-                color: KB.action,
-              }}
-            >
-              <Speech size={ICON_SIZE} />
-              <Delete size={ICON_SIZE} />
-              <Trash2 size={ICON_SIZE} />
+            <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', opacity: 0.75 }}>
+              <Speech size={44} />
+              <Delete size={44} />
+              <Trash2 size={44} />
             </div>
           </div>
         </GazeButton>
 
-        {/* Bloco 6: Sugestões, lista vertical simples (sem molduras internas) */}
+        {/* Grupo 6: palavras. Única tecla que escreve uma palavra inteira — o
+            fio âmbar no contorno é o que diz isso, sem precisar de legenda. */}
         <GazeButton
           key="group-suggestions"
-          className="kb-key"
-          onClick={() => {
-            if (currentSuggestions.length > 0) setActiveGroup(5);
-          }}
-          noWarn={true}
-          style={keyStyle(false)}
+          className={keyClass('words')}
+          onClick={() => { if (currentSuggestions.length > 0) setActiveGroup(5); }}
+          noWarn
+          style={cell}
         >
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-            }}
-          >
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
             {currentSuggestions.map((word) => (
               <span
                 key={word}
                 style={{
                   fontSize: FS_SUGGESTION,
-                  fontWeight: 700,
-                  lineHeight: LH_SUGGESTION,
-                  color: KB.letter,
+                  fontWeight: 500,
+                  lineHeight: 1.24,
                 }}
               >
                 {word}
@@ -338,63 +327,48 @@ export const KeyboardScreen: React.FC = () => {
 
   const renderSubGrid = () => {
     let items: string[] = [];
-    if (activeGroup === 5) {
-      items = currentSuggestions.slice(0, 6);
-    } else if (activeGroup !== null && activeGroup < 5) {
-      items = GROUPS[activeGroup];
-    }
+    if (activeGroup === 5) items = currentSuggestions.slice(0, 6);
+    else if (activeGroup !== null && activeGroup < 5) items = GROUPS[activeGroup];
 
-    const stack = (icon: React.ReactNode, label: string) => (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', color: KB.action }}>
-        {icon}
-        <span style={actionLabelStyle}>{label}</span>
+    const pilha = (icone: React.ReactNode, rotulo: string) => (
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.9rem' }}>
+        {icone}
+        <span style={actionLabel}>{rotulo}</span>
       </div>
     );
 
     return (
       <GazeGrid columns={3} rows={2} gap={GRID_GAP}>
         {items.map((item, index) => {
-          let content = <span style={letterStyle}>{item}</span>;
+          let content = <span style={letterGlyph}>{item}</span>;
 
-          // 88px de largura é a medida do glifo na gravação de referência.
-          if (item === 'Espaço')
-            content = stack(
-              <span style={{ color: KB.action, paddingBottom: '1.4rem' }}>
-                <EspacoGlifo width={88} />
-              </span>,
-              'Espaço'
-            );
-          if (item === 'Falar') content = stack(<Speech size={ICON_SIZE} />, 'Falar');
-          if (item === 'Apagar') content = stack(<Delete size={ICON_SIZE} />, 'Apagar');
-          if (item === 'Limpar') content = stack(<Trash2 size={ICON_SIZE} />, 'Limpar');
-
-          if (activeGroup === 5) {
-            content = (
-              <span style={{ ...letterStyle, fontSize: FS_SUGGESTION }}>{item}</span>
-            );
-          }
+          if (item === 'Espaço') content = pilha(<EspacoGlifo width={76} />, 'Espaço');
+          if (item === 'Falar') content = pilha(<Speech size={ICON_SIZE} />, 'Falar');
+          if (item === 'Apagar') content = pilha(<Delete size={ICON_SIZE} />, 'Apagar');
+          if (item === 'Limpar') content = pilha(<Trash2 size={ICON_SIZE} />, 'Limpar');
+          if (activeGroup === 5)
+            content = <span style={{ ...letterGlyph, fontSize: FS_SUGGESTION }}>{item}</span>;
 
           return (
             <GazeButton
               key={index}
-              className="kb-key"
+              className={keyClass('letter', lastPressed === item)}
               onClick={() => (activeGroup === 5 ? handleSelectSuggestion(item) : handleItemClick(item))}
-              noWarn={true}
-              style={keyStyle(lastPressed === item)}
+              noWarn
+              style={cell}
             >
               {content}
             </GazeButton>
           );
         })}
 
-        {/* Preenche as células vazias para sugestões (se houver menos que 6) */}
         {Array.from({ length: 6 - items.length }).map((_, idx) => (
           <GazeButton
-            key={`empty-${idx}`}
+            key={'empty-' + idx}
             className="kb-key kb-key-empty"
             disabled
-            noWarn={true}
-            style={keyStyle(false)}
+            noWarn
+            style={cell}
           >
             <span />
           </GazeButton>
@@ -402,6 +376,13 @@ export const KeyboardScreen: React.FC = () => {
       </GazeGrid>
     );
   };
+
+  const navContent = (icone: React.ReactNode, rotulo: string) => (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.6rem' }}>
+      {icone}
+      <span style={{ ...actionLabel, fontSize: '1.25rem' }}>{rotulo}</span>
+    </div>
+  );
 
   return (
     <GazePageLayout bare showBack={false}>
@@ -412,86 +393,113 @@ export const KeyboardScreen: React.FC = () => {
             inset: 0,
             display: 'flex',
             flexDirection: 'column',
-            background: KB.black,
-            fontFamily: KB_FONT,
+            background: KB.ground,
+            fontFamily: KB_FONT_KEYS,
             overflow: 'hidden',
-            // Consumidas por .kb-key / .kb-key::after em index.css
-            '--kb-letter': KB.letter,
-            '--kb-dwell': KB.dwell,
+            padding: GRID_GAP,
+            gap: GRID_GAP,
+            boxSizing: 'border-box',
+            // Consumidas pelo bloco .kb-* em index.css
+            '--kb-ground': KB.ground,
+            '--kb-key': KB.key,
+            '--kb-key-edge': KB.keyEdge,
+            '--kb-glyph': KB.glyph,
+            '--kb-glyph-dim': KB.glyphDim,
+            '--kb-ember': KB.ember,
+            '--kb-ember-edge': KB.emberEdge,
+            '--kb-ember-bright': KB.emberBright,
           } as React.CSSProperties
         }
       >
-        {/* Barra superior: seta discreta + texto digitado com cursor piscando */}
+        {/* ── Barra superior: saídas à esquerda, o que está sendo escrito à
+            direita. O texto ocupa o maior espaço porque é o produto da tela. */}
         <div
           style={{
-            flex: `0 0 ${TOPBAR_H}px`,
+            flex: '0 0 ' + TOPBAR_H + 'px',
             display: 'flex',
-            alignItems: 'center',
-            gap: '0.75rem',
-            paddingLeft: '1.25rem',
+            alignItems: 'stretch',
+            gap: GRID_GAP,
             boxSizing: 'border-box',
-            overflow: 'hidden',
           }}
         >
           <GazeButton
-            onClick={handleBackClick}
-            noWarn={true}
-            aria-label="Voltar"
-            style={{
-              flex: '0 0 auto',
-              width: 40,
-              height: TOPBAR_H,
-              padding: 0,
-              background: 'transparent',
-              border: 'none',
-              borderRadius: 0,
-              boxShadow: 'none',
-              color: KB.backArrow,
-            }}
+            className="kb-nav"
+            onClick={handleHomeClick}
+            aria-label="Início"
+            data-dwell-ms={DWELL_HOME_MS}
+            width={NAV_W}
+            height={NAV_H}
+            style={{ flex: '0 0 auto' }}
           >
-            <ArrowLeft size={26} />
+            {navContent(<Home size={46} />, 'Início')}
           </GazeButton>
 
+          {/* Voltar só existe quando há nível para subir. No nível 1 ele não
+              teria função, e alvo sem função é alvo para errar. */}
+          {activeGroup !== null && (
+            <GazeButton
+              className="kb-nav"
+              onClick={handleBackClick}
+              aria-label="Voltar"
+              data-dwell-ms={DWELL_BACK_MS}
+              width={NAV_W}
+              height={NAV_H}
+              style={{ flex: '0 0 auto' }}
+            >
+              {navContent(<ArrowLeft size={46} />, 'Voltar')}
+            </GazeButton>
+          )}
+
+          {/* Linha de composição, alinhada ao fim: o cursor fica sempre no mesmo
+              lugar, então o olho não precisa procurar onde a frase cresceu. */}
           <div
+            data-no-dwell="true"
             style={{
               flex: 1,
               minWidth: 0,
               display: 'flex',
               alignItems: 'center',
-              fontSize: FS_TOPBAR,
-              fontWeight: 700,
-              color: KB.letter,
+              justifyContent: text === '' ? 'flex-start' : 'flex-end',
+              padding: '0 2.5rem',
+              borderRadius: 20,
+              border: '1px solid ' + KB.keyEdge,
+              background: KB.key,
+              fontFamily: KB_FONT_TEXT,
+              fontSize: FS_TEXT,
+              fontWeight: 500,
+              letterSpacing: '0.04em',
+              color: KB.ember,
               whiteSpace: 'pre',
               overflow: 'hidden',
             }}
           >
-            {text}
-            <span style={{ animation: 'kb-caret-blink 1s step-start infinite' }}>_</span>
+            {text === '' ? (
+              <span style={{ color: KB.glyphDim, opacity: 0.6, fontSize: '2.4rem', letterSpacing: '0.06em' }}>
+                Escolha um grupo para começar
+              </span>
+            ) : (
+              <span className="kb-landing" key={text.length} style={{ animation: 'kb-land 160ms ease-out' }}>
+                {text}
+              </span>
+            )}
+            <span
+              className="kb-caret"
+              aria-hidden="true"
+              style={{
+                display: 'inline-block',
+                width: '0.1em',
+                height: '1em',
+                marginLeft: '0.12em',
+                background: KB.ember,
+                animation: 'kb-caret-blink 1.1s step-start infinite',
+              }}
+            />
           </div>
         </div>
 
-        {/* Fio luminoso sob a barra: #b4bdd6 esmaecendo ao longo de 10px */}
-        <div
-          style={{
-            flex: `0 0 ${DIVIDER_H}px`,
-            background: `linear-gradient(180deg, ${KB.divider} 0%, rgba(180, 189, 214, 0.12) 100%)`,
-          }}
-        />
-
-        {/* Grade 3x2 sangrando até as bordas. O fundo #333 do invólucro é o que
-            aparece no gap de 10px entre as teclas — não há borda nas teclas. */}
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            paddingBottom: GRID_BOTTOM,
-            boxSizing: 'border-box',
-            background: KB.black,
-          }}
-        >
-          <div style={{ width: '100%', height: '100%', background: KB.gridLine }}>
-            {activeGroup === null ? renderMainGrid() : renderSubGrid()}
-          </div>
+        {/* ── Grade 3×2 ── */}
+        <div style={{ flex: 1, minHeight: 0 }}>
+          {activeGroup === null ? renderMainGrid() : renderSubGrid()}
         </div>
       </div>
     </GazePageLayout>

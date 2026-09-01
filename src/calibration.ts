@@ -10,7 +10,7 @@ import { isAccuracyTesting } from './accuracy';
 import { RecursiveRidgeRegressor } from './recursiveRidge';
 import type { RidgeModel } from './ridge';
 import { trainRidgeModel, predictRidge, targetGroupKey, RidgeRegressor } from './ridge';
-import { L2CS_BLOCK_DIM } from './l2cs/block';
+import { l2csSlotsInSet } from './extractor';
 import {
 } from './distanceCorrection';
 import { EXPERIMENT } from './config/experiment';
@@ -1782,10 +1782,18 @@ export interface CalibrationFitDiagnostics {
   /** Diagnóstico da GRADE a partir do LOO por alvo: distingue "a periferia saiu
    *  do alcance" de "a sessão inteira está ruim". Ver `calibrationGridDiagnosis.ts`. */
   gridDiagnosis: DiagnosticoGrade;
-  /** Fração das amostras de treino em que o bloco L2CS estava válido (≠ 0).
-   *  Se isto for < 1, parte do treino viu 7 zeros onde a inferência vai ver
-   *  valores reais (ou vice-versa) — vazamento direto para o erro. */
-  l2csValidFraction: number;
+  /**
+   * Fração das amostras de treino em que o bloco L2CS estava válido (≠ 0).
+   * Se for < 1, parte do treino viu zeros onde a inferência vai ver valores
+   * reais (ou vice-versa) — vazamento direto para o erro.
+   *
+   * `null` = o conjunto de features ativo NÃO carrega bloco angular, então não
+   * há o que validar. Antes este campo era `number` e devolvia 0 nesse caso,
+   * que se lê como "o L2CS falhou em 100% das amostras" — alarme falso que
+   * apareceu como `l2csValidFraction: 0` no relatório
+   * `accuracy-report-1788225161304`, com o conjunto ativo em `irisCore`.
+   */
+  l2csValidFraction: number | null;
   /** Amostras aceitas por alvo. Desequilíbrio grande enviesa o ajuste. */
   samplesPerTarget: number[];
 }
@@ -1992,7 +2000,9 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   const d = lastFitDiagnostics;
   console.log(
     `[calib] D10 ajuste — treino=${d.trainErrorPx.toFixed(0)}px | ` +
-    `LOO=${d.looErrorPx.toFixed(0)}px | L2CS válido=${(d.l2csValidFraction * 100).toFixed(0)}% | ` +
+    `LOO=${d.looErrorPx.toFixed(0)}px | L2CS ${d.l2csValidFraction === null
+      ? 'fora do conjunto ativo'
+      : `válido=${(d.l2csValidFraction * 100).toFixed(0)}%`} | ` +
     `amostras/alvo=[${d.samplesPerTarget.join(',')}]`,
   );
   if (d.poseStd) {
@@ -2139,17 +2149,22 @@ export function computeFitDiagnostics(
     }
   }
 
-  // O bloco L2CS ocupa as últimas L2CS_BLOCK_DIM dimensões do vetor. Inválido
-  // é representado por 7 zeros exatos (ver `buildL2CSBlock`).
-  let l2csValid = 0;
-  for (let i = 0; i < n; i++) {
-    const f = featuresLeft[i];
-    if (f.length < L2CS_BLOCK_DIM) continue;
-    let allZero = true;
-    for (let j = f.length - L2CS_BLOCK_DIM; j < f.length; j++) {
-      if (f[j] !== 0) { allZero = false; break; }
+  // O bloco angular ocupa posições conhecidas do vetor JÁ PROJETADO, e não "as
+  // últimas 7" — `irisCore+l2cs` leva só 2 das 7 dims, e `irisCore` não leva
+  // nenhuma. Inválido é representado por zeros exatos (ver `buildL2CSBlock`).
+  //
+  // Conjunto sem bloco angular devolve `null` (não se aplica), nunca 0: zero
+  // aqui significa "o L2CS falhou em todas as amostras", que é conclusão bem
+  // diferente de "o L2CS não está no vetor".
+  const l2csSlots = l2csSlotsInSet();
+  let l2csValidFraction: number | null = null;
+  if (l2csSlots.length > 0 && n > 0) {
+    let l2csValid = 0;
+    for (let i = 0; i < n; i++) {
+      const f = featuresLeft[i];
+      if (l2csSlots.some((s) => s < f.length && f[s] !== 0)) l2csValid++;
     }
-    if (!allZero) l2csValid++;
+    l2csValidFraction = l2csValid / n;
   }
 
   return {
@@ -2160,7 +2175,7 @@ export function computeFitDiagnostics(
     poseStd,
     poseDrift: getSessionPoseDrift(),
     gridDiagnosis: diagnosticarGrade(looByTarget),
-    l2csValidFraction: n > 0 ? l2csValid / n : 0,
+    l2csValidFraction,
     samplesPerTarget,
   };
 }

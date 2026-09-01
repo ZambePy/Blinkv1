@@ -708,50 +708,94 @@ select:focus-visible,
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
- * Teclado de varredura em tela cheia (KeyboardScreen)
+ * Teclado de varredura ocular (KeyboardScreen)
  *
- * Todos os valores abaixo foram medidos pixel a pixel nas gravações de
- * referência (viewport 1918x1078). Ver KeyboardScreen.tsx para o mapa completo.
+ * PRINCÍPIO QUE GOVERNA ESTE BLOCO: nada de movimento na periferia.
+ *
+ * O usuário fixa o CENTRO da tecla. Qualquer animação nas bordas cai na
+ * periferia do campo visual dele — que é a região mais sensível a movimento e
+ * a que dispara sacada reflexa. Um indicador de dwell que se mexe nas bordas
+ * convida o olho a sair do alvo e, com isso, cancela o próprio dwell que
+ * estava reportando. Todo o feedback aqui acontece na FÓVEA: a tecla aquece
+ * inteira (mudança de cor, sem deslocamento) e um traço curto cresce sob o
+ * glifo, onde o olho já está pousado e não há para onde ser puxado.
  * ──────────────────────────────────────────────────────────────────────────── */
 
 .kb-key {
-  /* Anula o visual claro do .gaze-button: a tecla é preta, sem borda própria.
-     O que separa as teclas é o fundo #333 da grade aparecendo no gap. */
-  background: #000000;
-  border: none;
-  border-radius: 14px;
-  color: var(--kb-letter);
+  /* Anula o visual claro do .gaze-button. A tecla é uma superfície discreta
+     sobre o fundo, definida por um fio de contorno em vez de borda pesada. */
+  background: var(--kb-key);
+  border: 1px solid var(--kb-key-edge);
+  border-radius: 20px;
+  color: var(--kb-glyph);
   padding: 0;
   overflow: hidden;
-  transition: none;
+  /* Só a cor transiciona, e devagar: `transform` aqui deslocaria a tecla sob
+     o olhar fixo, que é exatamente o que não pode acontecer. */
+  transition: background-color 120ms linear, border-color 120ms linear;
 }
 
-/* Sem realce azul nem scale(1.02) do hover canônico: na referência a tecla
-   não se move nem muda de cor — quem sinaliza o alvo é a moldura de dwell. */
+/* Nível 1 — escolher um GRUPO. Recuado: contorno frio, rótulo mais quieto.
+   Nada foi comprometido ainda. */
+.kb-key--group {
+  color: var(--kb-glyph-dim);
+}
+
+/* Nível 1, tecla de palavras — a única que escreve uma palavra inteira em vez
+   de uma letra. O fio quente diz isso sem precisar de legenda. */
+.kb-key--words {
+  /* Recuada como os outros grupos: no nivel 1 tudo e previa. O fio ambar
+     sozinho ja diz que esta e a tecla que escreve palavra inteira — palavra em
+     contraste cheio MAIS fio seria o mesmo aviso dado duas vezes. */
+  color: var(--kb-glyph-dim);
+  border-color: var(--kb-ember-edge);
+}
+
+/* Nível 2 — escolher a LETRA. Avançado: glifo em contraste cheio. O par
+   recuado/avançado é o que diz ao usuário em que nível ele está sem ler nada. */
+.kb-key--letter {
+  color: var(--kb-glyph);
+}
+
+/* Sem scale nem sombra no hover: a tecla não pode se mexer sob o olhar. */
 .kb-key.gaze-hover {
-  border: none;
   box-shadow: none;
   transform: none;
+  border-color: var(--kb-ember-edge);
 }
 
-/* O anel cônico canônico dá lugar à moldura que fecha (medida na referência). */
+/* O anel cônico canônico não serve aqui — ele vive na borda. */
 .kb-key .gaze-button-progress-ring {
   display: none;
 }
 
-/* Moldura de dwell: começa em 86% da tecla e encolhe até sumir conforme o
-   progresso. Com box-sizing:border-box a largura nunca desce abaixo das duas
-   bordas de 30px, o que reproduz o piso de 60x60px medido na gravação. */
+/* A tecla AQUECE conforme o dwell avança. Mudança de cor não tem posição, então
+   não existe alvo de movimento para o olho perseguir. O teto de 34% é
+   deliberado: o suficiente para ser inequívoco na visão central, longe de
+   virar um flash que ofusca. */
+.kb-key.gaze-hover {
+  background:
+    radial-gradient(
+      ellipse 58% 52% at 50% 46%,
+      rgb(240 160 48 / calc(var(--gaze-dwell-progress, 0) * 26%)),
+      transparent 72%
+    ),
+    var(--kb-key);
+}
+
+/* O traço de progresso: curto, centrado, logo abaixo do glifo. Cresce do meio
+   para fora, então ambas as pontas se afastam simetricamente e nenhuma delas
+   forma uma frente de movimento única que puxe a fixação. */
 .kb-key::after {
   content: '';
   position: absolute;
   left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  box-sizing: border-box;
-  width: calc(86% * (1 - var(--gaze-dwell-progress, 0)));
-  height: calc(86% * (1 - var(--gaze-dwell-progress, 0)));
-  border: 30px solid var(--kb-dwell);
+  bottom: 13%;
+  transform: translateX(-50%);
+  width: calc(var(--gaze-dwell-progress, 0) * 30%);
+  height: 10px;
+  border-radius: 999px;
+  background: var(--kb-ember);
   opacity: 0;
   pointer-events: none;
   z-index: 1;
@@ -761,11 +805,64 @@ select:focus-visible,
   opacity: 1;
 }
 
-/* Teclas de preenchimento (subgrade de sugestões com menos de 6 itens):
-   invisíveis, mas ocupando a célula para não deformar a grade. */
+/* Confirmação: a tecla acende por um instante. É o único momento em que a cor
+   vai a brilho pleno, e marca a transição gaze → texto escrito. */
+.kb-key--fired {
+  background: var(--kb-ember-bright);
+  border-color: var(--kb-ember-bright);
+  color: var(--kb-ground);
+}
+
+/* Célula de preenchimento (subgrade de sugestões com menos de 6 itens):
+   ocupa a grade sem oferecer alvo nem desenhar nada. */
 .kb-key.kb-key-empty,
 .kb-key.kb-key-empty::after {
   opacity: 0;
+  border-color: transparent;
+}
+
+/* Chrome de navegação (início / voltar). Mesma linguagem das teclas, porém
+   sempre recuado: são saídas, não conteúdo. */
+.kb-nav {
+  background: transparent;
+  border: 1px solid var(--kb-key-edge);
+  border-radius: 20px;
+  color: var(--kb-glyph-dim);
+  padding: 0;
+  transition: background-color 120ms linear, border-color 120ms linear;
+}
+
+.kb-nav.gaze-hover {
+  box-shadow: none;
+  transform: none;
+  border-color: var(--kb-ember-edge);
+  background: color-mix(
+    in oklab,
+    transparent,
+    var(--kb-ember) calc(var(--gaze-dwell-progress, 0) * 34%)
+  );
+}
+
+.kb-nav .gaze-button-progress-ring {
+  display: none;
+}
+
+.kb-nav::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  width: calc(var(--gaze-dwell-progress, 0) * 44%);
+  height: 8px;
+  border-radius: 999px;
+  background: var(--kb-ember);
+  opacity: 0;
+  pointer-events: none;
+}
+
+.kb-nav.gaze-hover::after {
+  opacity: 1;
 }
 
 @keyframes kb-caret-blink {
@@ -774,3 +871,24 @@ select:focus-visible,
   }
 }
 
+/* O caractere recém-escrito assenta na linha de composição. Curto e sem
+   deslocamento lateral — é confirmação, não animação de trânsito. */
+@keyframes kb-land {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kb-key,
+  .kb-nav {
+    transition: none;
+  }
+  .kb-caret,
+  .kb-landing {
+    animation: none;
+  }
+}

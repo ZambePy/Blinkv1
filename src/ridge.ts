@@ -379,6 +379,25 @@ export class RidgeRegressor {
    * independente de quantos quadros ele reteve.
    *
    * Default false: e mudanca de pipeline e so entra com medicao antes/depois.
+   *
+   * RE-MEDIDO em 2026-09-01, depois que um relatorio ao vivo mostrou alvos com
+   * [24..65] amostras (2,7x de desequilibrio) numa sessao ruim. A hipotese era
+   * que o cenario que motivou o "sem ganho" original tivesse mudado. Nao tinha.
+   * Replay nas duas fixtures, irisCore + balanceado-v2, OFF -> ON:
+   *
+   *   sessao com oculos (deseq 2,3x)   media -3,3%   mediana -4,5%   p90 +2,4%
+   *   ci-baseline       (deseq 1,8x)   media -0,8%   mediana +1,7%   p90 -4,4%
+   *
+   * Os sinais se invertem entre as duas: melhora a mediana numa e piora na
+   * outra, melhora o p90 numa e piora na outra. Duas fixtures discordando na
+   * DIRECAO e ruido entre sessoes, nao efeito -- ligar seria escolher a fixture
+   * que da o numero desejado.
+   *
+   * O desequilibrio grande daquela sessao vinha junto com deriva de pose (os
+   * alvos do fim tinham mais amostras E o pitch mais deslocado). O aviso de
+   * deriva na tela de calibracao ataca a causa; equilibrar peso trataria o
+   * sintoma. Se o desequilibrio reaparecer SEM deriva, vale re-medir -- ai sera
+   * um cenario que nenhuma destas duas fixtures cobre.
    */
   static balanceTargets = false;
 

@@ -24,10 +24,15 @@ if (args.length !== 1) {
 const reportPath = path.resolve(args[0]);
 const report = JSON.parse(await readFile(reportPath, 'utf-8'));
 
-if (!report.pipeline || report.pipeline.variant !== 'l2cs+ridge') {
+// `pipeline.variant` deixou de ser o literal fixo 'l2cs+ridge' e passou a
+// derivar do conjunto de features ativo (ex.: 'irisCore+ridge'), porque o
+// literal seguia anunciando L2CS depois que o bloco angular saiu do vetor. Aqui
+// só se cobra que o campo EXISTA — cravar um valor esperado foi justamente o
+// que deixou este script validando uma ficção.
+if (!report.pipeline?.variant) {
   console.error(
-    `⚠ ${path.basename(reportPath)}: pipeline.variant="${report.pipeline?.variant ?? 'ausente'}" ` +
-    `(esperado "l2cs+ridge"). Relatório provavelmente antigo (pré-consolidação L2CS) — as métricas absolutas ainda valem, mas o campo pipeline está fora do formato atual.`,
+    `⚠ ${path.basename(reportPath)}: pipeline.variant ausente. Relatório antigo — ` +
+    `as métricas absolutas ainda valem, mas o campo pipeline está fora do formato atual.`,
   );
 }
 
@@ -38,7 +43,11 @@ console.log(`\n===== accuracy report =====`);
 console.log(`arquivo   : ${path.basename(reportPath)}`);
 console.log(`timestamp : ${report.timestamp}`);
 console.log(`resolução : ${report.resolution}`);
-console.log(`pipeline  : ${report.pipeline?.variant ?? '?'} (regressor=${report.pipeline?.regressor ?? '?'})`);
+const l2csDims = report.pipeline?.l2csDims;
+console.log(
+  `pipeline  : ${report.pipeline?.variant ?? '?'} (regressor=${report.pipeline?.regressor ?? '?'}` +
+  (l2csDims === undefined ? '' : `, bloco angular=${l2csDims === 0 ? 'ausente' : `${l2csDims} dims`}`) + ')',
+);
 console.log(`condição  : ilum=${meta.iluminacao ?? '?'} | óculos=${meta.oculos ? 'sim' : 'não'} | cabeça=${meta.movimentoCabeca ?? '?'} | ${meta.minutosDeSessao ?? '?'} min`);
 if (meta.usuario) console.log(`usuário   : ${meta.usuario}`);
 if (meta.observacoes) console.log(`obs       : ${meta.observacoes}`);
