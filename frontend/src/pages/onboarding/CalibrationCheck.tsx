@@ -8,6 +8,7 @@ import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hove
 import { startAccuracyTest } from '@tracker/accuracy';
 import { buildAutoTestMeta } from '../../utils/autoTestMeta';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
+import type { VeredictoDeriva } from '@tracker/calibration';
 
 // D6.1 — a lista canônica de alvos passou a viver em `src/calibration.ts`
 // (CALIBRATION_TARGETS_FULL). A UI consulta pelo context após chamar
@@ -95,8 +96,12 @@ export const CalibrationCheck: React.FC = () => {
   const l2csFailed = l2csStatus === 'error';
 
   const [stage, setStage] = useState<
-    'tutorial' | 'calibrating' | 'testing' | 'transitioning'
+    'tutorial' | 'calibrating' | 'testing' | 'transitioning' | 'drift-warning'
   >('tutorial');
+
+  // 1.1-UI — veredito da deriva de pose da calibração recém-treinada. Não-nulo
+  // significa que a cabeça migrou mais que o limiar DURANTE a coleta.
+  const [driftVerdict, setDriftVerdict] = useState<VeredictoDeriva | null>(null);
 
   // Distância efetiva escolhida no início desta calibração. Congelada aqui
   // para a grade e o relatório usarem exatamente o mesmo número.
@@ -258,6 +263,17 @@ export const CalibrationCheck: React.FC = () => {
       setStage('testing');
       calibration.completeCalibration?.((outcome) => {
         if (!outcome || outcome.ok !== false) {
+          // 1.1-UI — a deriva de pose já era medida e só ia para o console. Se a
+          // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
+          // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
+          // decidir, em vez de seguir para o teste com um ajuste contaminado.
+          const veredito = calibration.getPoseDriftVerdict?.() ?? null;
+          if (veredito && isMounted.current) {
+            console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
+            setDriftVerdict(veredito);
+            setStage('drift-warning');
+            return;
+          }
           console.log('[React] Calibração concluída — disparando teste de precisão automático');
           setTimeout(() => { if (isMounted.current) runAccuracyTestThenExit(); }, 400);
         } else {
@@ -798,6 +814,90 @@ export const CalibrationCheck: React.FC = () => {
                 <p style={{ color: TEXT_DIM, fontSize: '1rem', margin: 0, lineHeight: 1.6 }}>
                   Não se mexa. Olhe para os pontos que aparecerem.
                 </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ─── 1.1-UI: DERIVA DE POSE DURANTE A CALIBRAÇÃO ─────────────── */}
+        {stage === 'drift-warning' && driftVerdict && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+            <div
+              role="alertdialog"
+              aria-labelledby="drift-title"
+              aria-describedby="drift-msg"
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                textAlign: 'center', gap: '1.5rem', maxWidth: 620,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: '1.5rem', padding: '2.5rem',
+                animation: 'cfFadeUp 0.4s ease-out both',
+              }}
+            >
+              <AlertTriangle size={52} color="#f59e0b" aria-hidden="true" />
+
+              <div>
+                <h2 id="drift-title" style={{ fontSize: '1.65rem', fontWeight: 800, margin: '0 0 0.75rem', color: TEXT_PRIMARY }}>
+                  A cabeça se moveu durante a calibração
+                </h2>
+                <p id="drift-msg" style={{ color: TEXT_DIM, fontSize: '1.05rem', margin: 0, lineHeight: 1.65 }}>
+                  {driftVerdict.mensagem}
+                </p>
+              </div>
+
+              {/* O número medido fica visível: é o que separa "achei que mexi" de
+                  "mexi 238px-equivalentes". */}
+              <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
+                <div>
+                  <div data-testid="drift-px" style={{ fontSize: '2rem', fontWeight: 800, color: '#f59e0b' }}>
+                    {driftVerdict.piorEixoPx.toFixed(0)}px
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: TEXT_DIM, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    deriva equivalente
+                  </div>
+                </div>
+                <div>
+                  <div style={{ fontSize: '2rem', fontWeight: 800, color: TEXT_PRIMARY }}>
+                    {driftVerdict.monotona ? 'Progressiva' : 'Errática'}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: TEXT_DIM, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    padrão do movimento
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {/* Recalibrar vem primeiro: é a ação que corrige o problema. */}
+                <button
+                  type="button"
+                  data-no-dwell="true"
+                  data-testid="drift-recalibrar"
+                  onClick={() => { setDriftVerdict(null); handleStart(false); }}
+                  style={{
+                    background: ACCENT, color: '#fff', border: 'none',
+                    padding: '1rem 2.4rem', borderRadius: '2rem',
+                    fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
+                  }}
+                >
+                  Refazer calibração
+                </button>
+                {/* Seguir assim continua possível — para um usuário com ELA,
+                    repetir a coleta custa fadiga real. Mas é escolha informada. */}
+                <button
+                  type="button"
+                  data-no-dwell="true"
+                  data-testid="drift-continuar"
+                  onClick={() => { setStage('testing'); runAccuracyTestThenExit(); }}
+                  style={{
+                    background: 'transparent', color: TEXT_PRIMARY,
+                    border: '1px solid rgba(255,255,255,0.35)',
+                    padding: '1rem 2rem', borderRadius: '2rem',
+                    fontSize: '0.98rem', fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  Continuar mesmo assim
+                </button>
               </div>
             </div>
           </div>

@@ -115,6 +115,15 @@ export interface CalibrationApi {
   // no sucesso ou { ok: false, reason, detail } em qualquer falha do treino
   // (matriz singular, features degeneradas, amostras insuficientes, etc.).
   completeCalibration(onComplete?: (outcome: import('../calibration').CalibrationOutcome) => void): void;
+  /**
+   * 1.1-UI — veredito sobre a deriva de pose da calibração recém-treinada.
+   * `null` = deriva abaixo do limiar, ou alvos insuficientes para medir.
+   *
+   * Só faz sentido logo após `completeCalibration`. A tela de calibração usa
+   * para avisar antes de deixar o usuário seguir com um modelo treinado sobre
+   * uma postura que mudou no meio da coleta.
+   */
+  getPoseDriftVerdict(): import('../calibration').VeredictoDeriva | null;
   clear(): void;
   isCalibrated(): boolean;
   // Sprint 4 — recalibração implícita a partir de dwell clicks confirmados.
@@ -1071,6 +1080,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       completeCalibration(onComplete?: (outcome: import('../calibration').CalibrationOutcome) => void): void {
         calibration.completeCalibration(onComplete);
+      },
+      getPoseDriftVerdict() {
+        return calibration.avaliarDerivaDePose(calibration.getSessionPoseDrift());
       },
       clear(): void {
         calibration.clearCalibration();

@@ -846,6 +846,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getCalibrationMode: () => engineRef.current?.calibration.getCalibrationMode() ?? null,
       startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
       completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
+      // 1.1-UI — deriva de pose da calibração recém-treinada, para a tela poder
+      // avisar em vez de deixar o usuário seguir com um modelo contaminado.
+      getPoseDriftVerdict: () => engineRef.current?.calibration.getPoseDriftVerdict() ?? null,
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,
       feedOnlineSample: (x, y) => engineRef.current?.calibration.feedOnlineSample(x, y) ?? false,

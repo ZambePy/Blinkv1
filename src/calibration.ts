@@ -318,6 +318,57 @@ export interface SessionPoseDrift {
   trendRYaw: number; trendRPitch: number;
 }
 
+/**
+ * Veredito legível sobre a deriva de pose — a forma como a UI e o log falam
+ * dela. `null` quer dizer "nada a relatar", nunca "não medi".
+ */
+export interface VeredictoDeriva {
+  /** Deriva do eixo que mais doeu, em pixels-equivalentes na tela. */
+  piorEixoPx: number;
+  eixo: 'yaw' | 'pitch';
+  /** |r| > 0,8 contra a ordem de coleta: deriva lenta e progressiva. */
+  monotona: boolean;
+  /** Monótona = postura escorregando; errática = movimento. Pedem coisas
+   *  diferentes do usuário, e mandar refazer uma deriva monótona só produz
+   *  uma segunda calibração igualmente contaminada. */
+  acao: 'apoiar-a-nuca' | 'refazer';
+  mensagem: string;
+}
+
+/**
+ * 1.1-UI — traduz a deriva medida em algo que se mostra para uma pessoa.
+ *
+ * Existe como função pura e exportada porque tem DOIS consumidores que precisam
+ * concordar: o `console.warn` do log de calibração e a tela de calibração.
+ * Enquanto a regra morou só dentro do log, a tela não avisava nada — foi assim
+ * que uma calibração com 238 px-equivalentes de deriva (4× o limiar) seguiu
+ * direto para o teste de precisão sem que o usuário soubesse.
+ */
+export function avaliarDerivaDePose(
+  drift: SessionPoseDrift | null,
+  limiarPx: number = POSE_DRIFT_WARN_PX,
+): VeredictoDeriva | null {
+  if (!drift) return null;
+  const eixo: 'yaw' | 'pitch' = drift.pitchPx >= drift.yawPx ? 'pitch' : 'yaw';
+  const piorEixoPx = Math.max(drift.yawPx, drift.pitchPx);
+  if (!(piorEixoPx > limiarPx)) return null;
+
+  const monotona = Math.abs(drift.trendRYaw) > 0.8 || Math.abs(drift.trendRPitch) > 0.8;
+  const r = eixo === 'pitch' ? drift.trendRPitch : drift.trendRYaw;
+  return {
+    piorEixoPx,
+    eixo,
+    monotona,
+    acao: monotona ? 'apoiar-a-nuca' : 'refazer',
+    mensagem:
+      `A cabeça migrou ${piorEixoPx.toFixed(0)}px-equivalentes entre o primeiro e o último alvo. ` +
+      (monotona
+        ? `A deriva é monótona (r≈${r.toFixed(2)}), típica de escorregar na cadeira ao longo da ` +
+          `sessão — apoiar a nuca reduz mais que refazer a calibração.`
+        : `A deriva é errática — vale refazer a calibração com a cabeça apoiada.`),
+  };
+}
+
 export function getSessionPoseDrift(): SessionPoseDrift | null {
   const n = sessionPoseByTarget.length;
   if (n < 2) return null;
@@ -1963,23 +2014,16 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   // 1.1 — a deriva entre alvos em PIXELS, que é a unidade em que ela dói.
   if (d.poseDrift) {
     const pd = d.poseDrift;
-    const monotona = Math.abs(pd.trendRYaw) > 0.8 || Math.abs(pd.trendRPitch) > 0.8;
     console.log(
       `[calib] 1.1 deriva de pose entre os ${pd.targets} alvos — ` +
       `yaw ${pd.yawDeg.toFixed(2)}° (${pd.yawPx.toFixed(0)}px em X) | ` +
       `pitch ${pd.pitchDeg.toFixed(2)}° (${pd.pitchPx.toFixed(0)}px em Y) | ` +
       `tendência r=${pd.trendRYaw.toFixed(2)}/${pd.trendRPitch.toFixed(2)}`,
     );
-    if (Math.max(pd.yawPx, pd.pitchPx) > POSE_DRIFT_WARN_PX) {
-      console.warn(
-        `[calib] ⚠️ A cabeça migrou ${Math.max(pd.yawPx, pd.pitchPx).toFixed(0)}px-equivalentes ` +
-        `entre o primeiro e o último alvo. ` +
-        (monotona
-          ? `A deriva é monótona (r≈${pd.trendRYaw.toFixed(2)}), típica de escorregar na cadeira ` +
-            `ao longo da sessão — apoiar a nuca reduz mais que refazer a calibração.`
-          : `A deriva é errática — vale refazer a calibração com a cabeça apoiada.`),
-      );
-    }
+    // Mesma função que a tela de calibração usa: se um dia divergirem, é porque
+    // alguém duplicou a regra de novo.
+    const veredito = avaliarDerivaDePose(pd);
+    if (veredito) console.warn(`[calib] ⚠️ ${veredito.mensagem}`);
   }
 
   return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
