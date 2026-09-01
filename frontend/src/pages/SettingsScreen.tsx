@@ -5,7 +5,6 @@ import {
   UserCog,
   Clock,
   Mic,
-  Keyboard as KeyboardIcon,
   Volume2,
   VolumeX,
   Download,
@@ -47,6 +46,7 @@ import { startAccuracyTest } from '@tracker/accuracy';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { applyUptimeToRunMetaIfDefault } from '../utils/autoTestMeta';
+import { hoverAndFocusBackground } from '../components/ui/hoverFocus';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -599,12 +599,6 @@ export const SettingsScreen: React.FC = () => {
     { key: 'normal', label: t('settings.dwell.normal'), value: '1.5s' },
     { key: 'fast', label: t('settings.dwell.fast'), value: '0.8s' },
   ];
-  const layoutOptions: { key: 'frequency' | 'alphabetical' | 'qwerty' | 'hierarchical'; label: string }[] = [
-    { key: 'frequency', label: t('settings.layout.frequency') },
-    { key: 'alphabetical', label: t('settings.layout.alphabetical') },
-    { key: 'qwerty', label: t('settings.layout.qwerty') },
-    { key: 'hierarchical', label: t('settings.layout.hierarchical') },
-  ];
 
   return (
     <CaregiverPageLayout title={t('settings.title')}>
@@ -657,8 +651,7 @@ export const SettingsScreen: React.FC = () => {
               fontSize: '1rem',
               transition: 'background 0.2s',
             }}
-            onMouseOver={(e) => (e.currentTarget.style.background = '#15803d')}
-            onMouseOut={(e) => (e.currentTarget.style.background = '#22c55e')}
+            {...hoverAndFocusBackground('#22c55e', '#15803d')}
           >
             {t('settings.dashboardLink.button')}
           </button>
@@ -703,8 +696,7 @@ export const SettingsScreen: React.FC = () => {
               fontSize: '1rem',
               transition: 'background 0.2s',
             }}
-            onMouseOver={(e) => (e.currentTarget.style.background = '#d97706')}
-            onMouseOut={(e) => (e.currentTarget.style.background = '#f59e0b')}
+            {...hoverAndFocusBackground('#f59e0b', '#d97706')}
           >
             Abrir Guia do Cuidador
           </button>
@@ -758,55 +750,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </section>
 
-        {/* Layout Teclado */}
-        <section aria-labelledby="layout-title" style={cardStyle}>
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.75rem',
-              marginBottom: '1.25rem',
-            }}
-          >
-            <KeyboardIcon size={28} color="#1B54A8" aria-hidden="true" />
-            <h2
-              id="layout-title"
-              style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}
-            >
-              {t('settings.layout.title')}
-            </h2>
-          </div>
-          <div
-            role="radiogroup"
-            aria-labelledby="layout-title"
-            style={{ display: 'flex', gap: '1rem' }}
-          >
-            {layoutOptions.map(({ key, label }) => {
-              const active = settings.keyboardLayout === key;
-              return (
-                <button
-                  key={key}
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => updateSettings({ keyboardLayout: key })}
-                  style={{
-                    flex: 1,
-                    padding: '1rem',
-                    borderRadius: '1rem',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    border: '2px solid',
-                    background: active ? '#1B54A8' : 'white',
-                    color: active ? 'white' : '#475569',
-                    borderColor: active ? '#1B54A8' : '#e2e8f0',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        </section>
 
         {/* Som */}
         <section aria-labelledby="sound-title" style={cardStyle}>
@@ -972,6 +915,7 @@ export const SettingsScreen: React.FC = () => {
             <button
               type="button"
               role="switch"
+              aria-label="Filtro âmbar"
               aria-checked={settings.amberFilter}
               onClick={() => updateSettings({ amberFilter: !settings.amberFilter })}
               style={{

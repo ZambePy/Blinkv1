@@ -27,13 +27,24 @@ import { StandardScaler } from '../src/scaler';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2, type FilterPreset, type FilterPresetV2 } from '../src/oneEuroFilter';
 import { extractFeatures } from '../src/featurePipeline';
 import type { Point3D, L2CSGazeInput } from '../src/extractor';
-import { FEATURE_VECTOR_ID, activeFeatureDims, BlinkDetector } from '../src/extractor';
+import { ACTIVE_FEATURE_SET, FEATURE_VECTOR_ID, activeFeatureDims, BlinkDetector } from '../src/extractor';
 import type { FeatureSet } from '../src/extractor';
 
 /** 1.2 — conjuntos que o harness aceita medir. `compact` fica de fora de
  *  propósito: seu tamanho varia com a presença do bloco L2CS, então uma tabela
  *  comparativa com ele dentro compararia vetores de larguras diferentes. */
-const FEATURE_SETS = ['iris12', 'iris12+pose', 'iris12+posecross', 'iris12+l2cs', 'iris12+l2cs+pose'] as const;
+const FEATURE_SETS = [
+  'irisCore',
+  'irisCore+pose',
+  'irisCore+posecross',
+  'irisCore+l2cs',
+  'irisCore+l2cs+pose',
+  'iris12',
+  'iris12+pose',
+  'iris12+posecross',
+  'iris12+l2cs',
+  'iris12+l2cs+pose',
+] as const;
 function isFeatureSet(v: string | undefined): v is FeatureSet {
   return !!v && (FEATURE_SETS as readonly string[]).includes(v);
 }
@@ -45,7 +56,7 @@ import {
 import { compensarPredicao, poseDeReferencia } from '../src/poseCompensation';
 import { compensarTranslacao, centroDeReferencia } from '../src/translationCompensation';
 import { parseJSONL } from '../src/telemetry/recorder';
-import type { RecordedFrame, Recording, RecordedTarget } from '../src/telemetry/types';
+import type { RecordedFrame, Recording, RecordedTarget, RecordedQuality } from '../src/telemetry/types';
 
 // Constante espelhada de accuracy.ts (não exportada de lá; se mudar, atualizar
 // aqui também — replay tem que usar EXATAMENTE o mesmo valor para os graus
@@ -1517,6 +1528,22 @@ interface Report {
     onlineRls: false;
     source: 'src/';
     featuresSource: 'recorded' | 'recomputed';
+    featureSet: FeatureSet | string;
+    poseCompensation: boolean;
+    poseCompensationGain: number;
+    poseCompensationAxes: 'x' | 'y' | 'xy';
+    constantShiftPx: { x: number; y: number } | null;
+    translationCompensation: boolean;
+    featureDims: number | 'var';
+    pca: number;
+    keepDims: number[] | null;
+    fusao: ModoFusao;
+    keepTargets: number[] | null;
+    balanceTargets: boolean;
+    lambda: number | 'CV';
+    axisWeightedCv: boolean;
+    featureVectorId: string;
+    recordedFeatureVectorId: string | null;
     // D4.3 — grupos zerados. Vazio = vetor completo.
     droppedFeatureGroups: FeatureGroup[];
     // D7.3 — janela temporal aplicada aos frames de accuracy (undefined = sem filtro).
@@ -1962,7 +1989,7 @@ ERRO: --feature-set ${args.featureSet} pede features recomputadas.
       featuresSource: args.recomputeFeatures ? 'recomputed' : 'recorded',
       // 1.2 — qual conjunto ESTE relatório mediu. Sem isto uma tabela de
       // variantes vira um monte de números sem etiqueta.
-      featureSet: args.featureSet ?? 'iris12 (ACTIVE_FEATURE_SET)',
+      featureSet: args.featureSet ?? `${ACTIVE_FEATURE_SET} (default)`,
       poseCompensation: args.poseCompensation,
       poseCompensationGain: args.poseCompensationGain,
       poseCompensationAxes: args.poseCompensationAxes,

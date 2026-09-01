@@ -39,7 +39,7 @@
 // E opcionalmente um JSON em `--out` com todos os relatórios agregados.
 
 import { spawn } from 'node:child_process';
-import { readFile, writeFile } from 'node:fs/promises';
+import { writeFile } from 'node:fs/promises';
 import { resolve as resolvePath, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { existsSync } from 'node:fs';
@@ -235,7 +235,7 @@ async function runReplay(fixturePath, variant, verbose) {
       }
       try {
         resolveP({ report: JSON.parse(stdout), stderr });
-      } catch (e) {
+      } catch {
         rejectP(new Error(`stdout do replay não é JSON válido:\n${stdout.slice(0, 500)}`));
       }
     });

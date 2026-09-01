@@ -55,7 +55,9 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
         osc.start();
         osc.stop(ctx.currentTime + 0.1);
-      } catch (e) {}
+      } catch {
+        // WebAudio bloqueado (autoplay policy) não pode quebrar o fluxo.
+      }
     }
   };
 
@@ -92,7 +94,9 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         };
         playTone(400, 0, 0.1);
         playTone(300, 0.12, 0.1);
-      } catch (e) {}
+      } catch {
+        // Idem.
+      }
     }
   };
 

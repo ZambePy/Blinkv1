@@ -11,8 +11,8 @@ import { startRecording, stopRecording, clearRecording, getRecording, parseJSONL
 // que descreviam outro pipeline, e nada acusou.
 describe('FEATURE_VECTOR_ID', () => {
   it('descreve o conjunto ativo e a dimensão', () => {
-    expect(FEATURE_VECTOR_ID).toBe(`${ACTIVE_FEATURE_SET}:${IRIS12_DIMS}`);
-    expect(FEATURE_VECTOR_ID).toBe('iris12:12');
+    expect(FEATURE_VECTOR_ID).toBe(`${ACTIVE_FEATURE_SET}:${activeFeatureDims()}`);
+    expect(FEATURE_VECTOR_ID).toBe('irisCore:4');
   });
 
   it('`compact` não promete dimensão fixa', () => {

@@ -51,13 +51,6 @@
       "normal": "Normal",
       "fast": "Rápido"
     },
-    "layout": {
-      "title": "Layout do Teclado",
-      "frequency": "Frequência PT-BR",
-      "alphabetical": "Alfabético",
-      "qwerty": "QWERTY",
-      "hierarchical": "Varredura Hierárquica"
-    },
     "sound": {
       "title": "Áudio do Sistema",
       "on": "Som Ativado",

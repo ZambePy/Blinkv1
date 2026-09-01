@@ -20,6 +20,22 @@ const q = () => ({
   brightnessEstimate: 0.24, contrastEstimate: 0.09, blurEstimate: 0,
 });
 
+/**
+ * Relógio virtual da suíte.
+ *
+ * ⚠️ O mock LÊ este valor, nunca o incrementa. A versão anterior era
+ * `mockImplementation(() => (relogio += 80))`, o que amarrava o tempo à
+ * CONTAGEM DE CHAMADAS de `performance.now()` — e o spy é global, então
+ * qualquer chamada vinda de fora empurraria o relógio 80 ms e deslocaria a
+ * janela de acomodação de 400 ms de `calibration.ts`, mudando quantas amostras
+ * cada alvo aceita. Quem anda com o relógio agora é o teste, uma vez por
+ * amostra: o resultado não depende mais de quem mais chamou `performance.now`.
+ *
+ * (Isto endurece o teste, mas NÃO era a causa da falha intermitente que se via
+ * aqui — essa era o timeout; ver `TIMEOUT_CALIBRACAO_MS` abaixo.)
+ */
+let relogio = 0;
+
 /** Calibra com o olho esquerdo informativo e o direito com o ruído pedido. */
 function calibrar(ruidoDireito: number) {
   let semente = 11;
@@ -33,18 +49,31 @@ function calibrar(ruidoDireito: number) {
         Math.sin(d * 1.7 + 0.3) * x + Math.cos(d * 2.3 + 1.1) * y + rnd() * 0.002);
       const dir = Array.from({ length: 8 }, (_, d) =>
         Math.sin(d * 1.7 + 0.3) * x + Math.cos(d * 2.3 + 1.1) * y + rnd() * ruidoDireito);
+      // 80 ms por amostra: as ~5 primeiras de cada ponto caem na janela de
+      // acomodação, que é o que o código de produção espera ver.
+      relogio += 80;
       feedRawData(esq, dir, q());
     }
   }
   return completeCalibration();
 }
 
+/**
+ * Cada `calibrar()` faz uma calibração inteira — 9 alvos × 40 amostras, com
+ * treino do ridge e CV de λ nos dois olhos. Sozinho o arquivo roda em ~4 s;
+ * junto com a suíte, disputando CPU, o mesmo trabalho passa de 19 s. Com o
+ * timeout padrão de 5 s isso aparecia como falha intermitente (~1 em 8 rodadas)
+ * num teste cuja matemática estava certa o tempo todo — o erro real era
+ * `Test timed out in 5000ms`, não uma asserção. O teto abaixo é folga para a
+ * máquina mais lenta, não licença para o teste ficar mais pesado.
+ */
+const TIMEOUT_CALIBRACAO_MS = 30_000;
+
 describe('confiabilidade por olho', () => {
-  let relogio = 0;
   beforeEach(() => {
     clearCalibration();
     relogio = 0;
-    vi.spyOn(performance, 'now').mockImplementation(() => (relogio += 80));
+    vi.spyOn(performance, 'now').mockImplementation(() => relogio);
   });
   afterEach(() => { vi.restoreAllMocks(); });
 
@@ -58,14 +87,14 @@ describe('confiabilidade por olho', () => {
     const r = getEyeReliability()!;
     expect(r.left).toBeCloseTo(0.5, 1);
     expect(r.left + r.right).toBeCloseTo(1, 9);
-  });
+  }, TIMEOUT_CALIBRACAO_MS);
 
   it('olho ruidoso recebe menos peso', () => {
     calibrar(0.5);
     const r = getEyeReliability()!;
     expect(r.left).toBeGreaterThan(r.right);
     expect(r.left).toBeGreaterThan(0.6);
-  });
+  }, TIMEOUT_CALIBRACAO_MS);
 
   it('quanto pior o olho, menor o peso — é monótono', () => {
     calibrar(0.1);
@@ -73,7 +102,7 @@ describe('confiabilidade por olho', () => {
     clearCalibration();
     calibrar(1.0);
     expect(getEyeReliability()!.right).toBeLessThan(pouco);
-  });
+  }, TIMEOUT_CALIBRACAO_MS);
 
   it('os pesos somam 1 e nenhum é negativo', () => {
     calibrar(2.0);
@@ -81,14 +110,14 @@ describe('confiabilidade por olho', () => {
     expect(r.left + r.right).toBeCloseTo(1, 9);
     expect(r.left).toBeGreaterThanOrEqual(0);
     expect(r.right).toBeGreaterThanOrEqual(0);
-  });
+  }, TIMEOUT_CALIBRACAO_MS);
 
   it('recalibrar recomeça a medição', () => {
     calibrar(0.5);
     expect(getEyeReliability()).not.toBeNull();
     startCalibrationMode();
     expect(getEyeReliability()).toBeNull();
-  });
+  }, TIMEOUT_CALIBRACAO_MS);
 
   it('a predição pende para o olho confiável', () => {
     calibrar(0.5);
@@ -101,5 +130,5 @@ describe('confiabilidade por olho', () => {
     expect(p).not.toBeNull();
     // Sem confiabilidade a saída cairia no meio; com ela, pende para a esquerda.
     expect(r.left).toBeGreaterThan(r.right);
-  });
+  }, TIMEOUT_CALIBRACAO_MS);
 });

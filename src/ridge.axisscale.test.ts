@@ -17,8 +17,17 @@ import { RidgeRegressor } from './ridge';
 
 /** Grade 3×3 com ruído por eixo e duas dimensões colineares, para o λ ter algo
  *  que regularizar. A colinearidade não é enfeite: o `iris12` real tem posto
- *  efetivo 2,2 sobre 12 dims. */
-function amostras(ruidoX: number, ruidoY: number, colinearidade = 1e-2) {
+ *  efetivo 2,2 sobre 12 dims.
+ *
+ *  ⚠️ O default era 1e-2 e foi baixado para 1e-3 quando a assimetria de Σ_W foi
+ *  corrigida em `withinTargetPenalty`. Com a penalidade certa (mais branda), a
+ *  1e-2 este conjunto fica bem-condicionado DEMAIS: a curva do CV vira
+ *  monotônica crescente — o erro em λ=1e-8 e em λ=1e-5 difere na 7ª casa — e o
+ *  λ escolhido passa a ser sempre o primeiro item da grade, seja qual for a
+ *  ponderação de eixos. Estender a grade para baixo não resolve, só muda o piso.
+ *  A 1e-3 o ótimo volta a ser interior (1e-3 vs 4.64e-4) e o CV volta a ter o
+ *  que decidir — que é a premissa destes testes. */
+function amostras(ruidoX: number, ruidoY: number, colinearidade = 1e-3) {
   let semente = 7;
   const rnd = () => { semente = (semente * 1103515245 + 12345) % 2147483648; return semente / 2147483648 - 0.5; };
   const feats: number[][] = []; const tx: number[] = []; const ty: number[] = [];
@@ -42,6 +51,7 @@ function amostras(ruidoX: number, ruidoY: number, colinearidade = 1e-2) {
 
 function lambdaCom(escala: { x: number; y: number }, d: ReturnType<typeof amostras>): number {
   RidgeRegressor.axisScale = escala;
+  RidgeRegressor.independentLambda = false;
   vi.spyOn(console, 'log').mockImplementation(() => {});
   const m = new RidgeRegressor();
   m.train(d.feats, d.tx, d.ty);
@@ -50,7 +60,11 @@ function lambdaCom(escala: { x: number; y: number }, d: ReturnType<typeof amostr
 }
 
 describe('RidgeRegressor.axisScale', () => {
-  afterEach(() => { RidgeRegressor.axisScale = { x: 1, y: 1 }; vi.restoreAllMocks(); });
+  afterEach(() => {
+    RidgeRegressor.axisScale = { x: 1, y: 1 };
+    RidgeRegressor.independentLambda = true;
+    vi.restoreAllMocks();
+  });
 
   it('o default reproduz o comportamento histórico', () => {
     expect(RidgeRegressor.axisScale).toEqual({ x: 1, y: 1 });

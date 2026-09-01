@@ -51,13 +51,6 @@
       "normal": "Normal",
       "fast": "Fast"
     },
-    "layout": {
-      "title": "Keyboard Layout",
-      "frequency": "Frequency PT-BR",
-      "alphabetical": "Alphabetical",
-      "qwerty": "QWERTY",
-      "hierarchical": "Hierarchical Scan"
-    },
     "sound": {
       "title": "System Audio",
       "on": "Sound On",

@@ -50,6 +50,8 @@ export interface RidgeModel {
   // de 1e-6 mas acima de 1e-12: resolve numericamente mas gera coeficientes
   // grandes que produzem predições instáveis.
   lambda: number;
+  lambdaX?: number;
+  lambdaY?: number;
   nearSingularCols: number[];
   /** D9 — qual penalidade foi usada. `within-target` significa que o modelo
    *  foi branqueado pelo ruído intra-fixação; `isotropic` é o `λI` histórico
@@ -112,11 +114,9 @@ export function targetGroupKey(t: { screenX: number; screenY: number }): string 
   return `${t.screenX.toFixed(4)},${t.screenY.toFixed(4)}`;
 }
 
-/** Piso relativo da penalidade anisotrópica. Uma dimensão com variância
- *  intra-alvo ~0 (feature literalmente congelada) receberia penalidade zero e
- *  deixaria o sistema singular naquela direção. O piso garante que toda
- *  direção continua penalizada em pelo menos 10% da penalidade média. */
-const PENALTY_FLOOR = 0.10;
+/** Piso relativo da penalidade anisotrópica. Reduzido de 10% para 1% para não
+ *  penalizar e encolher excessivamente direções de sinal primário (offsetX). */
+const PENALTY_FLOOR = 0.01;
 
 /**
  * D9 — matriz de penalidade Σ_W (covariância intra-alvo) normalizada.
@@ -175,8 +175,16 @@ export function withinTargetPenalty(
   const meanDiag = traceSum / d;
   if (!(meanDiag > 0) || !Number.isFinite(meanDiag)) return null;
 
+  // Só o triângulo superior é percorrido, mas o inferior TEM de ser espelhado:
+  // Σ_W é uma covariância e precisa sair simétrica daqui. Ela vira `P` em
+  // A = ΦᵀΦ + reg·P, e `solveLinear` faz eliminação gaussiana sem checar
+  // simetria — uma P assimétrica seria resolvida em silêncio, devolvendo um β
+  // que não é o estimador ridge. Sem o espelho, P[b][a] = meanDiag · P[a][b].
   for (let a = 0; a < d; a++) {
-    for (let b = 0; b < d; b++) S[a][b] /= meanDiag;
+    for (let b = a; b < d; b++) {
+      S[a][b] /= meanDiag;
+      if (b > a) S[b][a] = S[a][b];
+    }
     S[a][a] += PENALTY_FLOOR;
   }
   return S;
@@ -199,12 +207,24 @@ export interface RidgeTrainOptions {
 export function trainRidgeModel(
   features: number[][],
   targets: { screenX: number; screenY: number }[],
-  lambda = 1.0,
+  lambda: number | { x: number; y: number } = 1.0,
   options?: RidgeTrainOptions,
 ): RidgeModel {
   const m = features.length;
+  const lamX = typeof lambda === 'number' ? lambda : lambda.x;
+  const lamY = typeof lambda === 'number' ? lambda : lambda.y;
+
   if (m === 0) {
-    return { betaX: [], betaY: [], numFeatures: 0, lambda, nearSingularCols: [], penalty: 'isotropic' };
+    return {
+      betaX: [],
+      betaY: [],
+      numFeatures: 0,
+      lambda: typeof lambda === 'number' ? lambda : (lamX + lamY) / 2,
+      lambdaX: lamX,
+      lambdaY: lamY,
+      nearSingularCols: [],
+      penalty: 'isotropic',
+    };
   }
 
   const rawFeatures = features[0].length;
@@ -222,36 +242,26 @@ export function trainRidgeModel(
       : null;
   const penalty: 'isotropic' | 'within-target' = P ? 'within-target' : 'isotropic';
 
-  // A = ΦᵀΦ + λ·m·P   (P = I no caso isotrópico)
-  //
-  // O fator `m` deixa λ adimensional: ΦᵀΦ cresce com o número de amostras, e
-  // sem ele o mesmo λ regulariza 3× mais fraco numa coleta que reteve 3× mais
-  // frames. Multiplicar λ (em vez de dividir A) preserva a escala numérica da
-  // matriz — os limiares absolutos de pivô em `solveLinear` continuam válidos.
-  // 3.4 - pesos por amostra, para equilibrar alvos com contagens diferentes.
-  //
-  // Sem pesos, um alvo que reteve 65 quadros restringe o ajuste 1,76x mais que
-  // um que reteve 37 -- e quantos quadros um alvo reteve e acidente de coleta,
-  // nao decisao. O CV de lambda ja media o erro POR ALVO desde D9; o AJUSTE em
-  // si continuava por amostra.
-  //
-  // `w` normalizado para somar `m`, de modo que `reg = lambda * somaW` fique na
-  // mesma escala de antes e o lambda escolhido siga comparavel.
   const w = options?.sampleWeights ?? null;
   const somaW = w ? w.reduce((a, b) => a + b, 0) : m;
   const peso = (k: number) => (w ? (w[k] * m) / somaW : 1);
 
-  const reg = lambda * m;
-  const A: number[][] = Array.from({ length: nf }, (_, i) =>
-    Array.from({ length: nf }, (_, j) => {
-      let s = 0;
-      for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * Phi[k][j];
-      // O bias (índice 0) nunca é penalizado.
-      if (i === 0 || j === 0) return s;
-      if (P) return s + reg * P[i - 1][j - 1];
-      return s + (i === j ? reg : 0);
-    })
-  );
+  // A_x e A_y com os respectivos lambdas de cada eixo
+  const buildMatrixA = (lam: number) => {
+    const reg = lam * m;
+    return Array.from({ length: nf }, (_, i) =>
+      Array.from({ length: nf }, (_, j) => {
+        let s = 0;
+        for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * Phi[k][j];
+        if (i === 0 || j === 0) return s;
+        if (P) return s + reg * P[i - 1][j - 1];
+        return s + (i === j ? reg : 0);
+      })
+    );
+  };
+
+  const AX = buildMatrixA(lamX);
+  const AY = lamX === lamY ? AX : buildMatrixA(lamY);
 
   // b = Φᵀy  (para screenX e screenY separadamente)
   const bX = Array.from({ length: nf }, (_, i) => {
@@ -266,16 +276,23 @@ export function trainRidgeModel(
     return s;
   });
 
-  // A1-3 — acumula colunas quase-singulares das duas solvidas. A união
-  // (não a interseção) porque uma coluna instável em X é sinal de β_x
-  // ruim, mesmo que β_y esteja ok.
+  // A1-3 — acumula colunas quase-singulares das duas solvidas.
   const nearSingularX: number[] = [];
   const nearSingularY: number[] = [];
-  const betaX = solveLinear(A, bX, nearSingularX);
-  const betaY = solveLinear(A, bY, nearSingularY);
+  const betaX = solveLinear(AX, bX, nearSingularX);
+  const betaY = solveLinear(AY, bY, nearSingularY);
   const nearSingularCols = Array.from(new Set([...nearSingularX, ...nearSingularY])).sort((a, b) => a - b);
 
-  return { betaX, betaY, numFeatures: rawFeatures, lambda, nearSingularCols, penalty };
+  return {
+    betaX,
+    betaY,
+    numFeatures: rawFeatures,
+    lambda: typeof lambda === 'number' ? lambda : (lamX + lamY) / 2,
+    lambdaX: lamX,
+    lambdaY: lamY,
+    nearSingularCols,
+    penalty,
+  };
 }
 
 export function predictRidge(
@@ -352,6 +369,12 @@ export class RidgeRegressor {
   static axisScale: { x: number; y: number } = { x: 1, y: 1 };
 
   /**
+   * Permite escolher lambda de forma independente para X e Y (evita que ruído
+   * vertical de pálpebra comprima o ganho horizontal em X). Default: true.
+   */
+  static independentLambda = true;
+
+  /**
    * 3.4 - equilibra os alvos no ajuste, dando a cada um o mesmo peso total
    * independente de quantos quadros ele reteve.
    *
@@ -368,14 +391,9 @@ export class RidgeRegressor {
 
   train(features: number[][], targetsX: number[], targetsY: number[]): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
-    // D9 — agrupamento por alvo. Habilita a penalidade branqueada e é o mesmo
-    // critério do leave-one-target-out abaixo.
     const groups = targets.map(targetGroupKey);
-    // BUG-5: Grid original (8 lambdas, salto 10×) era muito esparso — o CV
-    // podia escolher λ=1 quando o ótimo era λ=3.2 ou λ=0.3. Com 16 lambdas
-    // em log-space o salto médio é ~3×, bem mais fino. Custo extra: ~2× o
-    // tempo do CV (~20ms vs ~10ms), ainda negligenciável vs. a calibração total.
     const lambdas = [
+      1e-5, 2.15e-5, 4.64e-5,
       1e-4, 2.15e-4, 4.64e-4,
       1e-3, 2.15e-3, 4.64e-3,
       1e-2, 2.15e-2, 4.64e-2,
@@ -385,24 +403,20 @@ export class RidgeRegressor {
       100, 215, 464,
       1000,
     ];
-    // 3.1 — override de λ para o harness poder isolar o efeito de uma variante
-    // do efeito de o CV ter escolhido outro λ. `null` (default) mantém o CV.
-    const bestLambda = RidgeRegressor.lambdaOverride ?? this.selectLambdaCV(features, targets, lambdas, groups);
+    const bestLambdas = RidgeRegressor.lambdaOverride != null
+      ? { x: RidgeRegressor.lambdaOverride, y: RidgeRegressor.lambdaOverride }
+      : this.selectLambdaCV(features, targets, lambdas, groups);
     const pesos = RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(groups) : null;
 
-    // A1-3 — escalonamento defensivo. O CV pode escolher λ ótimo sobre
-    // folds parciais, mas o treino final (com TODAS as amostras) pode ter
-    // colunas ativas adicionais que tornam ΦᵀΦ singular. Escalona λ × 10
-    // até 3 tentativas antes de desistir. O λ efetivamente usado fica em
-    // model.lambda — comparar com bestLambda revela se houve socorro.
     const MAX_ESCALATIONS = 3;
-    let lambda = bestLambda;
+    let lambdaX = bestLambdas.x;
+    let lambdaY = bestLambdas.y;
     let lastError: unknown = null;
     for (let attempt = 0; attempt <= MAX_ESCALATIONS; attempt++) {
       try {
-        this.model = trainRidgeModel(features, targets, lambda, { groups, sampleWeights: pesos });
+        this.model = trainRidgeModel(features, targets, { x: lambdaX, y: lambdaY }, { groups, sampleWeights: pesos });
         if (attempt > 0) {
-          console.warn(`[ridge] λ escalonado ${attempt}× até ${lambda} (CV escolheu ${bestLambda}) — dado provavelmente ruim`);
+          console.warn(`[ridge] λ escalonado ${attempt}× até (${lambdaX}, ${lambdaY}) — dado provavelmente ruim`);
         }
         if (this.model.nearSingularCols.length > 0) {
           console.warn(`[ridge] pivô quase-singular em ${this.model.nearSingularCols.length} coluna(s): ${this.model.nearSingularCols.slice(0, 10).join(',')}${this.model.nearSingularCols.length > 10 ? '…' : ''}. β pode gerar predições instáveis.`);
@@ -410,7 +424,8 @@ export class RidgeRegressor {
         return;
       } catch (e) {
         lastError = e;
-        lambda *= 10;
+        lambdaX *= 10;
+        lambdaY *= 10;
       }
     }
     throw lastError instanceof Error
@@ -423,7 +438,7 @@ export class RidgeRegressor {
     targets: { screenX: number; screenY: number }[],
     lambdas: number[],
     groupKeys?: string[],
-  ): number {
+  ): { x: number; y: number } {
     const keys = groupKeys ?? targets.map(targetGroupKey);
     const targetsUnique: string[] = [];
     const groups: { [key: string]: number[] } = {};
@@ -437,32 +452,28 @@ export class RidgeRegressor {
       groups[key].push(i);
     }
 
-    if (targetsUnique.length < 2) return 1.0;
+    if (targetsUnique.length < 2) return { x: 1.0, y: 1.0 };
 
-    let bestLambda = lambdas[0];
-    let minError = Infinity;
+    let bestLambdaX = lambdas[0];
+    let bestLambdaY = lambdas[0];
+    let bestLambdaJoint = lambdas[0];
+    let minErrorX = Infinity;
+    let minErrorY = Infinity;
+    let minErrorJoint = Infinity;
 
-    // Tudo que depende só do FOLD (padronização, features escaladas, Σ_W) é
-    // calculado uma vez e reusado pelos 22 λ. Sem isto, `withinTargetPenalty`
-    // (O(m·d²)) rodaria 22× por fold.
     const foldCache = new Map<string, {
       stats: { apply: (r: number[]) => number[] };
       zTrain: number[][];
       zTest: number[][];
       trainTargets: { screenX: number; screenY: number }[];
       penaltyMatrix: number[][] | null;
-      /** 3.4 - pesos por amostra do fold. Cacheados junto porque `trainGroups`
-       *  so e preenchido na primeira passagem; sem isto o fold reusado
-       *  receberia um vetor de pesos vazio. */
       pesos: number[] | null;
     }>();
 
     for (const lambda of lambdas) {
-      // D9 — média dos erros POR ALVO, não soma sobre amostras. Antes, um alvo
-      // que reteve 90 frames pesava 3× mais na escolha de λ que um alvo que
-      // reteve 30 — e alvos com mais frames retidos são justamente os fáceis
-      // (rosto estável, sem rejeição por qualidade), enviesando λ para baixo.
-      let foldErrorSum = 0;
+      let foldErrorSumX = 0;
+      let foldErrorSumY = 0;
+      let foldErrorSumJoint = 0;
       let foldsCounted = 0;
       let failed = false;
 
@@ -485,12 +496,6 @@ export class RidgeRegressor {
           }
         }
 
-        // D9 — re-padroniza usando APENAS o fold de treino. As features chegam
-        // já escaladas por um StandardScaler ajustado sobre TODOS os alvos,
-        // inclusive o que está sendo deixado de fora: vazamento que faz o CV
-        // subestimar o erro de λ pequeno e escolher regularização insuficiente.
-        // Padronizar de novo sobre o subconjunto é equivalente a ter escalado
-        // o dado bruto só com o fold de treino (composição de mapas afins).
         const cached = foldCache.get(key);
         const stats = cached ? cached.stats : foldStandardizer(trainFeatures);
         const zTrain = cached ? cached.zTrain : trainFeatures.map(stats.apply);
@@ -507,26 +512,19 @@ export class RidgeRegressor {
         const foldTargets = cached ? cached.trainTargets : trainTargets;
 
         try {
-          // 3.4 - o CV treina com os MESMOS pesos do ajuste final. Escolher
-          // lambda sobre um ajuste diferente do que vai ser usado e o tipo de
-          // divergencia que ja custou caro neste projeto.
           const model = trainRidgeModel(zTrain, foldTargets, lambda, { penaltyMatrix, sampleWeights: pesosFold });
-          let sq = 0;
+          let sqX = 0;
+          let sqY = 0;
           for (let i = 0; i < zTest.length; i++) {
             const pred = predictRidge(model, zTest[i]);
-            // 3.1 — cada eixo pesa pela SUA dimensão em pixels.
-            //
-            // `screenX/screenY` são frações de tela, e fração de tela não é uma
-            // grandeza única: numa tela 16:9 uma unidade de x vale 1920 px e uma
-            // de y vale 1080. Somar `dx² + dy²` cru subponderava o erro em X por
-            // (1920/1080)² = 3,16×, então o λ era escolhido quase só pelo eixo Y
-            // — que é justamente o eixo com sinal 6× atenuado (ver 2.1). O
-            // resultado era regularização excessiva.
             const dx = (pred.x - testTargets[i].screenX) * RidgeRegressor.axisScale.x;
             const dy = (pred.y - testTargets[i].screenY) * RidgeRegressor.axisScale.y;
-            sq += dx * dx + dy * dy;
+            sqX += dx * dx;
+            sqY += dy * dy;
           }
-          foldErrorSum += zTest.length > 0 ? sq / zTest.length : 0;
+          foldErrorSumX += zTest.length > 0 ? sqX / zTest.length : 0;
+          foldErrorSumY += zTest.length > 0 ? sqY / zTest.length : 0;
+          foldErrorSumJoint += zTest.length > 0 ? (sqX + sqY) / zTest.length : 0;
           foldsCounted++;
         } catch {
           failed = true;
@@ -535,15 +533,30 @@ export class RidgeRegressor {
       }
 
       if (failed || foldsCounted === 0) continue;
-      const meanFoldError = foldErrorSum / foldsCounted;
-      if (meanFoldError < minError) {
-        minError = meanFoldError;
-        bestLambda = lambda;
+      const meanFoldErrorX = foldErrorSumX / foldsCounted;
+      const meanFoldErrorY = foldErrorSumY / foldsCounted;
+      const meanFoldErrorJoint = foldErrorSumJoint / foldsCounted;
+      if (meanFoldErrorX < minErrorX) {
+        minErrorX = meanFoldErrorX;
+        bestLambdaX = lambda;
+      }
+      if (meanFoldErrorY < minErrorY) {
+        minErrorY = meanFoldErrorY;
+        bestLambdaY = lambda;
+      }
+      if (meanFoldErrorJoint < minErrorJoint) {
+        minErrorJoint = meanFoldErrorJoint;
+        bestLambdaJoint = lambda;
       }
     }
 
-    console.log(`[ridge] CV Lambda selecionado: ${bestLambda} (erro médio por alvo: ${minError.toFixed(6)})`);
-    return bestLambda;
+    if (!RidgeRegressor.independentLambda) {
+      console.log(`[ridge] CV Lambda selecionado (conjunto): ${bestLambdaJoint} (erro: ${minErrorJoint.toFixed(6)})`);
+      return { x: bestLambdaJoint, y: bestLambdaJoint };
+    }
+
+    console.log(`[ridge] CV Lambda selecionado: X=${bestLambdaX} (erro: ${minErrorX.toFixed(4)}), Y=${bestLambdaY} (erro: ${minErrorY.toFixed(4)})`);
+    return { x: bestLambdaX, y: bestLambdaY };
   }
 
   predict(features: number[]): { x: number; y: number } {

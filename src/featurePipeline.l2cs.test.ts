@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { extractFeatures, USE_COMPACT_FEATURES } from './featurePipeline';
-import { extractCompactFeatures, projectFeatureSet, IRIS12_DIMS } from './extractor';
+import { extractCompactFeatures, projectFeatureSet, IRIS12_DIMS, activeFeatureDims } from './extractor';
 import { buildL2CSBlock, L2CS_BLOCK_DIM } from './l2cs/block';
 import type { Point3D } from './extractor';
 
@@ -128,20 +128,22 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
 
 // ─── D11 — projeção no conjunto de features ativo ───────────────────────────
 describe('D11 — projeção do vetor no conjunto ativo', () => {
-  it('a fronteira do pipeline entrega exatamente IRIS12_DIMS dims', () => {
+  it('a fronteira do pipeline entrega exatamente activeFeatureDims dims', () => {
     const lms = makeLandmarks();
     const piped = extractFeatures(lms, undefined, { yaw: 0.1, pitch: 0.05, valid: true });
-    expect(piped.featuresLeft).toHaveLength(IRIS12_DIMS);
-    expect(piped.featuresRight).toHaveLength(IRIS12_DIMS);
+    const dims = activeFeatureDims() as number;
+    expect(piped.featuresLeft).toHaveLength(dims);
+    expect(piped.featuresRight).toHaveLength(dims);
   });
 
-  it('as 12 dims entregues são o PREFIXO exato do vetor completo (sem reordenar)', () => {
+  it('as dimensões entregues são o PREFIXO exato do vetor completo (sem reordenar)', () => {
     // Reordenar silenciosamente seria o pior tipo de bug aqui: o modelo
     // treinaria e prediria com significados trocados, sem erro nenhum.
     const lms = makeLandmarks();
     const full = extractCompactFeatures(lms, undefined, { yaw: 0.1, pitch: 0.05, valid: true });
     const piped = extractFeatures(lms, undefined, { yaw: 0.1, pitch: 0.05, valid: true });
-    for (let i = 0; i < IRIS12_DIMS; i++) {
+    const dims = activeFeatureDims() as number;
+    for (let i = 0; i < dims; i++) {
       expect(piped.featuresLeft[i]).toBe(full.featuresLeft[i]);
       expect(piped.featuresRight[i]).toBe(full.featuresRight[i]);
     }

@@ -53,8 +53,8 @@ describe('…e é descartado antes de chegar ao modelo', () => {
     const lm = rosto();
     const a = projectFeatureSet(extractCompactFeatures(lm, undefined, GAZE_A).featuresLeft);
     const b = projectFeatureSet(extractCompactFeatures(lm, undefined, GAZE_B).featuresLeft);
-    expect(ACTIVE_FEATURE_SET).toBe('iris12');
-    expect(a).toHaveLength(12);
+    expect(ACTIVE_FEATURE_SET).toBe('irisCore');
+    expect(a).toHaveLength(4);
     expect(a).toEqual(b);
   });
 

@@ -8,6 +8,7 @@ import {
   Settings,
   Play
 } from 'lucide-react';
+import { hoverAndFocus } from '../../components/ui/hoverFocus';
 
 const TUTORIAL_STEPS = [
   {
@@ -168,8 +169,18 @@ export const TutorialScreen: React.FC = () => {
               cursor: 'pointer',
               transition: 'color 0.2s',
             }}
-            onMouseOver={(e) => e.currentTarget.style.color = '#334155'}
-            onMouseOut={(e) => e.currentTarget.style.color = '#64748b'}
+            {...hoverAndFocus(
+              (el) => {
+                el.style.color = '#334155';
+              },
+              // Devolve string vazia, e não uma cor fixa, para o botão voltar ao
+              // `color` declarado no style acima (que acompanha o tema). Antes
+              // voltava para '#64748b' e a cor original nunca mais era
+              // recuperada depois do primeiro hover.
+              (el) => {
+                el.style.color = '';
+              }
+            )}
           >
             {isLast ? 'Voltar' : 'Pular tutorial'}
           </button>
@@ -192,14 +203,16 @@ export const TutorialScreen: React.FC = () => {
               boxShadow: '0 12px 24px rgba(27,84,168,0.25)',
               transition: 'transform 0.2s, box-shadow 0.2s',
             }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.transform = 'translateY(-2px)';
-              e.currentTarget.style.boxShadow = '0 16px 32px rgba(27,84,168,0.3)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 12px 24px rgba(27,84,168,0.25)';
-            }}
+            {...hoverAndFocus(
+              (el) => {
+                el.style.transform = 'translateY(-2px)';
+                el.style.boxShadow = '0 16px 32px rgba(27,84,168,0.3)';
+              },
+              (el) => {
+                el.style.transform = 'translateY(0)';
+                el.style.boxShadow = '0 12px 24px rgba(27,84,168,0.25)';
+              }
+            )}
             onMouseDown={(e) => e.currentTarget.style.transform = 'translateY(2px)'}
           >
             {isLast ? 'Começar Calibração' : 'Próximo'}

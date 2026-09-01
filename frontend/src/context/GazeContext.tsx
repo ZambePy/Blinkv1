@@ -567,7 +567,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
                 const centerX = rect.left + rect.width / 2;
                 const centerY = rect.top + rect.height / 2;
                 engineRef.current?.calibration.feedOnlineSample(centerX, centerY);
-              } catch (e) {
+              } catch {
                 // Silencia
               }
               t.classList.remove('gaze-hover');

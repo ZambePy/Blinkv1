@@ -707,3 +707,70 @@ select:focus-visible,
   pointer-events: none;
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * Teclado de varredura em tela cheia (KeyboardScreen)
+ *
+ * Todos os valores abaixo foram medidos pixel a pixel nas gravações de
+ * referência (viewport 1918x1078). Ver KeyboardScreen.tsx para o mapa completo.
+ * ──────────────────────────────────────────────────────────────────────────── */
+
+.kb-key {
+  /* Anula o visual claro do .gaze-button: a tecla é preta, sem borda própria.
+     O que separa as teclas é o fundo #333 da grade aparecendo no gap. */
+  background: #000000;
+  border: none;
+  border-radius: 14px;
+  color: var(--kb-letter);
+  padding: 0;
+  overflow: hidden;
+  transition: none;
+}
+
+/* Sem realce azul nem scale(1.02) do hover canônico: na referência a tecla
+   não se move nem muda de cor — quem sinaliza o alvo é a moldura de dwell. */
+.kb-key.gaze-hover {
+  border: none;
+  box-shadow: none;
+  transform: none;
+}
+
+/* O anel cônico canônico dá lugar à moldura que fecha (medida na referência). */
+.kb-key .gaze-button-progress-ring {
+  display: none;
+}
+
+/* Moldura de dwell: começa em 86% da tecla e encolhe até sumir conforme o
+   progresso. Com box-sizing:border-box a largura nunca desce abaixo das duas
+   bordas de 30px, o que reproduz o piso de 60x60px medido na gravação. */
+.kb-key::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  box-sizing: border-box;
+  width: calc(86% * (1 - var(--gaze-dwell-progress, 0)));
+  height: calc(86% * (1 - var(--gaze-dwell-progress, 0)));
+  border: 30px solid var(--kb-dwell);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.kb-key.gaze-hover::after {
+  opacity: 1;
+}
+
+/* Teclas de preenchimento (subgrade de sugestões com menos de 6 itens):
+   invisíveis, mas ocupando a célula para não deformar a grade. */
+.kb-key.kb-key-empty,
+.kb-key.kb-key-empty::after {
+  opacity: 0;
+}
+
+@keyframes kb-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
+import '@testing-library/jest-dom';
 import React from 'react';
 import { KeyboardScreen } from './KeyboardScreen';
 import { SettingsProvider } from '../context/SettingsContext';
@@ -30,14 +31,8 @@ vi.mock('../context/GazeContext', () => ({
   }),
 }));
 
-describe('KeyboardScreen — Varredura Hierárquica', () => {
-  it('deve alternar para o layout hierárquico, navegar pelos subgrupos e digitar', () => {
-    // Configura o layout como hierárquico no localStorage antes de iniciar o contexto
-    localStorage.setItem(
-      'irisflow_settings',
-      JSON.stringify({ keyboardLayout: 'hierarchical' })
-    );
-
+describe('KeyboardScreen — Varredura Hierárquica 2x3', () => {
+  it('deve alternar para o layout hierárquico 2x3, navegar pelos subgrupos e digitar', () => {
     render(
       <BrowserRouter>
         <SettingsProvider>
@@ -47,45 +42,42 @@ describe('KeyboardScreen — Varredura Hierárquica', () => {
     );
 
     // 1. Validar que o Top Level (6 blocos gigantes) foi renderizado
-    const groupAE = screen.getByText('A - E');
-    const groupZ = screen.getByText('Z / Outros');
+    const groupAE = screen.getByText('A B C'); // the top part of the label
+    const groupZ = screen.getByText('Y Z');
     expect(groupAE).toBeInTheDocument();
     expect(groupZ).toBeInTheDocument();
 
-    // 2. Clicar no grupo A - E para entrar nas letras
+    // 2. Clicar no grupo A - F para entrar nas letras
     fireEvent.click(groupAE);
 
-    // 3. Validar que as letras do subgrupo A - E e o botão Voltar estão visíveis
+    // 3. Validar que as letras do subgrupo A - F e o botão Voltar estão visíveis.
+    //    Na barra superior em tela cheia o voltar é só a seta, identificada
+    //    pelo aria-label — não há mais o rótulo textual "Voltar".
     const letterC = screen.getByText('C');
-    const btnVoltar = screen.getAllByText('Voltar').find(el => el.tagName.toLowerCase() === 'div')!;
+    const btnVoltar = screen.getByLabelText('Voltar');
     expect(letterC).toBeInTheDocument();
     expect(btnVoltar).toBeInTheDocument();
 
     // 4. Clicar na letra C para digitar e validar que retorna ao Top Level
     fireEvent.click(letterC);
 
-    // A saída de texto deve exibir 'C'
-    const outputContainer = screen.getByText('C');
+    // A saída de texto deve exibir 'C' no display superior
+    const outputContainer = screen.getAllByText('C')[0];
     expect(outputContainer).toBeInTheDocument();
 
-    // O menu deve ter voltado para o Top Level (A - E deve estar visível novamente)
-    expect(screen.getByText('A - E')).toBeInTheDocument();
+    // O menu deve ter voltado para o Top Level (A B C deve estar visível novamente)
+    expect(screen.getByText('A B C')).toBeInTheDocument();
 
-    // 5. Entrar no grupo Z / Outros e navegar até os números
-    fireEvent.click(screen.getByText('Z / Outros'));
+    // 5. Entrar no grupo Y Z ␣ para ações
+    fireEvent.click(screen.getByText('Y Z'));
 
-    const btn1to5 = screen.getByText('1 - 5');
-    expect(btn1to5).toBeInTheDocument();
+    const btnApagar = screen.getByText('Apagar');
+    expect(btnApagar).toBeInTheDocument();
 
-    // Entra nos números 1 a 5
-    fireEvent.click(btn1to5);
+    // Entra em apagar
+    fireEvent.click(btnApagar);
 
-    const btn3 = screen.getByText('3');
-    expect(btn3).toBeInTheDocument();
-
-    // Clica no número 3 e valida que o texto vira 'C3' e retorna ao menu principal
-    fireEvent.click(btn3);
-    expect(screen.getByText('C3')).toBeInTheDocument();
-    expect(screen.getByText('A - E')).toBeInTheDocument();
+    // Permanece no mesmo grupo (conforme regra)
+    expect(screen.getByText('Apagar')).toBeInTheDocument();
   });
 });

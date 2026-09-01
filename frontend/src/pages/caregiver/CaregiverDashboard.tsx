@@ -4,6 +4,7 @@ import { CheckCircle2, Circle, Activity, Frown, Smile, HeartPulse, Save } from '
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { CaregiverPageLayout } from '../../components/ui/CaregiverPageLayout';
+import { hoverAndFocusBackground } from '../../components/ui/hoverFocus';
 
 interface Task {
   id: number;
@@ -311,8 +312,7 @@ export const CaregiverDashboard: React.FC = () => {
             cursor: 'pointer',
             transition: 'background 0.2s',
           }}
-          onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)')}
-          onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)')}
+          {...hoverAndFocusBackground('rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.15)')}
         >
           Ler Guia do Cuidador
         </button>
@@ -543,8 +543,7 @@ export const CaregiverDashboard: React.FC = () => {
               gap: '0.5rem',
               transition: 'background 0.2s',
             }}
-            onMouseOver={(e) => (e.currentTarget.style.background = '#2563eb')}
-            onMouseOut={(e) => (e.currentTarget.style.background = '#1B54A8')}
+            {...hoverAndFocusBackground('#1B54A8', '#2563eb')}
           >
             <Save size={20} aria-hidden="true" /> Salvar Diário
           </button>

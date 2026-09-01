@@ -36,6 +36,12 @@ accuracy-report-*.json
 # add -f frontend/python_scripts/l2cs_validation/<subdir>`.
 frontend/python_scripts/l2cs_validation/
 
+# Gravações de tela (referência visual/QA — pesadas, não versionadas)
+*.mp4
+*.mov
+*.mkv
+*.webm
+
 # Claude Code
 .claude/
 

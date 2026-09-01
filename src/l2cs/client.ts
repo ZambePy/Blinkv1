@@ -36,7 +36,7 @@ export interface L2CSClient {
 
 const DEFAULT_MODEL_URL = '/models/l2cs/l2cs_gaze360.onnx';
 const DEFAULT_META_URL = '/models/l2cs/l2cs.meta.json';
-const DEFAULT_STALE_MS = 500;
+const DEFAULT_STALE_MS = 1500;
 
 export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
   const modelUrl = opts.modelUrl ?? DEFAULT_MODEL_URL;

@@ -1,14 +1,12 @@
-import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, Eye, Loader2, AlertTriangle } from 'lucide-react';
+import { CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 import { useSettings } from '../../context/SettingsContext';
-import { SetupReadinessPanel } from '../../components/ui/SetupReadinessPanel';
-import type { ReadinessReport, EffectiveDistance } from '@tracker/setupReadiness';
-import { effectiveViewingDistanceCm } from '@tracker/setupReadiness';
 import { BackButton } from '../../components/ui/BackButton';
+import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hoverFocus';
 import { startAccuracyTest } from '@tracker/accuracy';
-import { buildAutoTestMeta, readinessMetaFrom } from '../../utils/autoTestMeta';
+import { buildAutoTestMeta } from '../../utils/autoTestMeta';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 
 // D6.1 — a lista canônica de alvos passou a viver em `src/calibration.ts`
@@ -55,7 +53,7 @@ const BG           = '#000000';
 const TEXT_PRIMARY = '#FFFFFF';
 const TEXT_DIM     = 'rgba(255,255,255,0.65)';
 const ACCENT       = '#1B54A8';          // IrisFlow Azul
-const ACCENT_DIM   = 'rgba(27, 84, 168, 0.15)';
+
 const SUCCESS      = '#22C55E';
 const DANGER       = '#EF4444';
 
@@ -97,21 +95,12 @@ export const CalibrationCheck: React.FC = () => {
   const l2csFailed = l2csStatus === 'error';
 
   const [stage, setStage] = useState<
-    'pre-calibration' | 'tutorial' | 'calibrating' | 'testing' | 'transitioning'
-  >('pre-calibration');
+    'tutorial' | 'calibrating' | 'testing' | 'transitioning'
+  >('tutorial');
 
-  // Etapa 2 — último veredito do posto de uso. Serve para (a) liberar o
-  // botão de avançar e (b) gravar as CONDIÇÕES MEDIDAS no relatório, no
-  // lugar dos hardcodes que havia no `RunMeta`.
-  const readinessRef = useRef<ReadinessReport | null>(null);
   // Distância efetiva escolhida no início desta calibração. Congelada aqui
   // para a grade e o relatório usarem exatamente o mesmo número.
-  const sessionDistanceRef = useRef<EffectiveDistance | null>(null);
-  const [readiness, setReadiness] = useState<ReadinessReport | null>(null);
-  const handleReadiness = useCallback((r: ReadinessReport) => {
-    readinessRef.current = r;
-    setReadiness(r);
-  }, []);
+  const sessionDistanceRef = useRef<number | null>(null);
 
   const [currentIndex, setCurrentIndex]       = useState(0);
   const [completedList, setCompletedList]     = useState<number[]>([]);
@@ -241,18 +230,10 @@ export const CalibrationCheck: React.FC = () => {
       // Etapa 1 — a MESMA distância que posicionou a grade. Se o relatório
       // convertesse px→graus com um número diferente do que montou os alvos,
       // as duas metades do diagnóstico falariam de geometrias distintas.
-      distanciaCm: sessionDistanceRef.current?.cm ?? settings.viewingDistanceCm,
+      distanciaCm: sessionDistanceRef.current ?? settings.viewingDistanceCm,
       telaPolegadas: settings.screenDiagonalIn,
     });
     meta.screenScaleFactor = settings.screenScaleFactor;
-
-    // Etapa 2 — sobrescreve com as condições MEDIDAS nesta sessão. Precisa vir
-    // DEPOIS de buildAutoTestMeta: aquela função preenche `iluminacao: 'boa'`,
-    // `movimentoCabeca: 'parada'` e deriva `oculos` da condição que o cuidador
-    // escolheu na tela — todos independentes do que a câmera estava vendo.
-    // Comparar sessões com metadado inventado é pior que não ter metadado: dá
-    // aparência de rastreabilidade sem o conteúdo.
-    Object.assign(meta, readinessMetaFrom(readinessRef.current));
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
       if (action === 'redo') {
@@ -358,23 +339,18 @@ export const CalibrationCheck: React.FC = () => {
     // reais do repositório diferiam 30% em tamanho de rosto, exatamente esse
     // efeito. Fica registrado em `sessionDistanceRef` para o relatório usar a
     // MESMA distância que a grade usou.
-    const dist = effectiveViewingDistanceCm(
-      readinessRef.current?.measured.estimatedDistanceCm ?? null,
-      settings.viewingDistanceCm,
-    );
-    sessionDistanceRef.current = dist;
-    if (dist.rejectedReason) {
-      console.warn(`[Etapa1] ${dist.rejectedReason}; usando ${dist.cm} cm configurado.`);
-    } else {
-      console.log(`[Etapa1] distância da sessão: ${dist.cm.toFixed(1)} cm (${dist.source}).`);
-    }
+    const estimatedDistanceCm = calibration.getCurrentCameraDistanceCm?.() ?? null;
+    const distCm = estimatedDistanceCm ?? settings.viewingDistanceCm;
+    sessionDistanceRef.current = distCm;
+    
+    console.log(`[Etapa1] distância da sessão: ${distCm.toFixed(1)} cm.`);
 
     // D12 — congela as distâncias desta calibração. A compensação de distância
     // usa a VARIAÇÃO em relação a estes dois números para reescalar a predição
     // quando o paciente sentar mais perto ou mais longe depois.
     calibration.setCalibrationDistancesCm?.(
-      calibration.getCurrentCameraDistanceCm?.() ?? null,
-      dist.cm,
+      estimatedDistanceCm,
+      distCm,
     );
 
     calibration.startCalibrationMode?.({
@@ -384,7 +360,7 @@ export const CalibrationCheck: React.FC = () => {
       // falar da mesma tela.
       geometry: {
         screenDiagonalIn: settings.screenDiagonalIn,
-        viewingDistanceCm: dist.cm,
+        viewingDistanceCm: distCm,
       },
     });
 
@@ -450,91 +426,13 @@ export const CalibrationCheck: React.FC = () => {
           fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
         }}
       >
-        {/* Botão Voltar — só nas telas pré-calibração */}
-        {(stage === 'pre-calibration' || stage === 'tutorial') && (
+        {/* Botão Voltar */}
+        {(stage === 'tutorial') && (
           <div style={{ position: 'absolute', top: '2rem', left: '2rem', zIndex: 60 }}>
             <BackButton />
           </div>
         )}
 
-        {/* ─── PRÉ-CALIBRAÇÃO ──────────────────────────────────────────── */}
-        {stage === 'pre-calibration' && (
-          <div style={{
-            // `overflow-y: auto` + `alignItems: flex-start` + `margin: auto` no
-            // filho: a combinação que centraliza quando há espaço E permite
-            // rolar quando não há.
-            //
-            // `alignItems: 'center'` sozinho (como estava) transborda para os
-            // DOIS lados quando o conteúdo passa da altura da tela — topo e
-            // rodapé ficam inalcançáveis, inclusive o botão de avançar. O
-            // `<main>` tem `overflow: hidden`, então a rolagem precisa
-            // acontecer aqui dentro.
-            flex: 1, minHeight: 0,
-            display: 'flex', alignItems: 'flex-start', justifyContent: 'center',
-            padding: '2rem', overflowY: 'auto',
-          }}>
-            <div style={{
-              maxWidth: 600, width: '100%', margin: 'auto',
-              display: 'flex', flexDirection: 'column', gap: '1.25rem',
-              animation: 'cfFadeUp 0.4s ease-out both',
-            }}>
-              {/* Cabeçalho CAA */}
-              <div style={{ textAlign: 'center' }}>
-                <div style={{
-                  width: 88, height: 88, borderRadius: '50%',
-                  background: ACCENT_DIM,
-                  border: `3px solid ${ACCENT}`,
-                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                  marginBottom: '1.25rem',
-                }}>
-                  <Eye size={44} color={ACCENT} />
-                </div>
-                <h1 style={{ fontSize: '2rem', fontWeight: 800, margin: '0 0 0.5rem', color: TEXT_PRIMARY }}>
-                  Antes de começar
-                </h1>
-                <p style={{ fontSize: '1.05rem', color: TEXT_DIM, margin: 0, lineHeight: 1.6 }}>
-                  A câmera está conferindo as condições. Ajuste o que estiver
-                  marcado antes de calibrar.
-                </p>
-              </div>
-
-              {/* Etapa 2 — verificação AO VIVO do posto de uso. Substituiu três
-                  cards de texto fixo que diziam "fique a 50-60 cm", "rosto bem
-                  iluminado" e "cabeça parada": conselhos corretos, mas que o
-                  usuário não tinha como saber se estava cumprindo. Agora os
-                  mesmos três itens são medidos e mostrados com o valor real. */}
-              <SetupReadinessPanel onReport={handleReadiness} />
-
-              {/* Só "sem rosto" / "câmera inadequada" desabilitam de verdade —
-                  nessas condições a calibração não tem como funcionar. Avisos
-                  mudam o rótulo do botão mas deixam seguir (regra 2 do
-                  projeto: a UI não prende o usuário). */}
-              <button
-                type="button"
-                disabled={readiness?.blockedHard ?? false}
-                onClick={() => setStage('tutorial')}
-                style={{
-                  background: readiness?.blockedHard ? 'rgba(255,255,255,0.10)' : ACCENT,
-                  color: readiness?.blockedHard ? TEXT_DIM : '#fff',
-                  border: 'none', padding: '1rem 3rem',
-                  borderRadius: '2rem', fontSize: '1.15rem', fontWeight: 800,
-                  cursor: readiness?.blockedHard ? 'not-allowed' : 'pointer',
-                  alignSelf: 'center',
-                  boxShadow: readiness?.blockedHard ? 'none' : '0 8px 24px rgba(27, 84, 168, 0.40)',
-                  transition: 'transform 0.15s, box-shadow 0.15s',
-                }}
-                onMouseOver={e => { if (!readiness?.blockedHard) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } }}
-                onMouseOut={e => { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = readiness?.blockedHard ? 'none' : '0 8px 24px rgba(27, 84, 168, 0.40)'; }}
-              >
-                {readiness?.blockedHard
-                  ? 'Ajuste a câmera para continuar'
-                  : readiness && !readiness.canStart
-                    ? 'Continuar mesmo assim'
-                    : 'Tudo certo ✓'}
-              </button>
-            </div>
-          </div>
-        )}
 
         {/* ─── TUTORIAL / INÍCIO ───────────────────────────────────────── */}
         {stage === 'tutorial' && (
@@ -709,8 +607,10 @@ export const CalibrationCheck: React.FC = () => {
                   boxShadow: l2csReady ? '0 8px 24px rgba(27, 84, 168, 0.40)' : 'none',
                   opacity: l2csReady ? 1 : 0.75,
                 }}
-                onMouseOver={e => { if (l2csReady) { e.currentTarget.style.transform = 'translateY(-2px)'; e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } }}
-                onMouseOut={e => { if (l2csReady) { e.currentTarget.style.transform = ''; e.currentTarget.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; } }}
+                {...hoverAndFocus(
+                  el => { if (l2csReady) { el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } },
+                  el => { if (l2csReady) { el.style.transform = ''; el.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; } }
+                )}
               >
                 {l2csReady && '👁  Começar (9 pontos)'}
                 {l2csStatus === 'loading' && (<><Loader2 size={20} style={{ animation: 'cfSpin 1s linear infinite' }} />Carregando...</>)}
@@ -737,8 +637,7 @@ export const CalibrationCheck: React.FC = () => {
                     cursor: 'pointer',
                     transition: 'all 0.15s',
                   }}
-                  onMouseOver={e => { e.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
-                  onMouseOut={e => { e.currentTarget.style.background = 'transparent'; }}
+                  {...hoverAndFocusBackground('transparent', 'rgba(255,255,255,0.08)')}
                 >
                   Recalibração rápida (4 pontos)
                 </button>

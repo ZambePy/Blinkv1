@@ -40,7 +40,9 @@ export const EmergencyEscalation: React.FC = () => {
         oscillator.connect(audioCtx.destination);
         oscillator.start();
         setTimeout(() => oscillator.stop(), 2000);
-      } catch (e) {}
+      } catch {
+        // Áudio indisponível não pode derrubar o alerta de emergência.
+      }
     }
 
     if ('speechSynthesis' in window && 'SpeechSynthesisUtterance' in window) {
@@ -96,7 +98,9 @@ export const EmergencyEscalation: React.FC = () => {
           oscillator.connect(audioCtx.destination);
           oscillator.start();
           setTimeout(() => oscillator.stop(), 500);
-        } catch (e) {}
+        } catch {
+          // Idem: o bipe é acessório, o alerta continua.
+        }
       }
     }, 2000);
 

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Video, Sun, Eye, Info } from 'lucide-react';
 import { CaregiverPageLayout } from '../../components/ui/CaregiverPageLayout';
+import { hoverAndFocusBackground } from '../../components/ui/hoverFocus';
 
 export const CaregiverGuide: React.FC = () => {
   const navigate = useNavigate();
@@ -40,8 +41,7 @@ export const CaregiverGuide: React.FC = () => {
             cursor: 'pointer',
             transition: 'background 0.2s',
           }}
-          onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.15)')}
-          onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+          {...hoverAndFocusBackground('rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.15)')}
         >
           <ArrowLeft size={18} /> Voltar
         </button>

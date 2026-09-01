@@ -1,4 +1,5 @@
 import React from 'react';
+import { hoverAndFocus } from './hoverFocus';
 
 interface PrimaryButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   variant?: 'primary' | 'secondary' | 'danger' | 'ghost';
@@ -62,16 +63,14 @@ export const PrimaryButton: React.FC<PrimaryButtonProps> = ({
         ...styles[variant],
         ...style,
       }}
-      onMouseOver={(e) => {
-        if (!disabled) {
-          e.currentTarget.style.transform = 'translateY(-2px)';
+      {...hoverAndFocus(
+        (el) => {
+          if (!disabled) el.style.transform = 'translateY(-2px)';
+        },
+        (el) => {
+          if (!disabled) el.style.transform = 'translateY(0)';
         }
-      }}
-      onMouseOut={(e) => {
-        if (!disabled) {
-          e.currentTarget.style.transform = 'translateY(0)';
-        }
-      }}
+      )}
       onMouseDown={(e) => {
         if (!disabled) {
           e.currentTarget.style.transform = 'translateY(1px) scale(0.99)';

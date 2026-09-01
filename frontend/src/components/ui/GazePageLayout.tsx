@@ -9,12 +9,21 @@ interface GazePageLayoutProps {
   showBack?: boolean;
   showEmergency?: boolean;
   backRoute?: string;
+  /**
+   * Modo "sem moldura": fundo preto, sem padding e sem o cabeçalho canônico
+   * (voltar + zona de descanso). A tela passa a controlar 100% do viewport e
+   * desenha a própria navegação. Usado pelo teclado de varredura, que precisa
+   * de tela cheia preta e das teclas encostando nas bordas.
+   * Os lembretes continuam sendo exibidos normalmente.
+   */
+  bare?: boolean;
 }
 
 export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
   children,
   showBack = true,
   backRoute,
+  bare = false,
 }) => {
   const { activeReminder, dismissActiveReminder } = useReminders();
 
@@ -24,61 +33,63 @@ export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
         position: 'relative',
         width: '100vw',
         height: '100vh',
-        background: 'var(--color-bg-base)', // Agora usa fundo branco/claro do tema
+        background: bare ? '#000000' : 'var(--color-bg-base)', // Agora usa fundo branco/claro do tema
         color: 'var(--color-text-base)',
         overflow: 'hidden',
         boxSizing: 'border-box',
-        padding: '8.5rem 3rem 3rem 3rem', // Espaço para a barra superior
+        padding: bare ? 0 : '8.5rem 3rem 3rem 3rem', // Espaço para a barra superior
         fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       }}
     >
       {/* Cabeçalho de Navegação e Emergência Canônica (B1-4) */}
-      <div
-        style={{
-          position: 'absolute',
-          top: '2rem',
-          left: '3rem',
-          right: '3rem',
-          height: '4.5rem',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          zIndex: 9990,
-        }}
-      >
-        {/* Voltar Canônico */}
-        {showBack ? (
-          <BackButton to={backRoute} />
-        ) : (
-          <div style={{ width: 180 }} />
-        )}
-
-        {/* Zona de Descanso Neutra (B1-5) */}
+      {!bare && (
         <div
-          data-no-dwell="true"
-          className="gaze-rest-zone"
           style={{
-            width: '320px', // Equivalente a 8.0° (GAZE_TOKENS.restZoneMinDeg)
-            height: '100%',
-            background: 'rgba(15, 23, 42, 0.03)',
-            border: '2px dashed rgba(15, 23, 42, 0.15)',
-            borderRadius: '1.5rem',
+            position: 'absolute',
+            top: '2rem',
+            left: '3rem',
+            right: '3rem',
+            height: '4.5rem',
             display: 'flex',
+            justifyContent: 'space-between',
             alignItems: 'center',
-            justifyContent: 'center',
-            color: 'rgba(15, 23, 42, 0.6)',
-            fontSize: '1rem',
-            fontWeight: 700,
-            cursor: 'default',
-            userSelect: 'none',
+            zIndex: 9990,
           }}
         >
-          👁 Zona de Descanso (Sem clique)
-        </div>
+          {/* Voltar Canônico */}
+          {showBack ? (
+            <BackButton to={backRoute} />
+          ) : (
+            <div style={{ width: 180 }} />
+          )}
 
-        {/* Emergência Canônica (Gerenciada globalmente pelo EmergencyProvider) */}
-        <div style={{ width: 200 }} />
-      </div>
+          {/* Zona de Descanso Neutra (B1-5) */}
+          <div
+            data-no-dwell="true"
+            className="gaze-rest-zone"
+            style={{
+              width: '320px', // Equivalente a 8.0° (GAZE_TOKENS.restZoneMinDeg)
+              height: '100%',
+              background: 'rgba(15, 23, 42, 0.03)',
+              border: '2px dashed rgba(15, 23, 42, 0.15)',
+              borderRadius: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'rgba(15, 23, 42, 0.6)',
+              fontSize: '1rem',
+              fontWeight: 700,
+              cursor: 'default',
+              userSelect: 'none',
+            }}
+          >
+            👁 Zona de Descanso (Sem clique)
+          </div>
+
+          {/* Emergência Canônica (Gerenciada globalmente pelo EmergencyProvider) */}
+          <div style={{ width: 200 }} />
+        </div>
+      )}
 
       {/* Conteúdo Principal */}
       <div style={{ width: '100%', height: '100%', position: 'relative' }}>

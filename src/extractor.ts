@@ -357,7 +357,18 @@ export const FEATURE_FORMAT_VERSION = 2;
 //
 // Nada aqui é decidido por argumento. `ACTIVE_FEATURE_SET` só muda com número
 // de harness; a tabela está em docs/RESULTADOS-D2-D8.md.
-export type FeatureSet = 'iris12' | 'iris12+pose' | 'iris12+posecross' | 'iris12+l2cs' | 'iris12+l2cs+pose' | 'compact';
+export type FeatureSet =
+  | 'irisCore'
+  | 'irisCore+pose'
+  | 'irisCore+posecross'
+  | 'irisCore+l2cs'
+  | 'irisCore+l2cs+pose'
+  | 'iris12'
+  | 'iris12+pose'
+  | 'iris12+posecross'
+  | 'iris12+l2cs'
+  | 'iris12+l2cs+pose'
+  | 'compact';
 
 /** Índices mantidos por `iris12`: offset, rel e contorno da íris. */
 export const IRIS12_DIMS = 12;
@@ -369,16 +380,16 @@ export const IRIS12_DIMS = 12;
  * [22..24] e as interações de 1ª ordem são [25..30], com cantos/ear/irisRadius
  * ([12..21]) descartados no meio.
  *
- *   iris12            [0..11]                         12 dims
- *   iris12+pose       + yaw,pitch,roll                 15 dims
- *   iris12+posecross  + 6 interações de 1ª ordem       21 dims
- *
- * As interações escolhidas são as SEIS de primeira ordem ([25..30]:
- * offset×yaw, offset×pitch, offset×scale, offset×roll). As seis de segunda
- * ordem ([31..36]) ficam de fora: 9 alvos já restringem mal 21 parâmetros, e
- * termos quadráticos são os primeiros a virar memorização.
+ * Conjuntos destilados (irisCore): eliminam os 8 termos redundantes de contorno
+ * de íris (que possuem correlação > 0.99 com offsetX/offsetY), reduzindo o
+ * número de condição da matriz de 350.000 para < 100.
  */
 const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly number[]> = {
+  'irisCore': [0, 1, 2, 3],
+  'irisCore+pose': [0, 1, 2, 3, 22, 23, 24],
+  'irisCore+posecross': [0, 1, 2, 3, 22, 23, 24, 25, 26],
+  'irisCore+l2cs': [0, 1, 2, 3, 37, 38],
+  'irisCore+l2cs+pose': [0, 1, 2, 3, 22, 23, 24, 25, 26, 37, 38],
   'iris12': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11],
   'iris12+pose': [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 22, 23, 24],
   'iris12+posecross': [
@@ -386,17 +397,10 @@ const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly numbe
     22, 23, 24,
     25, 26, 27, 28, 29, 30,
   ],
-  // O bloco angular do L2CS, [37..43]. Existe para responder uma pergunta que
-  // nunca pôde ser feita: até `90231ab` o crop entregava imagem preta e o
-  // modelo devolvia sempre o mesmo ângulo; esse commit corrigiu o crop e, na
-  // mesma leva, tirou o bloco do conjunto ativo. O L2CS nunca esteve
-  // simultaneamente funcionando e dentro do vetor.
   'iris12+l2cs': [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
     37, 38, 39, 40, 41, 42, 43,
   ],
-  // Pose e L2CS juntos: um mede para onde a CABEÇA aponta, o outro para onde o
-  // OLHAR aponta. São informações diferentes e podem se somar.
   'iris12+l2cs+pose': [
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11,
     22, 23, 24,
@@ -407,6 +411,11 @@ const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly numbe
 /** Maior índice que cada conjunto exige do vetor completo. Um vetor mais curto
  *  que isso não pode ser projetado — ver `projectFeatureSet`. */
 const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
+  'irisCore': 4,
+  'irisCore+pose': 25,
+  'irisCore+posecross': 27,
+  'irisCore+l2cs': 39,
+  'irisCore+l2cs+pose': 39,
   'iris12': 12,
   'iris12+pose': 25,
   'iris12+posecross': 31,
@@ -414,8 +423,8 @@ const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
   'iris12+l2cs+pose': 44,
 };
 
-/** Conjunto ativo. Ver a tabela acima para a evidência. */
-export const ACTIVE_FEATURE_SET: FeatureSet = 'iris12';
+/** Conjunto ativo padrão (destilado: 4 dimensões essenciais para máxima robustez contra reflexos de óculos). */
+export const ACTIVE_FEATURE_SET: FeatureSet = 'irisCore';
 
 /** Número de dimensões por olho que o conjunto ativo entrega ao modelo.
  *  `compact` é variável (37 sem bloco L2CS, 44 com), então o identificador

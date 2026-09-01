@@ -2,12 +2,10 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { computeDisplayGeometry, pickPanelForDisplay } from '@tracker/displayGeometry';
 
 type DwellSpeed = 'slow' | 'normal' | 'fast';
-type KeyboardLayout = 'frequency' | 'alphabetical' | 'qwerty' | 'hierarchical';
 type Theme = 'light' | 'dark';
 
 interface Settings {
   dwellSpeed: DwellSpeed;
-  keyboardLayout: KeyboardLayout;
   soundEnabled: boolean;
   voiceGender: 'female' | 'male' | 'cloned';
   voiceProfileId?: string;
@@ -64,7 +62,6 @@ interface Settings {
 
 const defaultSettings: Settings = {
   dwellSpeed: 'normal',
-  keyboardLayout: 'frequency',
   soundEnabled: true,
   voiceGender: 'female',
   eyeDominance: 'both',

@@ -2,6 +2,7 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, LogOut } from 'lucide-react';
 import { BackButton } from './BackButton';
+import { hoverAndFocusBackground } from './hoverFocus';
 import { useAuth } from '../../context/AuthContext';
 
 interface CaregiverPageLayoutProps {
@@ -65,8 +66,7 @@ export const CaregiverPageLayout: React.FC<CaregiverPageLayoutProps> = ({ childr
             gap: '0.5rem',
             transition: 'background 0.2s',
           }}
-          onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.15)')}
-          onMouseOut={(e) => (e.currentTarget.style.background = 'rgba(255, 255, 255, 0.05)')}
+          {...hoverAndFocusBackground('rgba(255, 255, 255, 0.05)', 'rgba(239, 68, 68, 0.15)')}
         >
           <LogOut size={16} /> Encerrar Acesso
         </button>
