@@ -246,7 +246,7 @@ A comparação entre `looErrorPx` e o erro do teste é o que distingue "o modelo
 | `docs/RESULTADOS-D2-D8.md` | Consolidação da semana de precisão, decisões e pendências |
 | `docs/AUDITORIA-SPRINT-0.md` | Auditoria de tratamento silencioso de erros |
 | `docs/BUG-OCULOS-EVIDENCIA.md` | Investigação do impacto de lentes na precisão |
-| `ROADMAP.md` | Sprints, status e critérios de aceite |
+| `docs/ROADMAP.md` | Sprints, status e critérios de aceite |
 | `PLANO-FRENTES-A-B.md` | Roadmap técnico e regras de desenvolvimento |
 
 ---

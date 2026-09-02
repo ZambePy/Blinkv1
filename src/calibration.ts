@@ -36,6 +36,22 @@ import {
   type StoredCalibrationProfile,
   type ProfileListEntry,
 } from './calibrationProfiles';
+import { expandPolynomialFeatures } from './calibration/polynomial';
+
+/**
+ * Aplica a expansão polinomial se a flag estiver ativa. Chamada UMA vez em cada
+ * ponto onde features cruas entram no StandardScaler ou Ridge — não fazer aqui
+ * dupla a dimensão silenciosamente no meio do pipeline.
+ */
+function maybeExpand(features: number[][]): number[][] {
+  if (!EXPERIMENT.polynomialFeatures) return features;
+  return features.map((f) => expandPolynomialFeatures(f));
+}
+
+function maybeExpandSingle(features: number[]): number[] {
+  if (!EXPERIMENT.polynomialFeatures) return features;
+  return expandPolynomialFeatures(features);
+}
 
 // Sprint 4 — recalibração implícita. `false` = comportamento antigo (só modelo
 // offline). Ligar via `setOnlineCalibrationEnabled(true)` a partir da UI/settings.
@@ -1901,11 +1917,14 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     );
   }
 
-  featureScalerLeft.fit(trainFeaturesLeft);
-  featureScalerRight.fit(trainFeaturesRight);
+  const expandedFeaturesLeft  = maybeExpand(trainFeaturesLeft);
+  const expandedFeaturesRight = maybeExpand(trainFeaturesRight);
 
-  const scaledFeaturesLeft  = featureScalerLeft.transform(trainFeaturesLeft);
-  const scaledFeaturesRight = featureScalerRight.transform(trainFeaturesRight);
+  featureScalerLeft.fit(expandedFeaturesLeft);
+  featureScalerRight.fit(expandedFeaturesRight);
+
+  const scaledFeaturesLeft  = featureScalerLeft.transform(expandedFeaturesLeft);
+  const scaledFeaturesRight = featureScalerRight.transform(expandedFeaturesRight);
 
   const targetsX = trainTargets.map(t => t.screenX);
   const targetsY = trainTargets.map(t => t.screenY);
@@ -2115,14 +2134,14 @@ export function computeFitDiagnostics(
     ml: RidgeModel, mr: RidgeModel,
     fl: number[], fr: number[],
   ) => {
-    const a = predictRidge(ml, sl.transformSingle(fl));
-    const b = predictRidge(mr, sr.transformSingle(fr));
+    const a = predictRidge(ml, sl.transformSingle(maybeExpandSingle(fl)));
+    const b = predictRidge(mr, sr.transformSingle(maybeExpandSingle(fr)));
     return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
   };
 
   const fitPair = (idx: number[]) => {
-    const fl = idx.map((i) => featuresLeft[i]);
-    const fr = idx.map((i) => featuresRight[i]);
+    const fl = maybeExpand(idx.map((i) => featuresLeft[i]));
+    const fr = maybeExpand(idx.map((i) => featuresRight[i]));
     const tg = idx.map((i) => targets[i]);
     const groups = tg.map(targetGroupKey);
     const sl = new StandardScaler(); sl.fit(fl);
@@ -2142,8 +2161,8 @@ export function computeFitDiagnostics(
   if (n > 0 && regressorLeft && regressorRight) {
     let sum = 0;
     for (let i = 0; i < n; i++) {
-      const a = regressorLeft.predict(featureScalerLeft.transformSingle(featuresLeft[i]));
-      const b = regressorRight.predict(featureScalerRight.transformSingle(featuresRight[i]));
+      const a = regressorLeft.predict(featureScalerLeft.transformSingle(maybeExpandSingle(featuresLeft[i])));
+      const b = regressorRight.predict(featureScalerRight.transformSingle(maybeExpandSingle(featuresRight[i])));
       sum += errPx((a.x + b.x) / 2 - targets[i].screenX, (a.y + b.y) / 2 - targets[i].screenY);
     }
     trainErrorPx = sum / n;
@@ -2364,8 +2383,8 @@ export function detectOutlierPoints(
     }
     const testIdx = groups.get(heldOutKey)!;
 
-    const trainFL = trainIdx.map((i) => points[i].featuresLeft);
-    const trainFR = trainIdx.map((i) => points[i].featuresRight);
+    const trainFL = maybeExpand(trainIdx.map((i) => points[i].featuresLeft));
+    const trainFR = maybeExpand(trainIdx.map((i) => points[i].featuresRight));
     const trainTgt = trainIdx.map((i) => ({
       screenX: points[i].screenX,
       screenY: points[i].screenY,
@@ -2380,8 +2399,8 @@ export function detectOutlierPoints(
       const modelR = trainRidgeModel(scR.transform(trainFR), trainTgt, OUTLIER_LOO_LAMBDA);
       for (const ti of testIdx) {
         const p = points[ti];
-        const pL = predictRidge(modelL, scL.transformSingle(p.featuresLeft));
-        const pR = predictRidge(modelR, scR.transformSingle(p.featuresRight));
+        const pL = predictRidge(modelL, scL.transformSingle(maybeExpandSingle(p.featuresLeft)));
+        const pR = predictRidge(modelR, scR.transformSingle(maybeExpandSingle(p.featuresRight)));
         const px = (pL.x + pR.x) / 2;
         const py = (pL.y + pR.y) / 2;
         const dx = px - p.screenX;
@@ -2798,8 +2817,8 @@ export function feedOnlineSample(
   const targetX = targetXpx / vw;
   const targetY = targetYpx / vh;
 
-  const scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
-  const scaledRight = featureScalerRight.transformSingle(featuresRight);
+  const scaledLeft  = featureScalerLeft.transformSingle(maybeExpandSingle(featuresLeft));
+  const scaledRight = featureScalerRight.transformSingle(maybeExpandSingle(featuresRight));
 
   // Rejeição de outlier via predição do modelo BASE — o online ainda está
   // aprendendo e não deve ser usado para julgar seus próprios inputs.
@@ -2907,8 +2926,8 @@ export function mapGaze(
   //   2. Aquele helper depende dos índices 25..34 do vetor, que DEIXARAM DE
   //      EXISTIR quando o conjunto ativo virou `iris12` (12 dims). Ele seguiria
   //      rodando sem erro e corrigindo dimensões erradas — falha silenciosa.
-  const scaledLeft  = featureScalerLeft.transformSingle(featuresLeft);
-  const scaledRight = featureScalerRight.transformSingle(featuresRight);
+  const scaledLeft  = featureScalerLeft.transformSingle(maybeExpandSingle(featuresLeft));
+  const scaledRight = featureScalerRight.transformSingle(maybeExpandSingle(featuresRight));
 
   let predLeft: { x: number; y: number };
   let predRight: { x: number; y: number };

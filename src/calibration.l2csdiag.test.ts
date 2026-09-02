@@ -37,18 +37,38 @@ function amostras(dims: number, preencherSlots: number[] | null) {
 }
 
 describe('l2csValidFraction — distingue "não se aplica" de "falhou"', () => {
-  it('conjunto ativo sem bloco angular devolve null, não 0', () => {
-    // Guarda o cenário exato do relatório: irisCore, 4 dims, sem L2CS.
-    expect(l2csSlotsInSet(ACTIVE_FEATURE_SET)).toEqual([]);
-    const a = amostras(4, null);
+  it('conjunto ativo hoje carrega bloco: mede em vez de devolver null', () => {
+    // `irisCore+l2cs` leva as posições [4, 5]. Com o L2CS efetivamente entrando
+    // no vetor, o relatório passa a ter valor de decisão (`x%` de amostras com
+    // ângulo válido), em vez de `null` como no cenário histórico do `irisCore`.
+    const slots = l2csSlotsInSet(ACTIVE_FEATURE_SET);
+    expect(slots).toEqual([4, 5]);
+    const a = amostras(6, slots);
     const d = computeFitDiagnostics(a.featuresLeft, a.featuresRight, a.targets, undefined, { w: 1920, h: 1080 });
-    expect(d.l2csValidFraction).toBeNull();
-    expect(d.l2csValidFraction).not.toBe(0);
+    expect(d.l2csValidFraction).not.toBeNull();
+    // Com todos os slots preenchidos com valor não-zero: 100% válido.
+    expect(d.l2csValidFraction).toBe(1);
   });
 
-  it('o campo não é decorativo: quando há bloco, ainda mede', () => {
-    // Verificação da mecânica em si — se um dia o conjunto ativo voltar a
-    // carregar L2CS, a contagem tem de continuar funcionando.
+  it('slots todos-zero contam como inválido (0 ≠ null)', () => {
+    // A distinção do design ainda vale: quando o conjunto ativo tem slots mas
+    // TODOS vêm zero, o campo é 0 (falha total do L2CS) — que é um alerta.
+    // Somente quando o conjunto ativo NÃO carrega slots é que o campo vira
+    // `null` ("não se aplica"). Preservar essa distinção evita alarme falso.
+    const slots = l2csSlotsInSet(ACTIVE_FEATURE_SET);
+    expect(slots.length).toBeGreaterThan(0);
+    const a = amostras(6, null);
+    // Força os slots angulares a zero em todas as amostras — o helper por
+    // default só zera slots do `iris12+l2cs` (≥12), que não caem no vetor de 6.
+    for (const v of a.featuresLeft) for (const s of slots) v[s] = 0;
+    for (const v of a.featuresRight) for (const s of slots) v[s] = 0;
+    const d = computeFitDiagnostics(a.featuresLeft, a.featuresRight, a.targets, undefined, { w: 1920, h: 1080 });
+    expect(d.l2csValidFraction).toBe(0);
+    expect(d.l2csValidFraction).not.toBeNull();
+  });
+
+  it('o campo não é decorativo: quando há bloco maior, ainda mede', () => {
+    // Verificação da mecânica: 'iris12+l2cs' leva as 7 dims completas.
     const slots = l2csSlotsInSet('iris12+l2cs');
     expect(slots.length).toBeGreaterThan(0);
     const a = amostras(19, slots);

@@ -41,9 +41,11 @@ describe('l2csSlotsInSet', () => {
     expect(l2csSlotsInSet('irisCore+l2cs+pose')).toEqual([9, 10]);
   });
 
-  it('o conjunto ATIVO hoje não carrega bloco angular', () => {
-    // Guarda contra o relatório voltar a dizer "l2cs+ridge" sem L2CS: se este
-    // teste passar a falhar, o conjunto ativo mudou e o rótulo tem de mudar junto.
-    expect(l2csSlotsInSet(ACTIVE_FEATURE_SET)).toEqual([]);
+  it('o conjunto ATIVO carrega tan(yaw) e tan(pitch) do L2CS nas posições 4 e 5', () => {
+    // Guarda inversa: o pipeline agora liga o L2CS de propósito. Se este teste
+    // voltar a exigir vazio, `ACTIVE_FEATURE_SET` foi revertido para
+    // `'irisCore'` sozinho e `EXPERIMENT.enableL2CS` precisa voltar a `false`
+    // no mesmo passo (senão o worker roda sem chegar ao modelo).
+    expect(l2csSlotsInSet(ACTIVE_FEATURE_SET)).toEqual([4, 5]);
   });
 });

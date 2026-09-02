@@ -450,8 +450,17 @@ export function l2csSlotsInSet(set: FeatureSet = ACTIVE_FEATURE_SET): number[] {
   return slots;
 }
 
-/** Conjunto ativo padrão (destilado: 4 dimensões essenciais para máxima robustez contra reflexos de óculos). */
-export const ACTIVE_FEATURE_SET: FeatureSet = 'irisCore';
+/** Conjunto ativo: as 4 dimensões destiladas do `irisCore` + as 2 dimensões
+ *  angulares de 1ª ordem do L2CS (`tan(yaw)`, `tan(pitch)`), totalizando 6.
+ *
+ *  Vem em par com `EXPERIMENT.enableL2CS = true` — ligar um sem o outro é
+ *  degenerado: o worker roda sem alimentar o modelo, ou o modelo recebe zeros
+ *  no lugar do bloco angular. As outras 5 dimensões do bloco completo (produtos
+ *  com distância, quadrados, cruzado) ficam fora deste conjunto porque `iris12`
+ *  + interações já cobrem parte do sinal de 2ª ordem, e o Ridge precisa de mais
+ *  alvos que dims para não memorizar aglomerados.
+ */
+export const ACTIVE_FEATURE_SET: FeatureSet = 'irisCore+l2cs';
 
 /** Número de dimensões por olho que o conjunto ativo entrega ao modelo.
  *  `compact` é variável (37 sem bloco L2CS, 44 com), então o identificador

@@ -12,7 +12,7 @@ import { startRecording, stopRecording, clearRecording, getRecording, parseJSONL
 describe('FEATURE_VECTOR_ID', () => {
   it('descreve o conjunto ativo e a dimensão', () => {
     expect(FEATURE_VECTOR_ID).toBe(`${ACTIVE_FEATURE_SET}:${activeFeatureDims()}`);
-    expect(FEATURE_VECTOR_ID).toBe('irisCore:4');
+    expect(FEATURE_VECTOR_ID).toBe('irisCore+l2cs:6');
   });
 
   it('`compact` não promete dimensão fixa', () => {

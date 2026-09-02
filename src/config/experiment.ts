@@ -95,10 +95,10 @@ export interface ExperimentConfig {
    * há coeficiente ajustado: o ganho vem da geometria, então não há o que
    * memorizar — que é como 1.2 falhou ao dar a pose ao Ridge como feature.
    *
-   * DEFAULT false, e a medição em `docs/RESULTADOS-D2-D8.md` explica por quê:
-   * na gravação de referência a direção prevista está certa nos dois eixos,
-   * mas a magnitude geométrica SUPERESTIMA a correção necessária. Ligar exige
-   * gravação com movimento de cabeça deliberado, que a base atual não tem.
+   * DEFAULT true (Fase 1.C) — baseline registra drift pitch monotônico de 6.2°
+   * durante calibração (trendRPitch=-0.98), contaminando dados de treino.
+   * A compensação geométrica já existia atrás da flag; apenas o default muda.
+   * Ver especificação em docs/superpowers/specs/2026-09-01-pipeline-refactor-design.md §3.1
    */
   geometricPoseCompensation: boolean;
   /**
@@ -129,6 +129,25 @@ export interface ExperimentConfig {
    * bloco é como essa avaliação vai ser feita.
    */
   enableL2CS: boolean;
+  /**
+   * Fase 1.A — expansão polinomial de grau 2 nas features antes do StandardScaler.
+   *
+   * Baseline mostra 77% do erro é não-linear (affine.explainedFraction=0.226).
+   * Ridge linear satura. Grau 2 sobre 8 dims → 44 features, ainda seguro contra
+   * overfitting com ~270 amostras + CV LOO do Ridge escolhendo λ.
+   *
+   * DEFAULT true — mudança do comportamento linear puro para curvatura.
+   */
+  polynomialFeatures: boolean;
+  /**
+   * Fase 2.A — treino da calibração via Web Worker.
+   *
+   * Elimina o freeze de UI de 1-3s durante `completeCalibration()`. Predict
+   * continua main-thread e síncrono. Se `false`, treino é síncrono (antigo).
+   *
+   * DEFAULT true.
+   */
+  calibrationWorker: boolean;
 }
 
 const DEFAULTS: ExperimentConfig = {
@@ -138,21 +157,18 @@ const DEFAULTS: ExperimentConfig = {
   enableDistanceLog: false,
   isotropicLandmarks: false,  // A2-5 — desligado até medição confirmar melhora
   lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
-  geometricPoseCompensation: false, // 1.3 — desligado: mede pior na base atual, ver RESULTADOS
+  geometricPoseCompensation: true, // Fase 1.C — habilitado por default; diagnóstico 2026-09-02 confirmou que SEM pose comp o erro explode (361px vs 150px) quando pose de teste diverge da calibração. Y offset +165 tem outra causa.
   lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
-  // C-01 — DESLIGADO até o Exp-2 decidir com número.
-  //
-  // Estava `true` sem participar de nada: com `ACTIVE_FEATURE_SET = 'irisCore'`
-  // o vetor entregue ao Ridge é `[0,1,2,3]` e o bloco angular do L2CS
-  // (índices 37..43) é descartado na projeção. O custo era real e o efeito,
-  // zero: 91 MB de download do ONNX no boot, um `getImageData` de 448² a 10 Hz
-  // e memória do worker, tudo para produzir números que ninguém lia.
-  //
-  // Religar é uma decisão do Exp-2 (BENCHMARKS.md), que compara `irisCore`
-  // puro, `irisCore`+pose geométrica, `irisCore`+l2cs e l2cs-only sobre a
-  // gravação B2 — e exige, antes, corrigir o crop (C-11) e o backpressure
-  // do cliente (C-10). Sem isso o L2CS nunca foi avaliado funcionando.
-  enableL2CS: false,
+  // LIGADO em conjunto com `ACTIVE_FEATURE_SET = 'irisCore+l2cs'`. Antes deste
+  // par a flag ficava true sozinha e o bloco angular era projetado para fora do
+  // vetor — 91 MB de ONNX, `getImageData` de 448² e um worker por quadro sem
+  // efeito no modelo. Agora as duas dims mais informativas do L2CS (tan yaw,
+  // tan pitch) entram como features [4] e [5] do vetor de 6 dims. Os bugs
+  // históricos (crop preto de `sourceDimensions`, yaw travado) já foram
+  // corrigidos e há `L2CSHealthMonitor` vigiando saída constante.
+  enableL2CS: true,
+  polynomialFeatures: true,
+  calibrationWorker: true,
 };
 
 const STORAGE_KEY = 'irisflow.experiment';

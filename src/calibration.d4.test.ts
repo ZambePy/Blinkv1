@@ -1,5 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { detectOutlierPoints, type CalibrationPoint } from './calibration';
+import { EXPERIMENT } from './config/experiment';
+
+// Fase 1.A: desliga expansão polinomial neste arquivo — os testes constroem
+// features 4-D com mapeamento identidade para target. Com polynomialFeatures=true
+// a expansão para 14 dims com apenas 4 amostras de treino causa near-singularity
+// e falsos positivos no detector de outliers. O comportamento do detector em si
+// é correto; o que muda é apenas a dimensão dos dados sintéticos.
+beforeAll(() => {
+  (EXPERIMENT as { polynomialFeatures: boolean }).polynomialFeatures = false;
+});
+afterAll(() => {
+  (EXPERIMENT as { polynomialFeatures: boolean }).polynomialFeatures = true;
+});
 
 // D4.1 (ROADMAP §5) — detectOutlierPoints.
 //

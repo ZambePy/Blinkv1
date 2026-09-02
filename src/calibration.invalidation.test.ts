@@ -4,6 +4,7 @@ import {
   getCalibrationInvalidation, clearCalibrationInvalidation, onCalibrationInvalidated,
   startCalibrationMode, startCollectingPoint, feedRawData, completeCalibration,
 } from './calibration';
+import { EXPERIMENT } from './config/experiment';
 
 // 0.2 — dimensão incompatível deve DESCARTAR a calibração e avisar, em vez de
 // devolver null a 30 Hz para sempre.
@@ -65,9 +66,16 @@ describe('mapGaze — dimensão incompatível', () => {
   beforeEach(() => {
     clearCalibration();
     clearCalibrationInvalidation();
+    // Fase 1.A: desliga expansão polinomial — estes testes verificam detecção de
+    // dimensão incompatível com pipeline linear (8 dims). Com polynomialFeatures=true
+    // o treino com 9 alvos × 44 features ultrapassa o timeout de 5 s do teste.
+    (EXPERIMENT as { polynomialFeatures: boolean }).polynomialFeatures = false;
   });
 
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    (EXPERIMENT as { polynomialFeatures: boolean }).polynomialFeatures = true;
+  });
 
   it('vetor com a dimensão certa prediz normalmente', () => {
     calibrarCom(8);

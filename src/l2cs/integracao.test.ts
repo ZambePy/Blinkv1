@@ -48,24 +48,46 @@ describe('o bloco angular é construído e anexado', () => {
   });
 });
 
-describe('…e é descartado antes de chegar ao modelo', () => {
-  it('dois olhares MUITO diferentes dão o mesmo vetor projetado', () => {
+describe('…e agora chega ao modelo (tan yaw, tan pitch)', () => {
+  it('dois olhares diferentes produzem vetores projetados diferentes', () => {
+    // O oposto do estado histórico: com `ACTIVE_FEATURE_SET = 'irisCore+l2cs'`
+    // as duas últimas dims [4] e [5] carregam tan(yaw) e tan(pitch), então o
+    // vetor entregue ao Ridge responde ao gaze.
     const lm = rosto();
     const a = projectFeatureSet(extractCompactFeatures(lm, undefined, GAZE_A).featuresLeft);
     const b = projectFeatureSet(extractCompactFeatures(lm, undefined, GAZE_B).featuresLeft);
-    expect(ACTIVE_FEATURE_SET).toBe('irisCore');
-    expect(a).toHaveLength(4);
-    expect(a).toEqual(b);
+    expect(ACTIVE_FEATURE_SET).toBe('irisCore+l2cs');
+    expect(a).toHaveLength(6);
+    expect(a).not.toEqual(b);
+    // As 4 primeiras dims são o irisCore puro (dependem só dos landmarks),
+    // então são iguais entre os dois olhares — quem varia é o par angular.
+    expect(a.slice(0, 4)).toEqual(b.slice(0, 4));
+    expect(a.slice(4)).not.toEqual(b.slice(4));
   });
 
-  it('e igual ao vetor de quem nunca rodou o L2CS', () => {
-    // Esta é a asserção que importa: no caminho que o engine usa
-    // (`extractFeatures`), ligar ou desligar o L2CS não muda um bit do que o
-    // Ridge recebe.
+  it('sem gaze, o extractor pula o bloco — e o engine live nunca cai nesse ramo', () => {
+    // Caller que não passa `l2csGaze` (nem `{valid:false}`) faz o extractor
+    // devolver 37 dims. `projectFeatureSet` requer 39 (maior índice angular
+    // 38 + 1) e devolve o vetor intacto quando ele é curto demais — o
+    // pipeline degrada de forma detectável em vez de projetar zeros que
+    // pareceriam medição.
+    //
+    // Em produção isto NÃO ocorre: `engine.ts` sempre passa um objeto
+    // `L2CSGazeInput`; enquanto o worker aquece ele vem com `valid:false`,
+    // e `buildL2CSBlock` devolve 7 zeros — o vetor fica com 44 dims e a
+    // projeção corta para 6 corretamente.
     const lm = rosto();
     const comGaze = extractFeatures(lm, undefined, GAZE_A, 1920, 1080).featuresLeft;
     const semGaze = extractFeatures(lm, undefined, null, 1920, 1080).featuresLeft;
-    expect(comGaze).toEqual(semGaze);
+    expect(comGaze).toHaveLength(6);
+    expect(semGaze).toHaveLength(37); // fallback do projectFeatureSet
+    expect(comGaze).not.toEqual(semGaze);
+
+    // Cenário do engine live: `{valid:false}` faz o bloco vir zerado, mas o
+    // vetor completo cresce para 44 dims e a projeção funciona.
+    const stale = extractFeatures(lm, undefined, { yaw: 0, pitch: 0, valid: false }, 1920, 1080).featuresLeft;
+    expect(stale).toHaveLength(6);
+    expect(stale.slice(4)).toEqual([0, 0]); // tan(0)=0, tan(0)=0
   });
 });
 

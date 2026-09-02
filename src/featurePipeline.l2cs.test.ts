@@ -18,8 +18,10 @@ function makeLandmarks(): Point3D[] {
 // `extractCompactFeatures`. Antes eles observavam esse comportamento através de
 // `extractFeatures`, o que funcionava porque o pipeline repassava o vetor
 // inteiro. Com a projeção no conjunto ativo (ver `ACTIVE_FEATURE_SET`), a
-// fronteira do pipeline passou a devolver 12 dims — então a asserção correta é
-// direto no extractor. A projeção em si tem cobertura própria no fim do arquivo.
+// fronteira do pipeline passou a devolver a dimensão do conjunto (6 dims hoje
+// para `irisCore+l2cs`) — então a asserção do bloco angular COMPLETO precisa
+// ser feita direto no extractor. A projeção em si tem cobertura própria no
+// fim do arquivo.
 const extractFull = (
   lms: Point3D[],
   faceMatrix?: Float32Array,
@@ -136,28 +138,41 @@ describe('D11 — projeção do vetor no conjunto ativo', () => {
     expect(piped.featuresRight).toHaveLength(dims);
   });
 
-  it('as dimensões entregues são o PREFIXO exato do vetor completo (sem reordenar)', () => {
+  it('as dimensões entregues são as posições EXATAS do vetor completo (sem reordenar)', () => {
     // Reordenar silenciosamente seria o pior tipo de bug aqui: o modelo
-    // treinaria e prediria com significados trocados, sem erro nenhum.
+    // treinaria e prediria com significados trocados, sem erro nenhum. Como
+    // `irisCore+l2cs` seleciona índices [0,1,2,3, 37,38] (não é prefixo
+    // contíguo), comparamos posição-a-posição via a mesma tabela que o
+    // extractor usa.
     const lms = makeLandmarks();
     const full = extractCompactFeatures(lms, undefined, { yaw: 0.1, pitch: 0.05, valid: true });
     const piped = extractFeatures(lms, undefined, { yaw: 0.1, pitch: 0.05, valid: true });
     const dims = activeFeatureDims() as number;
+    // Ativa hoje: irisCore(4) + tan(yaw), tan(pitch) = 6 dims nas posições
+    // [0,1,2,3, 37,38] do vetor completo.
+    const expectedIndices = [0, 1, 2, 3, 37, 38];
+    expect(dims).toBe(expectedIndices.length);
     for (let i = 0; i < dims; i++) {
-      expect(piped.featuresLeft[i]).toBe(full.featuresLeft[i]);
-      expect(piped.featuresRight[i]).toBe(full.featuresRight[i]);
+      expect(piped.featuresLeft[i]).toBe(full.featuresLeft[expectedIndices[i]]);
+      expect(piped.featuresRight[i]).toBe(full.featuresRight[expectedIndices[i]]);
     }
   });
 
-  it('o bloco L2CS não influencia mais o vetor entregue ao modelo', () => {
-    // Consequência direta da projeção: com L2CS válido ou inválido, o modelo vê
-    // o mesmo vetor. É o que isola o pipeline do bug do crop preto (D10) até
-    // haver gravação nova que avalie o bloco funcionando.
+  it('o bloco L2CS influencia o vetor entregue ao modelo — é a razão de ligar', () => {
+    // Antes o conjunto ativo era `irisCore` (só [0..3]) e o bloco angular era
+    // descartado; com `irisCore+l2cs` as posições [4] e [5] carregam
+    // tan(yaw) e tan(pitch), então a saída do L2CS chega ao Ridge. Este teste
+    // é a inversão explícita da versão anterior.
     const lms = makeLandmarks();
     const comValido = extractFeatures(lms, undefined, { yaw: 0.2, pitch: 0.1, valid: true });
     const comInvalido = extractFeatures(lms, undefined, { yaw: 0, pitch: 0, valid: false });
-    expect(comValido.featuresLeft).toEqual(comInvalido.featuresLeft);
-    expect(comValido.featuresRight).toEqual(comInvalido.featuresRight);
+    // Prefixo irisCore igual (depende só de landmarks).
+    expect(comValido.featuresLeft.slice(0, 4)).toEqual(comInvalido.featuresLeft.slice(0, 4));
+    // Sufixo angular diferente.
+    expect(comValido.featuresLeft.slice(4)).not.toEqual(comInvalido.featuresLeft.slice(4));
+    // Invalid vem zerado por buildL2CSBlock.
+    expect(comInvalido.featuresLeft.slice(4)).toEqual([0, 0]);
+    expect(comInvalido.featuresRight.slice(4)).toEqual([0, 0]);
   });
 
   it("projectFeatureSet('compact') é identidade", () => {
