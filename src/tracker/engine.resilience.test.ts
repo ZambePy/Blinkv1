@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { runLoopBody, emitToSubscribers, resetLoopErrorState, getLoopErrorCount } from './loopGuard';
 
 /**
- * C-23 — o loop de rAF não tinha nenhum `try/catch` e a chamada de
+ * O loop de rAF não tinha nenhum `try/catch` e a chamada de
  * `requestAnimationFrame(loop)` era a ÚLTIMA linha do corpo. Qualquer exceção
  * — em `detectForVideo`, no analisador de qualidade, num subscriber de gaze ou
  * num handler de clique do React disparado por dwell — pulava o reagendamento
@@ -13,7 +13,7 @@ import { runLoopBody, emitToSubscribers, resetLoopErrorState, getLoopErrorCount 
  * Para um usuário com ELA, um cursor congelado sem mensagem é indistinguível
  * de "o programa travou" — e ele não tem como reiniciar sozinho.
  */
-describe('loopGuard — o loop sobrevive a exceções (C-23)', () => {
+describe('loopGuard — o loop sobrevive a exceções', () => {
   beforeEach(() => { resetLoopErrorState(); vi.restoreAllMocks(); });
   afterEach(() => { vi.restoreAllMocks(); });
 

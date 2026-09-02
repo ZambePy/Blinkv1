@@ -41,9 +41,9 @@ describe('evaluateReadiness — posto de uso ideal', () => {
 });
 
 describe('evaluateReadiness — o posto de uso que produziu 115 px', () => {
-  // Reproduz as condições medidas em fixtures/replay/ci-baseline.jsonl, a
-  // gravação cujo teste de precisão deu 115 px. O objetivo do módulo é
-  // justamente NÃO aprovar em silêncio um setup como esse.
+  // Reproduz as condições medidas numa gravação cujo teste de precisão deu
+  // 115 px. O objetivo do módulo é justamente NÃO aprovar em silêncio um
+  // setup como esse.
   const medido = goodSnapshot({
     iod: 127, videoWidth: 1280, videoHeight: 720,   // iodFraction = 0,099
     brightness: 0.236,
@@ -349,7 +349,7 @@ describe('effectiveViewingDistanceCm — a medição realimenta o pipeline', () 
   });
 });
 
-describe('checagem de faixa de distância (D12)', () => {
+describe('checagem de faixa de distância', () => {
   it('sem calibração com distâncias, o item nem aparece', () => {
     const ids = evaluateReadiness(goodSnapshot()).checks.map((c) => c.id);
     expect(ids).not.toContain('distanceRange');

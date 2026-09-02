@@ -8,7 +8,7 @@ import {
   MAX_DISTANCE_RATIO,
 } from './distanceCorrection';
 
-// D5.2 (ROADMAP §5) — correção geométrica de distância câmera-rosto.
+// Correção geométrica de distância câmera-rosto.
 // Testes ancoram: identidade quando distância = calibração; escala esperada
 // nas duas direções; guardas contra inputs patológicos.
 

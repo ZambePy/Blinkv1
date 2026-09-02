@@ -23,7 +23,7 @@
 //
 // POR QUE NA SAÍDA E NÃO NAS FEATURES
 //
-// `distanceCorrection.ts` (D5.2) tentou isto escalando as dims de offset do
+// `distanceCorrection.ts` tentou isto escalando as dims de offset do
 // vetor. Duas objeções:
 //
 //   1. Geometricamente, as features estão CERTAS — o ângulo do olho não mudou.

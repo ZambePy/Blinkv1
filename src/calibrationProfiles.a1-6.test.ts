@@ -6,7 +6,7 @@ import {
   type OpticalCondition,
 } from './calibrationProfiles';
 
-// A1-6 — registry por condição óptica. Testes cobrem a API pura;
+// Registry por condição óptica. Testes cobrem a API pura;
 // integração com calibration.ts (startCalibrationMode → completeCalibration
 // → switchActiveProfile) precisa do DOM da calibração e é validada
 // manualmente ou em teste E2E depois.
@@ -23,7 +23,7 @@ function fakeProfile(cond: OpticalCondition, label?: string): StoredCalibrationP
   };
 }
 
-describe('A1-6: ProfileRegistry', () => {
+describe('ProfileRegistry', () => {
   let reg: ProfileRegistry;
 
   beforeEach(() => {
@@ -137,7 +137,7 @@ describe('A1-6: ProfileRegistry', () => {
   });
 });
 
-describe('A1-6: shouldWarnPrecisionForCondition', () => {
+describe('shouldWarnPrecisionForCondition', () => {
   it('progressivas disparam warning (limite físico, não bug)', () => {
     expect(shouldWarnPrecisionForCondition('oculos_progressivo')).toBe(true);
   });

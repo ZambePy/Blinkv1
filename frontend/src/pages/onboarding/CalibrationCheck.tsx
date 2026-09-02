@@ -10,11 +10,6 @@ import { buildAutoTestMeta } from '../../utils/autoTestMeta';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { VeredictoDeriva } from '@tracker/calibration';
 
-// D6.1 — a lista canônica de alvos passou a viver em `src/calibration.ts`
-// (CALIBRATION_TARGETS_FULL). A UI consulta pelo context após chamar
-// startCalibrationMode(opts) — a lista muda entre full (9 alvos) e quick
-// (4 cantos) conforme `opts.quick`. Enquanto nada é iniciado, a lista default
-// é a full pra a tela de tutorial mostrar "9 pontos" com honestidade.
 interface CalibrationPointUI { x: number; y: number; name: string; }
 const POINT_NAME: Record<string, string> = {
   '0.1,0.1': 'Superior Esquerdo',
@@ -28,10 +23,6 @@ const POINT_NAME: Record<string, string> = {
   '0.9,0.9': 'Inferior Direito',
 };
 
-// D6.2 — opções de condição óptica expostas ao cuidador. `desconhecido` é o
-// default de compat (perfil pré-D6). Progressivos ganham warn no console
-// via shouldWarnPrecisionForCondition — não é mentira dizer que a precisão
-// vai ser pior. A UI mostra o rótulo em português.
 const OPTICAL_LABELS: Record<OpticalCondition, string> = {
   sem_oculos:          'Sem óculos',
   oculos_simples:      'Óculos comuns (leitura, míopia)',
@@ -65,22 +56,13 @@ const humanMessage: Record<string, string> = {
   unknown: 'Erro desconhecido durante o treinamento do modelo. Por favor, tente novamente.',
 };
 
-// D3.2 (ROADMAP §5) — chave do localStorage pro checkbox "gravar sessão junto
-// com a calibração". Motivo do design: o sweep de EXPAND_FACTOR exige 6
-// rodadas de calibração+accuracy em fila, e no fluxo original o botão de
-// gravar mora em Configurações. Alternar entre telas 6 vezes é atrito real.
-// Deixando o checkbox aqui (default OFF, opt-in explícito), o operador que
-// vai rodar sweep marca uma vez e faz as 6 rodadas sem sair da tela.
-// Diferença essencial pro auto-recording revertido no D2: aqui é opt-in
-// explícito, não sempre-ligado. Usuário normal nunca dispara gravação sem
-// querer.
 const AUTO_RECORD_STORAGE_KEY = 'irisflow.autoRecordOnCalibrate';
 
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
   const { calibration, l2csStatus, getSessionUptimeMs, recording } = useGaze();
-  // D9 — geometria física do posto de uso. Fonte ÚNICA para (a) o erro angular
-  // do relatório e (b) o posicionamento dos alvos pelo orçamento de
+  // Geometria física do posto de uso. Fonte ÚNICA para (a) o erro angular do
+  // relatório e (b) o posicionamento dos alvos pelo orçamento de
   // excentricidade. Antes eram dois hardcodes de 15,6"/60 cm em arquivos
   // diferentes, e numa tela de 23,6" o erro angular saía 34% menor que o real.
   const { settings } = useSettings();
@@ -98,7 +80,7 @@ export const CalibrationCheck: React.FC = () => {
   const [stage, setStage] = useState<
     'tutorial' | 'calibrating' | 'testing' | 'transitioning' | 'drift-warning'
   >('tutorial');
-  // C-16 — espelho do `stage` para os listeners de visibilidade/blur, que são
+  // Espelho do `stage` para os listeners de visibilidade/blur, que são
   // registrados uma única vez e fechariam sobre o valor do primeiro render.
   const stageRef = useRef(stage);
   useEffect(() => { stageRef.current = stage; }, [stage]);
@@ -118,13 +100,12 @@ export const CalibrationCheck: React.FC = () => {
   const [preparing, setPreparing]             = useState(false);
   const PREPARE_MS = 1500;
 
-  // D6.2 — seleção da condição óptica antes de iniciar. Default `desconhecido`
-  // preserva o comportamento antes de D6 (perfil salvo como desconhecido).
   const [opticalCondition, setOpticalCondition] = useState<OpticalCondition>('desconhecido');
 
-  // D3.2 — checkbox opt-in pra iniciar a gravação junto com a calibração.
-  // Persistido para o operador do sweep de EXPAND_FACTOR não precisar remarcar
-  // a cada rodada. STOP e EXPORT continuam manuais em Configurações.
+  // Checkbox opt-in para iniciar a gravação junto com a calibração.
+  // Persistido para o operador não precisar remarcar a cada rodada. STOP e
+  // EXPORT continuam manuais em Configurações. Default OFF: usuário normal
+  // nunca dispara gravação sem querer.
   const [autoRecord, setAutoRecord] = useState<boolean>(() => {
     try { return localStorage.getItem(AUTO_RECORD_STORAGE_KEY) === 'true'; }
     catch { return false; }
@@ -143,25 +124,23 @@ export const CalibrationCheck: React.FC = () => {
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [recording]);
-  // D6.1 — modo em curso; controla renderização de "4/4" vs "9/9" e a lista
-  // de alvos consultada para display. Nulo enquanto nada iniciou.
   const [calibrationMode, setCalibrationMode] = useState<'full' | 'quick' | null>(null);
 
-  // C-05 — a lista de alvos da SESSÃO EM CURSO, congelada em `handleStart`
-  // depois de `startCalibrationMode`.
+  // Lista de alvos da SESSÃO EM CURSO, congelada em `handleStart` depois de
+  // `startCalibrationMode`.
   //
   // Antes, `startNextPoint` lia o `activePoints` do render em que `handleStart`
-  // rodou. Nesse render `calibrationMode` ainda era `null`, então a lista era a
-  // que `getCalibrationTargets()` devolvia ANTES do modo ser aplicado — a grade
-  // nominal, calculada no load do módulo com a geometria default. O
-  // `shuffleOrderRef` já era montado sobre a lista NOVA. Os índices de uma lista
-  // indexavam a outra: em modo rápido a UI mostrava 4 cantos e o engine coletava
-  // TL/TC/TR/ML da grade de 9; em modo completo divergiam sempre que a distância
-  // medida da sessão ≠ default (que é o caso normal).
+  // rodou. Nesse render `calibrationMode` ainda era `null`, então a lista era
+  // a que `getCalibrationTargets()` devolvia ANTES do modo ser aplicado — a
+  // grade nominal, calculada no load do módulo com a geometria default. O
+  // `shuffleOrderRef` já era montado sobre a lista NOVA. Os índices de uma
+  // lista indexavam a outra: em modo rápido a UI mostrava 4 cantos e o engine
+  // coletava TL/TC/TR/ML da grade de 9; em modo completo divergiam sempre que
+  // a distância medida da sessão ≠ default (que é o caso normal).
   //
-  // O ref é a fonte da verdade para o loop (síncrono, imune a render velho); o
-  // state existe só para o JSX redesenhar. Os dois são escritos juntos e nunca
-  // separadamente — ver `commitSessionTargets`.
+  // O ref é a fonte da verdade para o loop (síncrono, imune a render velho);
+  // o state existe só para o JSX redesenhar. Os dois são escritos juntos e
+  // nunca separadamente — ver `commitSessionTargets`.
   const activePointsRef = useRef<CalibrationPointUI[]>([]);
   const [sessionPoints, setSessionPoints] = useState<CalibrationPointUI[] | null>(null);
 
@@ -185,8 +164,6 @@ export const CalibrationCheck: React.FC = () => {
   const nominalPoints: CalibrationPointUI[] = useMemo(() => {
     const targets = calibration.getCalibrationTargets?.() ?? [];
     if (targets.length === 0) {
-      // Fallback: se o engine ainda não subiu, hardcode a grade full para
-      // não quebrar a tela de tutorial. Idêntico ao layout pré-D6.
       return [
         { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
         { x: 0.1, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.9, y: 0.5 },
@@ -204,8 +181,8 @@ export const CalibrationCheck: React.FC = () => {
   const retryCountRef            = useRef(0);
   const MAX_RETRIES_PER_POINT    = 3;
 
-  // D3.2 — ownership da gravação auto-iniciada. Só finalizamos gravação que
-  // ESTE componente iniciou (via handleStart com autoRecord marcado). Se o
+  // Ownership da gravação auto-iniciada. Só finalizamos gravação que ESTE
+  // componente iniciou (via handleStart com autoRecord marcado). Se o
   // operador começou manualmente em Configurações, deixamos em paz.
   const autoRecordOwnedRef = useRef(false);
   // Ref atualizada a cada render pra callback de unmount + timeouts sempre
@@ -244,11 +221,11 @@ export const CalibrationCheck: React.FC = () => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
-      // C-16 — sair da tela no meio da coleta deixava `isCalibrating` ligado
-      // para sempre: o engine reportava `calibrating` a cada frame, o dwell
-      // ficava desligado e o cursor oculto em TODO o app, sem recuperação a
-      // não ser completar uma calibração inteira. Abortar não descarta o
-      // modelo anterior — só encerra a sessão em curso.
+      // Sair da tela no meio da coleta deixava `isCalibrating` ligado para
+      // sempre: o engine reportava `calibrating` a cada frame, o dwell ficava
+      // desligado e o cursor oculto em TODO o app, sem recuperação a não ser
+      // completar uma calibração inteira. Abortar não descarta o modelo
+      // anterior — só encerra a sessão em curso.
       calibration.abort?.();
       // Sair da tela no meio de uma gravação auto-iniciada: descarta pra não
       // deixar JSONL parcial em lugar nenhum.
@@ -257,15 +234,15 @@ export const CalibrationCheck: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // C-16 — a janela perder o foco durante a coleta é o mesmo problema por outra
-  // porta: os alvos continuam sendo coletados enquanto o usuário olha para
+  // A janela perder o foco durante a coleta é o mesmo problema por outra
+  // porta: os alvos continuariam sendo coletados enquanto o usuário olha para
   // outro lugar, contaminando o modelo com amostras que não correspondem a
   // alvo nenhum. Aborta e devolve a tela ao início, em vez de treinar sujo.
   useEffect(() => {
     const abortarPorPerdaDeFoco = (motivo: string) => {
       if (document.visibilityState === 'visible' && motivo === 'visibility') return;
       if (stageRef.current !== 'calibrating') return;
-      console.warn(`[calib] C-16 — calibração abortada por ${motivo}`);
+      console.warn(`[calib] calibração abortada por ${motivo}`);
       calibration.abort?.();
       finalizeAutoRecordingRef.current(false);
       if (!isMounted.current) return;
@@ -292,18 +269,9 @@ export const CalibrationCheck: React.FC = () => {
   };
 
   const runAccuracyTestThenExit = () => {
-    // D2 (ROADMAP.md) — meta capturada NA HORA do accuracy test, não no mount:
-    //   - `minutosDeSessao` reflete uptime real do engine (via engine.getSessionUptimeMs)
-    //   - `oculos` deriva do perfil ativo (`desconhecido` até D6 expor a UI)
-    // Antes: hardcode 0/false, todo relatório automático mentia.
     const meta = buildAutoTestMeta({
       sessionUptimeMs: getSessionUptimeMs(),
       opticalCondition: calibration.getActiveOpticalCondition?.() ?? 'desconhecido',
-      // D9 — diagonal configurada pelo cuidador (Configurações → Teste de
-      // precisão) ou lida do EDID, persistida em SettingsContext.
-      // Etapa 1 — a MESMA distância que posicionou a grade. Se o relatório
-      // convertesse px→graus com um número diferente do que montou os alvos,
-      // as duas metades do diagnóstico falariam de geometrias distintas.
       distanciaCm: sessionDistanceRef.current ?? settings.viewingDistanceCm,
       telaPolegadas: settings.screenDiagonalIn,
     });
@@ -366,12 +334,13 @@ export const CalibrationCheck: React.FC = () => {
     setErrorMessage(null);
     setLastCompletedPoint(null);
 
-    // C-05 — SEMPRE do ref: `activePoints` aqui seria a lista do render em que
-    // esta closure nasceu, que é anterior a `startCalibrationMode`.
+    // SEMPRE do ref: `activePoints` aqui seria a lista do render em que esta
+    // closure nasceu, que é anterior a `startCalibrationMode`.
     const pt = activePointsRef.current[pointIdx];
     if (!pt) {
       // Ordem e lista dessincronizadas: abortar é melhor que treinar em alvo
-      // errado — era exatamente esse silêncio que fazia o C-05 passar batido.
+      // errado — era exatamente esse silêncio que fazia o bug de índices
+      // trocados entre a UI e o engine passar batido.
       console.error(
         `[calib] alvo ${pointIdx} inexistente na lista da sessão ` +
         `(${activePointsRef.current.length} alvos). Coleta abortada.`,
@@ -401,50 +370,43 @@ export const CalibrationCheck: React.FC = () => {
     });
   };
 
-  // D6.1/D6.2 — inicia calibração. `quick=true` reduz para 4 cantos e passa
-  // opts.quick para o backend. `opticalCondition` grava o perfil sob a
-  // condição escolhida — antes de D6.2, todo perfil ficava como `desconhecido`
-  // silenciosamente.
+  // Inicia calibração. `quick=true` reduz para 4 cantos e passa opts.quick
+  // para o backend. `opticalCondition` grava o perfil sob a condição
+  // escolhida.
   const handleStart = (quick: boolean = false) => {
     if (!l2csReady) return;
 
-    // D3.2 — se o operador marcou o opt-in E ainda não há uma gravação ativa
-    // (ex.: iniciada manualmente em Configurações), inicia agora. Paramos +
+    // Se o operador marcou o opt-in E ainda não há gravação ativa (ex.:
+    // iniciada manualmente em Configurações), inicia agora. Paramos +
     // exportamos automaticamente após o accuracy test bem-sucedido. NÃO
-    // paramos gravação iniciada manualmente em Settings (o `autoRecordOwnedRef`
-    // é a distinção).
-    // Diferença essencial pro auto-recording revertido no D2: aqui é opt-in
-    // explícito (checkbox default off), o download vai pro Downloads do
-    // browser (não pro project root via IPC), e cancelamentos/redos são
+    // paramos gravação iniciada manualmente em Settings (o
+    // `autoRecordOwnedRef` é a distinção). Cancelamentos/redos são
     // descartados em vez de exportados.
     if (autoRecord && !recording.isActive()) {
       recording.start();
       autoRecordOwnedRef.current = true;
-      console.log('[calib] gravação iniciada junto com a calibração (opt-in D3.2)');
+      console.log('[calib] gravação iniciada junto com a calibração (opt-in)');
     }
 
     setCalibrationMode(quick ? 'quick' : 'full');
     setStage('calibrating');
     setCompletedList([]);
 
-    // startCalibrationMode ANTES do useMemo reagir — chamamos aqui e a lista
-    // ativa vem via getCalibrationTargets() na hora do startNextPoint.
-    // Etapa 1 → pipeline: a distância MEDIDA nesta sessão manda, quando existe.
-    //
+    // A distância MEDIDA nesta sessão manda, quando existe.
     // `viewingDistanceCm` posiciona os alvos pelo orçamento de excentricidade.
     // Enquanto era só digitado, um paciente que sentasse 10 cm mais perto
-    // recebia a grade montada para a distância de ontem — e as duas gravações
-    // reais do repositório diferiam 30% em tamanho de rosto, exatamente esse
-    // efeito. Fica registrado em `sessionDistanceRef` para o relatório usar a
-    // MESMA distância que a grade usou.
+    // recebia a grade montada para a distância de ontem — e duas gravações
+    // reais diferiam 30% em tamanho de rosto exatamente por esse efeito. Fica
+    // registrado em `sessionDistanceRef` para o relatório usar a MESMA
+    // distância que a grade usou.
     const estimatedDistanceCm = calibration.getCurrentCameraDistanceCm?.() ?? null;
     const distCm = estimatedDistanceCm ?? settings.viewingDistanceCm;
     sessionDistanceRef.current = distCm;
-    
-    console.log(`[Etapa1] distância da sessão: ${distCm.toFixed(1)} cm.`);
 
-    // D12 — congela as distâncias desta calibração. A compensação de distância
-    // usa a VARIAÇÃO em relação a estes dois números para reescalar a predição
+    console.log(`[calib] distância da sessão: ${distCm.toFixed(1)} cm.`);
+
+    // Congela as distâncias desta calibração. A compensação de distância usa
+    // a VARIAÇÃO em relação a estes dois números para reescalar a predição
     // quando o paciente sentar mais perto ou mais longe depois.
     calibration.setCalibrationDistancesCm?.(
       estimatedDistanceCm,
@@ -454,18 +416,12 @@ export const CalibrationCheck: React.FC = () => {
     calibration.startCalibrationMode?.({
       quick,
       opticalCondition,
-      // D9 — mesma geometria do relatório: a grade e o erro angular passam a
-      // falar da mesma tela.
       geometry: {
         screenDiagonalIn: settings.screenDiagonalIn,
         viewingDistanceCm: distCm,
       },
     });
 
-    // C-05 — UMA leitura de `getCalibrationTargets()`, já com o modo e a
-    // geometria desta sessão aplicados, alimentando ao mesmo tempo a ordem
-    // embaralhada, o loop de coleta e o JSX. Antes, a ordem vinha daqui e os
-    // alvos vinham de uma closure anterior a `startCalibrationMode`.
     const targets = calibration.getCalibrationTargets?.() ?? [];
     const sessionTargets = commitSessionTargets(targets);
     const order = sessionTargets.map((_, i) => i);
@@ -602,10 +558,6 @@ export const CalibrationCheck: React.FC = () => {
                 </div>
               )}
 
-              {/* D6.2 — seleção da condição óptica ANTES de iniciar. Persiste no
-                   perfil salvo (StoredCalibrationProfile.meta.opticalCondition).
-                   Antes de D6.2 todo perfil ficava como 'desconhecido' — o
-                   default aqui preserva esse fallback caso o cuidador não escolha. */}
               <label
                 htmlFor="opticalConditionSelect"
                 data-testid="optical-condition-label"
@@ -644,9 +596,6 @@ export const CalibrationCheck: React.FC = () => {
                 ))}
               </select>
 
-              {/* D3.2 — opt-in de gravação. Fica ANTES do botão primário para
-                   que o operador do sweep marque uma vez e clique 6× seguidas
-                   sem sair da tela. Persistido em localStorage. */}
               <label
                 data-testid="auto-record-label"
                 style={{
@@ -717,10 +666,6 @@ export const CalibrationCheck: React.FC = () => {
                 {l2csFailed && (<><AlertTriangle size={20} />Modelo indisponível</>)}
               </button>
 
-              {/* D6.1 — modo rápido: 4 cantos, sem centro. Coerente com o
-                   achado Frontiers 2024 (§3 do ROADMAP). Meta de tempo: <15s
-                   contra ~19-29s do modo completo. Botão SECUNDÁRIO — o full
-                   continua sendo a via principal para usuário novo. */}
               {l2csReady && (
                 <button
                   type="button"
@@ -759,9 +704,6 @@ export const CalibrationCheck: React.FC = () => {
         {/* ─── CALIBRANDO ──────────────────────────────────────────────── */}
         {stage === 'calibrating' && (
           <>
-            {/* D3.2 — indicador de gravação. Canto superior direito, discreto,
-                 fora do centro do olhar. Só aparece se recorder ativo — assim
-                 continua invisível pra usuário que gravou via Configurações. */}
             {isRecording && (
               <div
                 data-testid="recording-indicator"

@@ -4,12 +4,6 @@ import React from 'react';
 import { MemoryRouter } from 'react-router-dom';
 import { DriftIndicator } from './DriftIndicator';
 
-// D6.3 (ROADMAP §5) — testes garantem:
-// (i)   aviso aparece só quando |bias| > 5% da tela;
-// (ii)  aviso NUNCA aparece em rotas de emergência ou calibração (regra 2);
-// (iii) aviso NUNCA aparece em rotas do cuidador (settings/caregiver);
-// (iv)  aviso some quando isDegraded é true (banner de degradação vence).
-
 let mockBias: { x: number; y: number; samples: number } = { x: 0, y: 0, samples: 0 };
 let mockIsDegraded = false;
 
@@ -38,7 +32,7 @@ vi.mock('./ui/GazeButton', () => ({
   },
 }));
 
-describe('DriftIndicator (D6.3)', () => {
+describe('DriftIndicator', () => {
   beforeEach(() => {
     mockBias = { x: 0, y: 0, samples: 0 };
     mockIsDegraded = false;
@@ -116,7 +110,7 @@ describe('DriftIndicator (D6.3)', () => {
     expect(screen.queryByTestId('drift-indicator')).toBeNull();
   });
 
-  it('some quando isDegraded=true (banner de degradação B4-2 tem prioridade)', () => {
+  it('some quando isDegraded=true (banner de degradação tem prioridade)', () => {
     mockBias = { x: 0.20, y: 0.20, samples: 100 };
     mockIsDegraded = true;
     renderAt('/menu');

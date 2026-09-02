@@ -145,10 +145,10 @@ export const SettingsScreen: React.FC = () => {
   const { calibration, recording, setFilterPreset, getSessionUptimeMs, getDiagnostics } = useGaze();
   const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
 
-  // Fase 0.1 — estado local do gravador de sessão. `active` é derivado do
-  // singleton do recorder, mas mantido em state pra o botão trocar de rótulo
-  // sem esperar o poll; `stats` é atualizado por setInterval enquanto
-  // gravando (o singleton não é reativo).
+  // Estado local do gravador de sessão. `active` é derivado do singleton do
+  // recorder, mas mantido em state para o botão trocar de rótulo sem esperar
+  // o poll; `stats` é atualizado por setInterval enquanto gravando (o
+  // singleton não é reativo).
   const [recActive, setRecActive] = useState(false);
   const [recStats, setRecStats] = useState<{ frames: number; dropped: number }>(
     { frames: 0, dropped: 0 },
@@ -271,9 +271,9 @@ export const SettingsScreen: React.FC = () => {
     oculos: false,
     movimentoCabeca: 'parada',
     minutosDeSessao: 0,
-    // D9 — geometria vem das settings persistidas (fonte única, compartilhada
-    // com a grade de calibração). Os campos abaixo espelham o valor atual;
-    // editá-los grava nas settings, não só neste state local.
+    // Geometria vem das settings persistidas (fonte única, compartilhada com
+    // a grade de calibração). Os campos abaixo espelham o valor atual; editá-
+    // los grava nas settings, não só neste state local.
     distanciaCm: settings.viewingDistanceCm,
     telaPolegadas: settings.screenDiagonalIn,
   });
@@ -290,21 +290,20 @@ export const SettingsScreen: React.FC = () => {
       toast.error('Calibre primeiro para rodar o teste de precisão.');
       return;
     }
-    // D7.2 (ROADMAP §5) — se o cuidador não editou "Sessão (min)" (segue 0),
-    // preenche com o uptime real do engine. Se ele escolheu 20/40 no select
-    // (para simular um teste de deriva), a escolha manual é preservada.
-    // D9 — a geometria SEMPRE vem das settings, mesmo que o state local esteja
-    // defasado (ex.: cuidador mudou a tela noutra aba da tela de config).
-    // Etapa 1 — mesma regra do fluxo automático: a distância MEDIDA manda
-    // quando existe. Sem isto os dois caminhos reportariam graus calculados
-    // com geometrias diferentes, e o histórico ficaria incomparável consigo
-    // mesmo dependendo de por onde o teste foi disparado.
+    // Se o cuidador não editou "Sessão (min)" (segue 0), preenche com o
+    // uptime real do engine. Se ele escolheu manualmente no select (para
+    // simular teste de deriva), a escolha manual é preservada.
+    // A geometria SEMPRE vem das settings, mesmo que o state local esteja
+    // defasado. E a distância MEDIDA manda quando existe — sem isto, o fluxo
+    // automático e o manual reportariam graus calculados com geometrias
+    // diferentes e o histórico ficaria incomparável consigo mesmo dependendo
+    // de por onde o teste foi disparado.
     const dLive = getDiagnostics();
     const medida = dLive && dLive.framing.hasFace
       ? estimateDistanceCm(dLive.framing.iodPx, dLive.video.width, settings.cameraHorizontalFovDeg)
       : null;
     const dist = effectiveViewingDistanceCm(medida, settings.viewingDistanceCm);
-    if (dist.rejectedReason) console.warn(`[Etapa1] ${dist.rejectedReason}`);
+    if (dist.rejectedReason) console.warn(`[distance] ${dist.rejectedReason}`);
 
     const metaWithUptime = applyUptimeToRunMetaIfDefault(
       {
@@ -1062,7 +1061,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </section>
 
-        {/* Suavização (Sprint 5) */}
         <section aria-labelledby="filter-title" style={cardStyle}>
           <div
             style={{
@@ -1121,7 +1119,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </section>
 
-        {/* Teste de Precisão (Sprint 0 — coleta de baseline) */}
         <section aria-labelledby="accuracy-title" style={cardStyle}>
           <div
             style={{
@@ -1287,7 +1284,7 @@ export const SettingsScreen: React.FC = () => {
                 onChange={(e) => {
                   const v = Number(e.target.value);
                   if (!Number.isFinite(v) || v <= 0) return;
-                  // Etapa 1 — edição manual passa a ser soberana sobre o EDID.
+                  // Edição manual passa a ser soberana sobre o EDID.
                   updateSettings({ screenDiagonalIn: v, screenGeometrySource: 'manual' });
                   setAccuracyMeta({ ...accuracyMeta, telaPolegadas: v });
                 }}
@@ -1301,13 +1298,13 @@ export const SettingsScreen: React.FC = () => {
             </label>
           </div>
 
-          {/* Etapa 1 — calibração do campo de visão da câmera.
-              Nenhuma API expõe o FOV da lente, e sem ele o medidor de distância
-              da pré-calibração não tem como converter "tamanho do rosto no
-              frame" em centímetros. Derivamos UMA vez: o cuidador mede a
-              distância com fita, o app lê o tamanho do rosto naquele instante,
-              e a geometria devolve o FOV. Depois disso o app estima a distância
-              sozinho em toda sessão. */}
+          {/* Calibração do campo de visão da câmera.
+              Nenhuma API expõe o FOV da lente, e sem ele o medidor de
+              distância da pré-calibração não tem como converter "tamanho do
+              rosto no frame" em centímetros. Derivamos UMA vez: o cuidador
+              mede a distância com fita, o app lê o tamanho do rosto naquele
+              instante, e a geometria devolve o FOV. Depois disso o app
+              estima a distância sozinho em toda sessão. */}
           <div style={{
             marginTop: '1rem', padding: '0.9rem 1rem',
             borderRadius: '0.75rem',
@@ -1417,7 +1414,6 @@ export const SettingsScreen: React.FC = () => {
             </div>
           )}
 
-          {/* Sprint 4 — feature flag da recalibração online */}
           <div
             style={{
               marginTop: '1.25rem',
@@ -1466,7 +1462,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </section>
 
-        {/* Gravador de sessão (Fase 0.1 do SPRINTSELA.MD) */}
         <section aria-labelledby="recorder-title" style={cardStyle}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
             <Video size={28} color="#1B54A8" aria-hidden="true" />
@@ -1476,8 +1471,7 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p style={{ color: 'var(--color-text-base)', opacity: 0.9, marginBottom: '1.25rem', fontFamily: 'system-ui, sans-serif', lineHeight: 1.6 }}>
             Grava landmarks, saída do L2CS, features e ponto predito em
-            JSONL — <strong>sem vídeo</strong>. Consumido pelo replay offline
-            para reexecutar o pipeline sem câmera. Use para depurar sem se
+            JSONL — <strong>sem vídeo</strong>. Use para depurar sem se
             preocupar em reproduzir a sessão.
           </p>
 

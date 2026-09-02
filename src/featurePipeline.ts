@@ -28,11 +28,11 @@ export function extractFeatures(
   l2csGaze?: L2CSGazeInput | null,
   videoWidth?: number,
   videoHeight?: number,
-  /** 1.2 — conjunto de features a projetar. Existe para o harness poder medir
+  /** Conjunto de features a projetar. Existe para o harness poder medir
    *  variantes na MESMA gravação sem recompilar; o app nunca passa este
    *  argumento e segue no `ACTIVE_FEATURE_SET`. */
   featureSet?: FeatureSet,
-  /** 2.2 — detector de piscada a usar. Sem ele vale o singleton do módulo,
+  /** Detector de piscada a usar. Sem ele vale o singleton do módulo,
    *  que é o comportamento do app. O harness passa um por execução, para que
    *  medir uma variante não altere o limiar adaptativo que a próxima veria. */
   blinkDetector?: BlinkDetector,
@@ -55,7 +55,7 @@ export function extractFeatures(
     ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze, blinkDetector)
     : extractEyeFeatures(workingLandmarks, faceMatrix, undefined, undefined, blinkDetector);
 
-  // D11 — a projeção no conjunto ativo mora AQUI, não dentro do extractor.
+  // A projeção no conjunto ativo mora AQUI, não dentro do extractor.
   // Motivo: `extractCompactFeatures` é o dono do layout e continua devolvendo
   // o vetor completo (37 ou 44 dims), o que preserva o contrato dos testes de
   // paridade e do bloco L2CS. Esta função é a fronteira que o engine e a

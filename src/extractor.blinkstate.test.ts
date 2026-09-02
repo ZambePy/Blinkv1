@@ -2,18 +2,9 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { BlinkDetector, resetEarHistory } from './extractor';
 import { extractFeatures } from './featurePipeline';
 
-// 2.2 — `extractFeatures` mutava estado escondido de módulo.
-//
-// O detector de piscada era um singleton (`_blinkDetector`) com limiar
-// ADAPTATIVO: ele aprende o EAR de repouso dos quadros anteriores. Como
-// `extractFeatures` chamava `update()` nesse singleton, a função deixava de ser
-// pura — o mesmo quadro podia sair `blinkDetected: true` ou `false` dependendo
-// do que tinha sido extraído antes, no mesmo processo.
-//
-// Isso não é teoria: o replay descarta o quadro quando `blinkDetected` é true.
-// Duas variantes que filtram quadros de forma diferente alimentam o detector
-// com populações diferentes, o limiar diverge, e o conjunto de quadros que
-// sobrevive muda por um motivo que nada tem a ver com o que se está medindo.
+// `extractFeatures` deve ser pura quando um detector é injetado — o singleton
+// interno mantém estado escondido de módulo, cujo limiar adaptativo aprende
+// EAR ao longo do processo. Injetar um detector isola o teste desse estado.
 
 /** Rosto sintético com abertura de olho controlada. 478 landmarks, o mínimo
  *  para o path compacto não sair pela porta de "sem landmarks". */

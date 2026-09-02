@@ -25,38 +25,37 @@ interface Settings {
   // IPC `window.electronBrightness` está disponível (Windows via WMI).
   // Persiste entre sessões e re-aplica no boot.
   monitorBrightness: number | null;
-  // D9 — geometria física do posto de uso. NÃO é cosmética: entra em duas
-  // contas que antes usavam hardcodes separados e divergentes.
+  // Geometria física do posto de uso. NÃO é cosmética: entra em duas contas
+  // que antes usavam hardcodes separados e divergentes.
   //   1. `meanErrorDeg` do relatório de precisão. Com 15,6" hardcoded numa
-  //      tela de 23,6", o erro angular saía 34% MENOR do que o real
-  //      (2,98° reportado vs 4,50° verdadeiro no relatório 1787682565489).
-  //   2. A posição dos alvos de calibração, que passou a sair de um orçamento
-  //      de excentricidade angular (ver `computeCalibrationTargets`).
+  //      tela de 23,6", o erro angular saía 34% MENOR do que o real.
+  //   2. A posição dos alvos de calibração, que sai de um orçamento de
+  //      excentricidade angular (ver `computeCalibrationTargets`).
   // Só o cuidador sabe estes números — o browser não expõe tamanho físico.
   screenDiagonalIn: number;
   viewingDistanceCm: number;
-  // Etapa 1 — de onde veio `screenDiagonalIn`. Existe para o preenchimento
-  // automático (EDID via Electron) NUNCA sobrescrever um valor que o cuidador
-  // digitou: se ele mediu com fita, esse número vale mais que o EDID, que em
-  // vários monitores vem arredondado a centímetro inteiro ou zerado.
+  // Origem de `screenDiagonalIn`. Existe para o preenchimento automático
+  // (EDID via Electron) NUNCA sobrescrever um valor que o cuidador digitou:
+  // se ele mediu com fita, esse número vale mais que o EDID, que em vários
+  // monitores vem arredondado a centímetro inteiro ou zerado.
   screenGeometrySource: 'default' | 'auto' | 'manual';
-  // Etapa 1, item 6 — consentimento para ler configurações do sistema (EDID do
-  // monitor, escala da tela). `null` = ainda não perguntamos. Ler o hardware do
-  // usuário sem avisar é o tipo de coisa que um software de saúde não faz por
+  // Consentimento para ler configurações do sistema (EDID do monitor, escala
+  // da tela). `null` = ainda não perguntamos. Ler o hardware do usuário sem
+  // avisar é o tipo de coisa que um software de saúde não faz por
   // conveniência, mesmo quando o dado é inócuo e o SO permitiria.
   systemAccessGranted: boolean | null;
-  // Etapa 1 — campo de visão HORIZONTAL da câmera, em graus. Nenhuma API
-  // expõe isso; é derivado uma única vez, quando o cuidador mede a distância
-  // com fita e aperta "Calibrar campo de visão" em Configurações. A partir
-  // daí o app estima a distância sozinho em toda sessão, que é o que faz o
-  // medidor de distância da pré-calibração funcionar de verdade.
+  // Campo de visão HORIZONTAL da câmera, em graus. Nenhuma API expõe isso;
+  // é derivado uma única vez, quando o cuidador mede a distância com fita e
+  // aperta "Calibrar campo de visão" em Configurações. A partir daí o app
+  // estima a distância sozinho em toda sessão, que é o que faz o medidor de
+  // distância da pré-calibração funcionar de verdade.
   cameraHorizontalFovDeg: number | null;
-  // Etapa 1, item 2 — fator de escala do Windows relatado pelo SO. NÃO entra na
-  // conversão px→cm (ver `pickPanelForDisplay` — a escala se cancela, porque o
-  // erro é medido em px CSS e a tela cobre um número fixo de px CSS). Guardado
-  // para (a) desambiguar monitores e (b) registrar a configuração no relatório,
-  // já que "1280×800 numa tela de 23,6\"" é a assinatura de escala em 150% e
-  // confunde quem lê o histórico depois.
+  // Fator de escala do Windows relatado pelo SO. NÃO entra na conversão
+  // px→cm (a escala se cancela, porque o erro é medido em px CSS e a tela
+  // cobre um número fixo de px CSS). Guardado para (a) desambiguar monitores
+  // e (b) registrar a configuração no relatório, já que "1280×800 numa tela
+  // de 23,6\"" é a assinatura de escala em 150% e confunde quem lê o
+  // histórico depois.
   screenScaleFactor: number | null;
 }
 
@@ -127,11 +126,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     };
   });
 
-  // Etapa 1 — preenche a diagonal a partir do EDID, uma vez no boot.
+  // Preenche a diagonal a partir do EDID, uma vez no boot.
   //
-  // Só age quando a origem atual é 'default' ou 'auto'. Um valor marcado como
-  // 'manual' (o cuidador digitou em Configurações) é soberano: o EDID reporta
-  // em centímetros inteiros, então erra por até ~0,4" — melhor que um hardcode
+  // Só age quando a origem atual é 'default' ou 'auto'. Um valor 'manual' (o
+  // cuidador digitou em Configurações) é soberano: o EDID reporta em
+  // centímetros inteiros, então erra por até ~0,4" — melhor que um hardcode
   // errado, pior que uma medição com fita.
   useEffect(() => {
     const sys = (window as unknown as {
@@ -166,12 +165,12 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         const { panel, ambiguous } = pickPanelForDisplay(sizes ?? [], aspect);
         const geo = computeDisplayGeometry(panel);
         if (!geo) {
-          console.log('[Etapa1] EDID não utilizável; mantendo diagonal configurada.');
+          console.log('[display] EDID não utilizável; mantendo diagonal configurada.');
           return scale !== null ? { ...prev, screenScaleFactor: scale } : prev;
         }
         if (ambiguous) {
           console.warn(
-            '[Etapa1] mais de um monitor com a mesma proporção — a diagonal lida ' +
+            '[display] mais de um monitor com a mesma proporção — a diagonal lida ' +
             'pode ser do monitor errado. Se o número abaixo não bater com a sua tela, ' +
             'corrija à mão em Configurações → Teste de precisão.',
           );
@@ -181,7 +180,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           && prev.screenGeometrySource === 'auto'
           && scale === prev.screenScaleFactor) return prev;
         console.log(
-          `[Etapa1] diagonal lida do sistema: ${rounded}" ` +
+          `[display] diagonal lida do sistema: ${rounded}" ` +
           `(${geo.widthCm}×${geo.heightCm} cm). Anterior: ${prev.screenDiagonalIn}".` +
           (scale && scale !== 1 ? ` Escala do Windows: ${(scale * 100).toFixed(0)}%.` : ''),
         );

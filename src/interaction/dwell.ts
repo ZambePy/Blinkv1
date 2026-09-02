@@ -1,29 +1,18 @@
 /**
  * Dispatcher de dwell — política pura, testável, sem DOM e sem relógio próprio.
  *
- * Antes, esta lógica vivia dentro do callback de rAF do `GazeProvider`, mutando
- * sete `useRef` e chamando `document.elementFromPoint` direto. Não tinha um
- * único teste, e é o código que **clica em nome do usuário**: para alguém com
- * ELA, um clique indevido é uma ação que a pessoa não consegue desfazer.
+ * Esta lógica clica em nome do usuário: para alguém com ELA, um clique
+ * indevido é uma ação que a pessoa não consegue desfazer. Três invariantes
+ * críticas:
  *
- * Três defeitos foram corrigidos ao extrair:
- *
- * - **C-07** — o dwell exigia só `hasFace`. Sem calibração, o cursor é o
- *   fallback do nariz (a ponta do nariz projetada na tela) e o app clicava em
- *   qualquer botão sob ele, inclusive no de emergência, com o cursor invisível.
- *   Agora `uncalibrated` bloqueia TUDO, inclusive emergência: sobre um sinal
- *   que não tem relação com o olhar, permitir emergência é disparar alarme por
- *   acaso.
- *
- * - **C-15** — o progresso era `now - dwellStartMs`, relógio de parede. Fechar
- *   os olhos 2 s sobre um botão clicava ao reabrir; e qualquer lacuna (rosto
- *   perdido, frame dropado, aba em segundo plano) contava como olhar fixo.
- *   Agora o progresso acumula APENAS o intervalo entre amostras válidas
- *   consecutivas, e uma lacuna PAUSA (congela) em vez de continuar correndo.
- *
- * - **C-23 (parte)** — o refratário era armado depois do `.click()`. Um handler
- *   React que lançasse deixava o refratário desarmado e os refs sujos. Aqui o
- *   estado da decisão é fechado ANTES de a ação ser executada pelo chamador.
+ * - Sem calibração o cursor é fallback do nariz — `uncalibrated` bloqueia
+ *   TUDO, inclusive emergência (permitir emergência sobre sinal sem relação
+ *   com o olhar é disparar alarme por acaso).
+ * - Progresso acumula APENAS o intervalo entre amostras válidas consecutivas;
+ *   fechar os olhos ou perder o rosto PAUSA (congela), não conta como olhar
+ *   fixo.
+ * - O refratário é armado ANTES de o callback do chamador executar, para que
+ *   um handler que lança não deixe estado sujo re-disparando.
  */
 
 /** Estado ocular vindo do engine. `unknown` = build antigo / sem informação. */
@@ -153,7 +142,7 @@ export function stepDwell(
     blockedBy: DwellOutcome['blockedBy'],
     opts: { preservarProgresso: boolean },
   ): DwellOutcome => {
-    // Pausa (C-15): mantém o alvo e o progresso, apenas solta o encadeamento
+    // Pausa: mantém o alvo e o progresso, apenas solta o encadeamento
     // temporal para que a lacuna não seja contabilizada como olhar.
     if (opts.preservarProgresso && state.targetKey !== null) {
       return {
@@ -179,18 +168,18 @@ export function stepDwell(
     };
   };
 
-  // C-07 — sem calibração o ponto é a ponta do nariz. Nada é clicável, nem
+  // Sem calibração o ponto é a ponta do nariz. Nada é clicável, nem
   // emergência: sobre um sinal que não acompanha o olhar, permitir emergência
   // é disparar alarme por acaso.
   if (sample.uncalibrated) return parar('uncalibrated', { preservarProgresso: false });
 
-  // C-15 — rosto perdido por muito tempo zera; por pouco tempo apenas pausa.
+  // Rosto perdido por muito tempo zera; por pouco tempo apenas pausa.
   if (!sample.hasFace) {
     const perdidoHa = state.lastValidTs === null ? Infinity : now - state.lastValidTs;
     return parar('no-face', { preservarProgresso: perdidoHa < config.lostResetMs });
   }
 
-  // C-15 — olhos fechados PAUSAM. Nunca completam um dwell, e nunca zeram:
+  // Olhos fechados PAUSAM. Nunca completam um dwell, e nunca zeram:
   // uma piscada no meio de uma seleção não pode custar o progresso.
   if (sample.eyeState === 'closed') return parar('eyes-closed', { preservarProgresso: true });
 
@@ -246,7 +235,7 @@ export function stepDwell(
   }
 
   if (next.elapsedMs >= dwellMs) {
-    // C-23 — o refratário é armado AQUI, antes de o chamador executar o
+    // O refratário é armado AQUI, antes de o chamador executar o
     // clique. Se o handler React lançar, o estado já está consistente e o
     // dwell não re-dispara sob o mesmo olhar.
     return {

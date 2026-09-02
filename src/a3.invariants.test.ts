@@ -1,4 +1,4 @@
-// Testes para A3-1 — módulo de invariantes explícitas.
+// Testes do módulo de invariantes explícitas.
 // Verificam: lançamento em NODE_ENV=test, acumulação em produção,
 // e cada uma das 5 invariantes instrumentadas.
 
@@ -17,7 +17,7 @@ import {
 
 // NODE_ENV=test é verdadeiro em Vitest — assertInvariant deve lançar.
 
-describe('A3-1: assertInvariant', () => {
+describe('assertInvariant', () => {
   beforeEach(() => clearInvariantViolations());
 
   it('não faz nada quando cond=true', () => {
@@ -46,7 +46,7 @@ describe('A3-1: assertInvariant', () => {
   });
 });
 
-describe('A3-1: assertFeatureDim', () => {
+describe('assertFeatureDim', () => {
   beforeEach(() => clearInvariantViolations());
 
   it('não lança quando dims iguais', () => {
@@ -58,7 +58,7 @@ describe('A3-1: assertFeatureDim', () => {
   });
 });
 
-describe('A3-1: assertFiniteFeatures', () => {
+describe('assertFiniteFeatures', () => {
   beforeEach(() => clearInvariantViolations());
 
   it('não lança para array de números finitos', () => {
@@ -78,7 +78,7 @@ describe('A3-1: assertFiniteFeatures', () => {
   });
 });
 
-describe('A3-1: assertScalerFitted', () => {
+describe('assertScalerFitted', () => {
   beforeEach(() => clearInvariantViolations());
 
   it('não lança quando fitted=true', () => {
@@ -90,7 +90,7 @@ describe('A3-1: assertScalerFitted', () => {
   });
 });
 
-describe('A3-1: assertScreenUnchanged', () => {
+describe('assertScreenUnchanged', () => {
   beforeEach(() => clearInvariantViolations());
 
   it('não lança quando resolução igual', () => {
@@ -106,14 +106,14 @@ describe('A3-1: assertScreenUnchanged', () => {
   });
 });
 
-describe('A3-1: assertCalibrationClaimedOk (regra 3 do plano em código)', () => {
+describe('assertCalibrationClaimedOk (regra 3 do plano em código)', () => {
   beforeEach(() => clearInvariantViolations());
 
   it('não lança quando isCalibrated=true', () => {
     expect(() => assertCalibrationClaimedOk(true)).not.toThrow();
   });
 
-  it('lança quando isCalibrated=false — bug dos óculos pré-A1-1', () => {
+  it('lança quando isCalibrated=false — bug dos óculos', () => {
     // Este é o cenário exato do bug: UI declara "Calibração Concluída" mas
     // o regressor não treinado. assertCalibrationClaimedOk(false) deve lançar
     // em test, expondo a desconexão entre UI e estado interno.

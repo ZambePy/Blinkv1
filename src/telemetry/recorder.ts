@@ -1,4 +1,4 @@
-// Gravador de sessão (Fase 0.1 do SPRINTSELA.MD).
+// Gravador de sessão.
 //
 // Puro / sem DOM / testável em Node. Singleton de módulo — uma gravação por
 // vez. O consumidor típico (engine.ts) chama `isRecording()` no hot loop
@@ -11,7 +11,7 @@
 //                            droppedFrames se buffer estiver cheio
 //   stopRecording()        → só desativa; buffer continua exportável
 //   exportAsJSONL()        → serializa como JSON Lines (header + frames)
-//   parseJSONL(text)       → inverso, usado pelo replay
+//   parseJSONL(text)       → inverso do exportAsJSONL
 //   clearRecording()       → zera tudo (usado entre gravações)
 //
 // Persistência (Blob, download, fs.writeFile) NÃO é responsabilidade daqui.
@@ -87,8 +87,8 @@ export function clearRecording(): void {
 }
 
 // Serializa em JSON Lines. Primeira linha = header (com droppedFrames
-// injetado para que a truncagem seja legível pelo replay); linhas seguintes
-// = um frame cada. Sem indentação — o replay parseia linha a linha.
+// injetado para que a truncagem seja legível pelo consumidor); linhas
+// seguintes = um frame cada. Sem indentação — parseia linha a linha.
 export function exportAsJSONL(): string {
   if (!header) return '';
   const lines: string[] = [];
@@ -100,7 +100,7 @@ export function exportAsJSONL(): string {
   return lines.join('\n');
 }
 
-// Parser inverso — usado pelo replay (Fase 0.2) e pelos testes do gravador.
+// Parser inverso — usado pelos testes do gravador.
 // Retorna null quando o texto não é um JSONL válido no formato esperado
 // (sem header, formatVersion ausente/errado, JSON inválido).
 export function parseJSONL(text: string): Recording | null {
@@ -119,8 +119,8 @@ export function parseJSONL(text: string): Recording | null {
     try {
       parsedFrames.push(JSON.parse(lines[i]) as RecordedFrame);
     } catch {
-      // Uma linha corrompida invalida a gravação inteira — o replay não pode
-      // saltar frames silenciosamente. Falha explícita.
+      // Uma linha corrompida invalida a gravação inteira — o consumidor não
+      // pode saltar frames silenciosamente. Falha explícita.
       return null;
     }
   }

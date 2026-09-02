@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { updateDegradedTimer, DEGRADED_THRESHOLD_MS } from './engine';
 
-// A1-4 — lógica pura do timer de degradação. O engine é factory + rAF + DOM,
+// Lógica pura do timer de degradação. O engine é factory + rAF + DOM,
 // difícil de testar end-to-end; esta função pura é o coração do detector e é
 // testada isolada.
 
-describe('A1-4: updateDegradedTimer', () => {
+describe('updateDegradedTimer', () => {
   it('frame válido zera o timer e não degrada', () => {
     const r = updateDegradedTimer({
       mapGazeReturnedNull: false,

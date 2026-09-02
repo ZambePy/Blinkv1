@@ -1,4 +1,4 @@
-// Recursive Least Squares Ridge (Sprint 4).
+// Recursive Least Squares Ridge.
 //
 // Atualiza incrementalmente os coeficientes β do Ridge a partir de amostras
 // supervisionadas chegadas online (dwell clicks confirmados), com fator de

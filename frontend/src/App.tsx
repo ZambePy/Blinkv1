@@ -110,14 +110,7 @@ function App() {
               <BrowserRouter>
                 <EmergencyProvider>
                   <DebugHUD />
-                  {/* D6.3 — indicador de drift ao cuidador. Componente
-                       independente do EmergencyProvider (respeita as mesmas
-                       regras de rota: skip em /calibration-check e /emergency,
-                       skip em rotas do cuidador). */}
                   <DriftIndicator />
-                  {/* D7.4 — aviso de fadiga não-bloqueante. Mesmas regras
-                       de rota do DriftIndicator. Convida para /rest quando a
-                       taxa de piscadas sustentada passa de 25/min (>30s). */}
                   <FatigueIndicator />
                   <Suspense fallback={<RouteFallback />}>
                     <Routes>

@@ -1,7 +1,7 @@
 import { describe, it, expect, afterEach, vi } from 'vitest';
 import { RidgeRegressor, trainRidgeModel, predictRidge } from './ridge';
 
-// 3.4 — o ajuste pesava por AMOSTRA; o CV de lambda já pesava por ALVO desde D9.
+// O ajuste antes pesava por AMOSTRA; o CV de lambda já pesava por ALVO.
 //
 // Quantos quadros um alvo reteve é acidente de coleta, não decisão: depende de
 // o rosto ter ficado estável naqueles 1,4 s. Na gravação de referência a razão

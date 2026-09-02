@@ -1,12 +1,11 @@
-// Contratos do gravador de sessão (Fase 0.1 do SPRINTSELA.MD).
+// Contratos do gravador de sessão.
 //
 // O gravador escreve JSON Lines: uma linha de cabeçalho seguida por N linhas
-// de frame. O consumidor é o replay offline (Fase 0.2) que reexecuta o
-// pipeline determinístico a partir das gravações.
+// de frame.
 //
 // PRIVACIDADE — o gravador NÃO persiste vídeo. Landmarks e features já são
-// dado biométrico; adicionar vídeo multiplicaria o passivo sem ganho para o
-// replay (que precisa reproduzir o pipeline, não a imagem).
+// dado biométrico; adicionar vídeo multiplicaria o passivo sem ganho para
+// consumidores offline (que precisam reproduzir o pipeline, não a imagem).
 
 /**
  * Versão do formato do JSONL de gravação.
@@ -19,8 +18,8 @@
  */
 export const TELEMETRY_FORMAT_VERSION = 2; // era 1 — v2 adiciona `sampleDecision`
 
-/** Decisão do pipeline de calibração sobre este frame. Reproduz, no replay,
- *  exatamente o filtro que `calibration.feedRawData` aplicou ao vivo.
+/** Decisão do pipeline de calibração sobre este frame. Reproduz exatamente
+ *  o filtro que `calibration.feedRawData` aplicou ao vivo.
  *  Ausente em frames fora de coleta de calibração. */
 export interface RecordedSampleDecision {
   accepted: boolean;
@@ -41,12 +40,12 @@ export interface RecordingHeader {
    * Identificador do vetor de features do build que gravou (`iris12:12`).
    *
    * Fica no CABEÇALHO e não em cada `RecordedFrame` de propósito: é uma
-   * constante de compilação, não pode variar entre frames da mesma gravação, e
-   * repeti-la em 30 mil linhas seria redundância pura num arquivo que já passa
-   * de 90 MB. O replay lê daqui e compara com o próprio build.
+   * constante de compilação, não pode variar entre frames da mesma gravação,
+   * e repeti-la em 30 mil linhas seria redundância pura num arquivo que já
+   * passa de 90 MB. O consumidor lê daqui e compara com o próprio build.
    *
-   * Opcional para as gravações anteriores a esta mudança, que não têm o campo —
-   * o replay trata ausência como "desconhecido, recompute" em vez de assumir
+   * Opcional para gravações antigas que não têm o campo — consumidores devem
+   * tratar ausência como "desconhecido, recompute" em vez de assumir
    * compatibilidade.
    */
   featureVectorId?: string;
@@ -66,10 +65,10 @@ export interface RecordedL2CS {
   yaw: number;    // rad, sinal Gaze360 (yaw+ = direita)
   pitch: number;  // rad, sinal Gaze360 (pitch+ = cima, provisional)
   valid: boolean;
-  // D3.3 (ROADMAP §5) — confiança agregada da softmax do L2CS, min(yaw, pitch)
-  // de `1 - H/H_max`. Opcional para compat com gravações anteriores a D3.3
-  // (formato v2 sem esse campo); replay/consumidor deve tratar undefined
-  // como "sem sinal de confiança nesta gravação", não como 0.
+  // Confiança agregada da softmax do L2CS, min(yaw, pitch) de `1 - H/H_max`.
+  // Opcional para compat com gravações antigas (formato v2 sem esse campo);
+  // consumidores devem tratar undefined como "sem sinal de confiança nesta
+  // gravação", não como 0.
   confidence?: number;
 }
 
@@ -101,7 +100,7 @@ export interface RecordedFrame {
 
   // Landmarks do MediaPipe achatados: [x0,y0,z0, x1,y1,z1, ...] com 478×3.
   // Presente sempre que hasFace=true. Formato achatado reduz o JSON em ~30%
-  // contra array de objetos e é o que o replay espera.
+  // contra array de objetos.
   landmarks?: number[];
 
   // Matriz 4×4 (row-major, 16 floats) do MediaPipe. Undefined quando o

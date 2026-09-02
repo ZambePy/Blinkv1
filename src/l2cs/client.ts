@@ -29,8 +29,8 @@ export interface L2CSClient {
   isReady(): boolean;
   getMeta(): L2CSModelMeta | null;
   getAverageLatencyMs(): number;
-  // D3.3 — média rolling das confidences (entropia softmax) das últimas
-  // ~20 inferências. 0 = incerteza total ou nenhum resultado ainda.
+  // Média rolling das confidences (entropia softmax) das últimas ~20
+  // inferências. 0 = incerteza total ou nenhum resultado ainda.
   getAverageConfidence(): number;
 }
 
@@ -55,9 +55,8 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
   let pendingId = 0;
   let latest: L2CSGaze = { yaw: 0, pitch: 0, timestamp: 0, valid: false };
   let recentLatencies: number[] = [];
-  // D3.3 — confidences dos últimos N resultados válidos, para expor média
-  // no diagnóstico sem forçar o consumidor a acumular ele mesmo. Mesma
-  // janela de 20 amostras que já usamos para latência.
+  // Confidences dos últimos N resultados válidos, para expor média no
+  // diagnóstico. Mesma janela de 20 amostras usada para latência.
   let recentConfidences: number[] = [];
 
   function post(msg: L2CSWorkerRequest, transfer?: Transferable[]): void {
@@ -177,8 +176,8 @@ export function createL2CSClient(opts: L2CSClientOptions = {}): L2CSClient {
       for (const t of recentLatencies) sum += t;
       return sum / recentLatencies.length;
     },
-    // D3.3 — média das últimas 20 confidences válidas. 0 se ainda não houver
-    // nenhum resultado (mesmo padrão de getAverageLatencyMs). Consumido pelo
+    // Média das últimas 20 confidences válidas. 0 se ainda não houver nenhum
+    // resultado (mesmo padrão de getAverageLatencyMs). Consumido pelo
     // EngineDiagnostics para expor no HUD; NÃO alimenta lógica de decisão.
     getAverageConfidence(): number {
       if (recentConfidences.length === 0) return 0;

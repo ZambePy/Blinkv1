@@ -322,10 +322,10 @@ import { FaceLandmarker, FilesetResolver } from 'https://cdn.jsdelivr.net/npm/@m
     requestAnimationFrame(measureLoop);
   }
 
-  // D3.1 (ROADMAP §5) — matriz expandida: centro + cima/baixo (par pitch) +
-  // direita/esquerda (par yaw). Simetria explícita permite validar sinal +
-  // eixo dominante com mais de 1 ponto de evidência (o script de validação
-  // reporta veredicto por PAR, não por foto isolada).
+  // Matriz expandida: centro + cima/baixo (par pitch) + direita/esquerda
+  // (par yaw). Simetria explícita permite validar sinal + eixo dominante com
+  // mais de 1 ponto de evidência (o script de validação reporta veredicto por
+  // PAR, não por foto isolada).
   const shots = [
     { name: 'look_center.jpg', hint: '① Olhe DIRETO para a lente' },
     { name: 'look_up.jpg',     hint: '② Cabeça reta — olhos PARA CIMA (topo do monitor)' },

@@ -24,7 +24,7 @@ import { runLoopBody, emitToSubscribers } from './loopGuard';
 // com o worker 'loading' treina o Ridge com o bloco de 7 dims em zero
 // (buildL2CSBlock(valid=false)) e depois, quando o worker liga, o vetor muda
 // e o modelo fica dessincronizado.
-/** 2.5 — `disabled` é o estado default: o caminho do L2CS não é iniciado
+/** `disabled` é o estado default: o caminho do L2CS não é iniciado
  *  porque a saída dele não entra no vetor de features ativo. Distinto de
  *  `error`, que é o worker tendo tentado e falhado. */
 export type L2CSStatus = 'loading' | 'ready' | 'error' | 'disabled';
@@ -34,14 +34,14 @@ export interface GazeSample {
   y: number;
   timestamp: number;
   hasFace: boolean;
-  // A1-4 — true quando o engine está no estado 'degraded': calibração feita
+  // true quando o engine está no estado 'degraded': calibração feita
   // mas mapGaze devolveu null por >DEGRADED_THRESHOLD_MS seguidos. Consumidores
   // devem tratar o cursor como não-confiável (é o fallback do nariz, não gaze),
   // desabilitar dwell exceto para elementos data-emergency, e mostrar aparência
-  // distinta. Opcional para compat com consumidores anteriores a A1-4.
+  // distinta. Opcional para compat com consumidores anteriores.
   degraded?: boolean;
   /**
-   * C-07 — `true` quando NUNCA houve calibração: o ponto emitido é o fallback
+   * `true` quando NUNCA houve calibração: o ponto emitido é o fallback
    * do nariz, que não tem relação com a direção do olhar. Distinto de
    * `degraded` (calibrado, mas a predição falhou), porque a política de
    * interação é diferente: em `degraded` a emergência continua permitida; em
@@ -50,7 +50,7 @@ export interface GazeSample {
    */
   uncalibrated?: boolean;
   /**
-   * C-15 — estado ocular do frame. O engine antes não emitia NADA durante a
+   * Estado ocular do frame. O engine antes não emitia NADA durante a
    * piscada, e o dwell (que media relógio de parede) completava sozinho: fechar
    * os olhos 2 s sobre um botão clicava ao reabrir. Com o estado explícito, o
    * dispatcher pausa em vez de continuar contando.
@@ -58,18 +58,18 @@ export interface GazeSample {
   eyeState?: 'open' | 'closed';
 }
 
-// A1-4 — estado 'degraded' distingue "sistema não sabe onde o olhar está" de
+// Estado 'degraded' distingue "sistema não sabe onde o olhar está" de
 // "sistema funcionando". Usuário-alvo ELA não pode desdizer um clique feito
 // sob cursor errado; melhor bloquear a UI que aceitar seleção aleatória.
 export type EngineState = 'idle' | 'loading' | 'tracking' | 'calibrating' | 'no_face' | 'degraded' | 'uncalibrated';
 
-// A1-4 — quanto tempo mapGaze pode devolver null antes de considerarmos que
+// Quanto tempo mapGaze pode devolver null antes de considerarmos que
 // a predição está degradada. 500 ms = ~15 frames a 30 fps — tolera glitch
 // isolado de 1-2 frames mas pega bug persistente (features degeneradas,
 // exceção repetida silenciada por _dimErrorLogged em calibration.ts).
 export const DEGRADED_THRESHOLD_MS = 500;
 
-// A1-4 — lógica pura do timer de degradação, testável sem rAF/DOM/worker.
+// Lógica pura do timer de degradação, testável sem rAF/DOM/worker.
 // Retorna o novo `nullSinceMs` (null se o timer foi zerado) e se o estado
 // deveria ser 'degraded' agora.
 //
@@ -98,42 +98,41 @@ export function updateDegradedTimer(input: {
   return { newNullSinceMs: nullSince, isDegraded };
 }
 
-// A1-1 — re-export para a UI consumir sem depender diretamente de calibration.ts.
+// Re-export para a UI consumir sem depender diretamente de calibration.ts.
 export type { CalibrationOutcome } from '../calibration';
 
 export interface CalibrationApi {
-  // D6 (ROADMAP §5) — `opts` opcional. `quick=true` reduz a calibração para
+  // `opts` opcional. `quick=true` reduz a calibração para
   // 4 cantos (recalibração rápida do cuidador, sem repetir 9 pontos completos).
-  // `opticalCondition` grava a condição do usuário no perfil salvo — antes
-  // de D6.2, a UI nunca passava e todo perfil ficava como `desconhecido`.
+  // `opticalCondition` grava a condição do usuário no perfil salvo.
   startCalibrationMode(opts?: {
     quick?: boolean;
     opticalCondition?: import('../calibrationProfiles').OpticalCondition;
     label?: string;
-    // D9 — geometria física da tela/usuário. Posiciona a grade dentro do
+    // Geometria física da tela/usuário. Posiciona a grade dentro do
     // orçamento de excentricidade angular; ver `computeCalibrationTargets`.
     geometry?: Partial<import('../calibration').CalibrationGeometry>;
   }): void;
-  // D6.1 — alvos ativos para renderização na UI. Reflete a lista de 4 cantos
+  // Alvos ativos para renderização na UI. Reflete a lista de 4 cantos
   // (quick) ou grade 3×3 (full) da sessão em curso. Antes de iniciar, retorna
   // a lista full por default.
   getCalibrationTargets(): readonly { x: number; y: number }[];
   getCalibrationMode(): 'full' | 'quick' | null;
   startCollectingPoint(x: number, y: number, onDone: (success: boolean) => void): void;
-  /** D12 — compensação de distância. Ver `distanceCompensation.ts`. */
+  /** Compensação de distância. Ver `distanceCompensation.ts`. */
   setCameraFovDeg(fov: number | null): void;
   setCalibrationDistancesCm(cameraCm: number | null, screenCm: number | null): void;
   getCurrentCameraDistanceCm(): number | null;
   getDistanceRange(): import('../distanceCompensation').DistanceRange | null;
-  /** 0.2 — avisa quando a calibração foi descartada em tempo de execução por
+  /** Avisa quando a calibração foi descartada em tempo de execução por
    *  incompatibilidade de pipeline. A UI deve pedir recalibração. */
   onInvalidated(cb: (e: import('../calibration').CalibrationInvalidated) => void): () => void;
-  // A1-1 — outcome tipado. Callback opcional; se fornecido, recebe { ok: true }
+  // Outcome tipado. Callback opcional; se fornecido, recebe { ok: true }
   // no sucesso ou { ok: false, reason, detail } em qualquer falha do treino
   // (matriz singular, features degeneradas, amostras insuficientes, etc.).
   completeCalibration(onComplete?: (outcome: import('../calibration').CalibrationOutcome) => void): void;
   /**
-   * 1.1-UI — veredito sobre a deriva de pose da calibração recém-treinada.
+   * Veredito sobre a deriva de pose da calibração recém-treinada.
    * `null` = deriva abaixo do limiar, ou alvos insuficientes para medir.
    *
    * Só faz sentido logo após `completeCalibration`. A tela de calibração usa
@@ -142,14 +141,14 @@ export interface CalibrationApi {
    */
   getPoseDriftVerdict(): import('../calibration').VeredictoDeriva | null;
   /**
-   * C-16 — encerra uma calibração em curso SEM treinar e sem descartar o
+   * Encerra uma calibração em curso SEM treinar e sem descartar o
    * modelo anterior. A tela chama no unmount e quando a janela perde o foco;
    * sem isto, sair no meio da coleta prendia o app em `calibrating`.
    */
   abort(): void;
   clear(): void;
   isCalibrated(): boolean;
-  // Sprint 4 — recalibração implícita a partir de dwell clicks confirmados.
+  // Recalibração implícita a partir de dwell clicks confirmados.
   // O consumidor (GazeContext) chama isso ao completar um dwell, passando o
   // centro do elemento como alvo supervisionado.
   feedOnlineSample(targetXpx: number, targetYpx: number): boolean;
@@ -163,7 +162,7 @@ export interface CalibrationApi {
   // Enabled por default; desligar volta ao comportamento pré-melhoria.
   setSessionBiasEnabled(enabled: boolean): void;
   resetSessionBias(): void;
-  // D6.3 (ROADMAP §5) — o valor do bias EMA acumulado na sessão + contagem de
+  // O valor do bias EMA acumulado na sessão + contagem de
   // amostras. Consumido pelo indicador de drift que sugere recalibração
   // quando |bias| ultrapassa ~5–6% da tela. Reset em cada calibração nova.
   getSessionBias(): { x: number; y: number; samples: number };
@@ -172,13 +171,12 @@ export interface CalibrationApi {
   // excessivo. Default 60000 ms (1 min); janelas menores dão resposta
   // mais rápida ao custo de variância maior.
   getRecentBlinkRatePerMinute(windowMs?: number): number;
-  // D2 — condição óptica do perfil ativo. Consumido pelo AUTO_TEST_META do
+  // Condição óptica do perfil ativo. Consumido pelo AUTO_TEST_META do
   // fluxo pós-calibração para preencher `RunMeta.oculos` em vez de hardcode.
-  // Retorna 'desconhecido' enquanto D6 não expõe a seleção na UI de calibração.
   getActiveOpticalCondition(): import('../calibrationProfiles').OpticalCondition;
 }
 
-// Fase 0.1 — API do gravador de sessão exposta pelo engine. Existe para que
+// API do gravador de sessão exposta pelo engine. Existe para que
 // a UI (SettingsScreen) não precise conhecer o singleton do recorder nem os
 // detalhes do que compõe o header (video res, l2cs meta) — o engine já tem
 // esses dados em mão.
@@ -198,10 +196,10 @@ export interface EngineDiagnostics {
     hz: number;
     latencyMs: number;
     stalePct: number;
-    // D3.3 (ROADMAP §5) — média rolling da confidence (1 - H/H_max da softmax
+    // Média rolling da confidence (1 - H/H_max da softmax
     // por eixo, agregada por min(yaw, pitch)) das últimas ~20 inferências.
     // 0 antes de qualquer resultado válido. Exposto para observabilidade;
-    // downstream ainda NÃO consome (regra 4 do projeto — medir antes de agir).
+    // downstream ainda NÃO consome.
     confidence: number;
   };
   gaze: {
@@ -236,14 +234,14 @@ export interface EngineDiagnostics {
     iod: number;
     faceCenter: { x: number; y: number };
     specularRatio: number;
-    /** Etapa 2 — distância entre os cantos externos dos olhos em PIXELS DE
+    /** Distância entre os cantos externos dos olhos em PIXELS DE
      *  VÍDEO. Diferente de `iod`, que é normalizado (e anisotrópico, porque x
      *  divide por largura e y por altura). A avaliação de setup precisa da
      *  grandeza em px porque o que governa a precisão é quantos pixels de
      *  sensor caem sobre o olho. */
     iodPx: number;
   };
-  /** Etapa 2 — qualidade do crop ocular no frame corrente. Já era calculada
+  /** Qualidade do crop ocular no frame corrente. Já era calculada
    *  por `qualityAnalyzer` e consumida pelos portões da calibração; passa a
    *  ser exposta para a tela de pré-calibração poder mostrar e travar. */
   quality: {
@@ -252,9 +250,9 @@ export interface EngineDiagnostics {
     blur: number;
     detectorConfidence: number;
   };
-  /** Etapa 2 — resolução REAL negociada com a câmera. */
+  /** Resolução REAL negociada com a câmera. */
   video: { width: number; height: number };
-  /** Etapa 2 — histórico recente do brilho do crop ocular, na CADÊNCIA DE
+  /** Histórico recente do brilho do crop ocular, na CADÊNCIA DE
    *  FRAME (não amostrado pela UI). O detector de cintilação precisa disso:
    *  amostrar a 10 Hz na tela faria o batimento de 10 Hz da rede de 50 Hz
    *  aliasar para 0 e desaparecer. Mais antigo primeiro. */
@@ -269,14 +267,14 @@ export interface GazeEngine {
   subscribe(cb: (sample: GazeSample) => void): () => void;
   onStateChange(cb: (state: EngineState) => void): () => void;
   getState(): EngineState;
-  // D2 — tempo desde o `start()` bem-sucedido, em ms (performance.now-based).
+  // Tempo desde o `start()` bem-sucedido, em ms (performance.now-based).
   // 0 antes do primeiro start. Consumido pelo AUTO_TEST_META para preencher
   // `RunMeta.minutosDeSessao` em vez de hardcode 0. Reinicia a cada stop→start.
   getSessionUptimeMs(): number;
-  // Sprint 5 — troca em tempo real do preset do filtro temporal.
+  // Troca em tempo real do preset do filtro temporal.
   // `estavel`/`balanceado`/`responsivo` alteram mincutoff, beta e o buffer
   // ponderado. Ver FILTER_PRESETS em oneEuroFilter.ts.
-  // A2-1 — presets v2 (sufixo '-v2') filtram em espaço normalizado [0,1]
+  // Presets v2 (sufixo '-v2') filtram em espaço normalizado [0,1]
   // antes de converter para pixel — desligado por default.
   setFilterPreset(preset: FilterPreset | FilterPresetV2): void;
   // Estado do subsistema L2CS. UI deve bloquear calibração enquanto != 'ready'.
@@ -340,12 +338,11 @@ function weightedBufferAvg(buf: number[]): number {
   return valueSum / weightSum;
 }
 
-// Fase 0.1 — helpers do gravador de sessão. Ficam em escopo de módulo pra
+// Helpers do gravador de sessão. Ficam em escopo de módulo pra
 // não realocar closures a 30 Hz.
 function flattenLandmarks(landmarks: readonly { x: number; y: number; z: number }[]): number[] {
-  // 478 × 3 = 1434 números. Achatado (não array de objetos) porque:
-  //   (a) reduz o JSON serializado em ~30% (sem repetir chaves x/y/z),
-  //   (b) o replay decodifica em Float64 sequencial de qualquer jeito.
+  // 478 × 3 = 1434 números. Achatado (não array de objetos) porque
+  // reduz o JSON serializado em ~30% (sem repetir chaves x/y/z).
   const out = new Array<number>(landmarks.length * 3);
   for (let i = 0; i < landmarks.length; i++) {
     const p = landmarks[i];
@@ -374,7 +371,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let rafHandle = 0;
   let lastVideoTime = -1;
   let running = false;
-  // D2 — marca do `performance.now()` no start bem-sucedido. Consumido por
+  // Marca do `performance.now()` no start bem-sucedido. Consumido por
   // getSessionUptimeMs() para o AUTO_TEST_META refletir o tempo real de uso
   // em vez de hardcode 0. Null antes do primeiro start; reset a cada start.
   let sessionStartMs: number | null = null;
@@ -392,7 +389,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   const bufferX: number[] = [];
   const bufferY: number[] = [];
 
-  // Sprint 4 — cache das últimas features extraídas. `feedOnlineSample` no
+  // Cache das últimas features extraídas. `feedOnlineSample` no
   // dwell click precisa das features do último frame válido; assim evitamos
   // rebuildar do zero (extractFeatures não é barato).
   let latestFeaturesLeft: number[] = [];
@@ -403,7 +400,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let lastEmittedY = 0;
   let lastEmitHadFace = false;
 
-  // A1-4 — timestamp do primeiro frame consecutivo em que mapGaze devolveu
+  // Timestamp do primeiro frame consecutivo em que mapGaze devolveu
   // null (após a calibração estar completa). Zerado no primeiro sucesso.
   let mapGazeNullSinceMs: number | null = null;
 
@@ -426,7 +423,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let l2csFramesSubmitted = 0;
   let l2csFramesValid = 0;
   let l2csFramesStale = 0;
-  // 2.5 — vigia de saída travada. Ver `L2CSHealthMonitor`.
+  // Vigia de saída travada. Ver `L2CSHealthMonitor`.
   const l2csHealth = new L2CSHealthMonitor();
 
   // Diagnostics counters
@@ -443,7 +440,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let latestSpecularRatio = 0;
   let latestIodPx = 0;
   let latestQuality = { brightness: 0, contrast: 0, blur: 0, detectorConfidence: 0 };
-  // Etapa 2 — anel de brilho na cadência de frame, para o detector de
+  // Anel de brilho na cadência de frame, para o detector de
   // cintilação. 96 amostras a ~30 fps ≈ 3,2 s: suficiente para resolver 10 Hz
   // com folga e barato de manter.
   const BRIGHTNESS_HISTORY_LEN = 96;
@@ -472,7 +469,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       lastEmittedY = sample.y;
     }
     lastEmitHadFace = sample.hasFace;
-    // C-23 — um subscriber que lança não pode abortar a entrega aos demais nem
+    // Um subscriber que lança não pode abortar a entrega aos demais nem
     // derrubar o frame. O dispatcher de dwell é um subscriber e chama `.click()`,
     // executando código React arbitrário: era a rota mais provável de morte.
     emitToSubscribers(gazeSubscribers, sample);
@@ -499,19 +496,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   // getL2CSStatus() e mostrar erro/impedir calibração.
   function initL2CSAsync(): void {
     if (l2csClient) return; // já iniciado
-    // 2.5 — o caminho inteiro é opcional, e o default é DESLIGADO.
+    // O caminho inteiro é opcional, e o default é DESLIGADO.
     //
     // O bloco angular do L2CS ocupa os índices [37..43] do vetor completo, e
     // `ACTIVE_FEATURE_SET = 'iris12'` seleciona [0..11]. A saída não chega ao
     // modelo. Enquanto isso custa 91 MB de download, `getImageData` de 448² a
     // 10 Hz e um worker por quadro.
-    //
-    // Medido na gravação de referência: 1563 quadros marcados `valid`, e o yaw
-    // com UM único valor distinto — −1,4315 rad (−82,0°). É a assinatura do
-    // crop preto (bug de `sourceDimensions`, desde corrigido): o modelo inferia
-    // sobre imagem vazia e devolvia constante. `isGazePlausible` zerava o bloco
-    // (±0,61 rad), mas o contador de válidos seguia subindo e a UI seguia
-    // dizendo "pronto" — a falha era invisível no nível do sistema.
     if (!EXPERIMENT.enableL2CS) {
       setL2CSStatus('disabled');
       console.log(
@@ -531,7 +521,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     );
   }
 
-  // C-23 — `loop()` passou a ser só o invólucro resiliente; o corpo real é
+  // `loop()` passou a ser só o invólucro resiliente; o corpo real é
   // `loopBody()`. O reagendamento vive no `finally` de `runLoopBody`, então
   // nenhuma exceção de etapa (MediaPipe, qualidade, worker, subscriber) pode
   // mais matar o rastreamento em silêncio.
@@ -569,7 +559,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         latestFaceCenter = { x: 0.5, y: 0.5 };
         latestSpecularRatio = 0;
         latestIodPx = 0;
-        // A1-4 — face perdida zera o timer de degradação; sem rosto o problema
+        // Face perdida zera o timer de degradação; sem rosto o problema
         // é 'no_face', não 'degraded'. Quando o rosto voltar, começa uma nova
         // janela de 500 ms antes de considerar degradado novamente.
         mapGazeNullSinceMs = null;
@@ -580,14 +570,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             y: lastEmittedY,
             timestamp: performance.now(),
             hasFace: false,
-            // C-07 — o dispatcher trata `uncalibrated` como bloqueio total;
+            // O dispatcher trata `uncalibrated` como bloqueio total;
             // omitir aqui deixaria a amostra de perda de rosto parecer válida.
             uncalibrated: !calibration.isCalibrated(),
           });
         }
-        // Fase 0.1 — mesmo sem rosto, gravamos o frame para o replay saber
-        // que houve perda de tracking (dwell precisa distinguir "sem sinal"
-        // de "sinal fraco" — congelamento de piscada vs. rosto perdido).
         if (recorder.isRecording()) {
           recorder.recordFrame({
             captureTs: startTimeMs,
@@ -635,7 +622,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         calibration.feedFaceMetrics(true, rawIod);
         latestHasFace = true;
         latestIod = rawIod;
-        // Etapa 2 — versão em px de vídeo. `rawIod` acima mistura escalas (x
+        // Versão em px de vídeo. `rawIod` acima mistura escalas (x
         // normalizado por largura, y por altura); aqui desfazemos isso antes
         // de medir, senão a distância muda com a inclinação da cabeça.
         latestIodPx = Math.hypot(
@@ -643,9 +630,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           (landmarks[33].y - landmarks[263].y) * (videoEl?.videoHeight ?? 0),
         );
         latestFaceCenter = { x: landmarks[1].x, y: landmarks[1].y };
-        // D12 — alimenta a compensação de distância. Dois números por quadro;
+        // Alimenta a compensação de distância. Dois números por quadro;
         // `mapGaze` converte para cm usando o campo de visão calibrado.
-        // 1.4 — altura e ponta do nariz também, para a compensação de
+        // Altura e ponta do nariz também, para a compensação de
         // translação lateral. `latestFaceCenter` já é o landmark 1.
         calibration.setCurrentFrameGeometry(
           latestIodPx, videoEl?.videoWidth ?? 0, videoEl?.videoHeight ?? 0, latestFaceCenter,
@@ -685,9 +672,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             console.error(
               `[L2CS] SAÍDA TRAVADA — yaw constante em ${g.yaw.toFixed(4)} rad ` +
               `(${((g.yaw * 180) / Math.PI).toFixed(1)}°) por dezenas de quadros. ` +
-              `O modelo está inferindo sobre imagem inútil (crop preto ou congelado). ` +
-              `Foi exatamente assim que a falha passou despercebida na gravação de ` +
-              `baseline: 1563 quadros marcados válidos, um único valor de yaw.`,
+              `O modelo está inferindo sobre imagem inútil (crop preto ou congelado).`,
             );
           }
           diagL2csYaw = g.yaw;
@@ -703,11 +688,6 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         );
         diagBlink = extractorResult.blinkDetected;
 
-        // Fase 0.1 — snapshot para o gravador. As duas variáveis abaixo são
-        // preenchidas dentro do bloco de emissão; fora dele ficam undefined
-        // (sinalizando "frame processado mas sem predição" — tipicamente
-        // piscada ou features vazias). O recorder call único no fim do
-        // branch hasFace consome esse snapshot.
         let recordedPredicted: { x: number; y: number } | undefined;
         let recordedQuality: RecordedQuality | undefined;
 
@@ -715,7 +695,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           const featuresLeft = extractorResult.featuresLeft;
           const featuresRight = extractorResult.featuresRight;
 
-          // Sprint 1.1 — sobrescreve brightness/contrast/blur/confidence
+          // Sobrescreve brightness/contrast/blur/confidence
           // com valores reais medidos no crop dos olhos. Mantém o
           // irisVisibilityPercentage (EAR) que continua sendo calculado
           // no extractor.
@@ -744,11 +724,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             yaw:   face?.yaw,
             pitch: face?.pitch,
             roll:  face?.roll,
-            // D5.2 — proxy de distância câmera-rosto para `mapGaze` computar
+            // Proxy de distância câmera-rosto para `mapGaze` computar
             // ratio de correção geométrica (flag off por default). Viaja
             // junto do `quality` pra não exigir um novo canal só pra isso.
             cameraDistanceEstimate: face?.cameraDistanceEstimate,
-            // 1.4 — centro facial e escala viajam junto do `quality` pelo mesmo
+            // Centro facial e escala viajam junto do `quality` pelo mesmo
             // motivo que `cameraDistanceEstimate`: evita um canal novo só para
             // isso, e assim entram em `profile[].quality`, que é de onde a
             // referência de calibração é calculada.
@@ -760,7 +740,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           if (face) {
             diagPose = { yaw: face.yaw, pitch: face.pitch, roll: face.roll };
           }
-          // 1.3 — pose do quadro para a compensação geométrica em `mapGaze`.
+          // Pose do quadro para a compensação geométrica em `mapGaze`.
           // Enviada sempre, inclusive `null`: a flag decide se é usada, e uma
           // pose velha guardada de um quadro sem rosto compensaria pelo lugar
           // errado.
@@ -794,7 +774,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             face ? { yaw: face.yaw, pitch: face.pitch, roll: face.roll } : undefined,
           );
 
-          // D12 — o quarto argumento é herança: `mapGaze` não o lê mais (a
+          // O quarto argumento é herança: `mapGaze` não o lê mais (a
           // compensação de distância passou a usar `setCurrentFrameGeometry` +
           // `setCameraFovDeg`, que dão centímetros). Mantido na chamada só
           // porque a assinatura ainda o aceita, por compatibilidade com os
@@ -814,7 +794,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             targetX = (1.0 - landmarks[1].x) * vw;
             targetY = landmarks[1].y * vh;
           }
-          // A1-4 — atualiza o timer de degradação. Só conta null como
+          // Atualiza o timer de degradação. Só conta null como
           // degradação após a calibração estar completa e fora do modo de
           // coleta (durante calibração null é normal).
           const degradedUpdate = updateDegradedTimer({
@@ -827,7 +807,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           mapGazeNullSinceMs = degradedUpdate.newNullSinceMs;
           const isDegraded = degradedUpdate.isDegraded;
 
-          // Sprint 5 — o buffer rolling adicionava lag e (em teste) não
+          // O buffer rolling adicionava lag e (em teste) não
           // aumentava a estabilidade em cima do One Euro. Só permanece quando
           // o preset ativo pede — no preset "estavel" é útil combinar com
           // mincutoff baixo para reduzir jitter de baixa amplitude.
@@ -844,7 +824,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           }
 
           const now = performance.now() / 1000.0;
-          // A2-1 — quando filterInNormalizedSpace está ligado, filtrar em [0,1]
+          // Quando filterInNormalizedSpace está ligado, filtrar em [0,1]
           // antes de converter para pixel. O filtro se torna independente da
           // resolução da tela: mincutoff=0.5 produz alpha≈0.50 em vez de 0.99.
           // Desligado por default — só os presets "-v2" ativam essa flag.
@@ -860,11 +840,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             smoothed = oneEuro.filter(targetX, targetY, now);
           }
 
-          // A1-4 — decide entre 'calibrating' | 'degraded' | 'tracking'.
+          // Decide entre 'calibrating' | 'degraded' | 'tracking' | 'uncalibrated'.
           // 'degraded' entra quando mapGaze devolveu null por >500ms seguidos
           // após a calibração estar completa. Sai automaticamente no primeiro
           // frame bem-sucedido.
-          // C-07 — `uncalibrated` é um estado próprio. Antes, um app sem
+          // `uncalibrated` é um estado próprio. Antes, um app sem
           // nenhuma calibração emitia o fallback do nariz como se fosse gaze
           // (`degraded:false`), e o dwell clicava em qualquer botão sob a ponta
           // do nariz — com o cursor invisível, porque a UI o esconde quando
@@ -902,7 +882,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             yaw: face?.yaw, pitch: face?.pitch, roll: face?.roll,
           };
         } else if (extractorResult.blinkDetected) {
-          // C-15 — piscada passa a EMITIR, na última posição conhecida e com
+          // Piscada passa a EMITIR, na última posição conhecida e com
           // `eyeState:'closed'`.
           //
           // Antes o engine simplesmente não emitia durante a piscada, e o
@@ -925,10 +905,6 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           });
         }
 
-        // Fase 0.1 — recorder hook único do branch hasFace. Fica FORA do
-        // if (!blink && features) para cobrir também os frames de piscada
-        // (que carregam blink=true e ausência de predição — informação que
-        // o replay usa para depurar o portão de confiança da Fase 3).
         if (recorder.isRecording()) {
           recorder.recordFrame({
             captureTs: startTimeMs,
@@ -955,9 +931,6 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         }
       }
     }
-    // C-23 — o reagendamento saiu daqui e foi para o `finally` de
-    // `runLoopBody`, em `loop()`. Enquanto morava nesta linha, era pulado por
-    // qualquer exceção acima e o loop morria sem deixar rastro.
   }
 
   return {
@@ -1009,7 +982,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
 
     setFilterPreset(preset: FilterPreset | FilterPresetV2): void {
       activePreset = preset;
-      // A2-1 — resolve o config de presets v1 (pixel) ou v2 (normalizado)
+      // Resolve o config de presets v1 (pixel) ou v2 (normalizado)
       const isV2 = preset.endsWith('-v2');
       const oldConfig = activeConfig;
       activeConfig = isV2
@@ -1201,7 +1174,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
     },
 
-    // Fase 0.1 — API do gravador. O engine preenche o header com dados que
+    // API do gravador. O engine preenche o header com dados que
     // só ele conhece (resolução de vídeo + metadados do L2CS) para a UI
     // não precisar plumar isso.
     recording: {

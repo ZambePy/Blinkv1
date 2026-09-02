@@ -7,7 +7,7 @@ import { computeFitDiagnostics } from './calibration';
 // Isso trata fração-da-largura e fração-da-altura como se valessem o mesmo, e
 // depois escala pela diagonal: num erro puro de Y o resultado saía 104% maior
 // que o real. O relatório 1787858613170 reportou treino=170px por causa disso.
-describe('D10 — erro de ajuste em pixels, por eixo', () => {
+describe('erro de ajuste em pixels, por eixo', () => {
   it('sem regressor treinado devolve zero em vez de NaN', () => {
     const d = computeFitDiagnostics([[0]], [[0]], [{ screenX: 0.5, screenY: 0.5 }], undefined, { w: 1920, h: 1080 });
     expect(Number.isFinite(d.trainErrorPx)).toBe(true);

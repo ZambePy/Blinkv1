@@ -1,12 +1,13 @@
-// Etapa 1 — ponte mínima para o renderer ler geometria física da tela.
+// Ponte mínima para o renderer ler geometria física da tela.
 //
-// O renderer roda com `contextIsolation: true` e `sandbox: true`. Nesse modo o
-// preload ainda tem acesso a `contextBridge` e `ipcRenderer` (subconjunto
-// permitido), que é tudo de que precisamos: nenhum módulo de Node vaza para a
-// página.
+// O renderer roda com `contextIsolation: true` e `sandbox: true`. Nesse modo
+// o preload ainda tem acesso a `contextBridge` e `ipcRenderer` (subconjunto
+// permitido), que é tudo de que precisamos: nenhum módulo de Node vaza para
+// a página.
 //
-// Superfície deliberadamente estreita — uma função, sem argumentos, só leitura.
-// Ampliar isto exige justificar por que o renderer precisa de mais poder.
+// Superfície deliberadamente estreita — uma função, sem argumentos, só
+// leitura. Ampliar isto exige justificar por que o renderer precisa de mais
+// poder.
 import { contextBridge, ipcRenderer } from 'electron';
 
 export interface PhysicalPanelSizeIPC {

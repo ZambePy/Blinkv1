@@ -1,5 +1,3 @@
-// Testes para A2-1, A2-2, A2-3, A2-4 — mudanças de precisão do filtro e blink.
-
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   LowPassFilter,
@@ -10,9 +8,9 @@ import {
 } from './oneEuroFilter';
 import { BlinkDetector } from './extractor';
 
-// ── A2-2: LowPassFilter — primeira amostra não puxada para zero ───────────
+// ── LowPassFilter — primeira amostra não puxada para zero ───────────
 
-describe('A2-2: LowPassFilter — primeira amostra não interpolada com zero', () => {
+describe('LowPassFilter — primeira amostra não interpolada com zero', () => {
   it('com alpha=0.5, primeira saída é o valor bruto (não 0.5 × value + 0.5 × 0)', () => {
     const f = new LowPassFilter(0.5);
     const out = f.filter(100);
@@ -33,7 +31,7 @@ describe('A2-2: LowPassFilter — primeira amostra não interpolada com zero', (
     const out = f.filter(960); // centro de uma tela 1920px
     expect(out).toBe(960);
     // Se houvesse puxada para zero: 0.99 * 960 + 0.01 * 0 = 950.4 — ainda perto,
-    // mas no espaço normalizado (A2-1) alpha≈0.5 e o salto seria de ~metade da tela.
+    // mas no espaço normalizado alpha≈0.5 e o salto seria de ~metade da tela.
   });
 
   it('converge para o valor de sinal estático independente do ponto de partida', () => {
@@ -44,9 +42,9 @@ describe('A2-2: LowPassFilter — primeira amostra não interpolada com zero', (
   });
 });
 
-// ── A2-3: OneEuroFilter2D.setParams — preserva estado sem recriá-lo ───────
+// ── OneEuroFilter2D.setParams — preserva estado sem recriá-lo ───────
 
-describe('A2-3: setParams não descarta o estado filtrado', () => {
+describe('setParams não descarta o estado filtrado', () => {
   it('setParams muta parâmetros mas continua do último valor filtrado', () => {
     const f = new OneEuroFilter2D(30, 0.05, 2.5);
 
@@ -84,9 +82,9 @@ describe('A2-3: setParams não descarta o estado filtrado', () => {
   });
 });
 
-// ── A2-1: FILTER_PRESETS — flags filterInNormalizedSpace ─────────────────
+// ── FILTER_PRESETS — flags filterInNormalizedSpace ─────────────────
 
-describe('A2-1: FilterConfig — flag filterInNormalizedSpace', () => {
+describe('FilterConfig — flag filterInNormalizedSpace', () => {
   it('todos os presets legados têm filterInNormalizedSpace=false', () => {
     expect(FILTER_PRESETS.estavel.filterInNormalizedSpace).toBe(false);
     expect(FILTER_PRESETS.balanceado.filterInNormalizedSpace).toBe(false);
@@ -108,9 +106,9 @@ describe('A2-1: FilterConfig — flag filterInNormalizedSpace', () => {
   });
 });
 
-// ── A2-4: BlinkDetector — encapsulamento e correção da realimentação ──────
+// ── BlinkDetector — encapsulamento e correção da realimentação ──────
 
-describe('A2-4: BlinkDetector', () => {
+describe('BlinkDetector', () => {
   let bd: BlinkDetector;
 
   beforeEach(() => {

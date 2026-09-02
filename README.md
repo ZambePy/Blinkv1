@@ -108,8 +108,6 @@ frontend/src/
   components/ui/              # Componentes desenhados para interação ocular
 
 electron/                     # Processo principal, preload e IPC de sistema
-docs/                         # Auditorias, baselines e resultados de sprint
-fixtures/replay/              # Gravações determinísticas (não versionadas)
 ```
 
 ---
@@ -189,14 +187,6 @@ npm run electron:build
 
 O instalador é gerado em `release/`.
 
-### Replay Determinístico
-
-```bash
-npm run replay -- <arquivo.jsonl>
-```
-
-Reexecuta o pipeline sobre uma gravação, permitindo comparar configurações sem introduzir ruído de nova sessão.
-
 ---
 
 ## Modelos Pré-treinados
@@ -234,20 +224,7 @@ O relatório de sessão registra, além do erro médio:
 
 A comparação entre `looErrorPx` e o erro do teste é o que distingue "o modelo é o limite" de "algo mudou entre calibrar e testar".
 
-> **Sobre números de precisão:** o menor erro registrado neste projeto foi 57 px / 0,9°, obtido em condições controladas num notebook de 15,6" (documentado em `docs/PONTO-DE-REFERENCIA.md`). Esse número **não é reproduzível em qualquer configuração** — erro em pixels depende do tamanho da tela, e erro angular depende da distância. Qualquer comparação exige que as condições de captura sejam as mesmas, e é por isso que o relatório grava as condições medidas junto com o resultado.
-
----
-
-## Documentação
-
-| Documento | Conteúdo |
-|---|---|
-| `docs/PONTO-DE-REFERENCIA.md` | Baseline de precisão e condições exatas de captura |
-| `docs/RESULTADOS-D2-D8.md` | Consolidação da semana de precisão, decisões e pendências |
-| `docs/AUDITORIA-SPRINT-0.md` | Auditoria de tratamento silencioso de erros |
-| `docs/BUG-OCULOS-EVIDENCIA.md` | Investigação do impacto de lentes na precisão |
-| `docs/ROADMAP.md` | Sprints, status e critérios de aceite |
-| `PLANO-FRENTES-A-B.md` | Roadmap técnico e regras de desenvolvimento |
+> **Sobre números de precisão:** erro em pixels depende do tamanho da tela, e erro angular depende da distância. Qualquer comparação exige que as condições de captura sejam as mesmas, e é por isso que o relatório grava as condições medidas junto com o resultado.
 
 ---
 

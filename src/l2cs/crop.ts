@@ -25,7 +25,7 @@ export interface SquareBBox {
 // Fonte de pixels aceita — video, canvas offscreen ou HTMLCanvasElement.
 export type CropSource = CanvasImageSource & { width: number; height: number };
 
-// ── Etapa 1+2: BBox dos landmarks, expandido e quadrado ───────────────────────
+// ── BBox dos landmarks, expandido e quadrado ─────────────────────────────────
 // Landmarks vêm em coordenadas normalizadas [0..1]. Multiplicamos por dims da
 // imagem antes de calcular. O quadrado usa o maior lado (largura ou altura)
 // para não distorcer no resize.
@@ -63,7 +63,7 @@ export function computeSquareBBox(
   };
 }
 
-// ── Etapa 5+6+7: RGBA HWC → RGB CHW ImageNet-normalizado ─────────────────────
+// ── RGBA HWC → RGB CHW ImageNet-normalizado ──────────────────────────────────
 // Puro, sem DOM — testável em Node. Assume src já é 448×448.
 export function preprocess448FromRGBA(
   rgba: Uint8Array | Uint8ClampedArray,
@@ -117,20 +117,14 @@ export interface CropOptions {
   context?: CropContext;
 }
 
-// D10 — dimensões REAIS da fonte de pixels.
+// Dimensões REAIS da fonte de pixels.
 //
-// BUG: `source.width` num HTMLVideoElement é o atributo HTML `width`, que vale
-// 0 quando ninguém o define — e `GazeContext` cria o vídeo só com `style`
-// (CSS), nunca com o atributo. Resultado: w = h = 0, todo landmark virava
-// px 0, o bbox saía com lado 0, e `drawImage` com sw/sh = 0 é um NO-OP
-// silencioso. O canvas ficava com o `fillRect('#000')` e o L2CS recebia uma
-// imagem 448×448 PRETA em todos os frames desde que foi integrado (D3).
-//
-// Evidência (fixtures/replay/*.jsonl, 780 frames válidos): yaw e pitch
-// constantes em -82,0° e -50,6° — min = mediana = máx, variância zero. Os 7
-// termos de `buildL2CSBlock` saturavam o clamp de ±45° em 100% dos frames,
-// virando [-1, -1, -d, -d, 1, 1, 1]: cinco constantes literais e dois termos
-// que só variam com a distância da cabeça. Zero informação de olhar.
+// BUG histórico: `source.width` num HTMLVideoElement é o atributo HTML
+// `width`, que vale 0 quando ninguém o define — e `GazeContext` cria o vídeo
+// só com `style` (CSS), nunca com o atributo. Resultado: w = h = 0, todo
+// landmark virava px 0, o bbox saía com lado 0, e `drawImage` com sw/sh = 0
+// é um NO-OP silencioso. O canvas ficava com o `fillRect('#000')` e o L2CS
+// recebia uma imagem 448×448 PRETA em todos os frames.
 //
 // A intrínseca de um vídeo é `videoWidth`/`videoHeight`; para canvas é
 // `width`/`height`. Preferimos a primeira quando existe.

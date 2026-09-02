@@ -45,20 +45,19 @@ export interface AccuracyResult {
   /** % de amostras dentro de um alvo de raio R centrado no ponto.
    *  Preditor direto da taxa de sucesso do dwell. */
   hitRateByRadius: { radiusPx: number; pct: number }[];
-  /** D9 — decomposição afim do erro. Ajusta, por mínimos quadrados sobre os 9
-   *  pares (ground-truth → predito) em coordenadas NORMALIZADAS:
+  /** Decomposição afim do erro. Ajusta, por mínimos quadrados sobre os pares
+   *  (ground-truth → predito) em coordenadas NORMALIZADAS:
    *
    *      predX = gainX·gx + crossXY·gy + offsetX
    *      predY = shearYX·gx + gainY·gy + offsetY
    *
    *  e reporta quanto do erro sobra depois de remover esse mapa afim
-   *  (`residualPx`). É o diagnóstico que separa as duas famílias de causa:
+   *  (`residualPx`). Separa as duas famílias de causa:
    *
    *   • `residualPx` << `meanError` → o sinal de olhar está bom e o que está
    *     errado é o MAPEAMENTO (ganho/offset/cisalhamento). Causa típica:
-   *     amplitude de olhar na calibração diferente da nominal (hipometria nos
-   *     alvos excêntricos), deriva de pose entre calibração e teste, ou
-   *     geometria de tela divergente.
+   *     amplitude de olhar na calibração diferente da nominal, deriva de pose
+   *     entre calibração e teste, ou geometria de tela divergente.
    *   • `residualPx` ≈ `meanError` → o erro é incoerente: ruído do regressor,
    *     ponto de calibração contaminado, landmarks instáveis.
    *
@@ -77,9 +76,9 @@ export interface AccuracyResult {
     /** Fração do erro médio explicada pelo mapa afim, em [0,1]. */
     explainedFraction: number;
   };
-  /** D9 — pontos de validação que coincidiram com alvos de calibração. Quando
+  /** Pontos de validação que coincidiram com alvos de calibração. Quando
    *  presente, o erro reportado nesses pontos mede memorização e o resultado
-   *  global está otimista. Ausente no caminho normal. Só registro — nenhuma
+   *  global fica otimista. Ausente no caminho normal. Só registro — nenhuma
    *  métrica é ajustada por causa disto. */
   validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[];
   /** Deriva de pose entre início do teste e ponto de maior desvio. Assinatura
@@ -105,16 +104,11 @@ export interface RunMeta {
   minutosDeSessao: number;    // 0, 20, 40 para curva de deriva
   usuario?: string;           // Identificador opcional do participante
   observacoes?: string;
-  /** Distância olho→tela em cm, usada para converter px em graus.
-   *
-   *  Etapa 1 — desde a introdução de `effectiveViewingDistanceCm`, este campo
-   *  pode vir MEDIDO (estimado do tamanho do rosto no frame, uma vez que o
-   *  campo de visão da câmera tenha sido calibrado) em vez de digitado. Qual
-   *  dos dois foi usado fica registrado em `observacoes`. */
+  /** Distância olho→tela em cm, usada para converter px em graus. */
   distanciaCm: number;
   /** Diagonal física do monitor em polegadas. */
   telaPolegadas: number;
-  /** Etapa 1 — fator de escala do SO (1 = 100%, 1.5 = 150%). Documental. */
+  /** Fator de escala do SO (1 = 100%, 1.5 = 150%). Documental. */
   screenScaleFactor?: number | null;
 }
 
@@ -138,26 +132,23 @@ interface PointDiagnostic {
 }
 
 // Grade 3×3 de validação, fixa em 25/50/75. Disjunta da grade de calibração
-// (a exceção é o centro, comum às duas por convenção): validar nas mesmas
+// (o centro é a exceção, comum às duas por convenção): validar nas mesmas
 // posições do treino mediria memorização, não generalização.
 //
-// D9 — a grade de calibração deixou de ser 5%/95% fixo e passou a sair do
-// orçamento de excentricidade (`computeCalibrationTargets`). Na tela de
-// referência (23,6" a 60 cm) ela cai em ~17%/83% em X e 5%/95% em Y.
+// A grade de calibração sai do orçamento de excentricidade
+// (`computeCalibrationTargets`). Na tela de referência (23,6" a 60 cm) ela
+// cai em ~17%/83% em X e 5%/95% em Y — 25/75 cabe dentro tanto de 17/83
+// quanto de 5/95, então os DOIS eixos são interpolação. Como esta grade
+// nunca mede a borda (onde a UI põe botões), existe o bloco `EDGE_POINTS`
+// abaixo para completar o quadro.
 //
-// 0.3 — CORREÇÃO. Este comentário afirmava "INTERPOLAÇÃO em Y e EXTRAPOLAÇÃO
-// em X", o que está errado: 25/75 cabe dentro de 17/83 tanto quanto dentro de
-// 5/95, então os DOIS eixos são interpolação. A consequência é mais séria que
-// um comentário impreciso — significa que esta grade nunca mediu extrapolação,
-// e portanto nunca mediu a borda, que é onde a UI põe botões (`GazeGrid` usa
-// x ∈ {1/6, 1/2, 5/6}). Daí o bloco `EDGE_POINTS` abaixo.
+// Estes 9 pontos NÃO acompanham a grade de calibração de propósito: uma
+// métrica que se move junto com o protocolo não serve para comparar sessões
+// ao longo do tempo. `meanError` continua sendo a média DESTES nove, pelo
+// mesmo motivo.
 //
-// Estes 9 pontos NÃO acompanham a grade de calibração de propósito: uma métrica
-// que se move junto com o protocolo não serve para comparar sessões ao longo do
-// tempo. `meanError` continua sendo a média DESTES nove, pelo mesmo motivo.
-//
-// ⚠️ Se a geometria configurada colocar um alvo de calibração em cima de um
-// destes 9 pontos, o teste passaria a medir memorização e o número ficaria
+// Se a geometria configurada colocar um alvo de calibração em cima de um
+// destes pontos, o teste passaria a medir memorização e o número ficaria
 // artificialmente bom. `checkValidationOverlap` detecta e avisa.
 const VALIDATION_POINTS = [
   { name: "P1", screenX: 0.25, screenY: 0.25 },
@@ -199,14 +190,6 @@ const ALL_VALIDATION_POINTS = [
   ...EDGE_POINTS.map((p) => ({ ...p, isEdge: true })),
 ];
 
-// Hotfix pós-Sprint 0 — paridade com o protocolo de calibração: descartar os
-// primeiros ACCLIMATION_MS de cada ponto (fase de sacada + acomodação). Sem
-// isso, o jitter reportado mistura movimento sacádico com fixação real.
-//
-// As duas constantes moram em `accuracyProtocol.ts`, compartilhadas com o
-// replay — que antes mantinha uma cópia "espelho" à mão. Ver lá a medição que
-// levou a acomodação de 400 para 600 ms.
-
 // Distância estimada usuário–tela para conversão px → graus
 // Assume 60 cm a 96 CSS DPI: 60 × 96 / 2.54 ≈ 2268 px
 const ASSUMED_DIST_PX = 2268;
@@ -226,7 +209,7 @@ let currentFrameSeq = 0;
 // Usada por main.ts para reduzir suavização durante o teste
 export let isAccuracyTesting = false;
 
-// Fase 0.1 — alvo do dot atualmente visível ao usuário. Setado por
+// Alvo do dot atualmente visível ao usuário. Setado por
 // runNextPoint ao mostrar cada ponto e limpo entre pontos + no fim do
 // teste. Consumido pelo gravador de sessão como ground-truth do frame.
 let currentValidationTarget: { xPx: number; yPx: number; label: string } | null = null;
@@ -271,7 +254,7 @@ export function startAccuracyTest(
 ) {
   isAccuracyTesting = true;
 
-  // D9 — guarda de honestidade da métrica. Roda ANTES do teste para que o
+  // Guarda de honestidade da métrica. Roda ANTES do teste para que o
   // aviso apareça no console junto do resto do diagnóstico da sessão.
   const overlap = checkValidationOverlap(getCalibrationTargets(), VALIDATION_POINTS);
   if (overlap.length > 0) {
@@ -284,7 +267,7 @@ export function startAccuracyTest(
       `MAX_ECCENTRICITY_DEG.`,
     );
   }
-  // O accuracy test mede o Ridge CRU. Se o bias EMA da sessão (D1-3) tiver
+  // O accuracy test mede o Ridge CRU. Se o bias EMA da sessão tiver
   // acumulado resíduos de dwells em botões arbitrários da UI (ex: dwell no
   // botão "Refazer teste" entre rodadas), medir com o bias aplicado enviesa o
   // relatório e não reflete a qualidade real do modelo. Reset defensivo aqui
@@ -329,7 +312,7 @@ export function startAccuracyTest(
     const targetScreenX = vp.screenX * vw;
     const targetScreenY = vp.screenY * vh;
 
-    // Fase 0.1 — publica alvo para o gravador. Mantido setado durante toda a
+    // Publica alvo para o gravador. Mantido setado durante toda a
     // janela (inclusive os 400 ms de acomodação) porque o dot já está visível
     // ao usuário; qualquer frame gravado nesse intervalo tem ground-truth
     // legítimo desse ponto.
@@ -363,11 +346,11 @@ export function startAccuracyTest(
         }
         // Passamos `undefined` de propósito. O accuracy test mede a QUALIDADE
         // DO RIDGE (o modelo treinado), não a estratégia de fusão binocular.
-        // Passar perEyeWeight ativa a heurística ponderada por EAR (D1-2), que
-        // pode degradar o número em usuários com EAR crônico assimétrico entre
-        // os olhos — porque a calibração treina os dois regressors com peso
-        // igual, sem saber que a inferência vai ponderar. Isolar a heurística
-        // aqui devolve o comportamento medido pela tag v0-menor-erro-oculos.
+        // Passar perEyeWeight ativa a heurística ponderada por EAR, que pode
+        // degradar o número em usuários com EAR crônico assimétrico entre os
+        // olhos — a calibração treina os dois regressors com peso igual, sem
+        // saber que a inferência vai ponderar. Isolar a heurística aqui
+        // devolve o comportamento medido pelo baseline sem óculos.
         // A fusão binocular segue ativa no cursor live (para semiptose/oclusão).
         const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
         if (gaze) {
@@ -484,14 +467,14 @@ function showValidationDot(
   overlay.appendChild(dot);
 }
 
-// D9 — dois pontos "iguais" para efeito de vazamento treino→teste. 2% de cada
+// Dois pontos "iguais" para efeito de vazamento treino→teste. 2% de cada
 // eixo em 1920×1080 são ~38 px em X e ~22 px em Y: bem abaixo do menor alvo
 // interativo do app (5° ≈ 200 px), então se um alvo de calibração cai dentro
 // disso de um ponto de validação, o teste está medindo memorização.
 const OVERLAP_TOLERANCE = 0.02;
 
 /**
- * D9 — detecta alvos de calibração que caíram em cima de pontos de validação.
+ * Detecta alvos de calibração que caíram em cima de pontos de validação.
  *
  * A grade de calibração agora depende da geometria configurada
  * (`computeCalibrationTargets`), então uma combinação de tela/distância pode,
@@ -510,13 +493,12 @@ export function checkValidationOverlap(
 ): { validationPoint: string; calibX: number; calibY: number }[] {
   const hits: { validationPoint: string; calibX: number; calibY: number }[] = [];
   for (const v of validationPoints) {
-    // O CENTRO da tela pertence às duas grades por convenção — está assim
-    // desde antes do D9 e é a exceção documentada no comentário de
-    // VALIDATION_POINTS. Consequência honesta, que fica registrada aqui: o
-    // erro de P5 é erro de TREINO, não de generalização, e por isso o
-    // agregado dos 9 pontos é levemente otimista (1 ponto em 9). Não é o
-    // vazamento que este guarda procura — ele procura o caso NÃO intencional,
-    // em que a geometria configurada move a grade para cima da validação.
+    // O CENTRO da tela pertence às duas grades por convenção — a exceção
+    // documentada no comentário de VALIDATION_POINTS. Consequência honesta:
+    // o erro de P5 é erro de TREINO, não de generalização, e por isso o
+    // agregado é levemente otimista (1 ponto em 9). Não é o vazamento que
+    // este guarda procura — ele procura o caso NÃO intencional, em que a
+    // geometria configurada move a grade para cima da validação.
     if (Math.abs(v.screenX - 0.5) < tolerance && Math.abs(v.screenY - 0.5) < tolerance) continue;
     for (const c of calibrationTargets) {
       if (Math.abs(c.x - v.screenX) < tolerance && Math.abs(c.y - v.screenY) < tolerance) {
@@ -542,7 +524,7 @@ export function percentileLinear(sorted: readonly number[], q: number): number {
 }
 
 /**
- * D9 — decomposição afim do erro de mapeamento.
+ * Decomposição afim do erro de mapeamento.
  *
  * Ajusta por mínimos quadrados, em coordenadas normalizadas [0,1]:
  *     predX = a·gx + b·gy + c
@@ -653,11 +635,11 @@ function finishTest(
   const meanError = meanErrorInner;
   const sortedErrors = [...innerErrors].sort((a, b) => a - b);
   const medianError = sortedErrors[Math.floor(sortedErrors.length / 2)] || 0;
-  // D9 — antes: `sorted[floor(n*0.9)]`, que com n=9 dá `sorted[8]` — ou seja, o
-  // p90 por ponto era LITERALMENTE o máximo, e o relatório publicava dois nomes
-  // para o mesmo número (p90Error === maxError em todos os relatórios
-  // existentes). Percentil linear-interpolado (mesma convenção do numpy
-  // 'linear') resolve sem mudar nenhuma outra métrica.
+  // Antes: `sorted[floor(n*0.9)]`, que com n=9 dá `sorted[8]` — o p90 por
+  // ponto era LITERALMENTE o máximo, e o relatório publicava dois nomes para
+  // o mesmo número (p90Error === maxError em todos os relatórios). Percentil
+  // linear-interpolado (mesma convenção do numpy 'linear') corrige sem mudar
+  // nenhuma outra métrica.
   const p90Error = percentileLinear(sortedErrors, 0.9);
 
   const meanErrorX = diagnostics.reduce((s, d) => s + d.errorX, 0) / diagnostics.length || 0;
@@ -682,7 +664,7 @@ function finishTest(
 
   let distPx = ASSUMED_DIST_PX;
   let geometryAssumed = true;
-  // Escala do display, quando o caller informou (Etapa 1). Puramente
+  // Escala do display, quando o caller informou. Puramente
   // documental — ver o comentário no bloco `geometry` abaixo.
   const displayScaleFactor = meta?.screenScaleFactor ?? null;
   let pxPorCm = 0;
@@ -750,7 +732,7 @@ function finishTest(
     }
   }
 
-  // D9 — decomposição afim. Só diagnóstico: entra no JSON e no console, nunca
+  // Decomposição afim. Só diagnóstico: entra no JSON e no console, nunca
   // em meanError/score. Ver o comentário do campo em `AccuracyResult`.
   const affine = affineErrorDecomposition(diagnostics, vw, vh, meanError);
   if (affine) {
@@ -794,22 +776,12 @@ function finishTest(
     }));
   } catch (_) { }
 
-  // Exportar relatório em JSON versionável (Sprint 0). `meta` carrega a condição
+  // Exportar relatório em JSON versionável. `meta` carrega a condição
   // do teste (iluminação, óculos, cabeça, minutos de sessão) para que a entrada
-  // no BASELINE.md seja auto-descritiva.
+  // no histórico seja auto-descritiva.
   //
-  // pipeline: identifica a versão do pipeline usada.
-  //
-  // Era o literal fixo `'l2cs+ridge'`, com um comentário dizendo que "L2CS agora
-  // é obrigatório (não há mais A/B)". Deixou de ser verdade em duas etapas —
-  // `b02de0a` desligou o caminho do L2CS por default, e o conjunto ativo passou
-  // a `irisCore`, que não inclui os índices [37..43]. O relatório seguia
-  // anunciando `l2cs+ridge` num pipeline SEM nenhuma dimensão angular; era o
-  // que o `accuracy-report-1788225161304` dizia enquanto rodava com 4 features
-  // de íris por olho.
-  //
-  // Agora deriva do conjunto ativo, então não tem como voltar a mentir: se
-  // alguém trocar `ACTIVE_FEATURE_SET`, o rótulo acompanha sozinho.
+  // pipeline: identifica a versão do pipeline usada. Deriva do conjunto ativo,
+  // então se alguém trocar `ACTIVE_FEATURE_SET`, o rótulo acompanha sozinho.
   const pipeline = {
     variant: `${ACTIVE_FEATURE_SET}+${REGRESSOR_MODE}`,
     featureSet: ACTIVE_FEATURE_SET,
@@ -819,7 +791,7 @@ function finishTest(
     gazeCorrectionApplied: EXPERIMENT.applyGazeCorrection,
   };
 
-  // D10 — diagnóstico do AJUSTE da calibração que gerou este modelo. É o que
+  // Diagnóstico do AJUSTE da calibração que gerou este modelo. É o que
   // permite ler o relatório e saber se o erro medido vem do modelo, dos dados
   // de calibração, ou de algo que mudou entre calibrar e testar. Ver
   // `CalibrationFitDiagnostics` em calibration.ts. Null quando o teste roda
@@ -833,7 +805,7 @@ function finishTest(
     pipeline,
     result,
     diagnostics,
-    // D12 — a faixa de distância no momento do teste. Diz se o resultado foi
+    // A faixa de distância no momento do teste. Diz se o resultado foi
     // obtido na distância de calibração ou compensado, e quanto. Sem isto, dois
     // relatórios com o mesmo `meanError` podem descrever situações diferentes:
     // um medido na posição de calibração e outro a 15 cm dela.
@@ -856,7 +828,7 @@ function finishTest(
       : null,
     geometry: {
       assumed: geometryAssumed, distPx, pxPorCm: pxPorCm || undefined,
-      // Etapa 1, item 2 — configuração de display do SO. NÃO participa da
+      // Configuração de display do SO. NÃO participa da
       // conversão px→cm (a escala se cancela: o erro é medido em px CSS e a
       // tela cobre um número fixo de px CSS). Fica registrado porque
       // "1280×800 numa tela de 23,6 polegadas" é a assinatura de escala em

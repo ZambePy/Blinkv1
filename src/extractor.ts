@@ -27,7 +27,7 @@ export interface FaceFeatures {
 }
 
 /**
- * 2.4 — campos OPCIONAIS de propósito: ausente significa "não medido".
+ * Campos OPCIONAIS de propósito: ausente significa "não medido".
  *
  * Antes eram obrigatórios, e o extractor os preenchia com constantes
  * (`detectorConfidence: 1.0`, `brightnessEstimate: 0.5`, `contrastEstimate:
@@ -47,14 +47,14 @@ export interface QualityFeatures {
   contrastEstimate?: number;
   blurEstimate?: number;
   occlusionEstimate?: number;
-  /** Medido de verdade, a partir do EAR — ver a ressalva de escala em 2.2:
-   *  `ear / 0.25` satura em 1,0 porque o EAR chega anisotrópico (mediana
-   *  0,551 onde a escala isotrópica daria 0,314). */
+  /** Medido de verdade, a partir do EAR — `ear / 0.25` satura em 1,0 porque
+   *  o EAR chega anisotrópico (mediana 0,551 onde a escala isotrópica daria
+   *  0,314). */
   irisVisibilityPercentage?: number;
-  // A1-5 — fração de pixels do crop ocular com luminância > SPECULAR_LUMINANCE
+  // Fração de pixels do crop ocular com luminância > SPECULAR_LUMINANCE
   // (default 0.95). Pele e esclera raramente saturam sob exposição correta;
   // lente refletindo a tela, sim. Opcional para compat com testes/perfis
-  // antigos serializados antes de A1-5.
+  // antigos serializados.
   specularRatio?: number;
 }
 
@@ -130,9 +130,9 @@ function mulRT(xAxis: Point3D, yAxis: Point3D, zAxis: Point3D, v: Point3D): Poin
   };
 }
 
-// A2-4 — detector de piscada encapsulado em classe com reset() explícito.
+// Detector de piscada encapsulado em classe com reset() explícito.
 // O design anterior usava um array `earHistory` de escopo de módulo que:
-//   1. Nunca era resetado entre sessões (até o fix de A0-4 adicionar resetEarHistory)
+//   1. Nunca era resetado entre sessões.
 //   2. Incluia frames de piscada no cálculo do threshold adaptativo —
 //      criando realimentação: quanto mais piscadas → média EAR menor → threshold
 //      menor → menos piscadas detectadas → frames de olho semifechado entram
@@ -287,7 +287,7 @@ export function getRecentBlinkRatePerMinute(windowMs: number = 60000): number {
  */
 export const FEATURE_FORMAT_VERSION = 2;
 
-// ─── D11 — conjunto de features ativo ───────────────────────────────────────
+// ─── Conjunto de features ativo ─────────────────────────────────────────────
 //
 // LAYOUT do vetor produzido por `extractCompactFeatures` (por olho):
 //
@@ -300,12 +300,11 @@ export const FEATURE_FORMAT_VERSION = 2;
 //   [20]     ear (altura/largura do olho)
 //   [21]     irisRadius
 //   [22..24] yaw, pitch, roll da cabeça
-//   [25..36] interações pose × offset (12 termos, Sprint 3)
-//   [37..43] bloco L2CS (7 termos, D3) — só quando o engine passa gaze
+//   [25..36] interações pose × offset (12 termos)
+//   [37..43] bloco L2CS (7 termos) — só quando o engine passa gaze
 //
-// POR QUE REDUZIR — medido por replay em DUAS gravações reais
-// (`fixtures/replay/ci-baseline.jsonl` e `sweep-expand_1.4_oculos_simples.jsonl`),
-// treinando na janela de calibração e medindo na janela do teste de precisão:
+// POR QUE REDUZIR — medido em duas gravações reais, treinando na janela de
+// calibração e medindo na janela do teste de precisão:
 //
 //   posições de calibração    4     6     8    10    12    14
 //   erro com 44 dims        422   302   249   234   200   165   px
@@ -321,42 +320,12 @@ export const FEATURE_FORMAT_VERSION = 2;
 // O que sai e por quê:
 //   cantos [12..19]  → geometria da órbita, não do olhar; move com a pose.
 //   ear, irisRadius  → abertura da pálpebra e distância; sem sinal de direção.
-//   pose  [22..24]   → ver a CORREÇÃO logo abaixo. A justificativa original
-//                      ("a pose já entra via offset") estava errada, e o
-//                      conjunto `iris12+pose` existe para medir o custo dela.
+//   pose  [22..24]   → o Ridge pode usá-la como atalho para adivinhar o alvo,
+//                      porque pose está correlacionada com a ordem de
+//                      apresentação. A alternativa é a compensação geométrica
+//                      no output (ver poseCompensation.ts).
 //   interações [25..36] → 12 dims quadráticas sobre 9 restrições.
-//   L2CS [37..43]    → ver `sourceDimensions` em l2cs/crop.ts: entre D3 e D10
-//                      este bloco era constante (crop preto). A medição acima
-//                      foi feita nesse estado, então ele NÃO foi avaliado
-//                      funcionando. Fica fora do default e disponível em
-//                      'compact' para re-medir quando houver gravação nova.
-//
-// ── CORREÇÃO (1.2): "a pose já entra via offset" é falso ────────────────────
-//
-// A frase acima justificava tirar `pose` do vetor dizendo que ela já estava
-// representada em `offset`. Não está, e o motivo é geométrico.
-//
-// `offsetX/offsetY` são a posição da íris MEDIDA NO FRAME DA CABEÇA: o
-// extractor rotaciona os landmarks pela matriz de transformação facial antes
-// de medir (ver `rotS`). É precisamente a construção que torna o offset
-// INVARIANTE à rotação da cabeça — que é o que se quer de uma feature de
-// olhar, e exatamente por isso ela não carrega a pose.
-//
-// A consequência é a que 1.1 mediu: se a cabeça gira Δ e o olho continua
-// parado na órbita, o offset não muda, mas o ponto olhado na tela se desloca
-// `d · tan(Δ)` — 38,5 px por grau na tela de referência. Um modelo que só vê
-// offset não tem como saber disso. Na gravação de baseline a postura migrou
-// 2,38° em yaw e 3,92° em pitch ao longo da calibração (91 px em X, 151 px em
-// Y), com r ≈ 0,96 contra a ordem de coleta.
-//
-// O risco que a justificativa original apontava é real, mas é outro: com a
-// pose no vetor, o Ridge PODE usá-la como atalho para adivinhar o alvo, já que
-// a pose está correlacionada com a ordem de apresentação e a ordem é fixa. Por
-// isso a medição destes conjuntos usa alvo inteiro como holdout, nunca split
-// aleatório de amostras — um split aleatório premiaria justamente a memorização.
-//
-// Nada aqui é decidido por argumento. `ACTIVE_FEATURE_SET` só muda com número
-// de harness; a tabela está em docs/RESULTADOS-D2-D8.md.
+//   L2CS [37..43]    → ver `sourceDimensions` em l2cs/crop.ts.
 export type FeatureSet =
   | 'irisCore'
   | 'irisCore+pose'
@@ -374,7 +343,7 @@ export type FeatureSet =
 export const IRIS12_DIMS = 12;
 
 /**
- * 1.2 — índices do vetor completo que cada conjunto seleciona.
+ * Índices do vetor completo que cada conjunto seleciona.
  *
  * Índices literais e não fatias porque os blocos não são contíguos: pose é
  * [22..24] e as interações de 1ª ordem são [25..30], com cantos/ear/irisRadius
@@ -473,31 +442,19 @@ export function activeFeatureDims(set: FeatureSet = ACTIVE_FEATURE_SET): number 
 /**
  * Identificador do vetor de features que ESTE build produz.
  *
- * POR QUE EXISTE
- *
- * As gravações em `fixtures/replay/*.jsonl` guardam `featuresLeft`/`featuresRight`
- * já calculados. Quando o conjunto ativo muda — como na redução de 44 para 12
- * dims — as features gravadas passam a descrever um pipeline que não existe
- * mais, e o replay segue rodando e produzindo números como se nada tivesse
- * acontecido.
- *
- * Foi exatamente o que ocorreu: `ci-baseline-a2.report.json` e
- * `ci-baseline-ablation.report.json` foram gerados às 14:38 de 2026-08-26, e o
- * commit que reduziu o vetor entrou no mesmo dia. Todas as decisões tomadas
- * sobre aqueles relatórios descrevem o vetor de 44 dims.
- *
- * Com este identificador gravado no cabeçalho do JSONL, o replay consegue
- * detectar a divergência e ABORTAR em vez de mentir.
+ * Grava-se no cabeçalho de gravações para detectar divergência entre a
+ * semântica atual e a que produziu os dados salvos — impede ler features
+ * antigas como se descrevessem o pipeline em vigor.
  */
 export const FEATURE_VECTOR_ID = `${ACTIVE_FEATURE_SET}:${activeFeatureDims()}`;
 
 /**
- * D11 — projeta o vetor completo do extractor no conjunto ativo.
+ * Projeta o vetor completo do extractor no conjunto ativo.
  *
- * Pura e total: com `compact` devolve a entrada intacta (contrato pré-D11),
- * com `iris12` devolve as 12 primeiras dimensões. Um vetor mais curto que 12
- * (extractor devolveu vazio por falta de landmarks) passa sem alteração — quem
- * trata frame sem rosto é o caller.
+ * Pura e total: com `compact` devolve a entrada intacta, com `iris12` devolve
+ * as 12 primeiras dimensões. Um vetor mais curto que 12 (extractor devolveu
+ * vazio por falta de landmarks) passa sem alteração — quem trata frame sem
+ * rosto é o caller.
  */
 export function projectFeatureSet(
   full: number[],
@@ -520,7 +477,7 @@ export function extractEyeFeatures(
   faceMatrix?: Float32Array,
   videoWidth?: number,
   videoHeight?: number,
-  /** 2.2 — ver `blinkDetector` em `extractCompactFeatures`. */
+  /** Ver `blinkDetector` em `extractCompactFeatures`. */
   blinkDetector?: BlinkDetector,
 ): ExtractorResult {
   if (landmarks.length < 478) {
@@ -529,7 +486,7 @@ export function extractEyeFeatures(
 
   // 1. Head Pose Normalization (EyeTrax Logic)
   //
-  // A2-5 — correção de anisotropia de aspect ratio (atrás de flag).
+  // Correção de anisotropia de aspect ratio (atrás de flag).
   // O MediaPipe normaliza x por videoWidth e y por videoHeight. Em 1920×1080
   // a escala de x é 1.78× maior que a de y. Distâncias euclidianas que misturam
   // as duas ficam distorcidas: o vetor interocular muda de comprimento quando
@@ -542,7 +499,7 @@ export function extractEyeFeatures(
   //
   // ⚠️ Atenção: quando ligado, perfis calibrados anteriormente são
   // incompatíveis — o vetor de features muda. RECORDING_FORMAT_VERSION
-  // foi incrementado para forçar invalidação de perfis salvos (A2-7).
+  // foi incrementado para forçar invalidação de perfis salvos.
   let workingLandmarks = landmarks;
   if (EXPERIMENT.isotropicLandmarks && videoWidth && videoHeight && videoHeight > 0) {
     const aspectRatio = videoWidth / videoHeight;
@@ -708,15 +665,12 @@ export function extractEyeFeatures(
 
   const ear = (leftEAR + rightEAR) / 2;
   
-  // 2.2 — o detector injetado tem precedência sobre o singleton do módulo.
+  // O detector injetado tem precedência sobre o singleton do módulo.
   //
   // O limiar de piscada é ADAPTATIVO: aprende o EAR de repouso dos quadros
-  // anteriores. Enquanto isso vivia num singleton, `extractFeatures` não era
-  // pura — o mesmo quadro podia sair `blinkDetected` true ou false conforme o
-  // que tinha sido extraído antes no mesmo processo. O replay descarta quadro
-  // com piscada, então duas variantes que filtram diferente alimentavam o
-  // detector com populações diferentes, o limiar divergia, e o conjunto de
-  // quadros medido mudava por um motivo alheio ao que se estava medindo.
+  // anteriores. Injetar o detector torna `extractFeatures` pura — o mesmo
+  // quadro produz sempre o mesmo `blinkDetected`, independente do que rodou
+  // antes no processo.
   const blinkDetected = (blinkDetector ?? _blinkDetector).update(ear);
 
   // 3. Geometry Extractions
@@ -759,7 +713,7 @@ export function extractEyeFeatures(
   // o `EyeQualityAnalyzer`. Preencher com constantes era fabricar medição.
   const quality: QualityFeatures = {
     irisVisibilityPercentage: Math.min(1.0, ear / 0.25),
-    specularRatio: 0, // A1-5 — sobrescrito por qualityAnalyzer quando disponível
+    specularRatio: 0, // sobrescrito por qualityAnalyzer quando disponível
   };
 
   const advancedFeatures: AdvancedFrameFeatures = {
@@ -774,12 +728,9 @@ export function extractEyeFeatures(
 // L2CS gaze data (E5/E6 do L2CS-NET.md). Interface local para evitar
 // dependência do módulo l2cs — o extractor permanece agnóstico. Quem passar
 // o objeto (engine.ts) sabe quando o gaze é válido e quando não é (cache
-// stale, worker não pronto, etc).
-//
-// D3.3 — `confidence` (opcional, 0..1) é a entropia normalizada da softmax
-// agregada por min(yaw, pitch). O extractor **não** consome — passa adiante
-// para o gravador de telemetria e o `EngineDiagnostics` só. Deixá-la aqui
-// evita um segundo canal paralelo entre engine e extractor.
+// stale, worker não pronto, etc). `confidence` (opcional, 0..1) é a entropia
+// normalizada da softmax agregada por min(yaw, pitch); passada adiante para
+// telemetria/diagnostics.
 export interface L2CSGazeInput {
   yaw: number;    // rad
   pitch: number;  // rad
@@ -791,7 +742,7 @@ export function extractCompactFeatures(
   landmarks: Point3D[],
   faceMatrix?: Float32Array,
   l2csGaze?: L2CSGazeInput | null,
-  /** 2.2 — detector de piscada a usar. Sem ele vale o singleton do módulo. */
+  /** Detector de piscada a usar. Sem ele vale o singleton do módulo. */
   blinkDetector?: BlinkDetector,
 ): ExtractorResult {
   const baseResult = extractEyeFeatures(landmarks, faceMatrix, undefined, undefined, blinkDetector);
@@ -843,7 +794,7 @@ export function extractCompactFeatures(
     const ear = height / width;
     const irisRadius = Math.sqrt((rotS(irisP[0]).x - rotS(irisP[2]).x)**2 + (rotS(irisP[0]).y - rotS(irisP[2]).y)**2) / 2;
 
-    // Sprint 3 — 6 termos originais (1ª ordem) + 6 termos de 2ª ordem.
+    // 6 termos originais (1ª ordem) + 6 termos de 2ª ordem.
     // Compensação de pose linear vs quadrática dentro de um modelo Ridge:
     // como todas as variáveis já estão calculadas, o custo é zero e o λ
     // por CV cuida do overfitting. Vetor por olho: ~31 → ~37 dims.

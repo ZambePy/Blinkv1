@@ -2,16 +2,16 @@
 // Recebe o vetor de features por olho (~31 dims com USE_COMPACT_FEATURES=true,
 // ou 260 dims com o extractor completo) + Bias implícito no índice 0.
 //
-// ─── D9: regularização branqueada pelo ruído intra-fixação ──────────────────
+// ─── Regularização branqueada pelo ruído intra-fixação ──────────────────────
 //
-// PROBLEMA (medido no relatório 1787682565489): o vetor compacto tem 44 dims/olho
-// (45 parâmetros com o bias) e a calibração fornece apenas 9 alvos distintos.
-// Sobram ~36 direções que NENHUM alvo restringe. Com `+λI` (penalidade
-// isotrópica) o Ridge preenche essas direções com o que estiver disponível —
-// o jitter de fixação e a deriva lenta de pose/landmark que ficam ALIASADOS
-// com a identidade do alvo, já que cada alvo é uma janela contígua de ~2 s.
-// Consequência medida: jitter RMS de 50 px a partir de ruído de landmark da
-// ordem de 10⁻³, isto é, amplificação de ruído de ~30×.
+// PROBLEMA: com o vetor compacto de 44 dims/olho (45 parâmetros com o bias) e
+// apenas 9 alvos distintos na calibração, sobram ~36 direções que NENHUM alvo
+// restringe. Com `+λI` (penalidade isotrópica) o Ridge preenche essas
+// direções com o que estiver disponível — o jitter de fixação e a deriva
+// lenta de pose/landmark que ficam ALIASADOS com a identidade do alvo, já
+// que cada alvo é uma janela contígua de ~2 s. Consequência medida: jitter
+// RMS de 50 px a partir de ruído de landmark da ordem de 10⁻³, isto é,
+// amplificação de ruído de ~30×.
 //
 // CORREÇÃO: penalidade anisotrópica. Durante a janela de um alvo o olhar está
 // PARADO por construção — logo toda variação intra-alvo é ruído, nunca sinal.
@@ -43,29 +43,29 @@ export interface RidgeModel {
   betaX: number[];  // coeficientes para predizer screenX
   betaY: number[];  // coeficientes para predizer screenY
   numFeatures: number;
-  // A1-3 — diagnóstico que sobrevive à serialização. `lambda` é o λ
-  // efetivamente usado no treino (pode ser maior que o escolhido pelo CV
-  // se houve escalonamento defensivo por matriz singular). `nearSingularCols`
-  // são as colunas cujo pivô durante a eliminação gaussiana ficou abaixo
-  // de 1e-6 mas acima de 1e-12: resolve numericamente mas gera coeficientes
-  // grandes que produzem predições instáveis.
+  // Diagnóstico que sobrevive à serialização. `lambda` é o λ efetivamente
+  // usado no treino (pode ser maior que o escolhido pelo CV se houve
+  // escalonamento defensivo por matriz singular). `nearSingularCols` são as
+  // colunas cujo pivô durante a eliminação gaussiana ficou abaixo de 1e-6
+  // mas acima de 1e-12: resolve numericamente mas gera coeficientes grandes
+  // que produzem predições instáveis.
   lambda: number;
   lambdaX?: number;
   lambdaY?: number;
   nearSingularCols: number[];
-  /** D9 — qual penalidade foi usada. `within-target` significa que o modelo
-   *  foi branqueado pelo ruído intra-fixação; `isotropic` é o `λI` histórico
+  /** Qual penalidade foi usada. `within-target` significa que o modelo foi
+   *  branqueado pelo ruído intra-fixação; `isotropic` é o `λI` histórico
    *  (usado quando o caller não agrupa amostras por alvo). Só diagnóstico —
    *  não afeta `predictRidge`, então perfis serializados antigos continuam
    *  carregando (o campo chega `undefined` e é tratado como isotropic). */
   penalty?: 'isotropic' | 'within-target';
 }
 
-// A1-3 — limiar de "quase-singular". Acima de 1e-12 solveLinear ainda
-// resolve, mas abaixo de 1e-6 os coeficientes β ficam ordens de grandeza
-// maiores que o razoável, gerando predições que "explodem" para pequenas
-// variações da entrada. É a assinatura do bug de erro grande + jitter
-// baixo observado em A0-5 com óculos (viés de 400 px).
+// Limiar de "quase-singular". Acima de 1e-12 solveLinear ainda resolve, mas
+// abaixo de 1e-6 os coeficientes β ficam ordens de grandeza maiores que o
+// razoável, gerando predições que "explodem" para pequenas variações da
+// entrada. É a assinatura do bug de erro grande + jitter baixo observado em
+// medidas com óculos (viés de 400 px).
 const NEAR_SINGULAR_PIVOT = 1e-6;
 const SINGULAR_PIVOT = 1e-12;
 
@@ -119,7 +119,7 @@ export function targetGroupKey(t: { screenX: number; screenY: number }): string 
 const PENALTY_FLOOR = 0.01;
 
 /**
- * D9 — matriz de penalidade Σ_W (covariância intra-alvo) normalizada.
+ * Matriz de penalidade Σ_W (covariância intra-alvo) normalizada.
  *
  * Devolve `null` quando não há grupos utilizáveis (menos de 2 alvos, ou nenhum
  * alvo com ≥2 amostras): nesse caso o caller usa a identidade e o comportamento
@@ -193,14 +193,14 @@ export function withinTargetPenalty(
 export interface RidgeTrainOptions {
   /** Chave do alvo de cada amostra (mesmo comprimento de `features`). Quando
    *  presente e com ≥2 alvos, ativa a penalidade branqueada pelo ruído
-   *  intra-fixação (D9). Ausente → `λI` isotrópico. */
+   *  intra-fixação. Ausente → `λI` isotrópico. */
   groups?: string[];
   /** Σ_W já calculada. Σ_W não depende de λ, então o CV a computa UMA vez por
    *  fold e reusa nas 22 tentativas de λ — sem isto, o custo O(m·d²) dominaria
    *  o treino (22× desperdício). `null` força a penalidade isotrópica. */
   penaltyMatrix?: number[][] | null;
-  /** 3.4 - peso de cada amostra nas equacoes normais. Ausente = todas iguais,
-   *  que e o comportamento historico. Ver o bloco em `trainRidgeModel`. */
+  /** Peso de cada amostra nas equacoes normais. Ausente = todas iguais.
+   *  Ver o bloco em `trainRidgeModel`. */
   sampleWeights?: number[] | null;
 }
 
@@ -233,7 +233,7 @@ export function trainRidgeModel(
   // Prepara matriz Phi com Bias
   const Phi = features.map(f => [1.0, ...f]);
 
-  // D9 — penalidade Σ_W (branqueada) quando o caller agrupou por alvo. Se o
+  // Penalidade Σ_W (branqueada) quando o caller agrupou por alvo. Se o
   // caller já a calculou (caminho do CV), reusa em vez de recomputar.
   const P = options?.penaltyMatrix !== undefined
     ? options.penaltyMatrix
@@ -276,7 +276,7 @@ export function trainRidgeModel(
     return s;
   });
 
-  // A1-3 — acumula colunas quase-singulares das duas solvidas.
+  // Acumula colunas quase-singulares das duas solvidas.
   const nearSingularX: number[] = [];
   const nearSingularY: number[] = [];
   const betaX = solveLinear(AX, bX, nearSingularX);
@@ -317,11 +317,11 @@ export function predictRidge(
   }
 
   // Retorna coordenadas normalizadas SEM clamp.
-  // O clamp é aplicado APÓS a média binocular em `mapGaze` (Sprint 1.2). Fazer
-  // clamp aqui, por olho, distorce a média binocular quando um olho satura na
-  // borda: se o olho direito prevê x=1.05 e o esquerdo prevê x=0.9, a média
-  // correta seria ~0.975; com clamp por olho vira (1.0+0.9)/2 = 0.95, puxando
-  // o cursor para dentro da tela.
+  // O clamp é aplicado APÓS a média binocular em `mapGaze`. Fazer clamp aqui,
+  // por olho, distorce a média binocular quando um olho satura na borda: se
+  // o olho direito prevê x=1.05 e o esquerdo prevê x=0.9, a média correta
+  // seria ~0.975; com clamp por olho vira (1.0+0.9)/2 = 0.95, puxando o
+  // cursor para dentro da tela.
   return {
     x: normX,
     y: normY,
@@ -353,13 +353,13 @@ export class RidgeRegressor {
     this.model = model ?? null;
   }
 
-  /** 3.1 — quando não é `null`, substitui o λ escolhido por validação cruzada.
+  /** Quando não é `null`, substitui o λ escolhido por validação cruzada.
    *  Só o harness escreve aqui; o app nunca toca. Existe porque comparar duas
    *  variantes com λ diferentes mistura duas mudanças numa medição só. */
   static lambdaOverride: number | null = null;
 
   /**
-   * 3.1 — pesos por eixo na escolha de λ, em pixels de tela.
+   * Pesos por eixo na escolha de λ, em pixels de tela.
    *
    * O default `{1, 1}` reproduz o comportamento histórico (fração de tela
    * tratada como grandeza única). O caller que conhece a geometria passa a
@@ -375,29 +375,13 @@ export class RidgeRegressor {
   static independentLambda = true;
 
   /**
-   * 3.4 - equilibra os alvos no ajuste, dando a cada um o mesmo peso total
+   * Equilibra os alvos no ajuste, dando a cada um o mesmo peso total
    * independente de quantos quadros ele reteve.
    *
-   * Default false: e mudanca de pipeline e so entra com medicao antes/depois.
-   *
-   * RE-MEDIDO em 2026-09-01, depois que um relatorio ao vivo mostrou alvos com
-   * [24..65] amostras (2,7x de desequilibrio) numa sessao ruim. A hipotese era
-   * que o cenario que motivou o "sem ganho" original tivesse mudado. Nao tinha.
-   * Replay nas duas fixtures, irisCore + balanceado-v2, OFF -> ON:
-   *
-   *   sessao com oculos (deseq 2,3x)   media -3,3%   mediana -4,5%   p90 +2,4%
-   *   ci-baseline       (deseq 1,8x)   media -0,8%   mediana +1,7%   p90 -4,4%
-   *
-   * Os sinais se invertem entre as duas: melhora a mediana numa e piora na
-   * outra, melhora o p90 numa e piora na outra. Duas fixtures discordando na
-   * DIRECAO e ruido entre sessoes, nao efeito -- ligar seria escolher a fixture
-   * que da o numero desejado.
-   *
-   * O desequilibrio grande daquela sessao vinha junto com deriva de pose (os
-   * alvos do fim tinham mais amostras E o pitch mais deslocado). O aviso de
-   * deriva na tela de calibracao ataca a causa; equilibrar peso trataria o
-   * sintoma. Se o desequilibrio reaparecer SEM deriva, vale re-medir -- ai sera
-   * um cenario que nenhuma destas duas fixtures cobre.
+   * Default false: os efeitos medidos foram inconsistentes entre sessões
+   * (melhora numa, piora noutra), e o desequilíbrio grande costuma vir junto
+   * com deriva de pose — o aviso de deriva na tela de calibração ataca a
+   * causa; equilibrar peso trataria o sintoma.
    */
   static balanceTargets = false;
 

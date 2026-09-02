@@ -2,8 +2,8 @@ import { describe, it, expect, beforeAll } from 'vitest';
 import { EyeQualityAnalyzer } from './qualityAnalyzer';
 import type { Point3D } from './extractor';
 
-// A1-5 — specularRatio é a fração de pixels com luminância > 0.95 no crop
-// ocular. Teste com um vídeo mock (canvas 2D) para exercitar o pipeline real
+// specularRatio é a fração de pixels com luminância > 0.95 no crop ocular.
+// Teste com um vídeo mock (canvas 2D) para exercitar o pipeline real
 // end-to-end sem depender de webcam.
 
 // Landmarks mínimos para o bbox — só os índices em EYE_BBOX_INDICES.
@@ -45,12 +45,11 @@ beforeAll(() => {
 });
 
 // Timeout maior no primeiro teste — ele monta jsdom+canvas do zero, e a
-// carga desse setup fica >5s intermitente sob load pesado do pool (D2-D8
-// adicionou +145 testes, aumentando concorrência). Runs isolados
-// consistentemente <500ms; sob suite completa, ~33% dos runs excedem 5s.
-// Ampliar o teto NÃO relaxa a asserção (specularRatio precisa continuar 0);
-// só evita false-positive de flake em D8.3.
-describe('A1-5: specularRatio em qualityAnalyzer', () => {
+// carga desse setup fica >5s intermitente sob load pesado do pool. Runs
+// isolados consistentemente <500ms; sob suite completa, alguns runs
+// excedem 5s. Ampliar o teto NÃO relaxa a asserção (specularRatio precisa
+// continuar 0); só evita false-positive de flake.
+describe('specularRatio em qualityAnalyzer', () => {
   it('crop uniformemente cinza (mid-luma) devolve specularRatio ≈ 0', () => {
     const video = makeFakeVideo([128, 128, 128]); // luma = 0.5
     const analyzer = new EyeQualityAnalyzer();

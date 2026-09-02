@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { trainRidgeModel, solveLinear, RidgeRegressor } from './ridge';
 
-// A1-3 — testa: (a) modelo carrega λ efetivo, (b) escalonamento defensivo
+// Testa: (a) modelo carrega λ efetivo, (b) escalonamento defensivo
 // quando trainRidgeModel lança, (c) detecção de pivô quase-singular.
 
-describe('A1-3: RidgeModel expõe λ efetivamente usado', () => {
+describe('RidgeModel expõe λ efetivamente usado', () => {
   it('trainRidgeModel salva o λ recebido em model.lambda', () => {
     const features = [[1, 0], [0, 1], [1, 1], [0, 0]];
     const targets = [
@@ -33,7 +33,7 @@ describe('A1-3: RidgeModel expõe λ efetivamente usado', () => {
   });
 });
 
-describe('A1-3: solveLinear reporta pivôs quase-singulares', () => {
+describe('solveLinear reporta pivôs quase-singulares', () => {
   it('coluna com pivô entre 1e-12 e 1e-6 vira nearSingular', () => {
     // Matriz cujo segundo pivô é ~1e-8 mas resolve
     const A: number[][] = [
@@ -67,7 +67,7 @@ describe('A1-3: solveLinear reporta pivôs quase-singulares', () => {
   });
 });
 
-describe('A1-3: RidgeRegressor escalona λ quando o treino final lança', () => {
+describe('RidgeRegressor escalona λ quando o treino final lança', () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
   let logSpy: ReturnType<typeof vi.spyOn>;
 

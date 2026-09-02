@@ -31,17 +31,16 @@ export function decodeAngleDeg(
   return deg;
 }
 
-// D3.3 (ROADMAP §5) — confiança da predição derivada da entropia da softmax.
+// Confiança da predição derivada da entropia da softmax.
 //
 // Convenção: 0 = totalmente incerto (distribuição uniforme sobre os N bins,
 // H = log(N)), 1 = totalmente certo (massa toda num único bin, H = 0).
 // Formalmente: 1 - H/H_max, onde H = -Σ p·log(p).
 //
-// Por que expor isso agora (D3, ROADMAP §5): a softmax já é calculada aqui em
-// cada frame — não custa nada devolver junto. Downstream (Ridge, filtro, etc.)
-// NÃO consome ainda; o campo existe para poder observar em uso real primeiro
-// (regra 4 do projeto — nunca ligar sintonia sem número). Se um dia entrar
-// como peso/gate, este é o único lugar canônico onde a métrica é definida.
+// A softmax já é calculada aqui em cada frame — não custa nada devolver junto.
+// Downstream (Ridge, filtro, etc.) NÃO consome ainda; o campo existe para poder
+// observar em uso real primeiro. Se um dia entrar como peso/gate, este é o
+// único lugar canônico onde a métrica é definida.
 export function decodeAngleWithConfidence(
   logits: ArrayLike<number>,
   binWidth: number,

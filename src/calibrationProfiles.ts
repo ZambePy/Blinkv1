@@ -1,16 +1,14 @@
-// A1-6 — perfis de calibração por condição óptica.
+// Perfis de calibração por condição óptica.
 //
-// Por que existe: A0-5 mostrou que óculos degradam a calibração 8× (57 → 440 px).
-// A causa dominante NÃO é bug de código — é refração das lentes, que introduz
-// um viés dependente da direção do olhar. Nenhum modelo linear global compensa.
-// A única solução é ter perfis SEPARADOS por condição óptica: o cuidador escolhe
-// "com óculos" pela manhã (paciente lê) e "sem óculos" à tarde, cada um treinado
-// naquela condição específica.
+// Por que existe: óculos degradam a calibração ~8× em medições reais. A causa
+// dominante NÃO é bug de código — é refração das lentes, que introduz um viés
+// dependente da direção do olhar. Nenhum modelo linear global compensa. A
+// solução é ter perfis SEPARADOS por condição óptica: o cuidador escolhe
+// "com óculos" pela manhã (paciente lê) e "sem óculos" à tarde, cada um
+// treinado naquela condição específica.
 //
-// Este módulo é o registry em memória. A persistência (localStorage + expiração
-// + invalidação por resolução/vetor de features) é escopo de A2-7 (Sprint 5).
-// Aqui, um refresh de página apaga tudo — mas dentro de uma sessão o usuário
-// pode alternar sem recalibrar.
+// Este módulo é o registry em memória. Um refresh de página apaga tudo — mas
+// dentro de uma sessão o usuário pode alternar sem recalibrar.
 
 import type { RidgeModel } from './ridge';
 
@@ -34,8 +32,8 @@ export interface CalibrationProfileMeta {
 }
 
 // Snapshot serializável do que treinou. Formato pensado para viver em
-// localStorage/IndexedDB quando A2-7 vier — nada de referências circulares,
-// tudo primitivos + arrays de números.
+// localStorage/IndexedDB — nada de referências circulares, tudo primitivos
+// + arrays de números.
 export interface StoredCalibrationProfile {
   meta: CalibrationProfileMeta;
   modelLeft: RidgeModel;
@@ -44,7 +42,7 @@ export interface StoredCalibrationProfile {
   scalerParamsRight: { means: number[]; stds: number[] };
   // Sumário da sessão que produziu o perfil — permite ao cuidador comparar
   // qual perfil está melhor sem recalibrar. Todos opcionais para compat
-  // com perfis criados antes de A1-6.
+  // com perfis criados antes.
   quality?: {
     sampleCount: number;
     varianceFloorBreaches: number;
@@ -55,11 +53,10 @@ export interface StoredCalibrationProfile {
     lambdaRatio: number;
     deadFeaturesLeftPct: number;
     deadFeaturesRightPct: number;
-    // D4.2 (ROADMAP §5) — alvos detectados como candidatos a outlier na
-    // calibração (LOO + MAD, ver detectOutlierPoints em calibration.ts).
-    // Opcional para compat com perfis pré-D4. Só SINALIZA (regra 4): não é
-    // usado para retreinar automaticamente sem o ponto. UI/log deve chamar
-    // este número de "indicativo" — com N~9 alvos, MAD é frágil.
+    // Alvos detectados como candidatos a outlier na calibração (LOO + MAD,
+    // ver detectOutlierPoints em calibration.ts). Só SINALIZA: não é usado
+    // para retreinar automaticamente sem o ponto. UI/log deve chamar este
+    // número de "indicativo" — com N~9 alvos, MAD é frágil.
     outlierTargets?: {
       count: number;                 // quantos alvos únicos marcados como outlier
       indices: number[];             // índices em `perTarget` que passaram do threshold
@@ -166,8 +163,7 @@ export class ProfileRegistry {
   }
 }
 
-// Singleton do processo. Fica em memória — quando A2-7 vier, esta instância
-// carrega/salva em localStorage via um adapter injetado.
+// Singleton do processo. Fica em memória.
 export const profileRegistry = new ProfileRegistry();
 
 // Sinalização honesta na UI (B parte). Progressivas são um limite físico:

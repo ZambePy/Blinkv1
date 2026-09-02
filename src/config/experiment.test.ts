@@ -1,24 +1,18 @@
 import { describe, it, expect } from 'vitest';
 import { loadEnvOverrides, EXPERIMENT } from './experiment';
 
-// D7.1 (ROADMAP §5) — a config de experimento em Node passa a aceitar override
-// via env-var `IRISFLOW_EXP_<key>=<value>`, permitindo que
-// `measure_baseline.mjs` varra `isotropicLandmarks` entre variantes do replay
-// sem editar código. Estes testes garantem que:
+// A config de experimento em Node aceita override via env-var
+// `IRISFLOW_EXP_<key>=<value>`. Estes testes garantem que:
 //   (i)  env-var em booleano é interpretada corretamente ("true"/"1" → true);
 //   (ii) env-var em número é convertida (não fica string, o que quebraria
 //        cálculos de vetor);
 //   (iii) chave desconhecida é ignorada (não trava rodada com typo);
 //   (iv) sem env-var, o default é preservado (garantia de retrocompat).
 //
-// Estratégia de teste: testamos a função pura `loadEnvOverrides(env)` passando
-// um objeto env sintético. Isso substitui uma versão anterior que usava
-// `vi.resetModules()` para reimportar o módulo com env-vars diferentes —
-// resetModules estressa o pool do vitest o suficiente pra causar timeout
-// intermitente em `qualityAnalyzer.a1-5.test.ts` (jsdom+canvas). Testar a
-// função pura tem o mesmo alcance sem esse custo.
+// Testamos a função pura `loadEnvOverrides(env)` passando um objeto env
+// sintético — evita `vi.resetModules()`, que estressa o pool do vitest.
 
-describe('loadEnvOverrides (D7.1)', () => {
+describe('loadEnvOverrides', () => {
   it('sem env-var, retorna objeto vazio', () => {
     expect(loadEnvOverrides({})).toEqual({});
   });

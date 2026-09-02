@@ -28,10 +28,10 @@ describe('createL2CSClient', () => {
     expect(g.valid).toBe(false);
   });
 
-  // D3.3 — o cliente deve responder `getAverageConfidence()` mesmo antes de
-  // qualquer inferência (default 0) e não pode carimbar `confidence` no
-  // L2CSGaze default inválido — o consumidor distingue "sem sinal" de
-  // "conf=0" pela ausência do campo.
+  // O cliente responde `getAverageConfidence()` mesmo antes de qualquer
+  // inferência (default 0) e não carimba `confidence` no L2CSGaze default
+  // inválido — o consumidor distingue "sem sinal" de "conf=0" pela ausência
+  // do campo.
   it('getAverageConfidence() = 0 antes de qualquer resultado', () => {
     const client = createL2CSClient();
     expect(client.getAverageConfidence()).toBe(0);

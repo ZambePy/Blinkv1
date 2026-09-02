@@ -1,60 +1,12 @@
 // Parâmetros de experimento ajustáveis SEM rebuild.
 //
 // Lidos de localStorage com fallback para o default de produção. Existem para
-// permitir varredura A/B durante as sessões de medição (D2) sem recompilar.
+// permitir varredura A/B durante as sessões de medição sem recompilar.
 // Em produção, nenhuma chave está setada → todos os defaults valem.
 //
 // Console:  __irisflowExp.set('expandFactor', 1.6)   → recarrega a página
 //           __irisflowExp.reset()                     → volta aos defaults
 //           __irisflowExp.dump()                      → estado atual (vai no relatório)
-
-// ── 2.6 — INVENTÁRIO DAS FLAGS ────────────────────────────────────────────
-//
-// Três flags foram removidas por não terem nenhum leitor em código:
-//
-//   dwellGraceMs, dwellSnapPx   zero referências fora deste arquivo. O dwell
-//                               nunca as consultou.
-//   applyDistanceCorrection     a única referência era um COMENTÁRIO em
-//                               `engine.ts`. D12 trocou a compensação de
-//                               distância de "escalar as features" para
-//                               "corrigir a saída", e o caminho antigo saiu —
-//                               mas a flag ficou. Pior: o helper que ela
-//                               governava depende dos índices 25..34, que
-//                               deixaram de existir quando o vetor virou
-//                               `iris12`; ligá-la teria corrigido dimensões
-//                               erradas em silêncio.
-//
-// As que ficaram, e o que a medição diz de cada uma
-// (`fixtures/replay/ci-baseline.jsonl`, `--filter balanceado-v2`):
-//
-//   expandFactor        parâmetro do crop do L2CS. INATIVA enquanto
-//   l2csCadenceMs       `enableL2CS` for false — mas são exatamente os
-//                       parâmetros necessários para reavaliar o L2CS, então
-//                       removê-las custaria mais que mantê-las.
-//
-//   isotropicLandmarks  TEM efeito, e o efeito é PIORAR: 140,7 → 154,9 px
-//                       (+10,1%). Contraintuitivo depois de 2.1 e 2.2 terem
-//                       achado problemas de anisotropia, mas coerente: um
-//                       modelo linear ABSORVE uma anisotropia constante nos
-//                       coeficientes, então "corrigi-la" só perturba o que o
-//                       ajuste já compensava. Onde a anisotropia machuca é na
-//                       comparação contra CONSTANTES — o limiar de piscada de
-//                       2.2 — que nenhum coeficiente pode absorver.
-//
-//   applyGazeCorrection VIVA no app (`applyGazeCorrection()` em `mapGaze`), e
-//                       o harness é ESTRUTURALMENTE CEGO a ela: o replay tem
-//                       `rbfApplied: false` fixo e não passa pelo `mapGaze` do
-//                       módulo de calibração. Medir OFF vs ON no replay dá
-//                       140,7 px nos dois lados — o que NÃO significa que a
-//                       flag não faz nada, significa que este harness não a
-//                       alcança. Ponto cego registrado.
-//
-//   enableDistanceLog   diagnóstico, um leitor em `calibration.ts`.
-//   lockCameraExposure  um leitor em `GazeContext.tsx`. Só afeta a câmera ao
-//                       vivo; o replay é no-op por construção.
-//
-//   geometricPoseCompensation (1.3), lateralTranslationCompensation (1.4),
-//   enableL2CS (2.5) — ver os blocos de cada uma abaixo.
 
 export interface ExperimentConfig {
   /** Fator de expansão da bbox facial antes do resize 448². Ver §E3. */
@@ -62,12 +14,12 @@ export interface ExperimentConfig {
   /** Cadência de submissão ao worker L2CS, em ms. */
   l2csCadenceMs: number;
   /** Aplica o mapa RBF de correção derivado do teste de precisão.
-   *  DEFAULT false — ver achado A2. Ligar só para comparação explícita. */
+   *  DEFAULT false — ligar só para comparação explícita. */
   applyGazeCorrection: boolean;
-  /** Log de distância ao fecho convexo (caro: O(n·d) por frame). Ver A10. */
+  /** Log de distância ao fecho convexo (caro: O(n·d) por frame). */
   enableDistanceLog: boolean;
   /**
-   * A2-5 — correção de anisotropia de aspect ratio.
+   * Correção de anisotropia de aspect ratio.
    * O MediaPipe normaliza x pela largura e y pela altura. Em 1920×1080 as
    * escalas diferem por 1.78×. Distâncias euclidianas misturando as duas
    * ficam distorcidas — `interEyeDistRaw` e o vetor inteiro ficam enviesados
@@ -80,7 +32,7 @@ export interface ExperimentConfig {
    */
   isotropicLandmarks: boolean;
   /**
-   * A2-6 — travar exposição da câmera após aquecimento de 2s.
+   * Travar exposição da câmera após aquecimento de 2s.
    * Solicita `exposureMode/focusMode/whiteBalanceMode = 'manual'` via
    * ImageCapture API quando o driver suportar. Reduz variação de brilho
    * do crop (entrada direta do L2CS) e estabiliza o reflexo especular em
@@ -89,25 +41,24 @@ export interface ExperimentConfig {
    */
   lockCameraExposure: boolean;
   /**
-   * 1.3 — compensação geométrica de pose na saída (`src/poseCompensation.ts`).
+   * Compensação geométrica de pose na saída (`src/poseCompensation.ts`).
    *
    * Desloca a predição por `d · tan(Δ)` contra a pose média da calibração. Não
    * há coeficiente ajustado: o ganho vem da geometria, então não há o que
-   * memorizar — que é como 1.2 falhou ao dar a pose ao Ridge como feature.
+   * memorizar — dar a pose ao Ridge como feature falhava por memorização.
    *
-   * DEFAULT true (Fase 1.C) — baseline registra drift pitch monotônico de 6.2°
-   * durante calibração (trendRPitch=-0.98), contaminando dados de treino.
-   * A compensação geométrica já existia atrás da flag; apenas o default muda.
-   * Ver especificação em docs/superpowers/specs/2026-09-01-pipeline-refactor-design.md §3.1
+   * DEFAULT true — sem pose comp o erro explode quando a pose de teste
+   * diverge da calibração; drift monotônico de pitch durante calibração
+   * (visto em gravações reais) contamina os dados de treino.
    */
   geometricPoseCompensation: boolean;
   /**
-   * 1.4 — compensação de TRANSLAÇÃO lateral da cabeça
+   * Compensação de TRANSLAÇÃO lateral da cabeça
    * (`src/translationCompensation.ts`).
    *
-   * Independente de 1.3: aquela corrige a cabeça girando, esta a cabeça
-   * deslizando. A correção é 1:1 em centímetros e não depende do FOV — ele
-   * cancela na álgebra, ver o módulo.
+   * Independente da compensação geométrica: aquela corrige a cabeça girando,
+   * esta a cabeça deslizando. A correção é 1:1 em centímetros e não depende
+   * do FOV — ele cancela na álgebra, ver o módulo.
    *
    * DEFAULT false. Não por medir pior, mas por não haver o que medir: na
    * gravação de referência o rosto translada 0,25 cm durante o teste inteiro,
@@ -115,24 +66,17 @@ export interface ExperimentConfig {
    */
   lateralTranslationCompensation: boolean;
   /**
-   * 2.5 — liga o caminho do L2CS-Net (worker ONNX + crop 448²).
+   * Liga o caminho do L2CS-Net (worker ONNX + crop 448²).
    *
-   * DEFAULT false, porque a saída dele NÃO CHEGA AO MODELO: o bloco angular
-   * ocupa os índices [37..43] do vetor completo, e `ACTIVE_FEATURE_SET =
-   * 'iris12'` seleciona [0..11]. Enquanto isso, o caminho custa 91 MB de
-   * download do modelo, um `getImageData` de 448² a 10 Hz e um worker por
-   * quadro.
-   *
-   * Não é remoção: o crop tinha um bug (`sourceDimensions`, corrigido) que
-   * fazia a inferência rodar sobre imagem preta, então o L2CS nunca foi
-   * avaliado FUNCIONANDO. Ligar esta flag com `--feature-set` incluindo o
-   * bloco é como essa avaliação vai ser feita.
+   * O crop tinha um bug (`sourceDimensions`, corrigido) que fazia a inferência
+   * rodar sobre imagem preta. Ligar esta flag com `--feature-set` incluindo o
+   * bloco angular é como o L2CS ganha caminho até o modelo.
    */
   enableL2CS: boolean;
   /**
-   * Fase 1.A — expansão polinomial de grau 2 nas features antes do StandardScaler.
+   * Expansão polinomial de grau 2 nas features antes do StandardScaler.
    *
-   * Baseline mostra 77% do erro é não-linear (affine.explainedFraction=0.226).
+   * 77% do erro em baseline é não-linear (affine.explainedFraction=0.226).
    * Ridge linear satura. Grau 2 sobre 8 dims → 44 features, ainda seguro contra
    * overfitting com ~270 amostras + CV LOO do Ridge escolhendo λ.
    *
@@ -140,7 +84,7 @@ export interface ExperimentConfig {
    */
   polynomialFeatures: boolean;
   /**
-   * Fase 2.A — treino da calibração via Web Worker.
+   * Treino da calibração via Web Worker.
    *
    * Elimina o freeze de UI de 1-3s durante `completeCalibration()`. Predict
    * continua main-thread e síncrono. Se `false`, treino é síncrono (antigo).
@@ -155,10 +99,10 @@ const DEFAULTS: ExperimentConfig = {
   l2csCadenceMs: 100,
   applyGazeCorrection: false,
   enableDistanceLog: false,
-  isotropicLandmarks: false,  // A2-5 — desligado até medição confirmar melhora
-  lockCameraExposure: false,  // A2-6 — desligado por compatibilidade de hardware
-  geometricPoseCompensation: true, // Fase 1.C — habilitado por default; diagnóstico 2026-09-02 confirmou que SEM pose comp o erro explode (361px vs 150px) quando pose de teste diverge da calibração. Y offset +165 tem outra causa.
-  lateralTranslationCompensation: false, // 1.4 — desligado: efeito abaixo do ruído na base atual
+  isotropicLandmarks: false,  // desligado até medição confirmar melhora
+  lockCameraExposure: false,  // desligado por compatibilidade de hardware
+  geometricPoseCompensation: true, // habilitado por default; SEM pose comp o erro explode (361px vs 150px) quando pose de teste diverge da calibração. Y offset +165 tem outra causa.
+  lateralTranslationCompensation: false, // desligado: efeito abaixo do ruído na base atual
   // LIGADO em conjunto com `ACTIVE_FEATURE_SET = 'irisCore+l2cs'`. Antes deste
   // par a flag ficava true sozinha e o bloco angular era projetado para fora do
   // vetor — 91 MB de ONNX, `getImageData` de 448² e um worker por quadro sem
@@ -173,24 +117,12 @@ const DEFAULTS: ExperimentConfig = {
 
 const STORAGE_KEY = 'irisflow.experiment';
 
-// D7.1 (ROADMAP §5) — override por env-var no ambiente Node.
-//
-// Motivação: `measure_baseline.mjs` precisa varrer a flag `isotropicLandmarks`
-// entre variantes do replay para responder "isso melhora ou piora contra a
-// mesma gravação?". Em browser, o override vem de localStorage (linha
-// abaixo); em Node, localStorage não existe, então o sweep tem que ser
-// resolvido antes deste módulo ser importado — logo, via env-var passada ao
-// spawn do processo filho.
+// Override por env-var no ambiente Node.
 //
 // Convenção: `IRISFLOW_EXP_<key>=<value>`. Booleans como "true"/"false" (ou
 // "1"/"0"); números como decimais. Chaves desconhecidas são ignoradas em
 // silêncio para não travar rodadas com typo em CLI.
 //
-// LIMITAÇÃO HONESTA (regra 3 do projeto): `lockCameraExposure` afeta APENAS
-// a câmera ao vivo (`ImageCapture.applyConstraints`). O replay lê de JSONL
-// gravado; sweepar essa flag em replay é NO-OP e o `measure_baseline` NÃO
-// oferece essa variante. A decisão de ligar/desligar `lockCameraExposure`
-// só pode vir de medição AO VIVO — pendência humana registrada no ROADMAP.
 // Ambiente do consumidor: Node passa `process.env`; browser passa `{}`
 // (localStorage é a via de override lá). Tipagem explícita sem depender de
 // @types/node — o frontend tsconfig NÃO inclui esse pacote, então referenciar

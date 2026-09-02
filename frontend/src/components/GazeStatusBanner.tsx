@@ -1,20 +1,18 @@
 import React from 'react';
 
 /**
- * F-FE-12 / C-07 — falhas que bloqueiam o controle por olhar precisam ser
- * VISÍVEIS.
+ * Falhas que bloqueiam o controle por olhar precisam ser VISÍVEIS.
  *
- * `cameraError` e `calibrationInvalidated` já eram calculados no `GazeProvider`
- * e expostos no contexto, mas `grep` não achava nenhum consumidor: ninguém
- * renderizava. A câmera podia falhar e o app seguia mudo.
+ * `cameraError` e `calibrationInvalidated` já eram calculados no
+ * `GazeProvider` e expostos no contexto, mas ninguém renderizava: a câmera
+ * podia falhar e o app seguia mudo.
  *
- * O caso `uncalibrated` passou a ser obrigatório junto com o C-07. Sem
- * calibração o cursor já era escondido (não há mapeamento para desenhar) e
- * agora o dwell também está desligado — inclusive para emergência, por decisão
- * de segurança: sobre o fallback do nariz, permitir emergência é disparar
- * alarme por acaso. Cursor invisível + nada clicável, sem aviso, é
- * indistinguível de "o programa travou" — e o usuário-alvo não tem como
- * reiniciar sozinho. Este banner é o que fecha esse beco.
+ * O caso `uncalibrated` também é tratado: sem calibração o cursor é escondido
+ * (não há mapeamento para desenhar) e o dwell fica desligado — inclusive para
+ * emergência, por decisão de segurança: sobre o fallback do nariz, permitir
+ * emergência é disparar alarme por acaso. Cursor invisível + nada clicável,
+ * sem aviso, é indistinguível de "o programa travou" — e o usuário-alvo não
+ * tem como reiniciar sozinho. Este banner é o que fecha esse beco.
  *
  * Renderizado dentro do `GazeProvider`, que fica FORA do router: por isso não
  * navega, apenas instrui. Quem age é o cuidador, com mouse ou toque.

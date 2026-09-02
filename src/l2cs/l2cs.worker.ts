@@ -95,7 +95,7 @@ async function infer(id: number, tensor: Float32Array): Promise<void> {
   const yawDecoded = decodeAngleWithConfidence(yawOut.data as Float32Array, meta.binWidth, meta.binOffset);
   const pitchDecoded = decodeAngleWithConfidence(pitchOut.data as Float32Array, meta.binWidth, meta.binOffset);
 
-  // D3.3 — confiança agregada = min(yaw, pitch). Ver comentário em L2CSGaze.
+  // Confiança agregada = min(yaw, pitch). Ver comentário em L2CSGaze.
   const confidence = Math.min(yawDecoded.confidence, pitchDecoded.confidence);
 
   post({

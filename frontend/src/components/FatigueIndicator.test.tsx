@@ -10,16 +10,6 @@ import {
   MIN_CONSECUTIVE_ABOVE,
 } from './FatigueIndicator';
 
-// D7.4 (ROADMAP §5) — testes garantem:
-// (i)   aviso aparece só quando taxa >= threshold por N polls CONSECUTIVOS
-//       (não em um pico isolado — evita "cry wolf");
-// (ii)  histerese: só some quando cai < threshold - hysteresis (evita
-//       banner piscando na zona 20-25/min);
-// (iii) NUNCA aparece em rotas de emergência ou calibração (regra 2);
-// (iv)  NUNCA aparece em rotas do cuidador (settings/caregiver);
-// (v)   NUNCA aparece em rotas públicas (/, /login);
-// (vi)  cede ao banner de degradação B4-2 (isDegraded tem prioridade).
-
 let mockBlinkRate = 0;
 let mockIsDegraded = false;
 
@@ -52,7 +42,7 @@ vi.mock('./ui/GazeButton', () => ({
   },
 }));
 
-describe('FatigueIndicator (D7.4)', () => {
+describe('FatigueIndicator', () => {
   beforeEach(() => {
     mockBlinkRate = 0;
     mockIsDegraded = false;
@@ -160,7 +150,7 @@ describe('FatigueIndicator (D7.4)', () => {
     expect(screen.queryByTestId('fatigue-indicator')).toBeNull();
   });
 
-  it('cede ao banner de degradação B4-2 (isDegraded=true suprime aviso)', () => {
+  it('cede ao banner de degradação (isDegraded=true suprime aviso)', () => {
     mockBlinkRate = 40;
     mockIsDegraded = true;
     renderAt('/menu');

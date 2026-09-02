@@ -3,12 +3,6 @@ import { buildAutoTestMeta, opticalConditionToOculos, applyUptimeToRunMetaIfDefa
 import type { RunMeta } from '@tracker/accuracy';
 import type { ReadinessReport } from '@tracker/setupReadiness';
 
-// D2 (ROADMAP.md) — critério de aceite: "teste unitário garantindo que
-// `RunMeta` não usa mais valores hardcoded para `minutosDeSessao`". A regressão
-// que estes testes protegem é o valor `0` fixo que estava em
-// `CalibrationCheck.tsx:73` — se alguém reintroduzir hardcoding, ao menos
-// esta suíte falha em vez do relatório mentir silenciosamente.
-
 describe('buildAutoTestMeta', () => {
   const base = {
     distanciaCm: 60,
@@ -115,15 +109,7 @@ describe('buildAutoTestMeta', () => {
   });
 });
 
-// D7.2 (ROADMAP §5) — o fluxo de accuracy test MANUAL do SettingsScreen mantém
-// um select "Sessão (min)" com default 0. Estes testes garantem que:
-//   (i)  se o valor for 0 (default do state), aplyUptimeToRunMetaIfDefault
-//        substitui pelo uptime real, e anota o `observacoes`;
-//   (ii) se o cuidador escolheu manualmente 20 ou 40, a escolha é preservada
-//        — override manual sempre vence (regra: nunca sobrescrever dado
-//        que o humano digitou expressamente);
-//   (iii) uptime < 30s (autoMinutos == 0) não polui o observacoes.
-describe('applyUptimeToRunMetaIfDefault (D7.2)', () => {
+describe('applyUptimeToRunMetaIfDefault', () => {
   const baseMeta: RunMeta = {
     data: '2026-08-25',
     iluminacao: 'boa',
@@ -191,7 +177,6 @@ describe('opticalConditionToOculos', () => {
   });
 });
 
-// ─── Etapa 2 — metadados medidos, não presumidos ───────────────────────────
 describe('readinessMetaFrom', () => {
   const build = (over: Partial<ReadinessReport> = {}): ReadinessReport => ({
     checks: [

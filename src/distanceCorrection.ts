@@ -1,4 +1,4 @@
-// D5.2 (ROADMAP §5) — correção geométrica de distância câmera-rosto.
+// Correção geométrica de distância câmera-rosto.
 //
 // POR QUE EXISTE
 // O extractor produz features de iris em espaço de OLHO rotacionado, dividindo
@@ -23,8 +23,8 @@
 // reduz. Ratio = 1 (mesma distância) → identidade, correção some.
 //
 // IMPORTANTE: esta é uma correção HEURÍSTICA de 1ª ordem. A solução
-// completa exige Structure-from-Motion (ver §8 do ROADMAP como backlog não
-// escondido). Aqui é um passo pequeno e reversível, gated por flag off.
+// completa exige Structure-from-Motion. Aqui é um passo pequeno e
+// reversível, gated por flag off.
 //
 // LAYOUT ESPERADO — o vetor deve ser o produzido por `extractCompactFeatures`.
 // Se a ordem lá mudar sem atualizar `IRIS_OFFSET_DIMS` / `OFFSET_INTERACTION_DIMS`

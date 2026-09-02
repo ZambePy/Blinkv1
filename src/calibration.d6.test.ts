@@ -7,10 +7,7 @@ import {
   CALIBRATION_TARGETS_QUICK,
 } from './calibration';
 
-// D6.1 (ROADMAP §5) — modo rápido: startCalibrationMode({ quick: true })
-// deve reduzir a lista de alvos para os 4 cantos.
-
-describe('D6.1 — modo rápido de calibração', () => {
+describe('modo rápido de calibração', () => {
   beforeEach(() => {
     // Sanity: os targets exportados são realmente 9 e 4.
     expect(CALIBRATION_TARGETS_FULL).toHaveLength(9);
@@ -41,11 +38,10 @@ describe('D6.1 — modo rápido de calibração', () => {
     expect(getCalibrationTargets()).toHaveLength(4);
   });
 
-  // D9 — as posições deixaram de ser constantes fixas: passaram a sair do
-  // orçamento de excentricidade angular (`computeCalibrationTargets`), que
-  // depende da tela e da distância. Estes testes afirmam a ESTRUTURA da grade
-  // (simetria, contagem, extremos), não os números mágicos de uma tela
-  // específica — a posição em si é coberta por `calibration.d9.test.ts`.
+  // As posições saem do orçamento de excentricidade angular
+  // (`computeCalibrationTargets`), que depende da tela e da distância.
+  // Estes testes afirmam a ESTRUTURA da grade (simetria, contagem, extremos),
+  // não os números mágicos de uma tela específica.
   it('modo quick: os 4 alvos são os cantos da grade, simétricos em torno do centro', () => {
     startCalibrationMode({ quick: true });
     const targets = getCalibrationTargets();

@@ -1,10 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { countDeadFeatures } from './calibration';
 
-// A1-2 — countDeadFeatures conta dimensões cuja variância ENTRE as médias
-// dos alvos é ~0 (dimensões que não carregam sinal de "onde o usuário olha").
-
-describe('A1-2: countDeadFeatures', () => {
+describe('countDeadFeatures', () => {
   it('feature perfeitamente correlacionada com o alvo NÃO é morta', () => {
     // 3 alvos, 2 amostras por alvo. dim 0 = screenX puro (varia entre alvos).
     const targets = [

@@ -4,28 +4,26 @@ import { AlertOctagon } from 'lucide-react';
 import { GazeButton } from './ui/GazeButton';
 import { useGaze } from '../context/GazeContext';
 
-// D6.3 (ROADMAP §5) — indicador de drift ao cuidador.
+// Indicador de drift ao cuidador.
 //
 // PARA QUE SERVE
-// A correção de bias em sessão (D1-3) absorve silenciosamente desvios do
-// olhar via EMA sobre dwell clicks. Isso é bom: o cursor continua caindo
-// no lugar certo mesmo quando o modelo base começa a errar. É ruim: o
-// cuidador nunca fica sabendo que o modelo base perdeu qualidade, e a UI
-// silenciosa mente sobre o estado real do sistema (viola regra 3).
+// A correção de bias em sessão absorve silenciosamente desvios do olhar via
+// EMA sobre dwell clicks. Isso é bom: o cursor continua caindo no lugar
+// certo mesmo quando o modelo base começa a errar. É ruim: o cuidador nunca
+// fica sabendo que o modelo base perdeu qualidade, e a UI silenciosa mente
+// sobre o estado real do sistema.
 //
-// Este componente SINALIZA sem BLOQUEAR (regra 2). Quando |bias| passa
-// de ~5% da tela, mostra um banner sugerindo recalibração rápida. Ao
-// clicar, leva o cuidador para /calibration-check onde o D6.2 já oferece
-// a opção "Recalibração rápida (4 pontos)".
+// Este componente SINALIZA sem BLOQUEAR. Quando |bias| passa de ~5% da tela,
+// mostra um banner sugerindo recalibração rápida. Ao clicar, leva o cuidador
+// para /calibration-check onde a opção "Recalibração rápida (4 pontos)" já
+// está disponível.
 //
-// REGRA CRÍTICA — nunca aparece em rotas de emergência ou calibração.
-// Um paciente com ELA em situação de crise não pode ter a rota de socorro
-// coberta por banner de qualidade. Idêntica disciplina da B4-2 (aviso de
-// rastreamento impreciso), replicada aqui.
+// REGRA CRÍTICA — nunca aparece em rotas de emergência ou calibração. Um
+// paciente com ELA em situação de crise não pode ter a rota de socorro
+// coberta por banner de qualidade.
 
-// 5% da tela em unidades normalizadas. Coerente com o threshold sugerido
-// no ROADMAP (5-6%). Abaixo disso o bias EMA está no seu regime normal
-// e não é sinal acionável.
+// 5% da tela em unidades normalizadas. Abaixo disso o bias EMA está no seu
+// regime normal e não é sinal acionável.
 const DRIFT_THRESHOLD_NORM = 0.05;
 
 // Antes de mostrar, exige N amostras acumuladas — bias com 1-2 dwell clicks
@@ -73,7 +71,7 @@ export const DriftIndicator: React.FC = () => {
     return () => clearInterval(id);
   }, [calibration]);
 
-  // Prioridade: se o rastreamento está DEGRADED (B4-2), o banner de degradação
+  // Prioridade: se o rastreamento está DEGRADED, o banner de degradação
   // domina — não empilhamos dois avisos amarelos. O de drift some.
   if (isDegraded) return null;
 

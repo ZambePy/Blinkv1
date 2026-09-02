@@ -1,4 +1,4 @@
-// Etapa 1 — ajuste automático da câmera ao nosso uso.
+// Ajuste automático da câmera ao nosso uso.
 //
 // POR QUE EXISTE
 //
@@ -338,8 +338,8 @@ export function planStabilizationStep(
  *
  * Nenhuma API do browser expõe o FOV. Mas se o cuidador medir a distância UMA
  * vez com fita métrica, a geometria devolve o FOV — e a partir daí o programa
- * estima a distância sozinho em toda sessão futura, que é o que `Etapa 2`
- * precisa para o indicador de distância.
+ * estima a distância sozinho em toda sessão futura, que é o que o indicador
+ * de distância precisa.
  *
  * `iodPx` e `videoWidth` do mesmo frame; `distanceCm` medida de verdade.
  */

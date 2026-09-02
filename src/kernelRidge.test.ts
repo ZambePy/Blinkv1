@@ -52,20 +52,19 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     const probeScaled = scaler.transformSingle(probeRaw);
 
     // Ridge baseline (comportamento documentado em ridge.convexhull.test.ts).
-    // Sprint 1.2 removeu o clamp de predictRidge — o modelo agora extrapola
-    // livremente para fora de [0,1]. O clamp downstream em `mapGaze` é que
-    // "satura" o valor final. Aqui checamos a extrapolação bruta, que revela
-    // o mesmo problema de saturação da UI.
-// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
-    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
-    // passamos o valor explícito para este teste continuar descrevendo o MESMO
-    // regime de regularização que sempre descreveu.
+    // predictRidge extrapola livremente para fora de [0,1]; o clamp
+    // downstream em `mapGaze` é que "satura" o valor final. Aqui checamos a
+    // extrapolação bruta, que revela o mesmo problema de saturação da UI.
+    //
+    // λ é adimensional (penalidade `λ·m·P`, não `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala
+    // adimensional; passamos o valor explícito.
     const LAMBDA_LEGACY_EQUIV = 1 / 9;
     const ridgeModel = trainRidgeModel(scaled, targets, LAMBDA_LEGACY_EQUIV);
     const ridgePred  = predictRidge(ridgeModel, probeScaled);
     const ridgeSaturates = ridgePred.x < 0 || ridgePred.x > 1;
 
-    // Kernel Ridge (ainda retorna pixels — não passou pela mudança da Sprint 4).
+    // Kernel Ridge (ainda retorna pixels).
     const t0 = performance.now();
     const kr  = new KernelRidgeRegressor();
     kr.train(scaled, tgtsX, tgtsY);
@@ -165,10 +164,9 @@ describe('KernelRidgeRegressor — Gate 2: precisão in-hull vs Ridge', () => {
     const tgtsX  = targets.map(t => t.screenX);
     const tgtsY  = targets.map(t => t.screenY);
 
-// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
-    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
-    // passamos o valor explícito para este teste continuar descrevendo o MESMO
-    // regime de regularização que sempre descreveu.
+    // λ é adimensional (penalidade `λ·m·P`, não `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala
+    // adimensional; passamos o valor explícito.
     const LAMBDA_LEGACY_EQUIV = 1 / 9;
     const ridgeModel = trainRidgeModel(scaled, targets, LAMBDA_LEGACY_EQUIV);
     const kr = new KernelRidgeRegressor();
@@ -202,7 +200,7 @@ describe('KernelRidgeRegressor — Gate 2: precisão in-hull vs Ridge', () => {
     for (const { label, rawFeat, targetX, targetY } of interpolatedProbes) {
       const probeScaled = scaler.transformSingle(rawFeat);
 
-      // Sprint 4: predictRidge retorna [0,1]. Multiplica por SCREEN_* para
+      // predictRidge retorna [0,1]. Multiplica por SCREEN_* para
       // comparar com KR (que retorna pixels) sob o mesmo threshold em px.
       const ridgePred = predictRidge(ridgeModel, probeScaled);
       const ridgePxX  = ridgePred.x * SCREEN_WIDTH;

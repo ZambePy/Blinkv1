@@ -4,22 +4,6 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { BrowserRouter } from 'react-router-dom';
 
-/**
- * C-05 — os alvos TREINADOS têm de ser os alvos EXIBIDOS.
- *
- * `startNextPoint` lia `activePoints`, a lista do render em que `handleStart`
- * executou. Nesse render `calibrationMode` ainda é `null` e a lista é a que
- * `getCalibrationTargets()` devolvia ANTES de `startCalibrationMode` — a grade
- * nominal. O `shuffleOrderRef`, por outro lado, já era montado sobre a lista
- * NOVA. Resultado em modo rápido: a ordem tem 4 índices, mas eles indexam a
- * grade de 9 — o engine coletava TL/TC/TR/ML enquanto a UI mostrava 4 cantos.
- *
- * O mock de `CalibrationCheck.drift.test.tsx` devolve uma lista CONSTANTE, e é
- * por isso que 548 testes passavam com este bug aberto. Aqui a lista muda
- * depois de `startCalibrationMode`, que é o comportamento real do núcleo
- * (`getCalibrationTargets` responde ao modo e à geometria da sessão).
- */
-
 // Grade nominal de 9, devolvida ENQUANTO nenhum modo foi iniciado.
 const GRADE_NOMINAL = [
   { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
@@ -116,7 +100,7 @@ function comoPares(lista: Array<{ x: number; y: number }>): Array<[number, numbe
   ]);
 }
 
-describe('CalibrationCheck — alvos treinados == alvos exibidos (C-05)', () => {
+describe('CalibrationCheck — alvos treinados == alvos exibidos', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     modoIniciado = null;

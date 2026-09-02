@@ -130,22 +130,19 @@ describe('preprocess448FromRGBA', () => {
   });
 });
 
-// ── D10 — regressão do crop preto ───────────────────────────────────────────
+// ── Regressão do crop preto ─────────────────────────────────────────────────
 //
-// Entre D3 e D10 o L2CS recebeu uma imagem 448×448 inteiramente PRETA em todos
-// os frames. Causa: `cropFaceToTensor` lia `source.width`, que num
+// Sintoma histórico: `cropFaceToTensor` lia `source.width`, que num
 // HTMLVideoElement é o ATRIBUTO HTML `width` (0 quando só o CSS define o
 // tamanho — que é exatamente como `GazeContext` cria o vídeo). Com w=h=0 todo
 // landmark virava px 0, o bbox saía com lado 0, e `drawImage` com sw/sh=0 é um
-// no-op silencioso: sobrava o `fillRect('#000')`.
-//
-// Sintoma medido em fixtures/replay/*.jsonl: yaw e pitch CONSTANTES em -82,0°
-// e -50,6° ao longo de 780 frames válidos (min = mediana = máx).
+// no-op silencioso: sobrava o `fillRect('#000')`. Resultado: yaw e pitch
+// constantes.
 //
 // Estes testes travam as duas metades do conserto: a fonte é medida pela
 // dimensão intrínseca, e uma fonte sem dimensão falha alto em vez de produzir
 // um tensor preto.
-describe('D10 — dimensões da fonte de pixels', () => {
+describe('dimensões da fonte de pixels', () => {
   // Stub mínimo: só o que `cropFaceToTensor` lê antes de tocar no canvas.
   const fakeVideo = (attrW: number, attrH: number, vidW: number, vidH: number) =>
     ({ width: attrW, height: attrH, videoWidth: vidW, videoHeight: vidH }) as unknown as Parameters<typeof cropFaceToTensor>[0];

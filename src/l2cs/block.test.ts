@@ -30,12 +30,9 @@ describe('buildL2CSBlock', () => {
     expect(b[6]).toBeCloseTo(ty * tp, 12);        // cross
   });
 
-  // D10 — MUDANÇA DE CONTRATO. Antes, um ângulo absurdo era clampeado em ±π/4
-  // e virava a CONSTANTE ±1 dentro do vetor de features. Isso transformava
-  // lixo da rede em feature de valor fixo, e o Ridge tratava a constante como
-  // sinal. Foi exatamente o que aconteceu entre D3 e D10 com o bug do crop
-  // preto: yaw=-82° em 100% dos frames → bloco [-1,-1,-d,-d,1,1,1] constante.
-  // Agora ângulo implausível é INVÁLIDO (bloco zerado), não extremo.
+  // Ângulo implausível é INVÁLIDO (bloco zerado), não extremo. Clampear em
+  // ±π/4 transforma lixo da rede em CONSTANTE dentro do vetor de features, e
+  // o Ridge trata a constante como sinal.
   it('yaw implausível é rejeitado, não clampeado', () => {
     expect(buildL2CSBlock(Math.PI, 0, true, 1)).toEqual([0, 0, 0, 0, 0, 0, 0]);
     expect(buildL2CSBlock(-Math.PI, 0, true, 1)).toEqual([0, 0, 0, 0, 0, 0, 0]);
@@ -46,9 +43,9 @@ describe('buildL2CSBlock', () => {
   });
 
   it('o valor real observado com o crop quebrado seria rejeitado hoje', () => {
-    // fixtures/replay/*.jsonl: yaw = -82,0°, pitch = -50,6°, constantes em
-    // 780/780 frames válidos. Com o contrato antigo isto virava
-    // [-1, -1, -d, -d, 1, 1, 1]; hoje não entra no vetor.
+    // yaw = -82,0°, pitch = -50,6° saíam constantes de uma inferência
+    // degenerada. Com o contrato antigo isto virava [-1, -1, -d, -d, 1, 1, 1];
+    // hoje não entra no vetor.
     const yaw = (-82.0 * Math.PI) / 180;
     const pitch = (-50.6 * Math.PI) / 180;
     expect(isGazePlausible(yaw, pitch)).toBe(false);

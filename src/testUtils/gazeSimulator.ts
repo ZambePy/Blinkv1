@@ -1,13 +1,12 @@
 // Simulador determinístico do pipeline de olhar — SÓ PARA TESTE.
 //
-// Por que existe: `fixtures/replay` é gitignored, então não há gravação real
-// versionada contra a qual medir precisão por região. Sem isto, qualquer
-// afirmação sobre "melhorou nos cantos" seria opinião. Este módulo gera um
-// vetor de features com a MESMA estrutura de `extractCompactFeatures`
-// (44 dims/olho: 37 do bloco geométrico + 7 do bloco L2CS), PROJETADO no
-// conjunto de features ativo (`ACTIVE_FEATURE_SET`), a partir de um
-// alvo de tela conhecido, para que `StandardScaler` + `RidgeRegressor` reais
-// possam ser treinados e medidos ponta a ponta.
+// Por que existe: sem gravação real versionada, afirmar "melhorou nos cantos"
+// seria opinião. Este módulo gera um vetor de features com a MESMA estrutura
+// de `extractCompactFeatures` (44 dims/olho: 37 do bloco geométrico + 7 do
+// bloco L2CS), PROJETADO no conjunto de features ativo
+// (`ACTIVE_FEATURE_SET`), a partir de um alvo de tela conhecido, para que
+// `StandardScaler` + `RidgeRegressor` reais possam ser treinados e medidos
+// ponta a ponta.
 //
 // O QUE ELE MODELA (e por quê):
 //
@@ -216,11 +215,10 @@ export class GazeSimSession {
       return vec;
     };
 
-    // D11 — emite o MESMO conjunto que o pipeline de produção entrega ao
-    // modelo. O `build()` acima monta o vetor completo na ordem real do
-    // extractor (offset, rel, contorno, cantos, ear, raio, pose, interações,
-    // L2CS), e a projeção aqui garante que o benchmark meça o que roda de
-    // verdade — não uma configuração que não existe mais.
+    // Emite o MESMO conjunto que o pipeline de produção entrega ao modelo.
+    // O `build()` acima monta o vetor completo na ordem real do extractor
+    // (offset, rel, contorno, cantos, ear, raio, pose, interações, L2CS), e
+    // a projeção aqui garante que o benchmark meça o que roda de verdade.
     return [projectFeatureSet(build(1)), projectFeatureSet(build(-1))];
   }
 }

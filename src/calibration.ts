@@ -53,7 +53,7 @@ function maybeExpandSingle(features: number[]): number[] {
   return expandPolynomialFeatures(features);
 }
 
-// Sprint 4 — recalibração implícita. `false` = comportamento antigo (só modelo
+// Recalibração implícita. `false` = comportamento antigo (só modelo
 // offline). Ligar via `setOnlineCalibrationEnabled(true)` a partir da UI/settings.
 export let USE_ONLINE_CALIBRATION = false;
 
@@ -147,7 +147,7 @@ export interface GazeDistanceLogEntry {
   nearestDistAvg: number;
 }
 
-// Sprint 2 — amostragem ponderada na periferia. `COLLECTION_MS_BASE` é a
+// Amostragem ponderada na periferia. `COLLECTION_MS_BASE` é a
 // duração para o ponto central; pontos de canto coletam `+ COLLECTION_MS_RANGE`
 // ms adicionais. A justificativa vem de literatura + prática: usuários fixam
 // pior nas bordas, e o Ridge extrapola pior perto do limite do fecho convexo.
@@ -171,39 +171,31 @@ export function getCollectionMsForPoint(x: number, y: number): number {
   return Math.round(COLLECTION_MS_BASE + d * COLLECTION_MS_RANGE);
 }
 
-// A1-2 — portão de variância. O antigo `VARIANCE_THRESHOLD = 0.02` era
-// ordem de grandeza irrisória: em A0-5 medimos variâncias entre 0.98 e 1.32
-// (sem óculos ~1.02, com óculos ~1.30), então o teto de 0.02 nunca rejeitava
-// nada. Mantido como referência histórica para reconhecer casos vindos de
-// perfis antigos serializados. **Não usar em código novo.**
 const VARIANCE_THRESHOLD_LEGACY_UNUSED = 0.02;
 void VARIANCE_THRESHOLD_LEGACY_UNUSED;
 
-// Piso e teto derivados de A0-5 (Rodada A sem óculos: 0.98–1.05; Rodada B
-// com óculos: 1.27–1.32). Piso uma ordem de grandeza abaixo do mínimo
-// observado — defesa contra features congeladas em outros hardwares, nunca
-// acionado no hw testado. Teto entre os dois mundos, para rejeitar reflexo
-// de óculos e aceitar sessão limpa com folga. Estes números vão ser afinados
-// à medida que mais sessões forem capturadas — sinalizam, não bloqueiam.
+// Piso e teto de variância intra-ponto. Piso uma ordem de grandeza abaixo do
+// mínimo observado — defesa contra features congeladas em outros hardwares,
+// nunca acionado no hw testado. Teto entre os dois mundos, para rejeitar
+// reflexo de óculos e aceitar sessão limpa com folga. Estes números vão ser
+// afinados à medida que mais sessões forem capturadas — sinalizam, não bloqueiam.
 const INTRA_POINT_VARIANCE_FLOOR = 0.10;
 const INTRA_POINT_VARIANCE_CEIL = 1.15;
 
-// A1-2 — feature "morta" = dimensão cuja variância ENTRE as médias dos 9
+// Feature "morta" = dimensão cuja variância ENTRE as médias dos 9
 // alvos é próxima de zero. Uma feature que não muda entre alvos diferentes
 // não carrega informação de olhar. Se mais de DEAD_FEATURE_RATIO do vetor
 // estiver morto, o modelo linear não tem sinal para aprender e vai devolver
-// o viés (ponto fixo perto do centro dos alvos). É o cenário que a hipótese
-// original do plano descrevia para o bug dos óculos; A0-5 mostrou que **não
-// é o modo dominante neste hardware**, mas a defesa continua fazendo sentido.
+// o viés (ponto fixo perto do centro dos alvos).
 const DEAD_FEATURE_VARIANCE_EPS = 1e-6;
 const DEAD_FEATURE_MAX_RATIO = 0.30;
 
-// A1-2 — contadores de breach expostos via __irisflowDebug. Reset em
+// Contadores de breach expostos via __irisflowDebug. Reset em
 // startCalibrationMode e clearCalibration.
 let varianceFloorBreaches = 0;
 let varianceCeilBreaches = 0;
 
-// A1-5 — detecção de reflexo especular por frame. Um único frame com specular
+// Detecção de reflexo especular por frame. Um único frame com specular
 // alto é ruído (piscada de luz, cursor branco cruzando o crop); avisar só
 // quando persistente durante um ponto (>SPECULAR_PERSISTENCE dos frames).
 // Não rejeita o frame — sinaliza para o cuidador que a lente pode estar
@@ -226,54 +218,16 @@ const distanceLog: GazeDistanceLogEntry[] = [];
 //
 // Threshold em radianos, contra a pose do primeiro frame ACEITO do ponto
 // (já pós-acomodação). O valor e o porquê estão logo abaixo.
-/**
- * 1.1 — tolerância de deriva de pose DENTRO de um ponto de calibração.
- *
- * Este número saiu de medição, não de derivação. O caminho até ele importa
- * porque o valor "óbvio" estava errado por um fator de 30.
- *
- * O GANHO GEOMÉTRICO sugere apertar: com a cabeça girando Δ e o olho parado na
- * órbita, o ponto aparente se desloca `d · tan(Δ)`. Na tela de referência
- * (23,6" a 60 cm, 36,75 px/cm) 1° = 38,5 px. A tolerância herdada, 0,087 rad
- * (4,98°), permitiria 192 px de contaminação — inaceitável no papel.
- *
- * MEDIÇÃO (`fixtures/replay/ci-baseline.jsonl`, 514 frames aceitos, 9 alvos,
- * via `npm run replay -- --regate-pose`):
- *
- *   dispersão DENTRO de cada ponto, p90 ......... yaw 0,09–0,30°  pitch 0,16–0,26°
- *   deriva ENTRE alvos (amplitude das medianas) .. yaw 2,34°      pitch 3,90°
- *   correlação da pose com a ORDEM de coleta ..... yaw +0,961     pitch −0,920
- *
- * A cabeça fica parada dentro de cada ponto — 0,3° é ruído de landmark, não
- * movimento. O que existe é deriva postural lenta ao longo da sessão, quase
- * perfeitamente linear no tempo (r ≈ 0,96). São 90 px em X e 150 px em Y de
- * inconsistência entre o primeiro e o último alvo, da mesma ordem do erro total
- * de 144,6 px do baseline.
- *
- * CONSEQUÊNCIA: qualquer tolerância entre 0,75° e 4,98° retém 100% dos frames
- * nesta gravação. O gate é inerte, e apertá-lo mais não melhora nada — só
- * começa a apagar alvos inteiros, porque a deriva não está dentro dos pontos.
- * Deriva entre alvos é para MODELAR (pose no vetor, 1.2; compensação
- * geométrica, 1.3), não para rejeitar.
- *
- * 0,017 rad (1,0°) é ~3× a dispersão intra-ponto observada: pega um lapso real
- * (o usuário virar a cabeça no meio da coleta) sem custar um único frame de uma
- * cabeça parada. Serve como rede de segurança, e é honesto sobre não ser mais
- * do que isso.
- */
 export const POSE_DRIFT_YAW_MAX   = 0.017;
 export const POSE_DRIFT_PITCH_MAX = 0.017;
 export const POSE_DRIFT_ROLL_MAX  = 0.017;
 
 /**
- * 1.1 — mínimo de amostras aceitas para um ponto entrar no treino.
+ * Mínimo de amostras aceitas para um ponto entrar no treino.
  *
  * `processStaticPoint` aceitava um ponto com 3 amostras. Com ~60 nos demais,
  * ele entrava com 1/20 do peso — presente o bastante para deslocar o ajuste,
  * ausente o bastante para não restringi-lo, e sem nenhum sinal ao operador.
- *
- * Não é hipotético: na gravação de referência um dos nove alvos fechou com 37
- * amostras aceitas contra 64 do melhor.
  *
  * 15 é ~1/4 do que um ponto saudável coleta. Abaixo disso o ponto é REFEITO: a
  * UI já trata `success: false` com retry e a mensagem "Tente não se mover".
@@ -281,7 +235,7 @@ export const POSE_DRIFT_ROLL_MAX  = 0.017;
 export const MIN_ACCEPTED_SAMPLES = 15;
 
 /**
- * 1.1 — frames de pose necessários para o baseline de sessão ser reportável.
+ * Frames de pose necessários para o baseline de sessão ser reportável.
  *
  * ~1 s a 30 fps. O baseline NÃO gateia nada (ver `POSE_DRIFT_YAW_MAX`); serve
  * de referência para medir a deriva da sessão e mostrá-la ao operador.
@@ -289,20 +243,19 @@ export const MIN_ACCEPTED_SAMPLES = 15;
 export const SESSION_POSE_BASELINE_MIN_SAMPLES = 20;
 
 /**
- * 1.1 — acima de quantos pixels-equivalentes de deriva entre alvos o operador
+ * Acima de quantos pixels-equivalentes de deriva entre alvos o operador
  * é avisado.
  *
- * 60 px é ~1,5° na tela de referência, metade do que a gravação de baseline
- * acumulou em pitch. Não bloqueia a calibração: a deriva é modelável e bloquear
- * custaria uma sessão inteira a um usuário com ELA. Só informa, e diz o que
- * fazer a respeito.
+ * 60 px é ~1,5° na tela de referência. Não bloqueia a calibração: a deriva é
+ * modelável e bloquear custaria uma sessão inteira a um usuário com ELA. Só
+ * informa, e diz o que fazer a respeito.
  */
 export const POSE_DRIFT_WARN_PX = 60;
 
 let currentPointBaselinePose: { yaw: number; pitch: number; roll: number } | null = null;
 
 /**
- * 1.1 — pose de referência da SESSÃO de calibração.
+ * Pose de referência da SESSÃO de calibração.
  *
  * Fixada uma vez, antes do primeiro alvo, com a mediana de ~1 s de frames.
  * Todos os pontos são julgados contra ela — é o que impede que dois alvos
@@ -312,11 +265,11 @@ let currentPointBaselinePose: { yaw: number; pitch: number; roll: number } | nul
 let sessionBaselinePose: { yaw: number; pitch: number; roll: number } | null = null;
 /** Buffer de poses acumulado antes do primeiro alvo. */
 let sessionPoseSamples: { yaw: number; pitch: number; roll: number }[] = [];
-/** 1.1 — pose mediana de cada alvo concluído, na ordem de coleta. */
+/** Pose mediana de cada alvo concluído, na ordem de coleta. */
 let sessionPoseByTarget: { yaw: number; pitch: number; roll: number }[] = [];
 
 /**
- * 1.1 — quanto a postura migrou ao longo da calibração, em graus e em pixels.
+ * Quanto a postura migrou ao longo da calibração, em graus e em pixels.
  *
  * A conversão para pixels usa o mesmo ganho geométrico do resto do módulo
  * (`d · tan(Δ)` na distância de calibração), porque grau não diz nada ao
@@ -324,8 +277,7 @@ let sessionPoseByTarget: { yaw: number; pitch: number; roll: number }[] = [];
  *
  * `trendR` é a correlação da pose com a ORDEM de coleta. Perto de ±1 significa
  * deriva postural lenta e monótona — o usuário escorregando na cadeira ao longo
- * da sessão. Perto de 0 significa movimento errático. A distinção importa:
- * a primeira é modelável (1.2/1.3), a segunda pede refazer a calibração.
+ * da sessão. Perto de 0 significa movimento errático.
  */
 export interface SessionPoseDrift {
   targets: number;
@@ -352,7 +304,7 @@ export interface VeredictoDeriva {
 }
 
 /**
- * 1.1-UI — traduz a deriva medida em algo que se mostra para uma pessoa.
+ * Traduz a deriva medida em algo que se mostra para uma pessoa.
  *
  * Existe como função pura e exportada porque tem DOIS consumidores que precisam
  * concordar: o `console.warn` do log de calibração e a tela de calibração.
@@ -450,7 +402,7 @@ function finalizeSessionPoseBaseline(): boolean {
 }
 let poseDriftRejects = 0;
 
-/** 3.2 — peso relativo de cada olho, do residuo de treino. `null` antes de
+/** Peso relativo de cada olho, do residuo de treino. `null` antes de
  *  qualquer calibracao, e nesse caso a fusao volta a ser media simples. */
 let eyeReliability: { left: number; right: number } | null = null;
 
@@ -458,7 +410,7 @@ export function getEyeReliability(): { left: number; right: number } | null {
   return eyeReliability;
 }
 
-/** 2.4 — campos de qualidade que o gate consulta. Lista explícita para o aviso
+/** Campos de qualidade que o gate consulta. Lista explícita para o aviso
  *  de ausência poder nomear o que faltou. */
 const QUALITY_FIELDS = [
   'irisVisibilityPercentage', 'detectorConfidence',
@@ -493,14 +445,13 @@ let regressorRight: GazeRegressor | null = null;
 export const featureScalerLeft = new StandardScaler();
 export const featureScalerRight = new StandardScaler();
 
-// D5.2 — `cameraDistanceEstimate` médio durante a calibração. Serve de
+// `cameraDistanceEstimate` médio durante a calibração. Serve de
 // distância de REFERÊNCIA para a correção geométrica em mapGaze. Null
 // enquanto não houver calibração treinada, e null se nenhum `quality`
-// dos pontos carregou o valor (compat com callers antigos). O que
-// mapGaze faz com null: sem correção (comportamento pré-D5.2).
+// dos pontos carregou o valor (compat com callers antigos).
 let calibrationRefDistance: number | null = null;
 
-// D12 — distâncias da calibração em CENTÍMETROS, para a compensação de saída.
+// Distâncias da calibração em CENTÍMETROS, para a compensação de saída.
 //
 // `calibrationRefDistance` acima é o proxy `1/scale3D`, adimensional: serve
 // para razões, não para a aritmética aditiva que a compensação exige (ver o
@@ -508,7 +459,7 @@ let calibrationRefDistance: number | null = null;
 let calibrationCameraDistanceCm: number | null = null;
 let calibrationScreenDistanceCm: number | null = null;
 
-/** D12 — registra as distâncias desta calibração, em cm. Chamado pela UI, que
+/** Registra as distâncias desta calibração, em cm. Chamado pela UI, que
  *  é quem conhece a distância medida da câmera e a configurada até a tela. */
 export function setCalibrationDistancesCm(
   cameraCm: number | null,
@@ -518,7 +469,7 @@ export function setCalibrationDistancesCm(
   calibrationScreenDistanceCm = screenCm;
 }
 
-// ── 2.1 — distância de calibração medida sobre os quadros ACEITOS ──────────
+// ── distância de calibração medida sobre os quadros ACEITOS ──────────
 //
 // A UI chamava `setCalibrationDistancesCm(getCurrentCameraDistanceCm(), …)` no
 // instante em que a calibração começa — UM quadro, ainda na janela de preparo,
@@ -526,11 +477,9 @@ export function setCalibrationDistancesCm(
 // compensação de distância da sessão.
 //
 // Dois problemas, e o segundo é o que importa:
-//   • ruído de quadro único (σ ≈ 0,13 cm na gravação de referência);
+//   • ruído de quadro único (σ ≈ 0,13 cm);
 //   • ele descreve a postura de quem acabou de clicar "começar", não a de quem
-//     passou os 15 s seguintes coletando. Na gravação de referência a diferença
-//     é pequena (0,11 cm típico, 0,51 cm no pior caso), mas é pequena porque o
-//     usuário ficou parado — não há nada no código que garanta isso.
+//     passou os 15 s seguintes coletando.
 //
 // A mediana sobre os quadros aceitos descreve o que o modelo de fato viu.
 // Mediana e não média: aqui o objetivo é resistir a um quadro com o rosto
@@ -557,7 +506,7 @@ export function getCalibrationDistancesCm(): { cameraCm: number | null; screenCm
   return { cameraCm: calibrationCameraDistanceCm, screenCm: calibrationScreenDistanceCm };
 }
 
-// D12 — geometria do quadro corrente e campo de visão da câmera.
+// Geometria do quadro corrente e campo de visão da câmera.
 //
 // Ficam em estado de módulo, e não como parâmetros de `mapGaze`, de propósito:
 // a alternativa exigiria propagar dois valores por engine → mapGaze e por
@@ -570,7 +519,7 @@ let cameraFovDeg: number | null = null;
 
 /** Campo de visão horizontal da câmera, calibrado uma vez pelo cuidador. Sem
  *  ele não há como converter tamanho de rosto em centímetros, e a compensação
- *  de distância fica inativa (comportamento anterior ao D12). */
+ *  de distância fica inativa. */
 export function setCameraFovDeg(fov: number | null): void {
   cameraFovDeg = fov;
 }
@@ -579,7 +528,7 @@ export function setCameraFovDeg(fov: number | null): void {
 export function setCurrentFrameGeometry(
   iodPx: number,
   videoWidth: number,
-  // 1.4 — altura e ponta do nariz. Opcionais para não quebrar os callers de
+  // Altura e ponta do nariz. Opcionais para não quebrar os callers de
   // teste que só exercitam a estimativa de distância (que não precisa delas).
   videoHeight?: number,
   centro?: CentroFacial | null,
@@ -592,7 +541,7 @@ export function setCurrentFrameGeometry(
   latestFaceCenter = centro ?? null;
 }
 
-/** 1.4 — ponta do nariz e escala facial do quadro corrente. */
+/** Ponta do nariz e escala facial do quadro corrente. */
 let latestFaceCenter: CentroFacial | null = null;
 let latestFaceScale: EscalaFacial | null = null;
 /** Centro facial médio das amostras que treinaram o modelo. */
@@ -610,7 +559,7 @@ function screenPxPerCm(): number {
   return g.screenDiagonalIn > 0 ? diagPx / (g.screenDiagonalIn * 2.54) : 0;
 }
 
-// ── 1.3 — estado da compensação geométrica de pose ─────────────────────────
+// ── estado da compensação geométrica de pose ─────────────────────────
 
 /** Pose do quadro corrente. Alimentada por `setCurrentFramePose`; `null` até o
  *  primeiro quadro com matriz facial válida. */
@@ -649,7 +598,7 @@ export function getCurrentCameraDistanceCm(): number | null {
 }
 
 /**
- * 0.2 — motivo pelo qual a calibração foi descartada em tempo de execução.
+ * Motivo pelo qual a calibração foi descartada em tempo de execução.
  *
  * `null` no caminho feliz. Quando preenchido, a UI deve pedir recalibração.
  *
@@ -700,7 +649,7 @@ export function getCalibrationRefDistance(): number | null {
   return calibrationRefDistance;
 }
 
-// A1-6 — meta da sessão de calibração em curso. Setada por startCalibrationMode
+// Meta da sessão de calibração em curso. Setada por startCalibrationMode
 // (default: `desconhecido`), consumida por completeCalibration para salvar o
 // perfil resultante no registry por condição óptica.
 let pendingProfileMeta: CalibrationProfileMeta | null = null;
@@ -717,7 +666,7 @@ export function isCalibrated(): boolean {
 }
 
 /**
- * C-16 — encerra uma sessão de calibração em curso SEM treinar.
+ * Encerra uma sessão de calibração em curso SEM treinar.
  *
  * `isCalibrating` só era desligado por `completeCalibration`. Sair da tela no
  * meio da coleta (voltar, navegar, unmount, fechar a aba) deixava o núcleo
@@ -769,7 +718,7 @@ export function abortCalibration(): void {
 }
 
 export function clearCalibration() {
-  // C-16 — sem isto, `clearCalibration` limpava o modelo mas deixava
+  // Sem isto, `clearCalibration` limpava o modelo mas deixava
   // `isCalibrating` ligado, prendendo o app em `calibrating`.
   abortCalibration();
   profile = [];
@@ -799,10 +748,10 @@ export function getCurrentLambda(): number {
   return diag?.left ?? 0;
 }
 
-// A1-3 — diagnóstico de regularização. Uma razão λ_max/λ_min > 10 entre os
+// Diagnóstico de regularização. Uma razão λ_max/λ_min > 10 entre os
 // dois olhos indica que o CV está detectando dado ruim em pelo menos um dos
-// lados (A0-5 observou λ=1 num olho e λ=0.01 no outro com óculos, ratio 100).
-// nearSingular* revela colunas do vetor de features que degeneram no treino.
+// lados. nearSingular* revela colunas do vetor de features que degeneram no
+// treino.
 export interface LambdaDiagnostics {
   left: number;
   right: number;
@@ -828,7 +777,7 @@ export function getLambdaDiagnostics(): LambdaDiagnostics | null {
   };
 }
 
-// A2-7 — persistência de perfis de calibração.
+// Persistência de perfis de calibração.
 //
 // Por que localStorage e não IndexedDB: os perfis são pequenos (~30-50 KB
 // de modelos Ridge + scalers + metadados) e o acesso síncrono do localStorage
@@ -837,14 +786,14 @@ export function getLambdaDiagnostics(): LambdaDiagnostics | null {
 // problema, migramos o storage sem mudar a API.
 //
 // Invalidação:
-//   - `featureDim` diferente → pipeline mudou (nova versão ou A2-5 ligado)
+//   - `featureDim` diferente → pipeline mudou (nova versão)
 //   - `screenW`/`screenH` diferente → Ridge mapeia para pixel; tela diferente
 //     desloca sistematicamente todas as predições
 //   - `videoW`/`videoH` diferente → aspecto do crop mudou
-//   - `experimentId` diferente → flags de A2 mudaram (isotropicLandmarks etc.)
+//   - `experimentId` diferente → flags mudaram (isotropicLandmarks etc.)
 //   - `createdAt` > 24 h → oferece revalidação, não bloqueia
 
-// D11 — chave versionada. A redução do vetor de 44 para 12 dims (ver
+// Chave versionada. A redução do vetor de 44 para 12 dims (ver
 // `ACTIVE_FEATURE_SET` em extractor.ts) torna todo perfil anterior
 // incompatível: `predictRidge` lançaria por dimensão divergente e o
 // `mapGaze` cairia em null a 30 Hz. Trocar a chave descarta os antigos de
@@ -856,14 +805,10 @@ function buildContextKey(): string {
   // Identificador do contexto em que o perfil foi criado. Um perfil só é
   // reaproveitado quando esta chave bate.
   //
-  // 0.2 — passou a codificar o PIPELINE, não só a tela e duas flags.
-  //
-  // O comentário anterior dizia "detectar incompatibilidade (tela diferente,
-  // pipeline diferente)", mas nada aqui descrevia o pipeline: a redução do
-  // vetor de 44 para 12 dims não mudava esta chave em nada. Um perfil salvo
-  // antes da mudança era considerado compatível, carregado, e só falhava lá na
-  // frente dentro de `predictRidge` — a 30 Hz, com o cursor caindo no fallback
-  // do nariz e nenhuma explicação para quem está na tela.
+  // Codifica o PIPELINE, não só a tela e duas flags. Sem isto, um perfil
+  // salvo antes de uma mudança no vetor de features era carregado e só
+  // falhava lá na frente dentro de `predictRidge` — a 30 Hz, com o cursor
+  // caindo no fallback do nariz e nenhuma explicação para quem está na tela.
   //
   //   FEATURE_VECTOR_ID       — quais dimensões saem (conjunto e contagem)
   //   FEATURE_FORMAT_VERSION  — o que elas significam
@@ -890,7 +835,7 @@ function tryParseStoredProfiles(): StoredCalibrationProfile[] {
 }
 
 export function loadProfile(): boolean {
-  // A2-7 — tenta restaurar o perfil mais recente válido do localStorage.
+  // Tenta restaurar o perfil mais recente válido do localStorage.
   regressorLeft = null;
   regressorRight = null;
 
@@ -942,7 +887,7 @@ export function loadProfile(): boolean {
 }
 
 function saveProfile() {
-  // A2-7 — persiste todos os perfis do registry no localStorage.
+  // Persiste todos os perfis do registry no localStorage.
   // Chamado após `persistActiveProfileToRegistry` em `completeCalibration`.
   if (typeof localStorage === 'undefined') return;
   try {
@@ -1043,22 +988,17 @@ export function exportGazeDistanceLog(): void {
 
 // ── Headless Calibration API ──────────────────────────────────────────────────
 
-// D6.1 (ROADMAP §5) — coordenadas dos alvos de calibração, exportadas para
+// Coordenadas dos alvos de calibração, exportadas para
 // a UI consumir a MESMA lista canônica. Cada entrada é fração da tela
 // [0..1]. Grade 3×3 nas margens de 10/50/90% é a mesma histórica (ver
 // `CalibrationCheck.tsx:CALIBRATION_POINTS`). O modo rápido usa APENAS os 4
-// cantos: coerente com o achado Frontiers 2024 citado no §3 do ROADMAP (4
-// pontos → ~3,2–3,3° em outro sistema webcam). Centro é omitido de propósito
-// — os 4 cantos dão exatamente 4 restrições independentes na média binocular,
-// que é o mínimo pra estimar bias + escala em x e y sem singularidade.
-// ─── D9: orçamento de excentricidade angular dos alvos ──────────────────────
+// cantos: coerente com o achado Frontiers 2024 (4 pontos → ~3,2–3,3° em outro
+// sistema webcam). Centro é omitido de propósito — os 4 cantos dão exatamente
+// 4 restrições independentes na média binocular, que é o mínimo pra estimar
+// bias + escala em x e y sem singularidade.
+// ─── orçamento de excentricidade angular dos alvos ──────────────────────
 //
-// BUG-8 empurrou os alvos de 10%/90% para 5%/95% argumentando que assim o
-// Ridge extrapolaria menos nas bordas. O raciocínio estava certo sobre a
-// regressão e errado sobre o olho.
-//
-// EVIDÊNCIA (accuracy-report-1787682565489, 1920×1080, 23,6", 60 cm — a
-// diagonal que aparece no JSON, 15,6", era o hardcode da UI, não a tela real):
+// EVIDÊNCIA (accuracy-report-1787682565489, 1920×1080, 23,6", 60 cm):
 // decompondo os 9 pares (ground-truth → predito) num mapa afim sobra resíduo
 // de 36,5 px sobre erro médio de 173,5 px — 79% do erro é ganho/cisalhamento/
 // offset coerente, não ruído. Os ganhos medidos foram:
@@ -1224,8 +1164,8 @@ export function computeCalibrationTargets(
   return out;
 }
 
-/** Geometria da janela atual + defaults físicos. Fora do browser (testes,
- *  replay) cai num 1920×1080 nominal para continuar determinístico. */
+/** Geometria da janela atual + defaults físicos. Fora do browser (testes)
+ *  cai num 1920×1080 nominal para continuar determinístico. */
 export function currentCalibrationGeometry(
   overrides?: Partial<CalibrationGeometry>,
 ): CalibrationGeometry {
@@ -1249,9 +1189,9 @@ export const CALIBRATION_TARGETS_FULL: readonly { x: number; y: number }[] =
 export const CALIBRATION_TARGETS_QUICK: readonly { x: number; y: number }[] =
   computeCalibrationTargets(currentCalibrationGeometry(), true);
 
-// D6.1 — modo em execução. `null` quando não está calibrando.
+// Modo em execução. `null` quando não está calibrando.
 let currentCalibrationMode: 'full' | 'quick' | null = null;
-// D9 — grade calculada para a tela/geometria da sessão em curso. `null` fora
+// Grade calculada para a tela/geometria da sessão em curso. `null` fora
 // de uma calibração; nesse caso `getCalibrationTargets` devolve a lista
 // nominal, que é o que a UI precisa para desenhar o tutorial.
 let currentCalibrationTargets: readonly { x: number; y: number }[] | null = null;
@@ -1275,9 +1215,9 @@ export function startCalibrationMode(
     opticalCondition?: OpticalCondition;
     label?: string;
     quick?: boolean;
-    /** D9 — geometria física da tela/usuário. Quando o cuidador tiver
+    /** Geometria física da tela/usuário. Quando o cuidador tiver
      *  configurado diagonal e distância reais, a UI passa aqui e a grade se
-     *  ajusta; sem isso, valem os defaults de 15,6"/60 cm. */
+     *  ajusta; sem isso, valem os defaults. */
     geometry?: Partial<CalibrationGeometry>;
   },
 ) {
@@ -1287,7 +1227,7 @@ export function startCalibrationMode(
 
   isCalibrating = true;
 
-  // 1.1 — zera a coleta de uma calibração abandonada.
+  // Zera a coleta de uma calibração abandonada.
   //
   // `startCalibrationMode` limpava todo o resto do estado mas deixava
   // `isCollecting` como estivesse. Quem saísse da tela no meio de um alvo e
@@ -1305,7 +1245,7 @@ export function startCalibrationMode(
     collectionTimeoutHandle = null;
   }
 
-  // 1.1 — o baseline pertence à SESSÃO; recomeçar a calibração recomeça ele.
+  // O baseline pertence à SESSÃO; recomeçar a calibração recomeça ele.
   sessionBaselinePose = null;
   sessionPoseSamples = [];
   sessionPoseByTarget = [];
@@ -1329,27 +1269,22 @@ export function startCalibrationMode(
   specularWarningsIssued = 0;
   resetSessionBias();
 
-  // D6.1 — modo ativo. Consulta pública via getCalibrationTargets() para a UI
+  // Modo ativo. Consulta pública via getCalibrationTargets() para a UI
   // renderizar 4 cantos (quick) ou grade 3×3 (full). Comportamento default
-  // permanece 'full' quando `quick` não é passado — perfis pré-D6 seguem iguais.
+  // permanece 'full' quando `quick` não é passado.
   currentCalibrationMode = opts?.quick ? 'quick' : 'full';
   if (currentCalibrationMode === 'quick') {
-    // ⚠️ RISCO RECONHECIDO (ROADMAP §5 D6, "Riscos"): 4 alvos × ~44 dims/olho
-    // é razão amostra:dim de ~0.09 no vetor bruto. Cada alvo contribui ~50-65
-    // amostras aceitas → ~200-260 amostras totais, o que TÓRICAMENTE fecha o
-    // sistema, mas os termos quadráticos de pose (extractor [31..36]) ficam
-    // pouco restringidos. Contramedida: o CV de λ em ridge.ts já escolhe
-    // regularização mais forte se detectar overfit; e detectOutlierPoints
-    // (D4.2) só emite `insufficient_targets` para < 3 alvos — o que N=4
-    // não dispara. Se a decisão pós-medição mostrar que a precisão do modo
-    // rápido é sistematicamente pior, a solução mais defensável não é reduzir
-    // o vetor (isso força invalidar todos os perfis salvos), é considerar
-    // uma variante do modo rápido com 5 pontos (4 cantos + centro). Preserva
-    // essa opção como backlog explícito neste comentário.
-    console.log('[calib] Modo RÁPIDO (D6.1) — 4 cantos, sem termos quadráticos garantidos.');
+    // ⚠️ RISCO RECONHECIDO: 4 alvos × ~44 dims/olho é razão amostra:dim de
+    // ~0.09 no vetor bruto. Cada alvo contribui ~50-65 amostras aceitas →
+    // ~200-260 amostras totais, o que TÓRICAMENTE fecha o sistema, mas os
+    // termos quadráticos de pose (extractor [31..36]) ficam pouco restringidos.
+    // Contramedida: o CV de λ em ridge.ts já escolhe regularização mais forte
+    // se detectar overfit; e detectOutlierPoints só emite `insufficient_targets`
+    // para < 3 alvos — o que N=4 não dispara.
+    console.log('[calib] Modo RÁPIDO — 4 cantos, sem termos quadráticos garantidos.');
   }
 
-  // D9 — grade posicionada pelo orçamento de excentricidade da tela em uso.
+  // Grade posicionada pelo orçamento de excentricidade da tela em uso.
   const geometry = currentCalibrationGeometry(opts?.geometry);
   currentCalibrationTargets = computeCalibrationTargets(
     geometry,
@@ -1358,14 +1293,14 @@ export function startCalibrationMode(
   const exPct = ((0.5 - currentCalibrationTargets[0].x) * 100).toFixed(1);
   const eyPct = ((0.5 - currentCalibrationTargets[0].y) * 100).toFixed(1);
   console.log(
-    `[calib] Alvos D9 — orçamento ${geometry.maxEccentricityDeg}° em ` +
+    `[calib] Alvos — orçamento ${geometry.maxEccentricityDeg}° em ` +
     `${geometry.screenDiagonalIn}" a ${geometry.viewingDistanceCm} cm → ` +
     `±${exPct}% em X, ±${eyPct}% em Y (a partir do centro).`,
   );
 
-  // A1-6 — meta para o perfil que resultar desta calibração. Default
-  // `desconhecido` porque a UI que pergunta a condição óptica (B1-6/B2-1)
-  // ainda não existe; quando existir, o React passa a condição explícita.
+  // Meta para o perfil que resultar desta calibração. Default `desconhecido`
+  // porque a UI que pergunta a condição óptica ainda não existe; quando
+  // existir, o React passa a condição explícita.
   const cond: OpticalCondition = opts?.opticalCondition ?? 'desconhecido';
   pendingProfileMeta = profileRegistry.createMeta({
     opticalCondition: cond,
@@ -1392,7 +1327,7 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
     collectionTimeoutHandle = null;
   }
 
-  // 1.1 — fixa o baseline de pose da sessão no primeiro alvo, a partir dos
+  // Fixa o baseline de pose da sessão no primeiro alvo, a partir dos
   // frames acumulados durante a janela de preparo da UI. Se não houver frames
   // suficientes, segue sem ele e o gate cai no comportamento por ponto.
   if (!sessionBaselinePose && !finalizeSessionPoseBaseline()) {
@@ -1452,7 +1387,7 @@ function calculateFeatureVariance(features: number[][]): number {
   return totalVariance / numFeatures;
 }
 
-// A1-2 — variância ENTRE alvos (não dentro do alvo). Para cada dimensão de
+// Variância ENTRE alvos (não dentro do alvo). Para cada dimensão de
 // feature, tira a média por alvo (agrupando amostras do mesmo screenX/screenY)
 // e mede quanto essa média varia entre os alvos. Dimensões com variância
 // entre-alvos ~ 0 não carregam informação de olhar — o modelo linear não
@@ -1518,7 +1453,7 @@ export function countDeadFeatures(
 
 export function feedRawData(featuresLeft: number[], featuresRight: number[], quality?: any | null) {
   if (!isCalibrating || !isCollecting) {
-    // 1.1 — a janela entre `startCalibrationMode` e o primeiro alvo (a UI espera
+    // A janela entre `startCalibrationMode` e o primeiro alvo (a UI espera
     // PREPARE_MS ali) é onde o baseline de pose da sessão é montado. Sem isto o
     // baseline só poderia sair do primeiro frame do primeiro ponto, que é
     // exatamente o que se quer evitar: um único frame como referência.
@@ -1539,27 +1474,12 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
     return;
   }
 
-  // Sprint 1.1 — filtros de qualidade sobre valores medidos no crop dos olhos
+  // Filtros de qualidade sobre valores medidos no crop dos olhos
   // por `EyeQualityAnalyzer`.
   //
-  // ⚠️ 2.4 — MEDIDO: NENHUM destes seis critérios dispara na gravação de
-  // referência. As distribuições ficam longe demais dos limiares:
-  //
-  //   critério                        limiar   medido (min..max)   folga
-  //   irisVisibility < 0,3               0,30   0,900 .. 1,000      3,0×
-  //   detectorConfidence < 0,4           0,40   0,909 .. 1,000      2,3×
-  //   brightness < 0,08                  0,08   0,199 .. 0,260      2,5×
-  //   brightness > 0,92                  0,92          max 0,260    3,5×
-  //   contrast < 0,02                    0,02   0,079 .. 0,106      4,0×
-  //   blur > 0,85                        0,85   sempre 0,000          —
-  //
-  // As decisões gravadas confirmam: 514 aceitos, 103 rejeitados por acomodação,
-  // ZERO por qualidade. O gate só pega falha catastrófica — câmera tapada,
-  // escuro total. Não é necessariamente errado (rejeitar quadro bom custa
-  // caro), mas o comentário abaixo dizia que os limiares seriam "refinados com
-  // base nos valores observados durante a coleta de baseline", e a coleta
-  // aconteceu: são estes os valores. Apertá-los é mudança de pipeline e precisa
-  // de medição antes/depois própria — não entra aqui.
+  // ⚠️ MEDIDO: nenhum destes seis critérios dispara em uso normal — as
+  // distribuições ficam longe demais dos limiares. O gate só pega falha
+  // catastrófica: câmera tapada, escuro total.
   //
   // Limiares e a intenção de cada um:
   //   - detectorConfidence < 0.4 → landmarks muito instáveis (movimento brusco)
@@ -1570,11 +1490,11 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   //   - blur        > 0.85       → foco perdido / rosto muito distante
   //   - irisVisibilityPercentage < 0.3 → pálpebra semi-fechada / piscada
   if (quality) {
-    // 2.4 — cada critério só vale se o valor foi MEDIDO.
+    // Cada critério só vale se o valor foi MEDIDO.
     //
     // `irisVisibilityPercentage` e `detectorConfidence` eram comparados sem
     // guarda de tipo. Como `undefined < 0.3` é false, um valor ausente passava
-    // silenciosamente — e desde 2.4 a ausência é possível de verdade, porque o
+    // silenciosamente — e a ausência é possível de verdade, porque o
     // analisador parou de fabricar constantes quando falha.
     //
     // A decisão é ACEITAR o quadro quando a medida falta, e avisar uma vez. O
@@ -1602,7 +1522,7 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
       return; // Ignora frame ruim
     }
 
-    // 1.1 — deriva de pose DENTRO do ponto, contra a referência do próprio ponto.
+    // Deriva de pose DENTRO do ponto, contra a referência do próprio ponto.
     //
     // ⚠️ ESTE GATE FOI MEDIDO E É QUASE INERTE. Ver `POSE_DRIFT_YAW_MAX`.
     //
@@ -1611,9 +1531,7 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
     // redefinir o zero. A hipótese sobre a deriva estava certa; a de que um gate
     // a resolveria estava errada, e a medição mostrou por quê — ver o comentário
     // de `sessionPoseByTarget`. Um gate só sabe apagar frames, e a deriva não
-    // está DENTRO dos pontos: está ENTRE eles. Julgar contra o baseline de
-    // sessão apagava 509 dos 514 frames da gravação de referência, ou seja,
-    // apagava alvos inteiros.
+    // está DENTRO dos pontos: está ENTRE eles.
     if (
       typeof quality.yaw === 'number' &&
       typeof quality.pitch === 'number' &&
@@ -1640,9 +1558,8 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   collectedFeaturesRight.push(featuresRight);
   collectedQualities.push(quality ?? null);
 
-  // A1-5 — contagem de frames com reflexo especular alto. Não rejeita nada
-  // (regra do plano: prevenir vale mais que rejeitar); só acumula para o
-  // sumário do ponto avisar.
+  // Contagem de frames com reflexo especular alto. Não rejeita nada;
+  // só acumula para o sumário do ponto avisar.
   currentPointFramesAccepted++;
   if (quality && typeof quality.specularRatio === 'number' && quality.specularRatio > SPECULAR_FRAME_THRESHOLD) {
     currentPointSpecularHits++;
@@ -1677,7 +1594,7 @@ function processStaticPoint() {
 
   const avgVarLeft = calculateFeatureVariance(collectedFeaturesLeft);
   const avgVarRight = calculateFeatureVariance(collectedFeaturesRight);
-  // Nota A0-5: como ~80% das dimensões do vetor de features vêm de landmarks
+  // Como ~80% das dimensões do vetor de features vêm de landmarks
   // e ângulos compartilhados entre os dois olhos (MUTUAL_INDICES, pose de
   // cabeça), avgVarLeft ≈ avgVarRight até a 6ª casa decimal. NÃO é bug — é
   // decorrência do design do extractor. Usamos a média das duas para o gate,
@@ -1689,7 +1606,7 @@ function processStaticPoint() {
     `(faixa [${INTRA_POINT_VARIANCE_FLOOR}, ${INTRA_POINT_VARIANCE_CEIL}])`,
   );
 
-  // A1-5 — reflexo especular persistente no ponto. Só avisa (não bloqueia).
+  // Reflexo especular persistente no ponto. Só avisa (não bloqueia).
   // Diagnóstico direto para o cuidador ver antes de rodar todos os 9 pontos:
   // se o primeiro já dispara, mudar posição da tela vale mais que continuar.
   if (currentPointFramesAccepted > 0) {
@@ -1706,10 +1623,10 @@ function processStaticPoint() {
     }
   }
 
-  // A1-2 — portão bidirecional. Continuamos aceitando pontos fora da faixa
-  // (comportamento antigo, para não gerar infinite retry loop em usuários
-  // inquietos), mas o log agora distingue piso vs. teto e contabiliza breaches
-  // para o preflight do treino decidir se aborta.
+  // Portão bidirecional. Continuamos aceitando pontos fora da faixa
+  // (para não gerar infinite retry loop em usuários inquietos), mas o log
+  // agora distingue piso vs. teto e contabiliza breaches para o preflight
+  // do treino decidir se aborta.
   if (avgVar < INTRA_POINT_VARIANCE_FLOOR) {
     varianceFloorBreaches++;
     console.warn(
@@ -1720,18 +1637,16 @@ function processStaticPoint() {
     varianceCeilBreaches++;
     console.warn(
       `[calib] ⚠ Ponto com variância ALTA (${avgVar.toFixed(6)} > ${INTRA_POINT_VARIANCE_CEIL}) — ` +
-      `usuário instável ou landmarks ruidosos (reflexo em óculos é o padrão A0-5). ` +
+      `usuário instável ou landmarks ruidosos (reflexo em óculos é o padrão). ` +
       `Aceitando com ${collectedFeaturesLeft.length} amostras.`,
     );
   }
 
-  // 1.1 — ponto com poucas amostras é REFEITO, não aceito de qualquer jeito.
+  // Ponto com poucas amostras é REFEITO, não aceito de qualquer jeito.
   //
   // Antes, um ponto com 3 amostras entrava no treino ao lado de outros com ~60:
   // peso suficiente para deslocar o ajuste, insuficiente para restringi-lo, e
-  // sem nenhum sinal. Na gravação de referência o pior alvo fechou com 37
-  // amostras contra 64 do melhor — bem acima do mínimo, mas o caso ruim não
-  // tinha tratamento nenhum.
+  // sem nenhum sinal.
   //
   // A UI já sabe lidar: `success: false` dispara retry com "Tente não se mover".
   if (collectedFeaturesLeft.length < MIN_ACCEPTED_SAMPLES) {
@@ -1746,7 +1661,7 @@ function processStaticPoint() {
     return;
   }
 
-  // 1.1 — pose mediana DESTE alvo, para medir a deriva da sessão.
+  // Pose mediana DESTE alvo, para medir a deriva da sessão.
   //
   // Não gateia nada. É o registro que permite ao operador (e ao relatório) ver
   // que a cabeça migrou entre o primeiro e o último alvo, que é a deriva que o
@@ -1768,7 +1683,7 @@ function processStaticPoint() {
     }
   }
 
-  // 2.1 — distância deste ponto, uma entrada por amostra aceita, para que
+  // Distância deste ponto, uma entrada por amostra aceita, para que
   // pontos com mais amostras pesem mais na mediana da sessão.
   {
     const d = getCurrentCameraDistanceCm();
@@ -1798,7 +1713,7 @@ interface TrainingSummary {
   deadFeaturesRightPct: number;
 }
 
-// D10 — diagnóstico de AJUSTE da calibração.
+// Diagnóstico de AJUSTE da calibração.
 //
 // Por que isto existe: até aqui a única medida de qualidade era o accuracy
 // test, que roda DEPOIS e mistura três coisas diferentes num número só:
@@ -1844,11 +1759,11 @@ export interface CalibrationFitDiagnostics {
    *  confundida com o olhar. */
   poseMean: { yaw: number; pitch: number; roll: number } | null;
   poseStd: { yaw: number; pitch: number; roll: number } | null;
-  /** 1.1 — deriva postural ENTRE alvos, em graus e em pixels de tela.
+  /** Deriva postural ENTRE alvos, em graus e em pixels de tela.
    *
    *  `poseStd` acima mistura o ruído dentro de cada ponto com a migração entre
-   *  pontos; medido na gravação de referência, o primeiro é 0,3° e o segundo
-   *  3,9°, e só o segundo importa. Este campo separa os dois. */
+   *  pontos; o primeiro é ~0,3° e o segundo ~3,9°, e só o segundo importa. Este
+   *  campo separa os dois. */
   poseDrift: SessionPoseDrift | null;
   /** Diagnóstico da GRADE a partir do LOO por alvo: distingue "a periferia saiu
    *  do alcance" de "a sessão inteira está ruim". Ver `calibrationGridDiagnosis.ts`. */
@@ -1880,10 +1795,10 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   const trainFeaturesRight = trainingProfile.map(p => p.featuresRight);
   const trainTargets = trainingProfile.map(p => ({ screenX: p.screenX, screenY: p.screenY }));
 
-  // D5.2 — média de `cameraDistanceEstimate` durante a calibração. Fica
+  // Média de `cameraDistanceEstimate` durante a calibração. Fica
   // como a distância de REFERÊNCIA para a correção geométrica opcional
   // em mapGaze. Se nenhum ponto carregou o campo (caller antigo), fica
-  // null e mapGaze pula a correção — comportamento pré-D5.2 preservado.
+  // null e mapGaze pula a correção.
   const camDists = trainingProfile
     .map((p) => (p.quality as { cameraDistanceEstimate?: number } | null | undefined)?.cameraDistanceEstimate)
     .filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v > 0);
@@ -1891,14 +1806,12 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     ? camDists.reduce((a, b) => a + b, 0) / camDists.length
     : null;
   if (calibrationRefDistance !== null) {
-    console.log(`[calib] distância câmera-rosto de referência (D5.2): ${calibrationRefDistance.toFixed(4)} (N=${camDists.length} amostras com quality preenchida)`);
+    console.log(`[calib] distância câmera-rosto de referência: ${calibrationRefDistance.toFixed(4)} (N=${camDists.length} amostras com quality preenchida)`);
   }
 
-  // A1-2 — preflight: aborta antes do solveLinear se mais de 30% das dims
+  // Preflight: aborta antes do solveLinear se mais de 30% das dims
   // não variam entre alvos diferentes. Falha barata com diagnóstico claro,
   // vs. falhar caro dentro do CV lambda com "Matriz singular na coluna N".
-  // A1-1 (pendente) vai propagar essa exceção para a UI; hoje o catch de
-  // completeCalibration engole, mas o warn abaixo dá diagnóstico ao dev.
   const deadL = countDeadFeatures(trainFeaturesLeft, trainTargets);
   const deadR = countDeadFeatures(trainFeaturesRight, trainTargets);
   const ratioL = deadL.totalDims > 0 ? deadL.deadCount / deadL.totalDims : 0;
@@ -1929,17 +1842,13 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   const targetsX = trainTargets.map(t => t.screenX);
   const targetsY = trainTargets.map(t => t.screenY);
 
-  // 3.1 — o λ passa a ser escolhido pelo erro em PIXELS, não em fração de tela.
+  // O λ é escolhido pelo erro em PIXELS, não em fração de tela.
   //
   // `screenX/screenY` são frações, e fração de tela não é uma grandeza única:
   // numa tela 16:9 uma unidade de x vale 1920 px e uma de y vale 1080. O CV
   // somava `dx² + dy²` cru, subponderando o erro em X por (1920/1080)² = 3,16×
   // e escolhendo λ quase só pelo eixo Y — justamente o eixo com sinal 6×
-  // atenuado pela pálpebra (ver 2.1). Daí regularização excessiva.
-  //
-  // Medido: o λ escolhido cai de 0,01 para 0,00464, e melhora nos DOIS
-  // critérios — accuracy 144,6 → 140,7 px e LOO por alvo 96,9 → 92,5 px. O LOO
-  // é independente do teste de precisão, então não é ajuste na base de avaliação.
+  // atenuado pela pálpebra. Daí regularização excessiva.
   {
     const g = currentCalibrationGeometry();
     if (g.screenWidthPx > 0 && g.screenHeightPx > 0) {
@@ -1955,22 +1864,12 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   scaledProfileLeft  = scaledFeaturesLeft;
   scaledProfileRight = scaledFeaturesRight;
 
-  // 3.2 — confiabilidade POR OLHO, do residuo de treino de cada modelo.
+  // Confiabilidade POR OLHO, do residuo de treino de cada modelo.
   //
   // A fusao binocular era media simples (com peso de EAR e dominancia por
-  // cima). Media simples supoe os dois olhos igualmente bons, e na gravacao de
-  // referencia eles nao sao nem de perto:
-  //
-  //   so olho esquerdo   134,9 px    (treino 36,2 | LOO 77,4)
-  //   so olho direito    164,8 px    (treino 52,6 | LOO 128,7)
-  //   media dos dois     140,7 px    (treino 38,3 | LOO 92,5)
-  //
-  // A media saiu PIOR que o olho bom sozinho: o olho ruim foi arrastando.
-  //
-  // O que NAO explica: a razao sinal-ruido bruta da iris e praticamente igual
-  // nos dois (excursao/ruido intra-alvo 30,8 contra 31,3). A diferenca esta no
-  // ajuste, nao no sinal captado, e nao da para prever qual olho sera melhor a
-  // partir da fisica. Por isso a resposta e MEDIR, nao supor.
+  // cima). Media simples supoe os dois olhos igualmente bons, e frequentemente
+  // eles nao sao — a media pode sair PIOR que o olho bom sozinho porque o olho
+  // ruim arrasta o resultado.
   //
   // Peso pelo inverso da variancia do residuo — o otimo para dois estimadores
   // nao-enviesados e independentes. Independencia e aproximacao grossa aqui (os
@@ -1999,8 +1898,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }
   }
 
-  // A1-3 — sinal de dado ruim que o CV já detecta mas não era propagado.
-  // A0-5 observou λ=1 num olho e λ=0.01 no outro com óculos (ratio 100).
+  // Sinal de dado ruim que o CV já detecta mas não era propagado.
   // Um ratio > 10 significa que os dois olhos discordam violentamente sobre
   // quanto regularizar, sinal de que pelo menos um dos lados está com
   // features degeneradas ou ruído desproporcional.
@@ -2008,14 +1906,13 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   if (diag && diag.ratio > 10) {
     console.warn(
       `[calib] ⚠ λ discrepante entre olhos: L=${diag.left} R=${diag.right} (ratio=${diag.ratio.toFixed(1)}). ` +
-      `Dado provavelmente ruim (reflexo em óculos, iluminação assimétrica). ` +
-      `Ver A0-5 no plano.`,
+      `Dado provavelmente ruim (reflexo em óculos, iluminação assimétrica).`,
     );
   }
 
-  // Sprint 4 — inicializa os regressores online a partir do modelo Ridge
-  // recém-treinado. Só suportado quando o modo ativo é 'ridge' — outros
-  // regressores (kernel) não expõem β_x/β_y diretamente.
+  // Inicializa os regressores online a partir do modelo Ridge recém-treinado.
+  // Só suportado quando o modo ativo é 'ridge' — outros regressores (kernel)
+  // não expõem β_x/β_y diretamente.
   onlineLeft = null;
   onlineRight = null;
   if (REGRESSOR_MODE === 'ridge') {
@@ -2028,7 +1925,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }
   }
 
-  // 1.3 — fixa a pose de referência a partir das amostras que de fato treinaram
+  // Fixa a pose de referência a partir das amostras que de fato treinaram
   // o modelo. `trainingProfile` e não `profile`: se alguma amostra foi
   // descartada antes do ajuste, a referência tem que descrever o que entrou.
   calibrationReferencePose = poseDeReferencia(
@@ -2040,7 +1937,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }),
   );
 
-  // 2.1 — troca a distância de um quadro pela mediana dos quadros aceitos.
+  // Troca a distância de um quadro pela mediana dos quadros aceitos.
   //
   // Só sobrescreve quando há medição: sem FOV calibrado `getCurrentCameraDistanceCm`
   // devolve null o tempo todo, e nesse caso o que a UI congelou (o valor
@@ -2058,7 +1955,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }
   }
 
-  // 1.4 — centro facial de referência, das mesmas amostras que treinaram.
+  // Centro facial de referência, das mesmas amostras que treinaram.
   calibrationReferenceCenter = centroDeReferencia(
     trainingProfile.map((a) => {
       const q = a.quality;
@@ -2073,7 +1970,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   );
   const d = lastFitDiagnostics;
   console.log(
-    `[calib] D10 ajuste — treino=${d.trainErrorPx.toFixed(0)}px | ` +
+    `[calib] ajuste — treino=${d.trainErrorPx.toFixed(0)}px | ` +
     `LOO=${d.looErrorPx.toFixed(0)}px | L2CS ${d.l2csValidFraction === null
       ? 'fora do conjunto ativo'
       : `válido=${(d.l2csValidFraction * 100).toFixed(0)}%`} | ` +
@@ -2081,7 +1978,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   );
   if (d.poseStd) {
     console.log(
-      `[calib] D10 pose durante a calibração — desvio yaw=${d.poseStd.yaw.toFixed(4)} ` +
+      `[calib] pose durante a calibração — desvio yaw=${d.poseStd.yaw.toFixed(4)} ` +
       `pitch=${d.poseStd.pitch.toFixed(4)} roll=${d.poseStd.roll.toFixed(4)} rad`,
     );
   }
@@ -2095,7 +1992,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     if (gd.mensagem) console.warn(`[calib] ⚠️ ${gd.mensagem}`);
   }
 
-  // 1.1 — a deriva entre alvos em PIXELS, que é a unidade em que ela dói.
+  // A deriva entre alvos em PIXELS, que é a unidade em que ela dói.
   if (d.poseDrift) {
     const pd = d.poseDrift;
     console.log(
@@ -2113,7 +2010,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
 }
 
-/** D10 — calcula `CalibrationFitDiagnostics`. Isolada e pura para poder ser
+/** Calcula `CalibrationFitDiagnostics`. Isolada e pura para poder ser
  *  testada sem passar por `completeCalibration`. */
 export function computeFitDiagnostics(
   featuresLeft: number[][],
@@ -2254,7 +2151,7 @@ export function computeFitDiagnostics(
   };
 }
 
-// D4.1 (ROADMAP §5) — detecção de ponto outlier na calibração.
+// Detecção de ponto outlier na calibração.
 //
 // Motivação: hoje só existe rejeição de outlier DENTRO de um ponto (variância
 // intra-ponto → warn; deriva de pose → rejeita frame). Um ponto INTEIRO mal
@@ -2268,20 +2165,19 @@ export function computeFitDiagnostics(
 // já usa em `ridge.ts` (leave-one-target-out).
 //
 //   Para cada alvo único k:
-//     1. Treina scaler + Ridge sobre TODOS os pontos EXCETO k (LOO por alvo).
+//     1. Treina scaler + Ridge sobre os pontos exceto k (LOO por alvo).
 //     2. Prediz cada amostra de k, mede erro (px normalizado) da média.
 //     3. Registra o resíduo médio r_k daquele alvo.
 //   Calcula MAD = mediana(|r_k - mediana(r)|).
 //   Marca k como candidato a outlier se |r_k - mediana(r)| > 3 × MAD × 1.4826.
 //   (O 1.4826 é o fator que faz MAD ~ σ para distribuição normal.)
 //
-// SAÍDA — só sinaliza (regra 4). O caller decide se avisa o cuidador ou não.
+// SAÍDA — só sinaliza. O caller decide se avisa o cuidador ou não.
 // Não bloqueia, não retreina automaticamente sem o ponto.
 //
-// ⚠️ N pequeno (~9 alvos): o próprio ROADMAP §5 (D4, "Riscos") pede que este
-// sinal seja tratado como INDICATIVO, não conclusivo. O log/UI que consumir
-// este resultado deve incluir essa ressalva — não criar falsa confiança num
-// número pequeno de amostras.
+// ⚠️ N pequeno (~9 alvos): este sinal deve ser tratado como INDICATIVO, não
+// conclusivo. O log/UI que consumir este resultado deve incluir essa ressalva
+// — não criar falsa confiança num número pequeno de amostras.
 export interface OutlierPointsReport {
   /** Índices em `points` (não em `targets únicos`) — pode conter várias
    *  amostras do mesmo alvo se ele foi marcado como outlier. */
@@ -2308,16 +2204,14 @@ export interface OutlierPointsReport {
 // não é achar o modelo ótimo, é comparar RESÍDUOS entre alvos deixados de fora
 // com o mesmo λ, isolando o efeito do alvo.
 //
-// D9 — λ passou a ser adimensional em `trainRidgeModel` (a penalidade é
-// `λ·m·P`, não mais `λ·I` absoluto). O valor antigo `1.0` equivalia, num LOO
-// com m amostras, a `1/m` na escala nova; com m ~ centenas isso é
-// regularização praticamente nula. `2e-3` mantém a mesma ordem de grandeza
-// efetiva do detector original para os tamanhos de coleta reais, sem depender
-// de m. A penalidade continua isotrópica aqui de propósito: o LOO precisa
-// comparar alvos com o MESMO viés, e a matriz Σ_W mudaria entre folds.
+// λ é adimensional em `trainRidgeModel` (a penalidade é `λ·m·P`, não mais
+// `λ·I` absoluto). `2e-3` mantém a ordem de grandeza efetiva do detector para
+// os tamanhos de coleta reais, sem depender de m. A penalidade continua
+// isotrópica aqui de propósito: o LOO precisa comparar alvos com o MESMO viés,
+// e a matriz Σ_W mudaria entre folds.
 const OUTLIER_LOO_LAMBDA = 2e-3;
 const OUTLIER_MAD_SCALE = 1.4826;      // MAD → σ para distribuição normal
-const OUTLIER_ZSCORE_THRESHOLD = 3.0;  // ~conservador; ver ROADMAP D4 riscos
+const OUTLIER_ZSCORE_THRESHOLD = 3.0;  // ~conservador
 // Piso absoluto do threshold em unidades normalizadas de tela (15% da tela).
 // Duas razões pra este piso ser alto:
 //   1. Quando o modelo é bom e os resíduos LOO são todos pequenos e parecidos,
@@ -2478,22 +2372,21 @@ function medianOf(values: readonly number[]): number {
   return s.length % 2 === 0 ? (s[m - 1] + s[m]) / 2 : s[m];
 }
 
-// A1-1 — outcome tipado. O chamador agora sabe se a UI deve mostrar
-// "Calibração Concluída" (só se ok=true) ou uma tela de falha com a razão
-// específica. Regra 3 do plano: o que a tela afirma tem que ser verdade.
+// Outcome tipado. O chamador sabe se a UI deve mostrar "Calibração Concluída"
+// (só se ok=true) ou uma tela de falha com a razão específica.
 export type CalibrationOutcome =
   | { ok: true }
   | {
       ok: false;
       reason:
-        | 'singular_matrix'          // solveLinear lançou mesmo após escalonamento λ (A1-3)
+        | 'singular_matrix'          // solveLinear lançou mesmo após escalonamento λ
         | 'insufficient_samples'     // profile vazio ou < 3 alvos únicos
-        | 'degenerate_features'      // preflight de A1-2 (>30% features mortas)
+        | 'degenerate_features'      // preflight (>30% features mortas)
         | 'unknown';
       detail: string;
     };
 
-// A1-1 — classificação de exceções do treino em um CalibrationOutcome.
+// Classificação de exceções do treino em um CalibrationOutcome.
 // Prioriza mensagens específicas do próprio código (degenerate_features,
 // singular_matrix) para dar orientação acionável ao cuidador.
 function classifyTrainingError(e: unknown, sampleCount: number): CalibrationOutcome {
@@ -2501,7 +2394,7 @@ function classifyTrainingError(e: unknown, sampleCount: number): CalibrationOutc
   if (sampleCount === 0) {
     return { ok: false, reason: 'insufficient_samples', detail };
   }
-  // 0.2 — o preflight de `completeCalibration` também dispara com amostras > 0
+  // O preflight de `completeCalibration` também dispara com amostras > 0
   // mas alvos únicos < 3. Sem este ramo, esse caso cairia em `unknown` e a UI
   // mostraria "erro desconhecido" para uma condição que sabemos nomear.
   if (/insufficient_samples/i.test(detail)) {
@@ -2529,7 +2422,7 @@ export function completeCalibration(
 
   let outcome: CalibrationOutcome;
   try {
-    // 0.2 — preflight de amostras.
+    // Preflight de amostras.
     //
     // `trainRidgeModel` NÃO lança com perfil vazio: devolve um modelo com
     // `numFeatures: 0`. Sem esta guarda, `completeCalibration` seguia para o
@@ -2553,16 +2446,16 @@ export function completeCalibration(
 
     const summary = trainScalersAndRegressors(profile);
     saveProfile();
-    // A1-6 — snapshot no registry por condição óptica. Se o pendingMeta não
-    // foi setado (chamador antigo não passou meta), salva como 'desconhecido'.
+    // Snapshot no registry por condição óptica. Se o pendingMeta não foi
+    // setado (chamador antigo não passou meta), salva como 'desconhecido'.
     persistActiveProfileToRegistry(summary);
     outcome = { ok: true };
   } catch (e) {
     const failure = classifyTrainingError(e, profile.length);
     outcome = failure;
-    // A1-6 — não persistir perfil quando o treino falhou.
-    // A1-1 — garantir que isCalibrated() diga a verdade após falha.
-    // Zeramos os regressors mesmo se algum tiver sobrevivido parcialmente.
+    // Não persistir perfil quando o treino falhou. Garantir que isCalibrated()
+    // diga a verdade após falha: zeramos os regressors mesmo se algum tiver
+    // sobrevivido parcialmente.
     regressorLeft = null;
     regressorRight = null;
     pendingProfileMeta = null;
@@ -2571,15 +2464,15 @@ export function completeCalibration(
     }
   } finally {
     isCalibrating = false;
-    // D6.1 — libera o modo. `getCalibrationTargets()` volta ao default 'full'.
+    // Libera o modo. `getCalibrationTargets()` volta ao default 'full'.
     currentCalibrationMode = null;
     if (onComplete) onComplete(outcome!);
   }
 }
 
-// A1-6 — extrai um snapshot serializável do estado atual e enfileira no
-// registry sob a meta pendente. Chamador (completeCalibration) só invoca
-// quando o treino terminou sem exceção.
+// Extrai um snapshot serializável do estado atual e enfileira no registry sob
+// a meta pendente. Chamador (completeCalibration) só invoca quando o treino
+// terminou sem exceção.
 function persistActiveProfileToRegistry(summary: TrainingSummary): void {
   const modelL = regressorLeft ? ridgeModelFromRegressor(regressorLeft) : null;
   const modelR = regressorRight ? ridgeModelFromRegressor(regressorRight) : null;
@@ -2592,10 +2485,10 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
 
   const diag = getLambdaDiagnostics();
 
-  // D4.2 — corre o detector de outlier ANTES de salvar o perfil, para o campo
+  // Corre o detector de outlier ANTES de salvar o perfil, para o campo
   // quality.outlierTargets nascer preenchido. É diagnóstico puro (não muda o
-  // treino). Se algo dá errado, log claro mas segue salvando — regra 1 do
-  // projeto (falhar alto, não silenciar) sem deixar o perfil sem quality.
+  // treino). Se algo dá errado, log claro mas segue salvando — falhar alto,
+  // não silenciar, sem deixar o perfil sem quality.
   let outlierSummary: NonNullable<StoredCalibrationProfile['quality']>['outlierTargets'] | undefined;
   try {
     const rep = detectOutlierPoints(profile);
@@ -2617,8 +2510,8 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
           isOutlier: t.isOutlier,
         })),
       };
-      // Log honesto e indicativo — ver riscos do D4 no ROADMAP: MAD com N~9
-      // é frágil, então nunca chamamos disso "conclusivo".
+      // Log honesto e indicativo — MAD com N~9 é frágil, então nunca
+      // chamamos disso "conclusivo".
       if (outlierIndicesInPerTarget.length > 0) {
         const worst = rep.perTarget
           .filter((t) => t.isOutlier)
@@ -2662,7 +2555,7 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
   );
 }
 
-// A1-6 — troca o perfil ativo (recarrega regressors e scalers a partir do
+// Troca o perfil ativo (recarrega regressors e scalers a partir do
 // snapshot serializado). Devolve o meta do perfil ativado ou null se o id
 // não existe. NÃO chama startCalibrationMode — o perfil está pronto, é só
 // restaurar o estado.
@@ -2727,10 +2620,9 @@ export function init() {
 
   (window as unknown as Record<string, unknown>).__exportGazeDistanceLog = exportGazeDistanceLog;
 
-  // A0-5 + A1-3 + A1-2: expõe hooks de diagnóstico do bug dos óculos no console.
+  // Expõe hooks de diagnóstico no console.
   // Uso: __irisflowDebug.isCalibrated(), __irisflowDebug.lambdaDiag(),
   //      __irisflowDebug.varianceBreaches(), __irisflowDebug.deadFeatures().
-  // Remover quando A1 estiver estável.
   (window as unknown as Record<string, unknown>).__irisflowDebug = {
     isCalibrated,
     sampleCount: getSampleCount,
@@ -2769,12 +2661,12 @@ export function init() {
         maxAllowed: DEAD_FEATURE_MAX_RATIO,
       };
     },
-    // D4.2 (ROADMAP §5) — hook para o cuidador/dev ver, no console, quais
-    // alvos da última calibração passaram do corte MAD. Roda sob demanda:
-    // `__irisflowDebug.outlierTargets()`. Recomputa em cima do `profile`
-    // atual (a mesma coisa que persistActiveProfileToRegistry usou), então
-    // reflete o estado real do modelo em memória. Retorna null se ainda não
-    // há amostras suficientes.
+    // Hook para o cuidador/dev ver, no console, quais alvos da última
+    // calibração passaram do corte MAD. Roda sob demanda:
+    // `__irisflowDebug.outlierTargets()`. Recomputa em cima do `profile` atual
+    // (a mesma coisa que persistActiveProfileToRegistry usou), então reflete
+    // o estado real do modelo em memória. Retorna null se ainda não há
+    // amostras suficientes.
     outlierTargets: () => {
       if (profile.length === 0) return null;
       return detectOutlierPoints(profile);
@@ -2786,8 +2678,8 @@ export function feedFaceMetrics(_detected: boolean, _iod: number): void {
   // O React agora consome isso diretamente via engine e Context
 }
 
-// Sprint 4 — hook de recalibração implícita. Chamado quando um dwell click é
-// confirmado sobre um botão da UI; alvo em pixels de tela (o centro do botão).
+// Hook de recalibração implícita. Chamado quando um dwell click é confirmado
+// sobre um botão da UI; alvo em pixels de tela (o centro do botão).
 //
 // Rejeita a amostra se:
 //   - Flag `USE_ONLINE_CALIBRATION` está desligada
@@ -2867,11 +2759,6 @@ export function onlineSampleCount(): number {
   return Math.min(onlineLeft.n, onlineRight.n);
 }
 
-// Fase 0.1 — expõe o alvo atual da coleta em px de viewport, para o gravador
-// de sessão anexar como ground-truth no frame. Retorna null quando não há
-// ponto sendo coletado (fora da calibração, ou entre pontos). Devolve o
-// centro do dot mesmo durante os 400 ms de acomodação — o dot está visível
-// ali, o replay precisa saber disso.
 export function getCurrentTargetPx(): { xPx: number; yPx: number } | null {
   if (!isCalibrating || !isCollecting) return null;
   if (typeof document === 'undefined') return null;
@@ -2880,14 +2767,14 @@ export function getCurrentTargetPx(): { xPx: number; yPx: number } | null {
   return { xPx: currentTargetX * vw, yPx: currentTargetY * vh };
 }
 
-// A1-1 — antes: `_dimErrorLogged` era one-shot para toda a sessão. Frame 1
+// Antes: `_dimErrorLogged` era one-shot para toda a sessão. Frame 1
 // lançava, logava uma vez, e todos os N frames seguintes falhavam em silêncio.
 // Combinado com o fallback do nariz no engine, o cursor "funcionava" enquanto
 // mapGaze quebrava a 30 Hz sem nenhum sinal.
 // Agora: rate-limit por tempo (1×/segundo) + contador de erros consecutivos
 // exposto via getMapGazeErrorCount(). Recupera silêncio no caminho feliz
 // mas dá visibilidade quando há problema persistente. O estado degradado do
-// engine (A1-4) também vai capturar isso — as duas defesas se reforçam.
+// engine também captura isso — as duas defesas se reforçam.
 let _mapGazeConsecutiveErrors = 0;
 let _mapGazeLastLoggedMs = 0;
 const MAP_GAZE_LOG_INTERVAL_MS = 1000;
@@ -2898,14 +2785,14 @@ export function getMapGazeErrorCount(): number {
 
 // Peso por olho (0..1) derivado do EAR relativo. Fica em escopo de módulo
 // para o `mapGaze` de assinatura simples continuar funcionando quando o
-// caller antigo (testes de regressão, replay) não passa `perEyeWeight`.
+// caller antigo (testes de regressão) não passa `perEyeWeight`.
 const MIN_EYE_WEIGHT = 0.05;   // nunca zera um olho: mantém alguma contribuição
 
 export function mapGaze(
   featuresLeft: number[],
   featuresRight: number[],
   perEyeWeight?: { left: number; right: number },
-  // D12 — mantido na assinatura por compatibilidade com os callers existentes
+  // Mantido na assinatura por compatibilidade com os callers existentes
   // (engine e testes de regressão), mas não é mais lido: a compensação de
   // distância passou a usar `setCurrentFrameGeometry` + `setCameraFovDeg`, que
   // dão a distância em CENTÍMETROS. Este parâmetro carregava o proxy
@@ -2915,7 +2802,7 @@ export function mapGaze(
 ): { x: number; y: number } | null {
   if (!regressorLeft || !regressorRight) return null;
 
-  // D12 — a compensação de distância deixou de mexer nas FEATURES e passou a
+  // A compensação de distância deixou de mexer nas FEATURES e passou a
   // corrigir a SAÍDA (ver o bloco no fim desta função e o cabeçalho de
   // `distanceCompensation.ts`).
   //
@@ -2936,7 +2823,7 @@ export function mapGaze(
     predRight = regressorRight.predict(scaledRight);
     _mapGazeConsecutiveErrors = 0; // caminho feliz: zera contador
   } catch (e) {
-    // 0.2 — dimensão incompatível é DEFINITIVA, não transitória.
+    // Dimensão incompatível é DEFINITIVA, não transitória.
     //
     // Antes, este catch tratava tudo igual: contava, logava 1×/s e devolvia
     // null. Para um erro de dimensão isso significa null a 30 Hz para sempre,
@@ -2969,7 +2856,7 @@ export function mapGaze(
   // também o multiplicador da dominância ocular do usuário.
   let wL = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.left) : 1;
   let wR = perEyeWeight ? Math.max(MIN_EYE_WEIGHT, perEyeWeight.right) : 1;
-  // 3.2 — confiabilidade medida na calibracao, multiplicada pelos pesos que ja
+  // Confiabilidade medida na calibracao, multiplicada pelos pesos que ja
   // existiam. Sao coisas diferentes e se compoem: `perEyeWeight` e disponibilidade
   // INSTANTANEA (o olho esta aberto agora?), a confiabilidade e qualidade do
   // MODELO daquele olho (quao bem ele mapeia iris para tela). Um olho aberto
@@ -2984,7 +2871,7 @@ export function mapGaze(
   let baseX = (predLeft.x * wL + predRight.x * wR) / wSum;
   let baseY = (predLeft.y * wL + predRight.y * wR) / wSum;
 
-  // Sprint 4 — mistura com o modelo online (RLS) quando habilitado e após
+  // Mistura com o modelo online (RLS) quando habilitado e após
   // acumular amostras suficientes. Rampa linear em [0,1] evita degradar o
   // baseline antes de acumular evidência.
   if (USE_ONLINE_CALIBRATION && onlineLeft && onlineRight) {
@@ -3037,7 +2924,7 @@ export function mapGaze(
     }
     return v;
   }
-  // D12 — compensação de distância, aplicada em espaço NORMALIZADO e ANTES do
+  // Compensação de distância, aplicada em espaço NORMALIZADO e ANTES do
   // softClamp.
   //
   // Antes do clamp porque o clamp é quem garante que o resultado fique dentro
@@ -3053,19 +2940,12 @@ export function mapGaze(
   lastDistanceRange = range;
   const compensado = applyDistanceRatioToPrediction(baseX, baseY, 1, 1, range.ratio);
 
-  // 1.3 — compensação geométrica de pose, também antes do softClamp e pelo
-  // mesmo motivo. DESLIGADA por default: ver `geometricPoseCompensation` e a
-  // medição em docs/RESULTADOS-D2-D8.md, onde a geometria pura mede 5,6% PIOR
-  // e um deslocamento fixo sem pose nenhuma bate a versão ajustada.
+  // Compensação geométrica de pose, também antes do softClamp e pelo
+  // mesmo motivo. DESLIGADA por default: a geometria pura mede pior que a
+  // versão ajustada.
   //
-  // Fica ligável porque a gravação de referência não consegue testá-la: a pose
-  // é quase constante durante o teste de precisão, então `d · tan(Δ)` degenera
-  // em deslocamento fixo. Testar de verdade exige gravação com movimento de
-  // cabeça deliberado.
-  // 1.4 — translação lateral, aplicada depois da rotação: são efeitos
-  // independentes que se somam no mesmo ponto predito. DESLIGADA por default —
-  // na gravação de referência o rosto translada 0,25 cm no teste inteiro, e o
-  // ganho medido empata com um deslocamento fixo que não olha o rosto.
+  // Translação lateral, aplicada depois da rotação: são efeitos independentes
+  // que se somam no mesmo ponto predito. DESLIGADA por default.
   const comPose0 = EXPERIMENT.geometricPoseCompensation
     ? compensarPredicao(
         compensado.x, compensado.y,

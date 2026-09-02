@@ -1,37 +1,3 @@
-// D3.1 (ROADMAP §5) — Validação empírica dos eixos do L2CS com matriz de poses.
-//
-// HISTÓRICO
-// A versão anterior (Sprint 0) validava só 3 fotos: look_center, look_up,
-// look_right. Isso confirmava `IS_VIDEO_MIRRORED=false` com um único ponto
-// para o yaw e outro para o pitch — insuficiente para descartar bug (uma
-// única foto podia estar enquadrada de forma que "casa por coincidência").
-//
-// D3.1 amplia para uma MATRIZ maior de poses, incluindo cima/baixo e
-// esquerda/direita nas duas direções, para validar simetria explícita:
-//   - look_center           → yaw ≈ 0, pitch ≈ 0
-//   - look_up   / look_down → pitch de sinais opostos, magnitude parecida
-//   - look_right/ look_left → yaw   de sinais opostos, magnitude parecida
-// Opcionalmente aceita conjuntos em múltiplas distâncias (subdiretórios) —
-// se cada distância der o MESMO sinal, o achado é robusto; se der sinais
-// opostos, é bug (não coincidência de enquadramento).
-//
-// COMPAT
-// Se só existirem as 3 fotos legadas (look_center/look_up/look_right), o
-// script continua rodando e reporta os mesmos veredictos de antes — só não
-// consegue emitir os veredictos de simetria (marcados como SKIPPED com
-// motivo). Não é regressão do escopo Sprint 0.
-//
-// USO
-//   npm install --no-save onnxruntime-node sharp
-//   node frontend/scripts/l2cs_axis_validation.mjs
-//   node frontend/scripts/l2cs_axis_validation.mjs --dir <path>
-//   node frontend/scripts/l2cs_axis_validation.mjs --dirs <path1>,<path2>
-//
-// SAÍDA
-// Relatório em JSON em <primeiroDir>/axis_validation_report.json com todas
-// as poses, veredictos e (se >1 distância) consistência entre distâncias.
-// Exit 0 se todos os veredictos "obrigatórios" passarem; 1 se algum falhar.
-
 // Dependências ONNX/sharp carregadas dinamicamente dentro de main() para que
 // `--help` funcione mesmo sem `npm install --no-save onnxruntime-node sharp`
 // (a ajuda é o único ponto que o operador consulta antes de instalar).
@@ -52,12 +18,6 @@ const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
 const CENTER_CROP_RATIO = 0.6;
 
-// Todas as poses suportadas. `axisSign` diz o sinal esperado no eixo
-// dominante da pose:
-//   { axis: 'yaw', sign: +1 } → yaw positivo esperado (olhando p/ direita)
-//   { axis: 'pitch', sign: -1 } → pitch negativo esperado (olhando p/ baixo)
-// A convenção default vem de Gaze360 confirmada em Sprint 0 (yaw+=direita,
-// pitch+=cima). Um sinal invertido aqui é a assinatura do bug de espelhamento.
 const POSE_CATALOG = [
   { name: 'look_center', axis: 'center', sign: 0,  hint: 'Olhe direto para a lente'                            },
   { name: 'look_up',     axis: 'pitch',  sign: +1, hint: 'Cabeça reta — olhos para CIMA (topo do monitor)'      },
@@ -66,10 +26,6 @@ const POSE_CATALOG = [
   { name: 'look_left',   axis: 'yaw',    sign: -1, hint: 'Cabeça reta — olhos para a ESQUERDA (borda esquerda)' },
 ];
 
-// Tolerâncias empíricas. Foram calibradas para o Sprint 0 (look_up mexeu
-// pitch em ~15°, look_right mexeu yaw em ~26°). Manter conservadoras — se
-// o usuário exagerar na pose, o delta cresce; se subestimar, cai — mas o
-// sinal e a dominância do eixo têm que continuar corretos.
 const CENTER_TOL_DEG = 10;
 const MIN_DELTA_DEG = 5;
 
@@ -87,7 +43,7 @@ function parseArgs(argv) {
 
 function printHelp() {
   process.stdout.write(`
-D3.1 — Validação empírica dos eixos do L2CS (matriz de poses).
+Validação empírica dos eixos do L2CS (matriz de poses).
 
 Uso:
   node frontend/scripts/l2cs_axis_validation.mjs               (usa ${DEFAULT_PHOTO_DIR})
@@ -97,7 +53,7 @@ Uso:
 Fotos suportadas (todas opcionais — o script pula as ausentes com WARN):
 ${POSE_CATALOG.map((p) => '  ' + p.name.padEnd(14) + ' — ' + p.hint).join('\n')}
 
-Para atingir a matriz do ROADMAP §5 (≥6 poses, ≥2 distâncias):
+Para atingir a matriz completa (≥6 poses, ≥2 distâncias):
   Distância 1 (~60 cm) → 5 fotos em <dir1>/
   Distância 2 (~40 cm) → mesmas 5 em <dir2>/
 Total: 10 fotos. O script valida sinais + simetria + consistência entre distâncias.
@@ -282,7 +238,7 @@ async function runOne(dirPath, session, meta, tagLabel, ort) {
 
   if (anyMissing) {
     dirResults.warnings.push(
-      `matriz completa da ROADMAP §5 exige as 5 poses ` +
+      `matriz completa exige as 5 poses ` +
       `(${POSE_CATALOG.map((p) => p.name).join(', ')}) para veredictos de simetria.`,
     );
   }

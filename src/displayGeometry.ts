@@ -1,11 +1,10 @@
-// Etapa 1 — geometria física da tela lida do sistema operacional.
+// Geometria física da tela lida do sistema operacional.
 //
 // POR QUE EXISTE
 //
 // A diagonal da tela entra em duas contas que NÃO são cosméticas:
 //   1. `meanErrorDeg` do relatório de precisão. Com 15,6" configurado numa tela
-//      de 23,6", o erro angular saía 34% MENOR que o real (2,98° exibido contra
-//      4,50° verdadeiro no relatório 1787682565489).
+//      de 23,6", o erro angular saía 34% MENOR que o real.
 //   2. A posição dos alvos de calibração, que sai de um orçamento de
 //      excentricidade angular e portanto depende do tamanho físico.
 //
@@ -68,8 +67,7 @@ export function computeDisplayGeometry(size: PhysicalPanelSize | null | undefine
  * Heurística: o maior. Num posto com notebook + monitor externo, o paciente
  * está olhando para o grande; e errar para o maior é o erro menos ruim, porque
  * subestimar a diagonal faz o orçamento de excentricidade colocar alvos mais
- * para fora do que o olho alcança — que é exatamente a falha que a auditoria
- * D9 encontrou.
+ * para fora do que o olho alcança.
  */
 export function pickPrimaryPanel(sizes: readonly PhysicalPanelSize[]): PhysicalPanelSize | null {
   let best: PhysicalPanelSize | null = null;

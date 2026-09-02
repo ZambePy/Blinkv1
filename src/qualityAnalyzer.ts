@@ -1,12 +1,7 @@
-// Análise de qualidade do crop dos olhos (Sprint 1.1).
+// Análise de qualidade do crop dos olhos.
 //
-// Antes desta sprint, `extractor.ts` retornava QualityFeatures com valores
-// hardcoded (brightness/contrast=0.5, blur=0, confidence=1.0). O filtro em
-// `calibration.feedRawData` que testa `detectorConfidence < 0.5` nunca disparava
-// — na prática nenhuma amostra ruim era rejeitada.
-//
-// Este módulo lê o frame de vídeo, define um bounding box em torno dos landmarks
-// dos olhos e computa:
+// Este módulo lê o frame de vídeo, define um bounding box em torno dos
+// landmarks dos olhos e computa:
 //   - brightnessEstimate → média de luminância (Rec. 709) no crop, em [0,1]
 //   - contrastEstimate   → desvio padrão da luminância
 //   - blurEstimate       → 1 - clamp(variância do Laplaciano) — alto = borrado
@@ -23,8 +18,7 @@ const EYE_BBOX_INDICES = [33, 133, 159, 145, 362, 263, 386, 374];
 
 // Referência empírica para converter variância do Laplaciano em "blur estimate".
 // Frames nítidos de webcam a 640×480 costumam produzir variância > 0.001;
-// abaixo disso, a imagem está borrada. Este valor precisa ser ajustado após
-// observar valores reais durante a coleta de baseline (Sprint 0).
+// abaixo disso, a imagem está borrada.
 const BLUR_REFERENCE_VARIANCE = 0.001;
 
 // Escala para converter deslocamento médio dos landmarks entre frames em
@@ -34,11 +28,11 @@ const BLUR_REFERENCE_VARIANCE = 0.001;
 // brusco e ~0.94 em rosto parado.
 const LANDMARK_JITTER_SCALE = 20;
 
-// A1-5 — limiar de luminância "quase-saturada". Pixels acima disso na região
-// do olho são candidatos a reflexo especular (a tela refletindo na lente).
-// Pele e esclera raramente ultrapassam 0.95 sob exposição correta; lente
-// refletindo LCD frontal, sim. Valor conservador; pode subir para 0.97 se
-// falsos positivos em pele muito clara aparecerem em campo.
+// Limiar de luminância "quase-saturada". Pixels acima disso na região do olho
+// são candidatos a reflexo especular (a tela refletindo na lente). Pele e
+// esclera raramente ultrapassam 0.95 sob exposição correta; lente refletindo
+// LCD frontal, sim. Valor conservador; pode subir para 0.97 se falsos
+// positivos em pele muito clara aparecerem em campo.
 const SPECULAR_LUMINANCE = 0.95;
 
 export class EyeQualityAnalyzer {
@@ -57,10 +51,9 @@ export class EyeQualityAnalyzer {
     if (this.canvas.width !== vw) this.canvas.width = vw;
     if (this.canvas.height !== vh) this.canvas.height = vh;
     if (!this.ctx) {
-      // 2.4 — sem contexto 2d nada foi medido. Devolver
-      // `{confidence: 1.0, brightness: 0.5, contrast: 0.5, blur: 0.0}` afirmava
-      // confiança máxima e passava nos seis critérios do gate de calibração,
-      // tornando a falha invisível. Objeto vazio é a verdade.
+      // Sem contexto 2d nada foi medido. Devolver constantes plausíveis
+      // afirmaria confiança máxima e passaria nos critérios do gate de
+      // calibração, tornando a falha invisível. Objeto vazio é a verdade.
       return {};
     }
 
@@ -114,7 +107,7 @@ export class EyeQualityAnalyzer {
       const data = imageData.data;
       const N = cropW * cropH;
       if (N === 0) {
-        // 2.4 — crop degenerado: `detectorConfidence` foi medido de verdade
+        // Crop degenerado: `detectorConfidence` foi medido de verdade
         // (vem do deslocamento de landmarks entre quadros) e vale reportar; o
         // resto não foi.
         return { detectorConfidence };
@@ -122,8 +115,8 @@ export class EyeQualityAnalyzer {
 
       const lum = new Float32Array(N);
       let sum = 0;
-      // A1-5 — contagem de pixels quase-saturados feita no mesmo loop
-      // (custo zero). specularRatio = fração acima de SPECULAR_LUMINANCE.
+      // Contagem de pixels quase-saturados feita no mesmo loop (custo zero).
+      // specularRatio = fração acima de SPECULAR_LUMINANCE.
       let specularCount = 0;
       for (let i = 0; i < N; i++) {
         const r = data[i * 4];

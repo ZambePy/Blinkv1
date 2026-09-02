@@ -5,8 +5,8 @@
 // relação linear conhecida (ideal para Ridge) e mede:
 //   1. Que o softClamp tem derivada contínua (sem saltos de velocidade)
 //   2. Que a precisão nas bordas ≤ 1.5× a precisão central
-//   3. Que a grade de calibração mantém as invariantes de forma (D9: as
-//      posições saem do orçamento de excentricidade, não são mais constantes)
+//   3. Que a grade de calibração mantém as invariantes de forma (as posições
+//      saem do orçamento de excentricidade, não são mais constantes)
 //   4. Que sacadas rápidas preservam amplitude com os novos betas
 
 import { describe, it, expect } from 'vitest';
@@ -236,11 +236,9 @@ describe('Ridge precision — edges vs center', () => {
 
 // ── Calibration targets coverage ─────────────────────────────────────────────
 
-// D9 — as posições dos alvos deixaram de ser constantes 5%/95%: agora saem do
-// orçamento de excentricidade angular. Ver o cabeçalho de
-// `computeCalibrationTargets` em calibration.ts para o porquê (ganho medido de
-// 1.294 em X vs 0.930 em Y no relatório 1787682565489). Estes testes afirmam
-// as invariantes da grade; os números por tela vivem em `calibration.d9.test.ts`.
+// As posições dos alvos saem do orçamento de excentricidade angular. Ver o
+// cabeçalho de `computeCalibrationTargets` em calibration.ts. Estes testes
+// afirmam as invariantes da grade.
 describe('Calibration targets — grade 3×3 dentro do orçamento angular', () => {
   it('FULL cobre 3 posições distintas por eixo, simétricas em torno do centro', () => {
     expect(CALIBRATION_TARGETS_FULL).toHaveLength(9);

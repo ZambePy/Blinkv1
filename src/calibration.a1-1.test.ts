@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import type { CalibrationOutcome } from './calibration';
 
-// A1-1 — classifyTrainingError é interno (não exportado). Testamos o contrato
+// classifyTrainingError é interno (não exportado). Testamos o contrato
 // via um wrapper equivalente aqui — o objetivo é garantir que:
 //   1. O tipo CalibrationOutcome está exportado corretamente.
 //   2. As mensagens de erro específicas (degenerate_features, matriz singular)
@@ -18,7 +18,7 @@ function classifyForTest(e: unknown, sampleCount: number): CalibrationOutcome {
   return { ok: false, reason: 'unknown', detail };
 }
 
-describe('A1-1: CalibrationOutcome contract', () => {
+describe('CalibrationOutcome contract', () => {
   it('tipo ok=true é atribuível', () => {
     const ok: CalibrationOutcome = { ok: true };
     expect(ok.ok).toBe(true);
@@ -37,14 +37,14 @@ describe('A1-1: CalibrationOutcome contract', () => {
   });
 });
 
-describe('A1-1: classificação de erros de treino', () => {
+describe('classificação de erros de treino', () => {
   it('samples=0 sempre vira insufficient_samples, independente do erro', () => {
     const r = classifyForTest(new Error('qualquer coisa'), 0);
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.reason).toBe('insufficient_samples');
   });
 
-  it('erro do preflight A1-2 (degenerate_features) é reconhecido', () => {
+  it('erro do preflight (degenerate_features) é reconhecido', () => {
     const err = new Error('[calib] degenerate_features: mais de 30% das dimensões...');
     const r = classifyForTest(err, 100);
     expect(r.ok).toBe(false);

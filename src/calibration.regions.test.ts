@@ -1,25 +1,3 @@
-// D9 — benchmark de precisão POR REGIÃO: centro, bordas, quatro cantos e
-// transições entre elas.
-//
-// Contexto: o relatório `accuracy-report-1787682565489` mostrou erro médio de
-// 173 px. A decomposição afim dos 9 pares (ground-truth → predito) devolveu
-// resíduo de 36,5 px — ou seja, 79% do erro era um mapa afim coerente
-// (ganho X 1,294, ganho Y 0,930), não ruído. Um modelo linear nas features não
-// consegue ganho > 1 no interior e acertar os extremos ao mesmo tempo: a
-// amplitude de olhar registrada nos alvos tinha que ser menor que a nominal.
-// Ver o cabeçalho de `computeCalibrationTargets` em calibration.ts.
-//
-// Este arquivo trava as duas coisas que a investigação estabeleceu:
-//   1. A decomposição afim identifica corretamente cada família de erro.
-//   2. O pipeline (StandardScaler + RidgeRegressor reais) atinge, por região,
-//      erros dentro dos limites medidos — com atenção às regiões onde a UI
-//      realmente coloca alvos.
-//
-// ⚠️ Os números vêm de um SIMULADOR (`testUtils/gazeSimulator`), não de
-// gravação real — `fixtures/replay` é gitignored. Os limites abaixo são
-// folgados de propósito: servem para pegar REGRESSÃO de pipeline, não para
-// prometer precisão de campo.
-
 import { describe, it, expect, beforeAll } from 'vitest';
 import { StandardScaler } from './scaler';
 import { RidgeRegressor } from './ridge';
@@ -149,7 +127,7 @@ function meanOverSeeds(targets: readonly { x: number; y: number }[], region: Reg
   return errs.reduce((a, b) => a + b, 0) / errs.length;
 }
 
-// Protocolos comparados. `LEGACY_TARGETS` é a grade 5%/95% de antes do D9.
+// Protocolos comparados. `LEGACY_TARGETS` é a grade 5%/95% antiga.
 const LEGACY_TARGETS = [
   { x: 0.05, y: 0.05 }, { x: 0.5, y: 0.05 }, { x: 0.95, y: 0.05 },
   { x: 0.05, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.95, y: 0.5 },
@@ -169,7 +147,7 @@ beforeAll(() => {
 
 // ── Decomposição afim ────────────────────────────────────────────────────────
 
-describe('D9 — decomposição afim do erro (diagnóstico)', () => {
+describe('decomposição afim do erro (diagnóstico)', () => {
   const grid = REGIONS.gradeDoTeste;
 
   it('erro puramente afim é reconhecido como afim (resíduo ~0)', () => {
@@ -218,12 +196,12 @@ describe('D9 — decomposição afim do erro (diagnóstico)', () => {
 
 // ── Precisão por região ──────────────────────────────────────────────────────
 
-describe('D9 — precisão por região (centro, bordas, cantos, transições)', () => {
+describe('precisão por região (centro, bordas, cantos, transições)', () => {
   const targets = NEW_TARGETS;
 
   // Limites medidos no simulador com as 3 sementes de SEEDS, na geometria de
   // referência (23,6" a 60 cm, orçamento de 16°) e no conjunto de features
-  // ATIVO (D11 — `iris12`). Valor observado entre parênteses; folga de ~50%
+  // ATIVO (`iris12`). Valor observado entre parênteses; folga de ~50%
   // para não virar teste flaky. Entre parênteses também o protocolo antigo
   // (5%/95%), que é o que este teste protege contra regressão:
   const BOUNDS: Record<Region, number> = {
@@ -234,27 +212,11 @@ describe('D9 — precisão por região (centro, bordas, cantos, transições)', 
     gradeDoTeste: 145, // observado 91,6 px (legado 154,3)
   };
 
-  // ⚠️ LIMITE HONESTO DO SIMULADOR — leia antes de usar estes números para
-  // decidir qualquer coisa sobre o vetor de features.
-  //
-  // Na questão "44 dims vs 12 dims", o simulador diz o OPOSTO das gravações
-  // reais. Aqui, com 44 dims os mesmos limites ficavam em 9,5/15,6/18,0/37,7 px
-  // — bem melhores que os 32,3/52,7/56,6/88,3 de agora. Nas duas gravações
-  // reais, 12 dims venceu 44 dims em TODOS os k (117 vs 165 px em k=14).
-  //
-  // Por que divergem: o simulador gera as 44 dimensões como funções limpas do
-  // olhar mais ruído. Nesse mundo, mais dimensões são sempre mais informação.
-  // Na captura real, 32 das 44 são nocivas — 7 do bloco L2CS estavam
-  // literalmente constantes (bug do crop preto, ver l2cs/crop.ts) e as de pose
-  // e interações estão confundidas com a posição do alvo, porque a cabeça se
-  // move ~metade da amplitude do olho e correlacionada com o alvo. O simulador
-  // não modela esse confundimento; já havia falhado antes em reproduzir o viés
-  // de -106 px em X e a variação entre sessões.
-  //
-  // CONSEQUÊNCIA PRÁTICA: este teste serve para travar regressão de REGIÃO sob
-  // configuração fixa — centro vs bordas vs cantos. NÃO serve para escolher o
-  // conjunto de features. Essa escolha se decide por replay de gravação real
-  // (`fixtures/replay/*.jsonl`), não aqui.
+  // ⚠️ Este teste serve para travar regressão de REGIÃO sob configuração fixa —
+  // centro vs bordas vs cantos. NÃO serve para escolher o conjunto de features:
+  // o simulador gera dimensões como funções limpas do olhar mais ruído, e essa
+  // suposição não representa capturas reais (onde pose e interações podem estar
+  // confundidas com a posição do alvo).
 
   for (const region of Object.keys(BOUNDS) as Region[]) {
     it(`${region}: erro médio dentro do limite de regressão`, () => {
@@ -284,7 +246,7 @@ describe('D9 — precisão por região (centro, bordas, cantos, transições)', 
 
 // ── Orçamento de excentricidade vs. protocolo antigo (5%/95%) ────────────────
 
-describe('D9 — guarda de contaminação treino→teste', () => {
+describe('guarda de contaminação treino→teste', () => {
   // A grade de calibração agora depende da geometria configurada. Para certas
   // combinações de tela/distância ela pode cair EM CIMA da grade de validação,
   // e aí o teste de precisão mede memorização em vez de generalização — o
@@ -334,7 +296,7 @@ describe('D9 — guarda de contaminação treino→teste', () => {
   });
 });
 
-describe('D9 — orçamento de excentricidade bate o protocolo 5%/95%', () => {
+describe('orçamento de excentricidade bate o protocolo 5%/95%', () => {
   it('a grade nova não coincide com a antiga no eixo X (e coincide no Y)', () => {
     // A assimetria é o ponto: 12° cobre a altura inteira da tela, mas não a
     // largura. É a mesma assimetria que o relatório real mediu.

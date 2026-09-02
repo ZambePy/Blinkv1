@@ -1,11 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { projectFeatureSet, activeFeatureDims, IRIS12_DIMS } from './extractor';
 
-// 1.2 — os conjuntos com pose existem para ser MEDIDOS contra iris12.
-//
 // O que se testa aqui é só que a projeção seleciona os índices certos do vetor
 // completo. Qual conjunto é melhor não é questão de teste unitário: é questão
-// de harness, e a resposta está em docs/RESULTADOS-D2-D8.md.
+// de harness.
 //
 // Layout do vetor completo (ver o comentário grande em extractor.ts):
 //   [0,1] offset · [2,3] rel · [4..11] contorno da íris · [12..19] cantos

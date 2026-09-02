@@ -1,13 +1,13 @@
 /**
- * C-23 — guardas do loop de rastreamento.
+ * Guardas do loop de rastreamento.
  *
  * O corpo do `loop()` do engine roda ~30×/s e toca MediaPipe (WASM), canvas,
  * o worker do L2CS e uma lista de subscribers que, no fim da cadeia, executa
  * handlers React (o dwell dispara `.click()` de verdade). Qualquer um deles
- * pode lançar. Antes, o `requestAnimationFrame(loop)` era a última linha do
- * corpo: uma exceção em qualquer etapa pulava o reagendamento e o loop morria
- * em silêncio, com `running === true` e estado `tracking` — cursor congelado,
- * sem erro visível e sem recuperação possível a não ser recarregar o app.
+ * pode lançar. Sem estes guardas, uma exceção pulava o reagendamento e o loop
+ * morria em silêncio, com `running === true` e estado `tracking` — cursor
+ * congelado, sem erro visível e sem recuperação possível a não ser recarregar
+ * o app.
  *
  * Estas funções vivem fora do `engine.ts` de propósito: o loop real depende de
  * vídeo, WASM e rAF, e não é testável. A política de resiliência é, e é ela que
@@ -46,7 +46,7 @@ export function runLoopBody(body: () => void, schedule: () => void): void {
     if (agora - lastLoggedErrorMs > ERROR_LOG_THROTTLE_MS) {
       lastLoggedErrorMs = agora;
       console.error(
-        `[IrisFlow] C-23 — exceção no loop de rastreamento (${loopErrorCount} no total). ` +
+        `[IrisFlow] exceção no loop de rastreamento (${loopErrorCount} no total). ` +
         `O loop foi reagendado; o cursor continua vivo.`,
         err,
       );
@@ -55,7 +55,7 @@ export function runLoopBody(body: () => void, schedule: () => void): void {
     try {
       schedule();
     } catch (scheduleErr) {
-      console.error('[IrisFlow] C-23 — falha ao reagendar o frame:', scheduleErr);
+      console.error('[IrisFlow] falha ao reagendar o frame:', scheduleErr);
     }
   }
 }
@@ -76,7 +76,7 @@ export function emitToSubscribers<T>(
     try {
       cb(sample);
     } catch (err) {
-      console.error('[IrisFlow] C-23 — subscriber de gaze lançou; os demais seguem:', err);
+      console.error('[IrisFlow] subscriber de gaze lançou; os demais seguem:', err);
     }
   }
 }

@@ -4,20 +4,6 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import type { GazeSample } from '@tracker/tracker/engine';
 
-/**
- * Teste de INTEGRAÇÃO da casca DOM do dispatcher de dwell.
- *
- * `src/interaction/dwell.test.ts` cobre a política pura (22 casos). O que ele
- * NÃO cobre é a metade que fala com o navegador: resolver o alvo com
- * `elementFromPoint`, aplicar `.click()` de verdade, pintar o realce e não
- * segurar referência a nós desmontados. Era exatamente essa camada que não
- * tinha teste nenhum, e é a que executa a ação em nome do usuário.
- *
- * Cobre C-07 (nada é clicável sem calibração, nem emergência), C-15 (olhos
- * fechados não completam dwell) e C-23 (um handler que lança não derruba o
- * dispatcher nem re-dispara o clique).
- */
-
 let emitir: (s: GazeSample) => void = () => {};
 let empurrarEstado: (s: string) => void = () => {};
 let estadoEngine = 'tracking';
@@ -118,14 +104,14 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it('C-07 — não clica sem calibração, por mais que se olhe', () => {
+  it('não clica sem calibração, por mais que se olhe', () => {
     calibrado = false;
     const { onClick } = montar(<button data-testid="alvo">Ok</button>);
     olhar(5000, 0, { uncalibrated: true });
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('C-07 — não clica NEM no botão de emergência sem calibração', () => {
+  it('não clica NEM no botão de emergência sem calibração', () => {
     calibrado = false;
     const { onClick } = montar(
       <button data-testid="alvo" data-emergency="true">SOS</button>,
@@ -134,7 +120,7 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('C-07 — o banner de "sem calibração" fica visível', () => {
+  it('o banner de "sem calibração" fica visível', () => {
     estadoEngine = 'uncalibrated';
     calibrado = false;
     montar(<button data-testid="alvo">Ok</button>);
@@ -143,7 +129,7 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     expect(screen.getByText(/Ainda não há calibração/i)).toBeInTheDocument();
   });
 
-  it('C-15 — olhos fechados por 3 s sobre o botão não geram clique ao reabrir', () => {
+  it('olhos fechados por 3 s sobre o botão não geram clique ao reabrir', () => {
     const { onClick } = montar(<button data-testid="alvo">Ok</button>);
     // Metade do dwell com o olho aberto...
     let t = olhar(DWELL_MS / 2, 0);
@@ -155,7 +141,7 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('C-15 — o progresso sobrevive à piscada e completa com olhar válido', () => {
+  it('o progresso sobrevive à piscada e completa com olhar válido', () => {
     const { onClick } = montar(<button data-testid="alvo">Ok</button>);
     let t = olhar(DWELL_MS / 2, 0);
     t = olhar(2000, t, { eyeState: 'closed' });
@@ -163,7 +149,7 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     expect(onClick).toHaveBeenCalledTimes(1);
   });
 
-  it('C-23 — um handler que lança não impede o refratário nem re-dispara', () => {
+  it('um handler que lança não impede o refratário nem re-dispara', () => {
     // O throw abaixo é deliberado, e `dispatchEvent` (por trás de `.click()`)
     // NÃO o propaga ao chamador: a spec manda reportá-lo como erro global.
     // Sem cancelar esse reporte, o jsdom o transforma em unhandled error e o

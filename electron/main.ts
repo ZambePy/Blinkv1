@@ -4,17 +4,17 @@ import path from 'node:path';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173';
 
-// Etapa 1 — tamanho FÍSICO da tela, lido do EDID via WMI.
+// Tamanho FÍSICO da tela, lido do EDID via WMI.
 //
 // Nenhuma API de browser (nem do Electron) expõe centímetros: `screen` dá
-// pixels e scaleFactor. Mas o EDID carrega as dimensões da área ativa, e o
+// pixels e scaleFactor. O EDID carrega as dimensões da área ativa, e o
 // Windows publica isso em `root\wmi : WmiMonitorBasicDisplayParams`
 // (MaxHorizontalImageSize / MaxVerticalImageSize, em CENTÍMETROS).
 //
 // Por que importa: a diagonal entra no erro angular do relatório e no
-// posicionamento dos alvos de calibração. Depender do cuidador digitar o valor
-// funciona até ele trocar de monitor — e aí os relatórios passam a mentir sem
-// nenhum sinal.
+// posicionamento dos alvos de calibração. Depender do cuidador digitar o
+// valor funciona até ele trocar de monitor — e aí os relatórios passam a
+// mentir sem nenhum sinal.
 //
 // Falha em silêncio de propósito: fora do Windows, com EDID ausente ou driver
 // genérico, devolve lista vazia e o app segue com o valor configurado à mão.
@@ -53,12 +53,12 @@ function readMonitorSizes(): Promise<{ widthCm: number; heightCm: number }[]> {
 
 ipcMain.handle('irisflow:monitor-sizes', () => readMonitorSizes());
 
-// Etapa 1, item 5 — resolução e escala da tela, do SO.
+// Resolução e escala da tela, do SO.
 //
 // `window.screen` do renderer já dá a resolução em px CSS, mas NÃO expõe o
-// fator de escala do Windows (125%, 150%). Com escala em 150%, 1920 px físicos
-// viram 1280 px CSS — e a conversão px→cm que o erro angular usa fica errada
-// por 1,5× se ninguém contar isso. Aqui vem o número de verdade.
+// fator de escala do Windows (125%, 150%). Com escala em 150%, 1920 px
+// físicos viram 1280 px CSS — e a conversão px→cm que o erro angular usa
+// fica errada por 1,5× se ninguém contar isso. Aqui vem o número de verdade.
 ipcMain.handle('irisflow:display-info', () => {
   const d = screen.getPrimaryDisplay();
   return {

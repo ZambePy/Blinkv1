@@ -4,28 +4,24 @@ import { Coffee } from 'lucide-react';
 import { GazeButton } from './ui/GazeButton';
 import { useGaze } from '../context/GazeContext';
 
-// D7.4 (ROADMAP §5) — indicador de fadiga não-bloqueante.
+// Indicador de fadiga não-bloqueante.
 //
 // PARA QUE SERVE
-// A taxa de piscadas (D1-4) já é medida em `extractor.ts`
-// (`getRecentBlinkRatePerMinute`), mas até agora não estava conectada a
-// nenhuma ação — o número existe no engine e nunca chega ao usuário.
-// Referência clínica (documentada em `extractor.ts:216-218`): repouso é
-// 15-20/min, >25/min sustentado indica fadiga, brilho excessivo ou olho
-// seco. Este componente SINALIZA (regra 2 do projeto: nunca bloquear a UI
-// do paciente) quando a taxa sustentada ultrapassa o limiar clínico, e
-// oferece um caminho de 1 clique para o Modo Descanso (B3-3, `/rest`).
+// A taxa de piscadas já é medida em `extractor.ts`
+// (`getRecentBlinkRatePerMinute`), mas o número existia no engine sem chegar
+// ao usuário. Referência clínica: repouso é 15-20/min, >25/min sustentado
+// indica fadiga, brilho excessivo ou olho seco. Este componente SINALIZA
+// (nunca bloqueia a UI do paciente) quando a taxa sustentada ultrapassa o
+// limiar clínico e oferece caminho de 1 clique para o Modo Descanso.
 //
-// SUSTENTADO — POR QUÊ
-// Uma janela de 60s pode subir acima de 25/min em picos (bocejo, tosse,
-// tela mudou de brilho). Mostrar aviso em um único pico gera "cry wolf".
-// Exigimos MIN_CONSECUTIVE_ABOVE polls acima do limiar antes de mostrar,
-// e histerese em BLINK_RATE_HYSTERESIS antes de esconder, para o aviso
-// não piscar in-and-out. Isso é a mesma disciplina do `isDegraded` no
-// GazeContext (B4-2) — sinal de qualidade mostra só se persistente.
+// POR QUE "SUSTENTADO"
+// Uma janela de 60s pode subir acima de 25/min em picos (bocejo, tosse, tela
+// mudou de brilho). Aviso num único pico gera "cry wolf". Exigimos
+// MIN_CONSECUTIVE_ABOVE polls acima do limiar antes de mostrar, e histerese
+// em BLINK_RATE_HYSTERESIS antes de esconder, para o aviso não piscar
+// in-and-out.
 //
 // REGRA CRÍTICA — nunca aparece em rotas de emergência ou calibração.
-// Idêntica disciplina do DriftIndicator (D6.3) e do banner degraded (B4-2).
 
 // >25/min é o limiar clínico documentado em extractor.ts. Não escolhemos
 // número novo — reaproveitamos o que o BlinkDetector já usa como referência.
@@ -91,8 +87,8 @@ export const FatigueIndicator: React.FC = () => {
     return () => clearInterval(id);
   }, [calibration]);
 
-  // Prioridade idêntica ao DriftIndicator: rastreamento degraded (B4-2)
-  // domina. Não empilhamos avisos.
+  // Prioridade idêntica ao DriftIndicator: rastreamento degraded domina.
+  // Não empilhamos avisos.
   if (isDegraded) return null;
 
   if (HIDE_ON_PATHS.has(location.pathname)) return null;

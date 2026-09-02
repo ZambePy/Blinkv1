@@ -1,20 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as calib from './calibration';
 
-/**
- * C-16 — sair da calibração no meio tem de devolver o engine ao estado normal.
- *
- * `isCalibrating` era ligado em `startCalibrationMode` e desligado APENAS em
- * `completeCalibration`. Quem saísse da tela durante a coleta (botão voltar,
- * navegação, unmount) deixava o núcleo em `calibrating` para sempre: o engine
- * reportava estado `calibrating` a cada frame, o dispatcher de dwell ficava
- * desligado e o cursor oculto em TODO o app — sem nenhuma forma de recuperar
- * a não ser completar uma calibração inteira.
- *
- * `clearCalibration()` também não ajudava: limpava perfil e regressores mas
- * deixava `isCalibrating` ligado.
- */
-describe('abortCalibration (C-16)', () => {
+describe('abortCalibration', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     calib.clearCalibration();

@@ -69,10 +69,9 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     const scaler = new StandardScaler();
     scaler.fit(features);
     const scaledFeatures = scaler.transform(features);
-// D9 — λ virou adimensional (penalidade `λ·m·P`, não mais `λ·I` absoluto).
-    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala nova;
-    // passamos o valor explícito para este teste continuar descrevendo o MESMO
-    // regime de regularização que sempre descreveu.
+    // λ é adimensional (penalidade `λ·m·P`, não `λ·I` absoluto).
+    // Com m=9 amostras o antigo default λ=1.0 equivale a λ=1/9 na escala
+    // adimensional; passamos o valor explícito.
     const LAMBDA_LEGACY_EQUIV = 1 / 9;
     const model = trainRidgeModel(scaledFeatures, targets, LAMBDA_LEGACY_EQUIV);
 
@@ -94,7 +93,7 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     // centro da grade para o ponto in-hull, e o ponto de borda direita
     // (gx=0.95) para o vetor out-of-hull, já que f0 alto deveria significar
     // "olhando para a direita".
-    // Sprint 4: predictRidge agora retorna coordenadas normalizadas [0,1].
+    // predictRidge retorna coordenadas normalizadas [0,1].
     // Erros aqui também são normalizados; multiplique por SCREEN_* na UI.
     const errInHull = Math.hypot(
       inHullPred.x - 0.5,
@@ -117,9 +116,8 @@ describe('Ridge: extrapolação fora do fecho convexo (diagnóstico)', () => {
     //    mais próximo do que o ponto de referência in-hull.
     expect(distOutOfHull).toBeGreaterThan(distInHull);
 
-    // 2) Comportamento ATUAL documentado (Sprint 1.2): predictRidge NÃO
-    //    aplica mais clamp. A extrapolação linear ultrapassa a faixa [0,1]
-    //    livremente; o clamp é feito APÓS a média binocular em
+    // 2) predictRidge NÃO aplica clamp. A extrapolação linear ultrapassa a
+    //    faixa [0,1] livremente; o clamp é feito APÓS a média binocular em
     //    `calibration.mapGaze`. Esta asserção verifica que o valor extrapolado
     //    saiu fora do intervalo [0,1] — se cair dentro, o vetor não é
     //    verdadeiramente "out of hull" ou a semântica do modelo mudou.

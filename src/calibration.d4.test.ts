@@ -2,9 +2,9 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { detectOutlierPoints, type CalibrationPoint } from './calibration';
 import { EXPERIMENT } from './config/experiment';
 
-// Fase 1.A: desliga expansão polinomial neste arquivo — os testes constroem
-// features 4-D com mapeamento identidade para target. Com polynomialFeatures=true
-// a expansão para 14 dims com apenas 4 amostras de treino causa near-singularity
+// Desliga expansão polinomial neste arquivo — os testes constroem features 4-D
+// com mapeamento identidade para target. Com polynomialFeatures=true a
+// expansão para 14 dims com apenas 4 amostras de treino causa near-singularity
 // e falsos positivos no detector de outliers. O comportamento do detector em si
 // é correto; o que muda é apenas a dimensão dos dados sintéticos.
 beforeAll(() => {
@@ -14,7 +14,7 @@ afterAll(() => {
   (EXPERIMENT as { polynomialFeatures: boolean }).polynomialFeatures = true;
 });
 
-// D4.1 (ROADMAP §5) — detectOutlierPoints.
+// detectOutlierPoints.
 //
 // Estratégia dos testes: construímos uma grade sintética em que o mapeamento
 // feature → target é LINEAR e SEM ruído, então o Ridge LOO consegue prever
@@ -116,10 +116,9 @@ describe('detectOutlierPoints', () => {
   });
 
   it('N=3 alvos (mínimo aceitável) — roda sem crash, MAD sobre 3 pontos', () => {
-    // Riscos do ROADMAP D4: MAD com N pequeno é frágil. Este teste garante
-    // que o algoritmo pelo menos não CRASHA no limite inferior, e reporta
-    // targetCount fidedigno. Não afirma nada sobre a robustez estatística —
-    // que o próprio ROADMAP marca como "sinal indicativo, não conclusivo".
+    // MAD com N pequeno é frágil. Este teste garante que o algoritmo pelo
+    // menos não CRASHA no limite inferior, e reporta targetCount fidedigno.
+    // Não afirma nada sobre a robustez estatística.
     const pts: CalibrationPoint[] = [
       goodPoint(0.1, 0.5), goodPoint(0.1, 0.5),
       goodPoint(0.5, 0.5), goodPoint(0.5, 0.5),

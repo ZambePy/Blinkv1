@@ -18,20 +18,20 @@ describe('featurePipeline: parity with the active extractor', () => {
   it('extractFeatures returns featuresLeft and featuresRight with identical length, order, and values to the underlying extractor', () => {
     const landmarks = makeSyntheticLandmarks();
 
-    // Sprint 5 introduced USE_COMPACT_FEATURES: the pipeline routes to
-    // extractCompactFeatures (~31 dims) when the flag is on, and to
-    // extractEyeFeatures (~260 dims) otherwise. Parity is checked against
-    // whichever path is currently active — a silent divergence between the
-    // pipeline and its underlying extractor would break stored profiles.
+    // USE_COMPACT_FEATURES: the pipeline routes to extractCompactFeatures
+    // (~31 dims) when the flag is on, and to extractEyeFeatures (~260 dims)
+    // otherwise. Parity is checked against whichever path is currently active
+    // — a silent divergence between the pipeline and its underlying extractor
+    // would break stored profiles.
     const direct = USE_COMPACT_FEATURES
       ? extractCompactFeatures(landmarks)
       : extractEyeFeatures(landmarks);
     const piped = extractFeatures(landmarks);
 
-    // D11 — a paridade agora é contra a PROJEÇÃO do extractor no conjunto ativo,
-    // não contra o vetor bruto. A truncagem deixou de ser acidente e passou a
-    // ser contrato (ver `ACTIVE_FEATURE_SET` em extractor.ts); o que continua
-    // sendo bug é o pipeline mexer nos valores ou na ORDEM.
+    // Parity is against the PROJECTION of the extractor onto the active set,
+    // not the raw vector. Truncation is contract (see `ACTIVE_FEATURE_SET` in
+    // extractor.ts); what remains a bug is the pipeline touching values or
+    // ORDER.
     const expected = {
       left: projectFeatureSet(direct.featuresLeft),
       right: projectFeatureSet(direct.featuresRight),

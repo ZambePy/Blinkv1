@@ -5,7 +5,7 @@ import { diagnosticarGrade, RAZAO_PERIFERIA_LIMITE, CENTRO_RUIM_PX, PIOR_ALVO_PX
 // foram escolhidos para separar estes dois; se um terceiro caso real aparecer e
 // não couber, é o limiar que muda, não o teste.
 
-/** Sessão que produziu 134,8 px de erro no replay — LOO por alvo medido. */
+/** Sessão que produziu 134,8 px de erro — LOO por alvo medido. */
 const GRAVACAO_BOA = [
   { x: 0.168, y: 0.05, errorPx: 82.6, samples: 63 },
   { x: 0.500, y: 0.05, errorPx: 67.5, samples: 58 },

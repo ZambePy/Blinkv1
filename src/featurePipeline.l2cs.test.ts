@@ -14,14 +14,12 @@ function makeLandmarks(): Point3D[] {
   }));
 }
 
-// D11 — estes testes cobrem o ANEXO do bloco L2CS, que é responsabilidade de
-// `extractCompactFeatures`. Antes eles observavam esse comportamento através de
-// `extractFeatures`, o que funcionava porque o pipeline repassava o vetor
-// inteiro. Com a projeção no conjunto ativo (ver `ACTIVE_FEATURE_SET`), a
-// fronteira do pipeline passou a devolver a dimensão do conjunto (6 dims hoje
-// para `irisCore+l2cs`) — então a asserção do bloco angular COMPLETO precisa
-// ser feita direto no extractor. A projeção em si tem cobertura própria no
-// fim do arquivo.
+// Estes testes cobrem o ANEXO do bloco L2CS, que é responsabilidade de
+// `extractCompactFeatures`. Com a projeção no conjunto ativo (ver
+// `ACTIVE_FEATURE_SET`), a fronteira do pipeline devolve a dimensão do
+// conjunto (6 dims hoje para `irisCore+l2cs`) — então a asserção do bloco
+// angular COMPLETO precisa ser feita direto no extractor. A projeção em si
+// tem cobertura própria no fim do arquivo.
 const extractFull = (
   lms: Point3D[],
   faceMatrix?: Float32Array,
@@ -128,8 +126,8 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
 });
 
 
-// ─── D11 — projeção no conjunto de features ativo ───────────────────────────
-describe('D11 — projeção do vetor no conjunto ativo', () => {
+// ─── Projeção no conjunto de features ativo ─────────────────────────────────
+describe('projeção do vetor no conjunto ativo', () => {
   it('a fronteira do pipeline entrega exatamente activeFeatureDims dims', () => {
     const lms = makeLandmarks();
     const piped = extractFeatures(lms, undefined, { yaw: 0.1, pitch: 0.05, valid: true });

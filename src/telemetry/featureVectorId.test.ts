@@ -2,13 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { FEATURE_VECTOR_ID, ACTIVE_FEATURE_SET, IRIS12_DIMS, activeFeatureDims } from '../extractor';
 import { startRecording, stopRecording, clearRecording, getRecording, parseJSONL, exportAsJSONL, recordFrame } from './recorder';
 
-// 0.1 — o identificador do vetor existe para que uma gravação nunca seja
-// medida contra um build diferente do que a produziu, em silêncio.
-//
-// O caso concreto: `ci-baseline-a2.report.json` foi gerado às 14:38 de
-// 2026-08-26 com o vetor de 44 dims; o commit que o reduziu para 12 entrou no
-// mesmo dia. As decisões de expandFactor e ablação foram tomadas sobre números
-// que descreviam outro pipeline, e nada acusou.
+// O identificador do vetor existe para que uma gravação nunca seja medida
+// contra um build diferente do que a produziu, em silêncio.
 describe('FEATURE_VECTOR_ID', () => {
   it('descreve o conjunto ativo e a dimensão', () => {
     expect(FEATURE_VECTOR_ID).toBe(`${ACTIVE_FEATURE_SET}:${activeFeatureDims()}`);
@@ -38,7 +33,7 @@ describe('cabeçalho da gravação', () => {
     expect(getRecording()?.header.featureVectorId).toBe(FEATURE_VECTOR_ID);
   });
 
-  it('sobrevive à ida e volta pelo JSONL — é lá que o replay vai ler', () => {
+  it('sobrevive à ida e volta pelo JSONL — é lá que consumidores lêem', () => {
     clearRecording();
     startRecording({
       resolution: { w: 1920, h: 1080 },
@@ -51,8 +46,8 @@ describe('cabeçalho da gravação', () => {
   });
 
   it('gravação anterior à mudança não tem o campo — e isso é detectável', () => {
-    // O replay trata ausência como "vetor desconhecido" e aborta em vez de
-    // assumir compatibilidade. Este teste trava esse contrato.
+    // Consumidores devem tratar ausência como "vetor desconhecido" e abortar
+    // em vez de assumir compatibilidade. Este teste trava esse contrato.
     const antiga = parseJSONL(
       JSON.stringify({ formatVersion: 2, startedAt: 'x', resolution: { w: 1, h: 1 }, videoResolution: { w: 1, h: 1 } }) + String.fromCharCode(10),
     );

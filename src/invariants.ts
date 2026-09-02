@@ -1,7 +1,6 @@
-// A3-1 — Invariantes explícitas do sistema IrisFlow.
+// Invariantes explícitas do sistema IrisFlow.
 //
-// O módulo implementa a regra 1 do plano ("falhar alto, nunca em silêncio")
-// em código, traduzindo assunções implícitas espalhadas por calibration.ts,
+// O módulo traduz assunções implícitas espalhadas por calibration.ts,
 // extractor.ts e engine.ts em verificações nomeadas e rastreáveis.
 //
 // Comportamento por ambiente:
@@ -10,7 +9,7 @@
 //     sem precisar fazer assert sobre o estado interno dos módulos.
 //   - Produção: conta as violações e loga uma vez para não spammar. O cuidador
 //     pode consultar o painel de diagnóstico; nenhuma exceção interrompe o loop
-//     de rastreamento (a comunicação nunca é bloqueada — regra 2 do plano).
+//     de rastreamento (a comunicação nunca é bloqueada).
 
 export type InvariantCode =
   | 'FEATURE_DIM'          // vetor do mesmo tamanho entre calibração e inferência
@@ -96,7 +95,7 @@ export function clearInvariantViolations(): void {
  * FEATURE_DIM — o vetor de features deve ter o mesmo tamanho entre calibração
  * e inferência. Se `calibratedDim` !== `inferenceDim`, o scaler e o regressor
  * foram treinados com uma geometria diferente da atual (mudança de pipeline,
- * versão de modelo, ou flag de A2-5 ligada pela metade).
+ * versão de modelo, ou flag de anisotropia ligada pela metade).
  */
 export function assertFeatureDim(calibratedDim: number, inferenceDim: number): void {
   assertInvariant(
@@ -146,12 +145,11 @@ export function assertScreenUnchanged(
 }
 
 /**
- * CALIBRATION_CLAIMED_OK — tradução direta da regra 3 do plano em código:
- * "o que a tela afirma tem que ser verdade."
+ * CALIBRATION_CLAIMED_OK — "o que a tela afirma tem que ser verdade."
  *
  * Chamado em CalibrationCheck.tsx antes de exibir "Calibração Concluída".
  * Se isCalibrated()===false nesse ponto, existe uma desconexão entre o estado
- * interno e a UI — exatamente o bug dos óculos pré-A1-1.
+ * interno e a UI.
  */
 export function assertCalibrationClaimedOk(isCalibrated: boolean): void {
   assertInvariant(

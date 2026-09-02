@@ -1,4 +1,4 @@
-// Etapa 2 — detecção de cintilação da rede elétrica no sensor.
+// Detecção de cintilação da rede elétrica no sensor.
 //
 // POR QUE IMPORTA AQUI
 //

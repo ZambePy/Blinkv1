@@ -48,7 +48,7 @@ function olharPor(
   return { estado, cliques, ultimoPct };
 }
 
-describe('dwell — C-07: nada é clicável sem calibração', () => {
+describe('dwell — nada é clicável sem calibração', () => {
   it('não clica em botão comum com uncalibrated=true, por mais que se olhe', () => {
     const { cliques } = olharPor(5000, { over: () => ({ uncalibrated: true }) });
     expect(cliques).toBe(0);
@@ -74,7 +74,7 @@ describe('dwell — C-07: nada é clicável sem calibração', () => {
   });
 });
 
-describe('dwell — C-15: olhos fechados nunca completam um dwell', () => {
+describe('dwell — olhos fechados nunca completam um dwell', () => {
   it('fechar os olhos 3 s sobre um botão não gera clique ao reabrir', () => {
     // 500 ms de olhar real (metade do dwell), depois 3 s de olhos fechados.
     const parcial = olharPor(500);
@@ -198,7 +198,7 @@ describe('dwell — refratário e troca de alvo', () => {
     expect(cliques).toBe(1);
   });
 
-  it('o refratário é armado no mesmo passo do clique (C-23)', () => {
+  it('o refratário é armado no mesmo passo do clique', () => {
     const parcial = olharPor(990);
     const r = stepDwell(parcial.estado, amostra({ timestamp: 1000 }), BOTAO, CFG);
     expect(r.effect.type).toBe('click');

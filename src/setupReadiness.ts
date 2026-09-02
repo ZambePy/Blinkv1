@@ -1,19 +1,11 @@
-// Etapa 2 — avaliação do posto de uso ANTES da calibração.
+// Avaliação do posto de uso ANTES da calibração.
 //
 // POR QUE EXISTE
 //
-// A auditoria D10 mostrou que a maior fonte de erro não-modelada do pipeline
-// não está no código: está no setup, e ele varia entre sessões sem ninguém
-// perceber. Comparando as duas gravações reais do repositório:
-//
-//   distância interocular   127 px  vs  166 px   (30% de diferença)
-//   pitch da cabeça        -0,033 rad vs +0,138 rad  (9 GRAUS de diferença)
-//   brilho no crop ocular   0,236   vs  0,227    (ambos escuros)
-//
-// Calibrar sem reproduzir a postura é calibrar para outra geometria. E o
-// sinal útil do pipeline inteiro é o deslocamento da íris no frame — medido em
-// 6,8 px para a tela toda a 1280×720. Tudo que reduz pixels no olho ou desloca
-// a cabeça consome esse orçamento minúsculo.
+// A maior fonte de erro não-modelada do pipeline está no setup, e ele varia
+// entre sessões sem ninguém perceber. O sinal útil é o deslocamento da íris no
+// frame — medido em 6,8 px para a tela toda a 1280×720. Tudo que reduz pixels
+// no olho ou desloca a cabeça consome esse orçamento minúsculo.
 //
 // Este módulo transforma sinais que o pipeline JÁ calcula (qualityAnalyzer,
 // faceMatrix, landmarks) num veredito legível, para a tela de pré-calibração
@@ -22,9 +14,9 @@
 // É puro e sem DOM de propósito: os limiares são a parte que precisa de teste,
 // e testar UI para verificar um limiar é caro e frágil.
 //
-// ⚠️ Os limiares vêm de UMA instalação (N=1). São defensáveis porque derivam de
+// ⚠️ Os limiares vêm de poucas instalações. São defensáveis porque derivam de
 // medições, não de palpite, mas a faixa "ideal" precisa de re-medição com mais
-// usuários. Cada constante abaixo diz de onde veio.
+// usuários.
 
 /** Estado de um item da checagem. `unknown` = ainda sem dado (rosto ausente). */
 export type CheckStatus = 'ok' | 'warn' | 'fail' | 'unknown';
@@ -79,14 +71,14 @@ export interface ReadinessSnapshot {
 
 /** Sinais que não vêm de um frame só. */
 export interface ReadinessContext {
-  /** D12 — faixa de distância em relação à calibração. Quando presente vira
-   *  uma checagem própria: "dentro da faixa" (compensado) vs "fora". */
+  /** Faixa de distância em relação à calibração. Quando presente vira uma
+   *  checagem própria: "dentro da faixa" (compensado) vs "fora". */
   distanceRange?: {
     status: 'ok' | 'warn' | 'out' | 'unknown';
     deltaCm: number | null;
     message: string;
   } | null;
-  /** Campo de visão horizontal da câmera (Etapa 1). Habilita a estimativa de
+  /** Campo de visão horizontal da câmera. Habilita a estimativa de
    *  distância e o alvo de posicionamento. */
   horizontalFovDeg?: number | null;
   /** Veredito do `flickerDetector` sobre a série de brilho. */
@@ -105,7 +97,7 @@ export interface ReadinessReport {
   measured: {
     /** iod / videoWidth. Métrica de densidade independente de resolução. */
     iodFraction: number;
-    /** Só quando o campo de visão da câmera é conhecido (Etapa 1). */
+    /** Só quando o campo de visão da câmera é conhecido. */
     estimatedDistanceCm: number | null;
     brightness: number;
     contrast: number;
@@ -149,7 +141,7 @@ const BRIGHTNESS_FAIL_HIGH = 0.92;
 const CONTRAST_FAIL_LOW = 0.03;
 const CONTRAST_WARN_LOW = 0.12;
 
-// Mesmo limiar que `SPECULAR_FRAME_THRESHOLD` usa na calibração (A1-5).
+// Mesmo limiar que `SPECULAR_FRAME_THRESHOLD` usa na calibração.
 const SPECULAR_WARN = 0.02;
 // Fração da janela com reflexo para chamar de PERSISTENTE. Mesmo valor que
 // `SPECULAR_PERSISTENCE` na calibração — um reflexo em >30% dos frames é
@@ -201,26 +193,18 @@ export function idealDistanceCm(
  * de inventar um número: uma distância errada é pior que nenhuma, porque
  * alimenta a conversão do erro para graus e a grade de calibração.
  *
- * 2.1 — DE ONDE O FOV VEM, E POR QUE NÃO SAI SOZINHO.
+ * DE ONDE O FOV VEM, E POR QUE NÃO SAI SOZINHO.
  *
- * Este comentário dizia que "a Etapa 1 vai obtê-lo do sistema". Não vai, e a
- * razão é estrutural: uma vista monocular de um objeto de tamanho conhecido dá
- * UMA equação — `tamanho_px / largura_px = tamanho_cm / (2 · D · tan(FOV/2))` —
- * com DUAS incógnitas, `D` e `FOV`. Nenhuma quantidade de quadros resolve isso;
- * todos trazem a mesma equação. O browser também não expõe o FOV: não há campo
- * em `getCapabilities()` nem em `getSettings()`.
+ * Uma vista monocular de um objeto de tamanho conhecido dá UMA equação —
+ * `tamanho_px / largura_px = tamanho_cm / (2 · D · tan(FOV/2))` — com DUAS
+ * incógnitas, `D` e `FOV`. Nenhuma quantidade de quadros resolve isso; todos
+ * trazem a mesma equação. O browser também não expõe o FOV: não há campo em
+ * `getCapabilities()` nem em `getSettings()`.
  *
  * A saída que FUNCIONA é `deriveHorizontalFovDeg` em `cameraTuner.ts`: medir a
  * distância uma única vez com fita métrica fecha o sistema, e daí em diante a
  * distância sai sozinha em toda sessão. É uma etapa de setup, feita uma vez por
  * hardware.
- *
- * A saída que NÃO funciona, e foi medida: usar a excursão da íris entre os
- * alvos de calibração como segunda equação. A geometria fecharia (o olho gira
- * um ângulo determinado pela tela, e a íris se desloca `2R·sen θ`), mas o sinal
- * medido é atenuado — 0,60× no eixo horizontal e 0,16× no vertical, contra a
- * previsão geométrica. As duas estimativas de distância que daí saem discordam
- * por 3,7× (102 cm contra 373 cm). Ver docs/RESULTADOS-D2-D8.md §2.1.
  */
 export function estimateDistanceCm(
   iodPx: number,
@@ -253,9 +237,9 @@ function band(
 /**
  * Avalia um frame e devolve o veredito por item.
  *
- * `horizontalFovDeg` é opcional (Etapa 1). Sem ele, a checagem de distância usa
- * a fração do frame ocupada pelo rosto — que é a grandeza que de fato governa a
- * precisão, e não depende de conhecer a lente.
+ * `horizontalFovDeg` é opcional. Sem ele, a checagem de distância usa a
+ * fração do frame ocupada pelo rosto — que é a grandeza que de fato governa
+ * a precisão, e não depende de conhecer a lente.
  */
 export function evaluateReadiness(
   snap: ReadinessSnapshot,
@@ -527,7 +511,7 @@ export interface EffectiveDistance {
   /** Valor a usar no pipeline. */
   cm: number;
   /** De onde veio — entra no relatório para o leitor não confundir medida
-   *  com digitação, que é o erro que a auditoria D9 encontrou. */
+   *  com digitação. */
   source: 'measured' | 'configured';
   /** Preenchido quando a medição foi descartada, com o porquê. */
   rejectedReason?: string;

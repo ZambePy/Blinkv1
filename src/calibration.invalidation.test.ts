@@ -66,7 +66,7 @@ describe('mapGaze — dimensão incompatível', () => {
   beforeEach(() => {
     clearCalibration();
     clearCalibrationInvalidation();
-    // Fase 1.A: desliga expansão polinomial — estes testes verificam detecção de
+    // Desliga expansão polinomial — estes testes verificam detecção de
     // dimensão incompatível com pipeline linear (8 dims). Com polynomialFeatures=true
     // o treino com 9 alvos × 44 features ultrapassa o timeout de 5 s do teste.
     (EXPERIMENT as { polynomialFeatures: boolean }).polynomialFeatures = false;

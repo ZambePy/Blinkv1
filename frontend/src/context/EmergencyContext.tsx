@@ -158,7 +158,7 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     >
       {children}
 
-      {/* Indicador de Rastreamento Degradado (B4-2) */}
+      {/* Indicador de Rastreamento Degradado */}
       {showDegradedBanner && !isConfirming && (
         <div
           style={{

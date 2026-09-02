@@ -66,10 +66,10 @@ describe('degToRad', () => {
   it('-90° = -π/2 rad', () => expect(degToRad(-90)).toBeCloseTo(-Math.PI / 2, 12));
 });
 
-// D3.3 (ROADMAP §5) — confidence = 1 - H/H_max, onde H = -Σ p·log(p) da
-// softmax. 0 = distribuição uniforme (incerteza total, sinal inutil), 1 =
-// massa concentrada num único bin (certeza total).
-describe('decodeAngleWithConfidence (D3.3)', () => {
+// confidence = 1 - H/H_max, onde H = -Σ p·log(p) da softmax.
+// 0 = distribuição uniforme (incerteza total, sinal inutil), 1 = massa
+// concentrada num único bin (certeza total).
+describe('decodeAngleWithConfidence', () => {
   const binWidth = 4;
   const binOffset = -180;
 

@@ -4,14 +4,9 @@ import {
   consumeLastSampleDecision, getSessionPoseDrift,
 } from './calibration';
 
-// 1.1 — a deriva de pose ao longo da calibração passou a ser MEDIDA.
-//
-// A tentativa original era gatear contra um baseline de sessão. A medição
-// (`npm run replay -- --regate-pose` sobre fixtures/replay/ci-baseline.jsonl)
-// mostrou que isso apaga 509 dos 514 frames: a cabeça fica parada DENTRO de
-// cada ponto (p90 ≤ 0,30°) e migra ENTRE pontos (yaw 2,34°, pitch 3,90°, com
-// r≈0,96 contra a ordem de coleta). Gate só sabe apagar; deriva entre alvos é
-// para modelar. Então o gate voltou a ser por ponto e a deriva virou relatório.
+// A deriva de pose ao longo da calibração é medida por alvo (não por sessão):
+// dentro de cada ponto a cabeça fica parada e o gate rejeita saltos; ENTRE
+// pontos existe deriva monótona, que vira relatório em vez de descarte.
 
 const q = (yaw: number, pitch = 0, roll = 0) => ({
   yaw, pitch, roll,
