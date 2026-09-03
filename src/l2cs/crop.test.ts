@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   computeSquareBBox,
   cropFaceToTensor,
-  preprocess448FromRGBA,
+  preprocessFromRGBA,
   EXPAND_FACTOR,
   IMAGENET_MEAN,
   IMAGENET_STD,
@@ -66,14 +66,14 @@ describe('computeSquareBBox', () => {
   });
 });
 
-describe('preprocess448FromRGBA', () => {
+describe('preprocessFromRGBA', () => {
   it('rejeita tamanho errado', () => {
-    expect(() => preprocess448FromRGBA(new Uint8Array(100))).toThrow();
+    expect(() => preprocessFromRGBA(new Uint8Array(100))).toThrow();
   });
 
   it('pixel preto (0,0,0) → -mean/std por canal', () => {
     const rgba = new Uint8Array(INPUT_SIZE * INPUT_SIZE * 4); // tudo 0
-    const t = preprocess448FromRGBA(rgba);
+    const t = preprocessFromRGBA(rgba);
     const px = INPUT_SIZE * INPUT_SIZE;
     expect(t[0]).toBeCloseTo((0 - IMAGENET_MEAN[0]) / IMAGENET_STD[0], 6);
     expect(t[px]).toBeCloseTo((0 - IMAGENET_MEAN[1]) / IMAGENET_STD[1], 6);
@@ -82,7 +82,7 @@ describe('preprocess448FromRGBA', () => {
 
   it('pixel branco (255,255,255) → (1-mean)/std por canal', () => {
     const rgba = new Uint8Array(INPUT_SIZE * INPUT_SIZE * 4).fill(255);
-    const t = preprocess448FromRGBA(rgba);
+    const t = preprocessFromRGBA(rgba);
     const px = INPUT_SIZE * INPUT_SIZE;
     expect(t[0]).toBeCloseTo((1 - IMAGENET_MEAN[0]) / IMAGENET_STD[0], 6);
     expect(t[px]).toBeCloseTo((1 - IMAGENET_MEAN[1]) / IMAGENET_STD[1], 6);
@@ -93,7 +93,7 @@ describe('preprocess448FromRGBA', () => {
     // Pixel único puramente vermelho em (0,0)
     const rgba = new Uint8Array(INPUT_SIZE * INPUT_SIZE * 4);
     rgba[0] = 255; rgba[1] = 0; rgba[2] = 0; rgba[3] = 255;
-    const t = preprocess448FromRGBA(rgba);
+    const t = preprocessFromRGBA(rgba);
     const px = INPUT_SIZE * INPUT_SIZE;
     // Posição (0,0) — R canal: valor de branco; G canal: valor de preto; B canal: valor de preto.
     expect(t[0]).toBeCloseTo((1 - IMAGENET_MEAN[0]) / IMAGENET_STD[0], 6);
@@ -103,7 +103,7 @@ describe('preprocess448FromRGBA', () => {
 
   it('tamanho total = 3 × 448 × 448', () => {
     const rgba = new Uint8Array(INPUT_SIZE * INPUT_SIZE * 4);
-    const t = preprocess448FromRGBA(rgba);
+    const t = preprocessFromRGBA(rgba);
     expect(t.length).toBe(3 * INPUT_SIZE * INPUT_SIZE);
   });
 
@@ -119,8 +119,8 @@ describe('preprocess448FromRGBA', () => {
       a[j+3] = 255;
       b[j+3] = 0;
     }
-    const ta = preprocess448FromRGBA(a);
-    const tb = preprocess448FromRGBA(b);
+    const ta = preprocessFromRGBA(a);
+    const tb = preprocessFromRGBA(b);
     // Comparação byte-a-byte via Buffer é O(n) mas evita 600k invocações de expect
     let identical = true;
     for (let i = 0; i < ta.length; i++) {

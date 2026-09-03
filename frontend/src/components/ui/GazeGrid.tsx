@@ -1,4 +1,5 @@
 import React from 'react';
+import { alvoMinimoPx } from '../../design/gazeMetrics';
 
 interface GazeGridProps {
   columns: number;
@@ -13,7 +14,8 @@ export const GazeGrid: React.FC<GazeGridProps> = ({
   children,
   gap = 59 // Equivalente a 1.5° de espaçamento mínimo (GAZE_TOKENS.spacingMinDeg)
 }) => {
-  const cellMinPx = 198; // Equivalente a 5.0° de tamanho mínimo
+  // B3.24 — fonte única, derivada da geometria real do usuário.
+  const cellMinPx = alvoMinimoPx();
   const childCount = React.Children.count(children);
 
   React.useEffect(() => {

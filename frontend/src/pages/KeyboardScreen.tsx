@@ -3,7 +3,7 @@ import { ArrowLeft, Delete, Home, Speech, Trash2 } from 'lucide-react';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeButton } from '../components/ui/GazeButton';
 import { GazeGrid } from '../components/ui/GazeGrid';
-import { useGaze } from '../context/GazeContext';
+import { useGaze, useIsDwelling } from '../context/GazeContext';
 import { getPredictions, learnSentence } from '../utils/wordPredictor';
 import { logSentence } from '../utils/clinicalLogger';
 import { useNavigate } from 'react-router-dom';
@@ -121,7 +121,10 @@ const EspacoGlifo: React.FC<{ width: number }> = ({ width }) => {
 };
 
 export const KeyboardScreen: React.FC = () => {
-  const { isDwelling, setIsComposing } = useGaze();
+  const { setIsComposing } = useGaze();
+  // B3.23 — contexto separado: assinar `useGaze()` para ler `isDwelling` faria
+  // esta tela (507 linhas) re-renderizar a cada mudança de estado do engine.
+  const isDwelling = useIsDwelling();
   const navigate = useNavigate();
   const [text, setText] = useState('');
   const [lastPressed, setLastPressed] = useState<string | null>(null);

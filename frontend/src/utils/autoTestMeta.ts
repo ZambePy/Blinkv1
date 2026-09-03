@@ -27,6 +27,15 @@ export interface AutoTestMetaInput {
   distanciaCm: number;
   /** Diagonal física do monitor em polegadas. Definida pelo cuidador. */
   telaPolegadas: number;
+  /**
+   * De onde veio `telaPolegadas` (B2.10): `'default'` (hardcode 23,6″),
+   * `'auto'` (EDID) ou `'manual'` (o cuidador mediu).
+   *
+   * Sem este campo o relatório declarava `geometryAssumed: false` sempre que o
+   * número existisse — e como o default sempre existe, TODO relatório afirmava
+   * ter medido a diagonal. O erro angular é calculado sobre ela.
+   */
+  screenGeometrySource?: 'default' | 'auto' | 'manual';
   /** ISO date do dia (yyyy-mm-dd). Injetável para o teste ser determinístico. */
   dateISO?: string;
 }
@@ -54,6 +63,9 @@ export function buildAutoTestMeta(input: AutoTestMetaInput): RunMeta {
       `condição óptica=${input.opticalCondition})`,
     distanciaCm: input.distanciaCm,
     telaPolegadas: input.telaPolegadas,
+    // B2.10 — a procedência da diagonal viaja com o relatório. Ausente é
+    // tratado como 'default' pelo consumidor, que é o pior caso honesto.
+    screenGeometrySource: input.screenGeometrySource ?? 'default',
   };
 }
 

@@ -33,16 +33,18 @@ const GAZE_A = { yaw: 0.20, pitch: -0.10, valid: true };
 const GAZE_B = { yaw: -0.35, pitch: 0.25, valid: true };
 
 describe('o bloco angular é construído e anexado', () => {
-  it('o vetor completo cresce de 37 para 44 dims com L2CS', () => {
+  it('o vetor completo cresce de 37 para 50 dims com L2CS', () => {
     const lm = rosto();
     expect(extractCompactFeatures(lm, undefined, null).featuresLeft).toHaveLength(37);
-    expect(extractCompactFeatures(lm, undefined, GAZE_A).featuresLeft).toHaveLength(44);
+    expect(extractCompactFeatures(lm, undefined, GAZE_A).featuresLeft).toHaveLength(50);
   });
 
   it('e os sete valores do bloco respondem ao olhar', () => {
     const lm = rosto();
-    const a = extractCompactFeatures(lm, undefined, GAZE_A).featuresLeft.slice(37);
-    const b = extractCompactFeatures(lm, undefined, GAZE_B).featuresLeft.slice(37);
+    // `slice(37, 44)` e não `slice(37)`: `P6.5` acrescentou o bloco `spec11`
+    // em [44..49], então fatiar até o fim apanharia 13 valores em vez de 7.
+    const a = extractCompactFeatures(lm, undefined, GAZE_A).featuresLeft.slice(37, 44);
+    const b = extractCompactFeatures(lm, undefined, GAZE_B).featuresLeft.slice(37, 44);
     expect(a).toHaveLength(7);
     expect(a).not.toEqual(b);
   });
@@ -65,29 +67,30 @@ describe('…e agora chega ao modelo (tan yaw, tan pitch)', () => {
     expect(a.slice(4)).not.toEqual(b.slice(4));
   });
 
-  it('sem gaze, o extractor pula o bloco — e o engine live nunca cai nesse ramo', () => {
-    // Caller que não passa `l2csGaze` (nem `{valid:false}`) faz o extractor
-    // devolver 37 dims. `projectFeatureSet` requer 39 (maior índice angular
-    // 38 + 1) e devolve o vetor intacto quando ele é curto demais — o
-    // pipeline degrada de forma detectável em vez de projetar zeros que
-    // pareceriam medição.
+  it('sem gaze, o pipeline LANÇA em vez de entregar 37 dims (B1.1)', () => {
+    // ATÉ B1.1 este teste afirmava `expect(semGaze).toHaveLength(37)` e
+    // chamava isso de "fallback do projectFeatureSet". Era o bug: o vetor de
+    // 37 dims ia inteiro para o Ridge — com pose [22..24] e as 12 interações
+    // [25..36] que a análise do extractor exclui de propósito por memorização
+    // (322 px medidos contra 140 px) — enquanto `FEATURE_VECTOR_ID` continuava
+    // gravando "irisCore+l2cs:6".
     //
-    // Em produção isto NÃO ocorre: `engine.ts` sempre passa um objeto
-    // `L2CSGazeInput`; enquanto o worker aquece ele vem com `valid:false`,
-    // e `buildL2CSBlock` devolve 7 zeros — o vetor fica com 44 dims e a
-    // projeção corta para 6 corretamente.
+    // Em produção isto NÃO deveria ocorrer: `engine.ts` sempre passa um objeto
+    // `L2CSGazeInput`. Mas ocorre com `EXPERIMENT.enableL2CS = false`, que é
+    // acionável em runtime por `__irisflowExp.set('enableL2CS', false)` — daí
+    // a necessidade da barreira.
     const lm = rosto();
     const comGaze = extractFeatures(lm, undefined, GAZE_A, 1920, 1080).featuresLeft;
-    const semGaze = extractFeatures(lm, undefined, null, 1920, 1080).featuresLeft;
     expect(comGaze).toHaveLength(6);
-    expect(semGaze).toHaveLength(37); // fallback do projectFeatureSet
-    expect(comGaze).not.toEqual(semGaze);
+    expect(() => extractFeatures(lm, undefined, null, 1920, 1080)).toThrow(RangeError);
 
-    // Cenário do engine live: `{valid:false}` faz o bloco vir zerado, mas o
-    // vetor completo cresce para 44 dims e a projeção funciona.
+    // Cenário do engine live com worker aquecendo: `{valid:false}` faz o bloco
+    // vir zerado, mas o vetor completo cresce para 44 dims e a projeção
+    // funciona. Este é o caminho de degradação graciosa (§E4) e continua válido.
     const stale = extractFeatures(lm, undefined, { yaw: 0, pitch: 0, valid: false }, 1920, 1080).featuresLeft;
     expect(stale).toHaveLength(6);
     expect(stale.slice(4)).toEqual([0, 0]); // tan(0)=0, tan(0)=0
+    expect(comGaze).not.toEqual(stale);
   });
 });
 

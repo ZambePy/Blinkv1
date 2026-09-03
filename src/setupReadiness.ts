@@ -158,8 +158,16 @@ const RESOLUTION_FAIL_WIDTH = 1280;
  *  px→cm fica errada e o erro angular do relatório mente junto. */
 const VIEWPORT_COVERAGE_WARN = 0.92;
 
-/** Distância entre cantos externos dos olhos num adulto (bi-ectocanthion). */
-export const CANTHAL_DISTANCE_CM = 9.0;
+/**
+ * Distância entre cantos externos dos olhos num adulto (bi-ectocanthion).
+ *
+ * P5.3 — o valor mora em `src/anthropometry.ts`, junto com a interpupilar e com
+ * os índices de landmark de cada uma. Reexportado aqui para não quebrar os
+ * consumidores existentes; quem for escrever código novo deve importar do
+ * módulo de antropometria.
+ */
+export { CANTHAL_DISTANCE_CM } from './anthropometry';
+import { CANTHAL_DISTANCE_CM } from './anthropometry';
 
 /** Densidade-alvo do rosto no frame. Espelha `TARGET_IOD_FRACTION` do
  *  `cameraTuner` — os dois precisam concordar, senão a tela pede uma coisa

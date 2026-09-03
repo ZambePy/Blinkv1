@@ -34,11 +34,13 @@ export interface L2CSModelMeta {
 // (wasmPath foi removido — o worker agora resolve URLs dos artefatos ORT via
 // Vite `?url` imports, não precisa de path externo.)
 export type L2CSWorkerRequest =
-  | { type: 'init'; modelUrl: string; metaUrl: string }
+  | { type: 'init'; modelUrl: string; metaUrl: string; executionProvider?: 'wasm' | 'webgpu' }
   | { type: 'infer'; id: number; tensor: Float32Array; width: number; height: number };
 
 export type L2CSWorkerResponse =
-  | { type: 'ready'; meta: L2CSModelMeta }
+  /** `executionProvider` é o que de fato ficou ATIVO, não o que foi pedido —
+   *  ver a nota sobre fallback silencioso em `experiment.ts` (P5.5). */
+  | { type: 'ready'; meta: L2CSModelMeta; executionProvider: string; requested: string }
   | { type: 'init_error'; error: string }
   | { type: 'result'; id: number; yaw: number; pitch: number; confidence: number; inferenceMs: number }
   | { type: 'infer_error'; id: number; error: string };

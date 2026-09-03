@@ -17,6 +17,50 @@
 // Este arquivo é só a parte pura: converter o que o SO devolve em diagonal.
 // A ponte com o Electron fica em `electron/main.ts` + `preload.ts`.
 
+// ---------------------------------------------------------------------------
+// B2.11 — o comando WMI mora AQUI, não inline em `electron/main.ts`.
+//
+// O bug: `electron/main.ts` montava a consulta com o literal
+//
+//   'Get-CimInstance -Namespace root\wmi -ClassName ...'
+//
+// e `\w` **não é um escape reconhecido** em string JavaScript — a barra é
+// simplesmente descartada. O PowerShell recebia `-Namespace rootwmi`, um
+// namespace que não existe, errava sempre, e o handler fazia `resolve([])`.
+//
+// O comentário do módulo chamava isso de "falha em silêncio de propósito",
+// então o sintoma parecia comportamento projetado. Na prática:
+// `screenGeometrySource` NUNCA saía de `'default'`, `screenDiagonalIn` ficava
+// travado em 23,6″, e esse número alimentava o erro angular do relatório e o
+// posicionamento dos alvos de calibração. **O recurso que o README destaca
+// como diferencial nunca funcionou uma única vez.**
+//
+// Trazer a string para o núcleo permite testá-la: o CI roda `windows-latest`
+// mas não abre o Electron, então o que dá para verificar deterministicamente é
+// a string gerada.
+// ---------------------------------------------------------------------------
+
+/**
+ * Namespace WMI que expõe os parâmetros do painel.
+ *
+ * Escrito com barra DUPLA de propósito — em literal JavaScript, `'\w'` vira
+ * `'w'` e o namespace colapsa para `rootwmi`.
+ */
+export const WMI_NAMESPACE = 'root\\wmi';
+
+/**
+ * Comando PowerShell que devolve as dimensões físicas dos monitores.
+ *
+ * `MaxHorizontalImageSize` e `MaxVerticalImageSize` vêm do EDID em
+ * CENTÍMETROS — o consumidor monta `{widthCm, heightCm}` assumindo isso.
+ */
+export function buildMonitorSizeQuery(): string {
+  return (
+    `Get-CimInstance -Namespace ${WMI_NAMESPACE} -ClassName WmiMonitorBasicDisplayParams | ` +
+    'Select-Object MaxHorizontalImageSize,MaxVerticalImageSize | ConvertTo-Json -Compress'
+  );
+}
+
 /** Dimensões da área ativa do painel, em centímetros, vindas do EDID. */
 export interface PhysicalPanelSize {
   widthCm: number;

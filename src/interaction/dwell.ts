@@ -38,6 +38,21 @@ export interface DwellTarget {
   /** `data-dwell-ms`, quando presente e válido. */
   customDwellMs: number | null;
   isEmergency: boolean;
+  /**
+   * Alvo de RECUPERAÇÃO (`data-recovery="true"`) — B1.9.
+   *
+   * Aceito em `degraded` pelo mesmo ramo do emergency. Existe porque a única
+   * saída oferecida ao paciente quando o rastreamento degrada era, por
+   * construção, inalcançável: o banner "Recalibre aqui" só aparece em
+   * `degraded`, e em `degraded` o dispatcher bloqueava todo alvo não-emergency.
+   * O paciente ficava com um banner piscando e nada acionável — perda total de
+   * autonomia para quem usa o olhar como único meio de entrada.
+   *
+   * Distinto de `isEmergency` de propósito: emergência chama ajuda humana,
+   * recuperação conserta o rastreamento. Misturar os dois faria o botão de
+   * recalibrar herdar a prioridade máxima do alarme.
+   */
+  isRecovery: boolean;
   isDisabled: boolean;
 }
 
@@ -46,6 +61,15 @@ export interface DwellConfig {
   dwellMs: number;
   /** Multiplicador do dwell de emergência quando em `degraded`. */
   emergencyDegradedMult: number;
+  /**
+   * Multiplicador do dwell de RECUPERAÇÃO quando em `degraded` (B1.9).
+   *
+   * Maior que o de emergência de propósito: um alarme disparado por engano é
+   * constrangedor mas reversível; uma recalibração disparada por engano custa
+   * 1–2 min de sessão a um paciente com fadiga limitante, e acontece
+   * justamente quando o cursor está instável.
+   */
+  recoveryDegradedMult: number;
   /** Bloqueio após um clique, para não re-disparar sob o mesmo olhar. */
   refractoryMs: number;
   /** Janela em que sair e voltar ao mesmo alvo preserva o progresso. */
@@ -60,6 +84,10 @@ export interface DwellConfig {
 export const DEFAULT_DWELL_CONFIG: DwellConfig = {
   dwellMs: 1500,
   emergencyDegradedMult: 2,
+  // 2,5× → 3,75 s no dwell base de 1500 ms. Provisório: o número certo sai da
+  // medição com humano do Dia 7 (F8.5, métrica 7 — estabilidade do dwell).
+  // Escolhido acima do de emergência pelo motivo no comentário do campo.
+  recoveryDegradedMult: 2.5,
   refractoryMs: 800,
   graceMs: 300,
   lostResetMs: 500,
@@ -78,6 +106,23 @@ export interface DwellState {
   exitTs: number | null;
   /** Enquanto `now < refractoryUntil`, nenhum dwell acumula. */
   refractoryUntil: number;
+  /**
+   * Marca que o dwell está PAUSADO — `null` quando não está (B2.5).
+   *
+   * Antes de B2.5, "está pausado" era codificado como `lastValidTs === null`.
+   * Isso sobrecarregava um campo com duas responsabilidades incompatíveis:
+   *
+   *   - "quando foi o último olhar válido" — necessário para medir a idade da
+   *     perda e decidir entre pausar e zerar;
+   *   - "houve interrupção" — necessário para o frame de retomada não somar a
+   *     lacuna inteira como progresso.
+   *
+   * Zerar `lastValidTs` para sinalizar o segundo destruía o primeiro: o frame
+   * seguinte via `Infinity` e resetava tudo, reduzindo a tolerância efetiva de
+   * 500 ms para **um único frame**. Separar os dois campos permite que as duas
+   * invariantes coexistam.
+   */
+  pausadoDesde: number | null;
 }
 
 export function createDwellState(): DwellState {
@@ -89,6 +134,7 @@ export function createDwellState(): DwellState {
     lastTargetElapsedMs: 0,
     exitTs: null,
     refractoryUntil: 0,
+    pausadoDesde: null,
   };
 }
 
@@ -144,9 +190,28 @@ export function stepDwell(
   ): DwellOutcome => {
     // Pausa: mantém o alvo e o progresso, apenas solta o encadeamento
     // temporal para que a lacuna não seja contabilizada como olhar.
+    //
+    // B2.5 — `lastValidTs` é PRESERVADO. Antes ele era zerado aqui, e o efeito
+    // era destruir a própria tolerância que este ramo existe para oferecer:
+    //
+    //   frame 1 sem rosto → pausa, e apaga lastValidTs
+    //   frame 2 (33 ms)   → perdidoHa = Infinity → reset total
+    //
+    // A tolerância efetiva virava 1 frame, não os 500 ms de `lostResetMs`. O
+    // teste antigo (`dwell.test.ts`) só exercitava um frame de perda, então
+    // passava.
+    //
+    // A lacuna continua não sendo contada como olhar: quem faz isso é o
+    // `pausadoDesde`, que o ramo de acumulação usa para saber que houve
+    // interrupção e não somar o intervalo.
     if (opts.preservarProgresso && state.targetKey !== null) {
       return {
-        state: { ...state, lastValidTs: null },
+        state: {
+          ...state,
+          // Marca o início da pausa uma única vez — reentrar no ramo não pode
+          // empurrar o relógio para frente, senão a perda nunca "envelhece".
+          pausadoDesde: state.pausadoDesde ?? now,
+        },
         effect: { type: 'none' },
         hoverKey: state.targetKey,
         blockedBy,
@@ -161,6 +226,8 @@ export function stepDwell(
         lastTargetKey: state.targetKey ?? state.lastTargetKey,
         lastTargetElapsedMs: state.targetKey !== null ? state.elapsedMs : state.lastTargetElapsedMs,
         exitTs: state.targetKey !== null ? now : state.exitTs,
+        // Reset encerra a pausa: o próximo episódio começa a contar do zero.
+        pausadoDesde: null,
       },
       effect: { type: 'none' },
       hoverKey: null,
@@ -174,6 +241,12 @@ export function stepDwell(
   if (sample.uncalibrated) return parar('uncalibrated', { preservarProgresso: false });
 
   // Rosto perdido por muito tempo zera; por pouco tempo apenas pausa.
+  //
+  // B2.5 — a FÓRMULA aqui sempre esteve certa; o que estava errado era o ramo
+  // de pausa zerar `lastValidTs`, fazendo o frame seguinte ver `Infinity`.
+  // Com `lastValidTs` preservado, "há quanto tempo foi o último olhar válido"
+  // volta a ser mensurável ao longo de todo o episódio de perda — que é
+  // exatamente o que `lostResetMs` quer decidir.
   if (!sample.hasFace) {
     const perdidoHa = state.lastValidTs === null ? Infinity : now - state.lastValidTs;
     return parar('no-face', { preservarProgresso: perdidoHa < config.lostResetMs });
@@ -181,33 +254,63 @@ export function stepDwell(
 
   // Olhos fechados PAUSAM. Nunca completam um dwell, e nunca zeram:
   // uma piscada no meio de uma seleção não pode custar o progresso.
+  //
+  // Diferente do rosto perdido de propósito: aqui o paciente ESTÁ olhando para
+  // o alvo, só com os olhos fechados. Fadiga é a condição do público-alvo, e
+  // punir fechamento prolongado com perda de progresso seria hostil a quem o
+  // sistema serve. Decisão de design preexistente, mantida.
   if (sample.eyeState === 'closed') return parar('eyes-closed', { preservarProgresso: true });
 
   if (now < state.refractoryUntil) return parar('refractory', { preservarProgresso: false });
 
   if (!target) return parar('no-target', { preservarProgresso: false });
   if (target.isDisabled) return parar('disabled', { preservarProgresso: false });
-  if (sample.degraded && !target.isEmergency) {
+  // B1.9 — em `degraded` passam DUAS classes de alvo: emergência (chamar
+  // ajuda) e recuperação (consertar o rastreamento). Antes só a primeira
+  // passava, e como o botão "Recalibre aqui" não é de emergência, a única
+  // saída oferecida ao paciente era inacionável.
+  if (sample.degraded && !target.isEmergency && !target.isRecovery) {
     return parar('degraded', { preservarProgresso: false });
   }
 
   const dwellMs =
     target.customDwellMs ??
-    (sample.degraded && target.isEmergency
-      ? config.dwellMs * config.emergencyDegradedMult
+    // Em degradado o cursor é sabidamente instável, então os alvos que ainda
+    // aceitam clique pagam um dwell mais longo. Um `Math.max` em vez de somar
+    // os multiplicadores: um alvo que seja emergência E recuperação usa o
+    // maior dos dois, nunca o produto — senão o paciente ficaria 6 s olhando
+    // para um botão de emergência.
+    (sample.degraded && (target.isEmergency || target.isRecovery)
+      ? config.dwellMs * Math.max(
+          target.isEmergency ? config.emergencyDegradedMult : 1,
+          target.isRecovery ? config.recoveryDegradedMult : 1,
+        )
       : config.dwellMs);
 
   let next: DwellState;
 
   if (state.targetKey === target.key) {
     // Mesmo alvo: acumula só o intervalo entre amostras válidas consecutivas.
-    // `lastValidTs === null` significa que houve pausa — o primeiro frame após
-    // a retomada não acrescenta tempo, só restabelece o encadeamento.
+    //
+    // B2.5 — a retomada é detectada por `pausadoDesde`, não mais por
+    // `lastValidTs === null`. Como a pausa agora PRESERVA `lastValidTs` (para
+    // poder medir a idade da perda), usá-lo como sinal de pausa somaria a
+    // lacuna inteira como progresso fantasma — até `lostResetMs` de olhar que
+    // nunca aconteceu.
+    //
+    // O primeiro frame após a retomada não acrescenta tempo, só restabelece o
+    // encadeamento — mesma regra de antes, agora com o sinal certo.
+    const retomando = state.pausadoDesde !== null;
     const delta =
-      state.lastValidTs === null
+      retomando || state.lastValidTs === null
         ? 0
         : Math.max(0, Math.min(now - state.lastValidTs, config.lostResetMs));
-    next = { ...state, elapsedMs: state.elapsedMs + delta, lastValidTs: now };
+    next = {
+      ...state,
+      elapsedMs: state.elapsedMs + delta,
+      lastValidTs: now,
+      pausadoDesde: null,
+    };
   } else if (
     state.lastTargetKey === target.key &&
     state.exitTs !== null &&
@@ -220,9 +323,22 @@ export function stepDwell(
       elapsedMs: state.lastTargetElapsedMs,
       lastValidTs: now,
       exitTs: null,
+      pausadoDesde: null,
     };
   } else {
     // Alvo novo: começa do zero. O frame de entrada não conta tempo.
+    //
+    // B3.27 — `exitTs` registra AGORA, simetricamente ao ramo `parar`.
+    //
+    // Antes era `exitTs: null` aqui e `exitTs: now` no `parar`. A tolerância
+    // `graceMs` funcionava ao sair para o VAZIO (que passa pelo `parar`) e
+    // NÃO ao passar por um alvo vizinho (que passa por aqui):
+    //
+    //   A com 1400 ms → B por um frame → volta para A → A recomeça do zero
+    //
+    // Num teclado ocular, onde as teclas são vizinhas e o cursor tem jitter,
+    // o paciente via a barra encher e zerar sem ter desviado o olhar de
+    // propósito. Os dois caminhos de saída têm que custar a mesma coisa.
     next = {
       ...state,
       targetKey: target.key,
@@ -230,7 +346,8 @@ export function stepDwell(
       lastValidTs: now,
       lastTargetKey: state.targetKey ?? state.lastTargetKey,
       lastTargetElapsedMs: state.targetKey !== null ? state.elapsedMs : state.lastTargetElapsedMs,
-      exitTs: null,
+      exitTs: state.targetKey !== null ? now : state.exitTs,
+      pausadoDesde: null,
     };
   }
 

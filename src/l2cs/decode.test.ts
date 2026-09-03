@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { softmax, decodeAngleDeg, decodeAngleWithConfidence, degToRad } from './decode';
+import { softmax, decodeAngleDeg, decodeAngleCircularDeg, decodeAngleWithConfidence, degToRad } from './decode';
 
 describe('softmax', () => {
   it('normaliza para soma 1', () => {
@@ -73,11 +73,30 @@ describe('decodeAngleWithConfidence', () => {
   const binWidth = 4;
   const binOffset = -180;
 
-  it('devolve o mesmo ângulo que decodeAngleDeg (não há regressão de contrato)', () => {
+  it('devolve o mesmo ângulo que decodeAngleCircularDeg', () => {
+    // B3.1 — a paridade agora é com a decodificação CIRCULAR, não com a
+    // linear. Antes deste bug as duas coincidiam por acidente (`decodeAngleDeg`
+    // era a única implementação); a diferença aparece justamente quando a
+    // distribuição tem massa perto do wrap, que é o caso do crop degenerado
+    // que a média linear transformava num plausível ~−2°.
     const logits = [0, 1, 5, 2, 1, 0.5];
-    const legacy = decodeAngleDeg(logits, binWidth, binOffset);
+    const circular = decodeAngleCircularDeg(logits, binWidth, binOffset);
     const { deg } = decodeAngleWithConfidence(logits, binWidth, binOffset);
-    expect(deg).toBeCloseTo(legacy, 12);
+    expect(deg).toBeCloseTo(circular, 12);
+  });
+
+  it('a decodificação linear NÃO é mais o contrato de produção', () => {
+    // Trava a fronteira: se alguém reverter `decodeAngleWithConfidence` para a
+    // média linear, este teste falha. Numa distribuição concentrada longe do
+    // wrap as duas quase coincidem, então é preciso um caso com massa nas
+    // pontas para a diferença ser visível.
+    const logits = new Array<number>(90).fill(0);
+    logits[0] = 30;
+    logits[89] = 30;
+    const linear = decodeAngleDeg(logits, binWidth, binOffset);
+    const { deg } = decodeAngleWithConfidence(logits, binWidth, binOffset);
+    expect(Math.abs(linear)).toBeLessThan(10);      // ~−2°: o bug
+    expect(Math.abs(deg)).toBeGreaterThan(170);     // ~178°: a verdade
   });
 
   it('distribuição uniforme (todos os logits iguais) → confidence = 0', () => {

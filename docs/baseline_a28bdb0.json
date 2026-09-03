@@ -1,0 +1,70 @@
+{
+  "seed": 12345,
+  "screen": {
+    "w": 1920,
+    "h": 1080
+  },
+  "featureDim": 6,
+  "trajectories": [
+    {
+      "name": "static-fixation",
+      "frames": 1350,
+      "meanErrorPx": 50.37818981232724,
+      "p90ErrorPx": 82.43664867933319,
+      "jitterRmsPx": 81.52223349838317,
+      "samplesRejected": 0
+    },
+    {
+      "name": "saccade-20deg",
+      "frames": 240,
+      "meanErrorPx": 53.159805574405674,
+      "p90ErrorPx": 80.59470488264196,
+      "jitterRmsPx": 103.44402237714039,
+      "samplesRejected": 0
+    },
+    {
+      "name": "slow-pursuit",
+      "frames": 75,
+      "meanErrorPx": 41.42823371433766,
+      "p90ErrorPx": 64.0127568118078,
+      "jitterRmsPx": 50.98714053216,
+      "samplesRejected": 0
+    },
+    {
+      "name": "blink-during-fixation",
+      "frames": 150,
+      "meanErrorPx": 36.82927963979619,
+      "p90ErrorPx": 64.11381660366095,
+      "jitterRmsPx": 42.29851963407001,
+      "samplesRejected": 15
+    },
+    {
+      "name": "face-loss-2s",
+      "frames": 180,
+      "meanErrorPx": 35.10301171364634,
+      "p90ErrorPx": 51.4173975103821,
+      "jitterRmsPx": 35.36035515853881,
+      "samplesRejected": 60
+    },
+    {
+      "name": "pose-drift-5deg",
+      "frames": 90,
+      "meanErrorPx": 97.04811903951496,
+      "p90ErrorPx": 154.63594209650878,
+      "jitterRmsPx": 54.80245593424156,
+      "samplesRejected": 0
+    }
+  ],
+  "measuredStageLatency": {},
+  "simConfig": {
+    "seed": 12345,
+    "framesPerPoint": 55,
+    "landmarkNoise": 0.008,
+    "poseJitter": 0.006,
+    "poseDriftPerPoint": 0.01,
+    "l2csNoise": 0.02,
+    "dimDrift": 0.005,
+    "hypometria": true
+  },
+  "note": "Baseline gerado por src/testUtils/writeBaseline.test.ts. measuredStageLatency omitido de propósito (depende da máquina). Só regenerar com IRISFLOW_WRITE_BASELINE=1 e revisão humana do diff."
+}

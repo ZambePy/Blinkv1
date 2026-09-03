@@ -40,7 +40,7 @@ Antes da calibração, o sistema mede as condições reais de captura e as corri
 
 ### Estimativa de Olhar por Rede Neural
 
-L2CS-Net treinada no dataset Gaze360, exportada para ONNX e executada em Web Worker. Entrada: recorte facial 448×448 normalizado (ImageNet). Saída: ângulos *yaw* e *pitch* decodificados de 90 bins por eixo via expectativa da softmax.
+L2CS-Net treinada no dataset Gaze360, exportada para ONNX com **eixos espaciais dinâmicos** e executada em Web Worker. Entrada: recorte facial normalizado (ImageNet) — **448×448 por default** (o tamanho do export original), com 224×224 disponível no mesmo binário pela flag `l2csInputSize`. Saída: ângulos *yaw* e *pitch* decodificados de 90 bins por eixo via expectativa da softmax.
 
 ### Interface para CAA
 
@@ -193,7 +193,7 @@ O instalador é gerado em `release/`.
 
 | Modelo | Arquivo | Tamanho | Origem |
 |---|---|---|---|
-| L2CS-Net | `frontend/public/models/l2cs/l2cs_gaze360.onnx` | 92 MB | Treinado em Gaze360; 90 bins/eixo, entrada 448×448 |
+| L2CS-Net | `frontend/public/models/l2cs/l2cs_gaze360.onnx` | 92 MB | Treinado em Gaze360; 90 bins/eixo; entrada dinâmica (224² ou 448², default 448²) |
 | Face Landmarker | `frontend/public/mediapipe/models/face_landmarker.task` | 3,6 MB | MediaPipe Tasks Vision, 478 landmarks com íris |
 
 Ambos são carregados localmente. O worker L2CS deve estar em estado `ready` antes de iniciar a calibração.

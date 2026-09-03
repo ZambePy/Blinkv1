@@ -11,6 +11,45 @@
 // dentro de uma sessão o usuário pode alternar sem recalibrar.
 
 import type { RidgeModel } from './ridge';
+import type { Pose } from './poseCompensation';
+import type { CentroFacial } from './translationCompensation';
+
+/**
+ * Estado de referência da calibração (B1.3).
+ *
+ * Tudo aqui é medido DURANTE a calibração e usado DEPOIS, na inferência, para
+ * corrigir a predição pela diferença entre as condições de agora e as de então.
+ * Antes de B1.3 nada disso era persistido: `StoredCalibrationProfile` guardava
+ * só os betas e os scalers, e um F5 zerava o resto.
+ *
+ * A consequência era silenciosa e cara. Com `geometricPoseCompensation: true`
+ * (default de produção), `compensarPredicao` chama `deslocamentoPorPose(atual,
+ * referencia, …)`; com `referencia === null` a função devolve `{0,0}` por
+ * contrato — ela é total de propósito, para nunca produzir NaN. Ou seja: a
+ * compensação que `config/experiment.ts` documenta como valendo 361 px contra
+ * 150 px simplesmente parava de agir, sem log, sem erro, sem sinal na UI.
+ * Mesmo modelo, mesmo paciente, cursor diferente conforme tenha havido reload.
+ */
+export interface CalibrationReferenceState {
+  /** Pose média das amostras aceitas na calibração. Base da compensação
+   *  geométrica de rotação da cabeça. */
+  pose: Pose | null;
+  /** Centro facial (ponta do nariz) de referência. Base da compensação de
+   *  translação lateral. */
+  center: CentroFacial | null;
+  /** Distância câmera→rosto medida na calibração, em cm. */
+  cameraDistanceCm: number | null;
+  /** Distância olho→tela na calibração, em cm. Grandeza DIFERENTE da anterior
+   *  — ver `distanceCompensation.ts` e o bug B1.4. */
+  screenDistanceCm: number | null;
+  /** Proxy adimensional `1/scale3D` da distância. Serve de razão relativa;
+   *  não é centímetro. */
+  refDistance: number | null;
+  /** Peso por olho na fusão binocular, medido na calibração (B1.5). Pertence
+   *  ao PERFIL: um perfil "com óculos" com olho direito ruim não pode emprestar
+   *  seus pesos para o perfil "sem óculos". */
+  eyeReliability: { left: number; right: number } | null;
+}
 
 // Categorias observáveis pelo cuidador. `oculos_progressivo` é registrado
 // separadamente porque **é limite físico**, não bug — a refração muda com a
@@ -34,12 +73,29 @@ export interface CalibrationProfileMeta {
 // Snapshot serializável do que treinou. Formato pensado para viver em
 // localStorage/IndexedDB — nada de referências circulares, tudo primitivos
 // + arrays de números.
+/**
+ * Versão do schema de `StoredCalibrationProfile`.
+ *
+ * v2 (B1.3) adiciona o campo obrigatório `reference`. Perfis v1 não têm como
+ * ser migrados — o estado de referência não é derivável dos betas — então são
+ * INVALIDADOS no load em vez de carregados com `reference: null`. Carregar com
+ * null reproduziria exatamente o bug: modelo restaurado, compensação desligada,
+ * nenhum aviso.
+ */
+export const PROFILE_SCHEMA_VERSION = 2;
+
 export interface StoredCalibrationProfile {
   meta: CalibrationProfileMeta;
+  /** Versão do schema. Ausente em perfis v1 (pré-B1.3). */
+  schemaVersion?: number;
   modelLeft: RidgeModel;
   modelRight: RidgeModel;
   scalerParamsLeft:  { means: number[]; stds: number[] };
   scalerParamsRight: { means: number[]; stds: number[] };
+  /** Estado de referência da sessão que treinou este perfil (B1.3/B1.5).
+   *  Obrigatório a partir do schema v2; ausente nos perfis antigos, que por
+   *  isso são rejeitados no load. */
+  reference?: CalibrationReferenceState;
   // Sumário da sessão que produziu o perfil — permite ao cuidador comparar
   // qual perfil está melhor sem recalibrar. Todos opcionais para compat
   // com perfis criados antes.

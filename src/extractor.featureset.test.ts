@@ -43,12 +43,20 @@ describe('projectFeatureSet', () => {
     expect(projectFeatureSet(v, 'compact')).toBe(v);
   });
 
-  it('vetor curto demais passa intacto em vez de inventar zeros', () => {
-    // Frame sem rosto e o path legado `extractEyeFeatures` caem aqui. Projetar
-    // um vetor de 12 para 'iris12+pose' preencheria pose com undefined.
+  it('vetor curto demais LANÇA em vez de degradar em silêncio (B1.1)', () => {
+    // ATÉ B1.1 este teste afirmava o oposto: que o vetor curto passava intacto.
+    // Esse era o bug. Devolver um vetor de 12 dims onde o conjunto declara 15
+    // fazia o Ridge treinar com uma semântica que o `FEATURE_VECTOR_ID` não
+    // descrevia — e um perfil gravado assim era aceito por uma sessão
+    // incompatível, terminando em `clearCalibration()` no meio do uso.
     const curto = marcado(12);
-    expect(projectFeatureSet(curto, 'iris12+pose')).toBe(curto);
+    expect(() => projectFeatureSet(curto, 'iris12+pose')).toThrow(RangeError);
+  });
+
+  it('vetor VAZIO segue passando — é o frame sem rosto, tratado pelo caller', () => {
+    // A única exceção legítima ao contrato de comprimento.
     expect(projectFeatureSet([], 'iris12+posecross')).toEqual([]);
+    expect(projectFeatureSet([], 'iris12+pose')).toEqual([]);
   });
 
   it('iris12 aceita um vetor de exatamente 12 sem alterá-lo', () => {

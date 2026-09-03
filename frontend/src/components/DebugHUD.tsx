@@ -77,6 +77,31 @@ export const DebugHUD: React.FC = () => {
         <span>
           expand {diag.experiment.expandFactor} &middot; cad {diag.experiment.cadenceMs} ms &middot; gazeCorr {diag.experiment.applyGazeCorrection ? 'on' : 'off'}
         </span>
+
+        {/*
+          P5.5 — latência por estágio.
+          Ordenada por p95 e limitada aos quatro mais caros: o HUD é canto de
+          tela, e a lista inteira empurraria o resto para fora. Quem precisa da
+          tabela completa usa `__irisflowLatencia()` no console.
+
+          Estágios que ainda não rodaram nenhuma vez não aparecem — ausência
+          significa "não executou", que é diferente de "custou zero".
+        */}
+        <span style={{ color: '#88f' }}>latência</span>
+        <span>
+          {(() => {
+            const estagios = Object.entries(diag.stageLatency)
+              .sort((a, b) => b[1].p95Ms - a[1].p95Ms)
+              .slice(0, 4);
+            if (estagios.length === 0) return 'sem amostras';
+            return estagios
+              .map(([nome, s]) => `${nome} ${s.p50Ms.toFixed(1)}/${s.p95Ms.toFixed(1)}`)
+              .join(' · ');
+          })()}
+        </span>
+      </div>
+      <div style={{ marginTop: 8, opacity: 0.6, fontSize: '10px' }}>
+        p50/p95 em ms &middot; console: __irisflowLatencia()
       </div>
     </div>
   );

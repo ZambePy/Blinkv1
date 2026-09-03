@@ -63,6 +63,20 @@ export interface Pose {
 }
 
 /**
+ * Maior desvio de pose (em relação à referência de calibração) que a
+ * compensação geométrica aceita, em radianos — B3.12.
+ *
+ * π/6 = 30°. Acima disso a hipótese do modelo já não vale: a compensação
+ * assume que a cabeça girou em torno de um centro fixo e que `tan(Δ)` descreve
+ * o deslocamento resultante na tela. Aos 30° a aproximação está mal, e aos 60°
+ * o número quase certamente veio de um `atan2` saltando de sinal — não de uma
+ * cabeça que girou.
+ *
+ * Mesma ordem do `CLAMP_RAD = π/4` que `l2cs/block.ts` já aplica ao gaze.
+ */
+export const DELTA_POSE_MAX_RAD = Math.PI / 6;
+
+/**
  * Deslocamento em pixels que a rotação da cabeça causa no ponto olhado.
  *
  * `distanciaPx` é a distância olho–tela expressa em pixels de tela: o mesmo
@@ -82,13 +96,37 @@ export function deslocamentoPorPose(
   const dyaw = atual.yaw - referencia.yaw;
   const dpitch = atual.pitch - referencia.pitch;
   if (!Number.isFinite(dyaw) || !Number.isFinite(dpitch)) return { dx: 0, dy: 0 };
+
+  // B3.12 — Δpose fora da faixa plausível ZERA aquele eixo.
+  //
+  // `yaw` vem de `atan2`, que salta de sinal quando a cabeça vira de perfil ou
+  // quando a matriz de transformação degenera. Nesses instantes `dyaw` se
+  // aproxima de ±π/2 e `tan` explode: `tan(π/2 − 0,001) ≈ 1000`, e com
+  // `distanciaPx = 2000` isso vira 2 milhões de pixels de deslocamento.
+  //
+  // O `softClamp` do caller segura o valor FINAL, então o cursor não some da
+  // tela. Mas o pico já entrou no buffer temporal e no One Euro antes do
+  // clamp — e o filtro leva vários frames para decair, produzindo um salto
+  // visível que dura muito mais que o frame ruim que o causou.
+  //
+  // Zerar em vez de clampar é deliberado: um Δ de 60° entre a calibração e o
+  // frame corrente não é rotação de cabeça, é matriz degenerada. Compensar por
+  // um número que sabemos ser lixo — mesmo clampado — seria fabricar correção.
+  // Zero significa "não sei compensar este frame", e o frame seguinte volta ao
+  // normal sozinho.
+  //
+  // Os eixos são avaliados INDEPENDENTEMENTE: um yaw absurdo não descarta um
+  // pitch plausível. Mesma proteção que `block.ts` já aplica com `CLAMP_RAD`.
+  const yawOk = Math.abs(dyaw) <= DELTA_POSE_MAX_RAD;
+  const pitchOk = Math.abs(dpitch) <= DELTA_POSE_MAX_RAD;
+
   // `-0` sai naturalmente quando o desvio é zero e o sinal é negativo. É
   // inofensivo em aritmética, mas vaza para o JSON do relatório como `-0` e
   // faz comparação exata falhar sem motivo. Normalizado aqui, uma vez.
   const semZeroNegativo = (v: number) => (v === 0 ? 0 : v);
   return {
-    dx: semZeroNegativo(SINAL_YAW_X * distanciaPx * Math.tan(dyaw)),
-    dy: semZeroNegativo(SINAL_PITCH_Y * distanciaPx * Math.tan(dpitch)),
+    dx: yawOk ? semZeroNegativo(SINAL_YAW_X * distanciaPx * Math.tan(dyaw)) : 0,
+    dy: pitchOk ? semZeroNegativo(SINAL_PITCH_Y * distanciaPx * Math.tan(dpitch)) : 0,
   };
 }
 

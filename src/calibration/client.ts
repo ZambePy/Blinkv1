@@ -1,12 +1,31 @@
 import type { RidgeModel } from '../ridge';
+import { snapshotConfigDoRegressor, type RegressorConfig } from './regressorConfig';
 
 export interface TrainRequest {
   featuresLeft: number[][];
   featuresRight: number[][];
   targetsX: number[];
   targetsY: number[];
+  /**
+   * Chaves de agrupamento por alvo.
+   *
+   * ⚠️ O worker NÃO consome este campo, e isso é inofensivo:
+   * `RidgeRegressor.train` recomputa os grupos a partir dos próprios alvos via
+   * `targetGroupKey`, e a derivação é determinística. O campo permanece na
+   * request por compatibilidade e porque documenta a intenção — fica esta nota
+   * para quem o ler e estranhar (B3.10).
+   */
   targetGroups: string[];
   polynomialFeatures: boolean;
+  /**
+   * Estado estático do `RidgeRegressor` (B3.10).
+   *
+   * Preenchido automaticamente por `train()`. Um Web Worker tem registro de
+   * módulos próprio, então sem isto os estáticos valem os defaults lá dentro —
+   * e o default de `axisScale` (`{1,1}`) reintroduz o bug de aspect-ratio que
+   * subponderava o eixo X em 3,16×.
+   */
+  regressorConfig?: RegressorConfig;
 }
 
 export interface TrainedModel {
@@ -47,6 +66,32 @@ export function createCalibrationClient(): CalibrationClient {
     }
   }
 
+  /**
+   * Rejeita TODOS os treinos em voo (B3.11).
+   *
+   * O código anterior fazia `pending.clear()` — descartando os `reject` sem
+   * chamá-los — e o handler de `error` só logava. Nos dois casos a promise
+   * ficava **pendente para sempre**: o `await` de quem pediu o treino nunca
+   * retornava, e a UI travava na tela de "treinando" sem nada acionável para o
+   * cuidador. Uma promise que nunca resolve é pior que uma que rejeita, porque
+   * não há como escrever tratamento para ela.
+   */
+  function rejeitarPendentes(motivo: string): void {
+    if (pending.size === 0) return;
+    const erro = new Error(motivo);
+    // Copia antes de limpar: um `reject` pode disparar código que chame
+    // `stop()` de novo, e iterar o mapa sendo mutado é como se perde entrada.
+    const emVoo = [...pending.values()];
+    pending.clear();
+    for (const p of emVoo) {
+      try {
+        p.reject(erro);
+      } catch (e) {
+        console.error('[calibration.worker] handler de rejeição lançou:', e);
+      }
+    }
+  }
+
   return {
     async start() {
       if (worker) return;
@@ -54,6 +99,12 @@ export function createCalibrationClient(): CalibrationClient {
       worker.addEventListener('message', handle);
       worker.addEventListener('error', (e) => {
         console.error('[calibration.worker] error:', e.message);
+        // B3.11 — erro de carregamento do módulo mata todo treino em voo.
+        rejeitarPendentes(`[calibration.worker] erro no worker: ${e.message}`);
+        // O worker está inutilizável; um `start()` posterior precisa criar um
+        // novo em vez de reaproveitar este.
+        worker = null;
+        ready = false;
       });
       ready = true;
     },
@@ -62,14 +113,22 @@ export function createCalibrationClient(): CalibrationClient {
       const id = ++nextId;
       return new Promise<TrainedModel>((resolve, reject) => {
         pending.set(id, { resolve, reject });
-        worker!.postMessage({ type: 'train', id, ...req });
+        worker!.postMessage({
+          type: 'train',
+          id,
+          ...req,
+          // B3.10 — a configuração estática do regressor viaja com a request.
+          // Sem isto o worker treina com `axisScale = {1,1}`.
+          regressorConfig: req.regressorConfig ?? snapshotConfigDoRegressor(),
+        });
       });
     },
     stop() {
       worker?.terminate();
       worker = null;
       ready = false;
-      pending.clear();
+      // B3.11 — rejeita antes de limpar.
+      rejeitarPendentes('[calibration.worker] treino interrompido por stop()');
     },
     isReady() {
       return ready;

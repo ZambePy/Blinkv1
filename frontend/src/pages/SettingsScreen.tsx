@@ -126,6 +126,18 @@ const MonitorBrightnessSlider: React.FC = () => {
   );
 };
 
+/**
+ * Formata uma métrica de precisão que pode não ter sido medida (B3.6).
+ *
+ * `null` significa "nenhum ponto de validação coletou amostra". Mostrar "0px"
+ * seria afirmar precisão perfeita a partir de uma medição que não aconteceu —
+ * exatamente o que o relatório fazia antes, num campo, enquanto outro mostrava
+ * `NaN` para o mesmo evento.
+ */
+function px(v: number | null): string {
+  return v === null ? '—' : `${Math.round(v)}px`;
+}
+
 export const SettingsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -318,11 +330,21 @@ export const SettingsScreen: React.FC = () => {
     startAccuracyTest((r) => {
       setAccuracyRunning(false);
       setLastAccuracy(r);
-      logCalibrationAccuracy(r.meanErrorDeg);
+      // B3.6 — só registra no histórico clínico quando houve medição. Gravar
+      // um `null` (ou pior, um `0`) como resultado de precisão contaminaria a
+      // curva de acompanhamento do paciente com um teste que falhou.
+      if (r.meanErrorDeg !== null) logCalibrationAccuracy(r.meanErrorDeg);
       setClinicalData(getClinicalData());
-      toast.success(
-        `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
-      );
+      if (r.meanError === null || r.meanErrorDeg === null) {
+        toast.error(
+          `Teste de precisão sem amostras (${r.pontosNaoMedidos} de ` +
+          `${r.pontosMedidos + r.pontosNaoMedidos} pontos). Verifique o rastreamento e repita.`,
+        );
+      } else {
+        toast.success(
+          `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
+        );
+      }
     }, metaWithUptime);
   };
 
@@ -1404,12 +1426,18 @@ export const SettingsScreen: React.FC = () => {
               <div style={{ fontWeight: 700, marginBottom: '0.35rem' }}>
                 Último resultado — {lastAccuracy.score}
               </div>
+              {/* B3.6 — métricas podem ser `null` quando nenhum ponto de
+                  validação coletou amostra. "—" é a resposta honesta; antes o
+                  relatório mostrava `0px` num campo e `NaN` noutro para o
+                  mesmo evento. */}
               <div>
-                mean = {Math.round(lastAccuracy.meanError)}px ·{' '}
-                median = {Math.round(lastAccuracy.medianError)}px ·{' '}
-                p90 = {Math.round(lastAccuracy.p90Error)}px ·{' '}
+                mean = {px(lastAccuracy.meanError)} ·{' '}
+                median = {px(lastAccuracy.medianError)} ·{' '}
+                p90 = {px(lastAccuracy.p90Error)} ·{' '}
                 jitter = {lastAccuracy.jitterRMS.toFixed(1)}px ·{' '}
-                {lastAccuracy.meanErrorDeg.toFixed(2)}°
+                {lastAccuracy.meanErrorDeg === null
+                  ? '—'
+                  : `${lastAccuracy.meanErrorDeg.toFixed(2)}°`}
               </div>
             </div>
           )}

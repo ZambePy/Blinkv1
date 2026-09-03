@@ -23,6 +23,8 @@
 // driver. Quando ela não existe, este módulo não finge — reporta que o ajuste
 // tem de ser físico (aproximar a câmera) e não inventa outro caminho.
 
+import { CANTHAL_DISTANCE_CM, fovHorizontalDeg } from './anthropometry';
+
 export interface CapabilityRange {
   min: number;
   max: number;
@@ -41,6 +43,12 @@ export interface CameraCapabilities {
    *  driver expõe, é a correção certa para o batimento que `flickerDetector`
    *  enxerga — melhor que pedir ao cuidador para trocar de lâmpada. */
   powerLineFrequency?: readonly number[];
+  /** Tempo de exposição em unidades de 100 µs (convenção do padrão). Só é
+   *  gravável com `exposureMode: 'manual'` (P4.3). */
+  exposureTime?: CapabilityRange;
+  /** Compensação de exposição em EV. Alternativa quando o driver não expõe o
+   *  tempo absoluto (P4.3). */
+  exposureCompensation?: CapabilityRange;
 }
 
 /** Valores atualmente aplicados (de `track.getSettings()`). */
@@ -52,16 +60,27 @@ export interface CameraState {
   focusMode?: string;
   whiteBalanceMode?: string;
   powerLineFrequency?: number;
+  exposureTime?: number;
+  exposureCompensation?: number;
 }
 
 export interface TuningMeasurement {
   hasFace: boolean;
   /** iodPx / videoWidth — densidade do rosto, independente de resolução. */
   iodFraction: number;
-  /** Brilho medido no crop ocular, 0..1. */
-  brightness: number;
-  /** Contraste medido no crop ocular, 0..1. */
-  contrast: number;
+  /**
+   * Brilho medido no crop ocular, 0..1 — ou `undefined` quando **não foi
+   * medido** (B3.3).
+   *
+   * O `qualityAnalyzer` devolve `undefined` quando a bbox dos olhos é
+   * degenerada ou o canvas está tainted. Tratar isso como `0` faria o planner
+   * concluir "imagem preta, aumente o brilho ao máximo" a partir de uma
+   * ausência de leitura — e mexer no hardware do paciente com base em nada é
+   * pior que não mexer.
+   */
+  brightness?: number;
+  /** Contraste medido no crop ocular, 0..1, ou `undefined` se não medido. */
+  contrast?: number;
 }
 
 export interface TuningTarget {
@@ -195,7 +214,31 @@ export function planTuningStep(
 
   if (!iodConverged) {
     if (caps.zoom) {
-      const current = state.zoom ?? caps.zoom.min;
+      // B3.14 — piso positivo para a lei multiplicativa.
+      //
+      // O código era `state.zoom ?? caps.zoom.min`. `state.zoom` vem de
+      // `track.getSettings()` e é `undefined` em vários drivers (o campo é
+      // opcional no padrão). Quando isso coincide com `zoom.min = 0` — comum
+      // em webcams que expõem zoom como "0..100%" — TUDO colapsa:
+      //
+      //   desired = 0 · ratio = 0
+      //   maxStep = 0 · 0,25  = 0
+      //   next === current    → conclui `atLimit`
+      //
+      // E o app avisava *"Zoom no máximo e o rosto ainda está pequeno"* com o
+      // zoom em 0, mandando o cuidador mover o hardware numa situação em que o
+      // software tinha toda a margem para agir sozinho.
+      //
+      // O piso é o menor valor POSITIVO representável na faixa: o passo do
+      // driver quando ele existe, senão 1% da amplitude. É o mínimo que
+      // permite a multiplicação sair do lugar.
+      const pisoPositivo = caps.zoom.min > 0
+        ? caps.zoom.min
+        : (caps.zoom.step && caps.zoom.step > 0
+            ? caps.zoom.step
+            : Math.max(1e-6, (caps.zoom.max - caps.zoom.min) * 0.01));
+      const bruto = state.zoom ?? caps.zoom.min;
+      const current = bruto > 0 ? bruto : pisoPositivo;
       const desired = current * iodErrorRatio;
       // Amortecimento: nunca mais que MAX_ZOOM_STEP_RATIO por iteração.
       const maxStep = current * MAX_ZOOM_STEP_RATIO;
@@ -224,52 +267,103 @@ export function planTuningStep(
   }
 
   // ── brilho ─────────────────────────────────────────────────────────────
-  const brightnessConverged = Math.abs(measured.brightness - target.brightness) <= BRIGHTNESS_DEADBAND;
-  if (!brightnessConverged && caps.brightness) {
+  //
+  // B3.3 — sem medição, o eixo é PULADO em vez de tratado como zero.
+  //
+  // O `qualityAnalyzer` devolve `undefined` quando a bbox dos olhos é
+  // degenerada ou o canvas está tainted. O engine convertia isso em `0` com
+  // `?? 0`, e o planner concluía "crop preto, aumente o brilho ao máximo" a
+  // partir de uma ausência de leitura — mexendo no hardware do paciente com
+  // base em nada. Pular o eixo e dizer por quê é a única resposta honesta.
+  const brilhoMedido = measured.brightness;
+  const temBrilho = typeof brilhoMedido === 'number' && Number.isFinite(brilhoMedido);
+  if (!temBrilho) reasons.push('brilho não medido — eixo de brilho ignorado neste passo');
+  // Sem medida não há como afirmar convergência; tratar como convergido
+  // impediria a malha de agir quando a medição voltasse, então o passo
+  // simplesmente não mexe neste eixo e a malha tenta de novo no próximo frame.
+  const brightnessConverged = temBrilho
+    ? Math.abs(brilhoMedido - target.brightness) <= BRIGHTNESS_DEADBAND
+    : false;
+  if (temBrilho && !brightnessConverged && caps.brightness) {
     const range = caps.brightness;
     const current = state.brightness ?? (range.min + range.max) / 2;
-    const dir = measured.brightness < target.brightness ? 1 : -1;
-    const next = clampToRange(current + dir * (range.max - range.min) * BRIGHTNESS_STEP_RATIO, range);
+    // B3.14 — ganho PROPORCIONAL ao erro, em vez de bang-bang de 15% fixo.
+    //
+    // Com passo fixo, a malha ultrapassava o alvo quando estava perto e
+    // demorava demais quando estava longe — oscilando em torno da faixa morta
+    // sem nunca declarar `brightnessConverged`. Como o contraste era
+    // condicionado a essa convergência, ele nunca era ajustado.
+    //
+    // O erro é normalizado pela distância máxima possível (o alvo está em
+    // [0,1], então o pior erro é ~1), e o passo é limitado por
+    // `BRIGHTNESS_STEP_RATIO` — que passa de "passo fixo" a "passo máximo".
+    const erro = target.brightness - brilhoMedido;
+    const fracaoDoErro = Math.min(1, Math.abs(erro) / Math.max(target.brightness, 1e-6));
+    const dir = erro > 0 ? 1 : -1;
+    const passo = (range.max - range.min) * BRIGHTNESS_STEP_RATIO * fracaoDoErro;
+    const next = clampToRange(current + dir * passo, range);
     if (Math.abs(next - current) > 1e-9) {
       constraints.brightness = next;
       reasons.push(
         `brilho ${current.toFixed(1)} → ${next.toFixed(1)} ` +
-        `(crop ocular em ${measured.brightness.toFixed(3)}, alvo ${target.brightness.toFixed(2)})`,
+        `(crop ocular em ${brilhoMedido.toFixed(3)}, alvo ${target.brightness.toFixed(2)})`,
       );
-    } else if (measured.brightness < target.brightness) {
+    } else if (brilhoMedido < target.brightness) {
       atLimit = true;
       physicalAdvice = physicalAdvice ??
         'Brilho da câmera no máximo e o rosto ainda escuro. Ilumine de FRENTE, com luminária difusa atrás do monitor.';
     }
-  } else if (!brightnessConverged && !caps.brightness && measured.brightness < target.brightness) {
+  } else if (temBrilho && !brightnessConverged && !caps.brightness && brilhoMedido < target.brightness) {
     atLimit = true;
     physicalAdvice = physicalAdvice ??
       'Esta câmera não expõe controle de brilho. Ilumine o rosto de FRENTE, com luminária difusa atrás do monitor.';
   }
 
   // ── contraste ──────────────────────────────────────────────────────────
-  // Só age quando o brilho já está na faixa. Mexer nos dois ao mesmo tempo faz
-  // a malha oscilar: em muitos drivers o ganho de contraste altera o brilho
-  // aparente, e o passo seguinte tentaria desfazer o anterior.
-  const contrastConverged = Math.abs(measured.contrast - target.contrast) <= CONTRAST_DEADBAND;
-  if (brightnessConverged && !contrastConverged && caps.contrast) {
+  //
+  // B3.14 — DESACOPLADO da convergência do brilho.
+  //
+  // A condição anterior era `if (brightnessConverged && !contrastConverged
+  // && caps.contrast)`, justificada assim: "mexer nos dois ao mesmo tempo faz
+  // a malha oscilar, porque em muitos drivers o ganho de contraste altera o
+  // brilho aparente".
+  //
+  // O raciocínio é legítimo, mas a premissa não se sustentava: com o brilho em
+  // bang-bang de 15% fixo, ele podia oscilar em torno da faixa morta
+  // indefinidamente e NUNCA declarar convergência — e então o contraste nunca
+  // era ajustado. Justamente quando a imagem está pior, o eixo que separa íris
+  // de esclera ficava congelado.
+  //
+  // A oscilação cruzada é tratada na causa: o brilho agora usa ganho
+  // proporcional (converge em vez de caçar) e ambos os eixos têm faixa morta.
+  // Se a medição do Dia 7 mostrar acoplamento residual entre os dois, o lugar
+  // de resolver é a constante de passo, não voltar a travar um eixo no outro.
+  //
+  // B3.3 — mesmo tratamento do brilho: sem medida, o eixo é pulado.
+  const contrasteMedido = measured.contrast;
+  const temContraste = typeof contrasteMedido === 'number' && Number.isFinite(contrasteMedido);
+  if (!temContraste) reasons.push('contraste não medido — eixo de contraste ignorado neste passo');
+  const contrastConverged = temContraste
+    ? Math.abs(contrasteMedido - target.contrast) <= CONTRAST_DEADBAND
+    : false;
+  if (temContraste && !contrastConverged && caps.contrast) {
     const range = caps.contrast;
     const current = state.contrast ?? (range.min + range.max) / 2;
-    const dir = measured.contrast < target.contrast ? 1 : -1;
+    const dir = contrasteMedido < target.contrast ? 1 : -1;
     const bounded = current + dir * (range.max - range.min) * CONTRAST_STEP_RATIO;
     const next = snapTowards(bounded, current, range);
     if (Math.abs(next - current) > 1e-9) {
       constraints.contrast = next;
       reasons.push(
         `contraste ${current.toFixed(1)} → ${next.toFixed(1)} ` +
-        `(crop ocular em ${measured.contrast.toFixed(3)}, alvo ${target.contrast.toFixed(2)})`,
+        `(crop ocular em ${contrasteMedido.toFixed(3)}, alvo ${target.contrast.toFixed(2)})`,
       );
-    } else if (measured.contrast < target.contrast) {
+    } else if (contrasteMedido < target.contrast) {
       atLimit = true;
       physicalAdvice = physicalAdvice ??
         'Contraste da câmera no máximo e a borda da íris continua mole. Melhore a luz frontal.';
     }
-  } else if (brightnessConverged && !contrastConverged && !caps.contrast && measured.contrast < target.contrast) {
+  } else if (temContraste && !contrastConverged && !caps.contrast && contrasteMedido < target.contrast) {
     atLimit = true;
     physicalAdvice = physicalAdvice ??
       'Esta câmera não expõe controle de contraste. Melhore a luz frontal e desligue a correção automática de luz no painel da webcam.';
@@ -333,6 +427,195 @@ export function planStabilizationStep(
   };
 }
 
+// ── P4.3 — exposição manual ───────────────────────────────────────────────────
+
+/** Passo máximo do tempo de exposição por iteração, como fração do valor atual.
+ *  Mesma lógica do zoom: a relação exposição↔brilho é aproximadamente linear,
+ *  mas o driver leva alguns frames para assentar, e passo grande faz caçar. */
+const MAX_EXPOSURE_STEP_RATIO = 0.5;
+
+/** O que o driver de fato permite fazer com a exposição. */
+export type ExposureSupportLevel =
+  /** Trava o modo E escreve o tempo (ou a compensação): malha fechada completa. */
+  | 'full'
+  /** Expõe alguma coisa, mas não o bastante para fechar a malha. */
+  | 'partial'
+  /** Não expõe nada — só resta ação física. */
+  | 'none';
+
+export interface ExposureStep extends TuningStep {
+  supportLevel: ExposureSupportLevel;
+}
+
+/**
+ * Planeja a exposição manual (P4.3).
+ *
+ * ── A regra que decide se travamos ou não ────────────────────────────────────
+ *
+ * Travar `exposureMode: 'manual'` **só** quando (a) também dá para dirigir a
+ * exposição (`exposureTime` ou `exposureCompensation` graváveis), ou (b) o
+ * brilho medido já está no alvo.
+ *
+ * O caso que essa regra evita é concreto: driver que expõe `exposureMode` mas
+ * nem tempo nem compensação, com a imagem escura. Travar ali congela a imagem
+ * escura para sempre e ainda destrói o único mecanismo que podia salvá-la — a
+ * auto-exposição que estávamos desligando. Fica pior que não fazer nada, e sem
+ * sintoma visível além de "a câmera é ruim".
+ *
+ * ── Relação com `planStabilizationStep` ─────────────────────────────────────
+ *
+ * Aquele pede os modos manuais depois que a imagem convergiu, sem escolher
+ * valor. Este escolhe o VALOR a partir da medição, e é o que a flag
+ * `lockCameraExposure` liga. São complementares: se os dois rodarem, o modo é
+ * pedido duas vezes com o mesmo valor, o que é inofensivo.
+ */
+export function planExposureStep(
+  caps: CameraCapabilities,
+  state: CameraState,
+  measured: TuningMeasurement,
+  target: TuningTarget = DEFAULT_TARGET,
+): ExposureStep {
+  const constraints: Record<string, number | string> = {};
+  const reasons: string[] = [];
+
+  const podeTravarModo = !!caps.exposureMode?.includes('manual');
+  const temTempo = !!caps.exposureTime;
+  const temCompensacao = !!caps.exposureCompensation;
+  const podeDirigir = podeTravarModo && (temTempo || temCompensacao);
+  const supportLevel: ExposureSupportLevel = podeDirigir
+    ? 'full'
+    : (podeTravarModo || temTempo || temCompensacao ? 'partial' : 'none');
+
+  // Sem rosto, `brightness` descreve o fundo, não o crop ocular. Ajustar
+  // exposição a partir disso afasta do alvo assim que o rosto voltar.
+  if (!measured.hasFace) {
+    return {
+      constraints: {},
+      reasons: ['sem rosto detectado — ajuste de exposição suspenso'],
+      converged: false,
+      atLimit: false,
+      physicalAdvice: null,
+      supportLevel,
+    };
+  }
+
+  if (supportLevel === 'none') {
+    return {
+      constraints: {},
+      reasons: ['driver não expõe exposureMode, exposureTime nem exposureCompensation'],
+      converged: false,
+      atLimit: true,
+      physicalAdvice:
+        'Esta câmera não deixa o programa controlar a exposição. Ajuste no painel próprio da ' +
+        'webcam (desligue a "correção automática de luz") e ilumine o rosto de FRENTE, com ' +
+        'luminária difusa atrás do monitor.',
+      supportLevel,
+    };
+  }
+
+  const brilho = measured.brightness;
+  const temBrilho = typeof brilho === 'number' && Number.isFinite(brilho);
+  // B3.3 — sem medição o eixo é pulado, não zerado. Derivar tempo de exposição
+  // de uma não-leitura é fabricar um ajuste de hardware a partir de nada.
+  if (!temBrilho) reasons.push('brilho não medido — tempo de exposição não derivado neste passo');
+
+  const noAlvo = temBrilho && Math.abs(brilho - target.brightness) <= BRIGHTNESS_DEADBAND;
+
+  if (podeTravarModo && (podeDirigir || noAlvo)) {
+    constraints.exposureMode = 'manual';
+    reasons.push('exposureMode → manual (a auto-exposição reajusta o contraste da borda da íris)');
+  } else if (podeTravarModo) {
+    reasons.push(
+      'driver expõe exposureMode mas não exposureTime nem exposureCompensation, e a imagem não ' +
+      'está no alvo — travar aqui congelaria a exposição ruim e ainda desligaria a única ' +
+      'compensação que restava.',
+    );
+  } else {
+    reasons.push('driver não expõe exposureMode — escrever exposureTime seria sobrescrito pela malha automática');
+  }
+
+  let atLimit = false;
+  let physicalAdvice: string | null = null;
+
+  if (temBrilho && !noAlvo && podeDirigir) {
+    // Brilho da imagem é aproximadamente linear no tempo de exposição, então a
+    // razão alvo/medido é o fator desejado. `brilho` é > 0 aqui: valores não
+    // finitos já saíram, e 0 exato levaria a razão a infinito — por isso o piso.
+    const razao = target.brightness / Math.max(brilho, 1e-3);
+
+    if (temTempo) {
+      const range = caps.exposureTime!;
+      let current = state.exposureTime;
+      if (typeof current !== 'number' || !Number.isFinite(current)) {
+        current = (range.min + range.max) / 2;
+        reasons.push(`exposureTime ausente em getSettings() — partindo do meio da faixa (${current.toFixed(0)})`);
+      }
+      const desejado = current * razao;
+      const passoMax = current * MAX_EXPOSURE_STEP_RATIO;
+      const limitado = Math.min(current + passoMax, Math.max(current - passoMax, desejado));
+      const next = snapTowards(limitado, current, range);
+      if (Math.abs(next - current) > 1e-9) {
+        constraints.exposureTime = next;
+        reasons.push(
+          `exposureTime ${current.toFixed(0)} → ${next.toFixed(0)} ` +
+          `(crop ocular em ${brilho.toFixed(3)}, alvo ${target.brightness.toFixed(2)})`,
+        );
+      } else {
+        atLimit = true;
+        physicalAdvice = brilho < target.brightness
+          ? 'Tempo de exposição no máximo e o rosto ainda escuro. Ilumine de FRENTE, com luminária difusa atrás do monitor.'
+          : 'Tempo de exposição no mínimo e a imagem ainda estourada. Reduza a luz atrás do paciente (janela ou luminária de fundo).';
+        reasons.push(`exposureTime no limite (${current.toFixed(0)})`);
+      }
+    } else if (temCompensacao) {
+      // Sem tempo absoluto, a compensação em EV é o que sobra. Um EV é um
+      // fator 2 de luz, então o ajuste é log₂ da razão desejada.
+      const range = caps.exposureCompensation!;
+      const current = typeof state.exposureCompensation === 'number' && Number.isFinite(state.exposureCompensation)
+        ? state.exposureCompensation
+        : (range.min + range.max) / 2;
+      const deltaEv = Math.log2(razao);
+      const next = snapTowards(
+        Math.min(range.max, Math.max(range.min, current + deltaEv)),
+        current,
+        range,
+      );
+      if (Math.abs(next - current) > 1e-9) {
+        constraints.exposureCompensation = next;
+        reasons.push(
+          `exposureCompensation ${current.toFixed(1)} → ${next.toFixed(1)} EV ` +
+          `(crop ocular em ${brilho.toFixed(3)}, alvo ${target.brightness.toFixed(2)})`,
+        );
+      } else {
+        atLimit = true;
+        physicalAdvice = brilho < target.brightness
+          ? 'Compensação de exposição no máximo e o rosto ainda escuro. Ilumine de FRENTE, com luminária difusa atrás do monitor.'
+          : 'Compensação de exposição no mínimo e a imagem ainda estourada. Reduza a luz de fundo.';
+      }
+    }
+  }
+
+  if (temBrilho && !noAlvo && !podeDirigir) {
+    atLimit = true;
+    physicalAdvice = physicalAdvice ?? (
+      brilho < target.brightness
+        ? 'Esta câmera não deixa ajustar a exposição por software. Ilumine o rosto de FRENTE, com luminária difusa atrás do monitor.'
+        : 'Esta câmera não deixa ajustar a exposição por software. Reduza a luz atrás do paciente.'
+    );
+    if (temTempo && !podeTravarModo) reasons.push('exposureTime existe mas sem exposureMode manual não se sustenta');
+    else if (!temTempo) reasons.push('driver não expõe exposureTime');
+  }
+
+  return {
+    constraints,
+    reasons,
+    converged: noAlvo,
+    atLimit,
+    physicalAdvice,
+    supportLevel,
+  };
+}
+
 /**
  * Campo de visão horizontal a partir de uma medição conhecida.
  *
@@ -347,11 +630,10 @@ export function deriveHorizontalFovDeg(
   iodPx: number,
   videoWidth: number,
   distanceCm: number,
-  canthalDistanceCm = 9.0,
+  canthalDistanceCm: number = CANTHAL_DISTANCE_CM,
 ): number | null {
-  if (!(iodPx > 0) || !(videoWidth > 0) || !(distanceCm > 0)) return null;
-  const frameWidthCm = (videoWidth / iodPx) * canthalDistanceCm;
-  const halfFovRad = Math.atan(frameWidthCm / (2 * distanceCm));
-  const deg = (halfFovRad * 2 * 180) / Math.PI;
-  return Number.isFinite(deg) && deg > 0 && deg < 180 ? deg : null;
+  // P5.3 — delega para a implementação única em `anthropometry.ts`. A duplicata
+  // que existia aqui tinha o literal 9.0 escrito à mão, e literal duplicado é
+  // como as duas constantes antropométricas divergiram no passado.
+  return fovHorizontalDeg(iodPx, videoWidth, distanceCm, canthalDistanceCm);
 }

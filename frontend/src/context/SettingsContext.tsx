@@ -1,5 +1,6 @@
-import React, { createContext, useContext, useState, useEffect } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { computeDisplayGeometry, pickPanelForDisplay } from '@tracker/displayGeometry';
+import { aplicarGeometriaDoUsuario } from '../design/gazeMetrics';
 
 type DwellSpeed = 'slow' | 'normal' | 'fast';
 type Theme = 'light' | 'dark';
@@ -115,10 +116,63 @@ function applyVisualComfort(s: Pick<Settings, 'theme' | 'brightnessLevel' | 'amb
   html.style.filter = b < 1 ? `brightness(${b.toFixed(2)})` : '';
 }
 
+/** Versão do schema de `Settings` gravado no localStorage (B3.22). */
+const SETTINGS_SCHEMA_VERSION = 1;
+const SETTINGS_KEY = 'irisflow_settings';
+
+/**
+ * Lê as configurações do disco sem nunca lançar (B3.22).
+ *
+ * O código anterior fazia `JSON.parse(raw)` direto no inicializador do
+ * `useState`, **sem `try/catch`**. Um localStorage truncado — que acontece
+ * quando os 5 perfis de calibração estouram a quota de 5 MB do navegador —
+ * derrubava o `SettingsProvider` inteiro no boot, e com ele a árvore React
+ * inteira. Tela branca, sem recuperação possível para o cuidador.
+ *
+ * Também não havia campo de versão: uma mudança futura no formato entraria
+ * silenciosamente misturada aos defaults, com metade dos campos de um schema e
+ * metade de outro.
+ */
+function lerSettingsDoDisco(): Partial<Settings> | null {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+    const obj = parsed as Partial<Settings> & { schemaVersion?: number };
+    // Schema de versão diferente: descarta em vez de mesclar. Metade de um
+    // formato com metade de outro é pior que voltar aos defaults, porque o
+    // resultado não corresponde a nenhuma configuração que alguém escolheu.
+    if (obj.schemaVersion !== undefined && obj.schemaVersion !== SETTINGS_SCHEMA_VERSION) {
+      console.warn(
+        `[SettingsContext] configurações de schema v${obj.schemaVersion} ` +
+        `(atual: v${SETTINGS_SCHEMA_VERSION}) — usando os defaults.`,
+      );
+      return null;
+    }
+    return obj;
+  } catch (e) {
+    console.warn('[SettingsContext] configurações ilegíveis no localStorage — usando os defaults.', e);
+    return null;
+  }
+}
+
+/** Grava sem nunca lançar. Quota estourada não pode derrubar a UI (B3.22). */
+function gravarSettingsNoDisco(s: Settings): void {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, schemaVersion: SETTINGS_SCHEMA_VERSION }));
+  } catch (e) {
+    // Quota excedida é o caso real: 5 perfis de calibração ocupam quase toda
+    // a cota. Perder a persistência da configuração é ruim; derrubar a sessão
+    // do paciente é pior.
+    console.warn('[SettingsContext] não foi possível gravar as configurações:', e);
+  }
+}
+
 export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<Settings>(() => {
-    const raw = localStorage.getItem('irisflow_settings');
-    const saved = raw ? (JSON.parse(raw) as Partial<Settings>) : null;
+    const saved = lerSettingsDoDisco();
     return {
       ...defaultSettings,
       ...(saved ?? {}),
@@ -190,7 +244,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
           screenGeometrySource: 'auto' as const,
           screenScaleFactor: scale,
         };
-        try { localStorage.setItem('irisflow_settings', JSON.stringify(next)); } catch { /* indisponível */ }
+        gravarSettingsNoDisco(next);
         return next;
       });
     }).catch(() => { /* IPC indisponível: segue com o valor configurado */ });
@@ -217,14 +271,51 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [settings.monitorBrightness]);
 
-  const updateSettings = (partial: Partial<Settings>) => {
-    const next = { ...settings, ...partial };
-    setSettings(next);
-    localStorage.setItem('irisflow_settings', JSON.stringify(next));
-  };
+  /**
+   * B3.22 — updater FUNCIONAL, não closure sobre `settings`.
+   *
+   * A versão anterior era `const next = { ...settings, ...partial }`, onde
+   * `settings` vinha do render corrente. Duas chamadas no mesmo handler —
+   * `updateSettings({a})` seguido de `updateSettings({b})` — partiam ambas do
+   * MESMO valor: a segunda sobrescrevia a primeira, e a perda ia inclusive
+   * para o localStorage. O cuidador mudava duas configurações e uma sumia,
+   * sem nada indicando qual.
+   *
+   * `useCallback` com deps vazias porque o updater funcional não fecha sobre
+   * nada — o que também mantém a identidade estável para o `useMemo` abaixo.
+   */
+  const updateSettings = useCallback((partial: Partial<Settings>) => {
+    setSettings((anterior) => {
+      const next = { ...anterior, ...partial };
+      gravarSettingsNoDisco(next);
+      return next;
+    });
+  }, []);
+
+  // B3.24 — a geometria do usuário alimenta o design system.
+  //
+  // `degToPx` usava 60 cm e 96 dpi HARDCODED, e os tokens CSS eram calculados
+  // uma única vez no import do módulo. O app já conhece
+  // `viewingDistanceCm` e `screenDiagonalIn` — usa os dois para posicionar os
+  // alvos de calibração — e o design system os ignorava.
+  //
+  // Numa TV de 40″ a 100 cm, `degToPx(5°)` devolvia 198 px quando o correto
+  // passa de 300: o aviso de acessibilidade virava falso positivo. Um aviso
+  // que mente sobre acessibilidade é pior que nenhum, porque o cuidador
+  // aprende a ignorá-lo.
+  useEffect(() => {
+    aplicarGeometriaDoUsuario(settings.viewingDistanceCm, settings.screenDiagonalIn);
+  }, [settings.viewingDistanceCm, settings.screenDiagonalIn]);
+
+  // B3.22 — `useMemo` no value do provider.
+  //
+  // Sem ele, um objeto novo era criado a cada render do provider e TODOS os
+  // consumidores de `useSettings` re-renderizavam junto — mesmo quando nenhuma
+  // configuração tinha mudado.
+  const value = useMemo(() => ({ settings, updateSettings }), [settings, updateSettings]);
 
   return (
-    <SettingsContext.Provider value={{ settings, updateSettings }}>
+    <SettingsContext.Provider value={value}>
       {children}
     </SettingsContext.Provider>
   );

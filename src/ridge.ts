@@ -328,22 +328,161 @@ export function predictRidge(
   };
 }
 
-/** Padronizador de fold: média/desvio calculados só sobre as linhas passadas.
- *  Usado dentro do CV para eliminar o vazamento do scaler global. */
-function foldStandardizer(rows: number[][]): { apply: (r: number[]) => number[] } {
+/**
+ * Padronizador de fold: média/desvio calculados só sobre as linhas passadas.
+ * Usado dentro do CV para eliminar o vazamento do scaler global.
+ *
+ * ## B2.7 — o acumulador começava em 1
+ *
+ * A linha era `const std = new Array<number>(d).fill(1)` e o mesmo array servia
+ * de acumulador da soma de quadrados. O resultado era
+ * `σ̂ = sqrt((1 + Σ(x−μ)²)/(n−1))` — um viés aditivo de 1 dentro da raiz.
+ *
+ * Medido com n=240: uma feature com σ = 0,05 saía como **0,0818 (+63%)**;
+ * uma feature constante saía como **0,0647** em vez de cair na guarda de 1.
+ *
+ * Dois efeitos, ambos silenciosos:
+ *
+ *  (a) **O Ridge deixa de ser invariante à escala.** O λ escolhido pelo CV
+ *      passa a corresponder a um problema com condicionamento diferente do
+ *      ajuste final. O eixo Y é o mais afetado, porque suas features têm σ
+ *      menor — e é justamente o eixo que `calibration.ts` documenta como tendo
+ *      sinal 6× atenuado.
+ *
+ *  (b) **A guarda de desvio zero fica desativada.** Com o viés, o mínimo
+ *      possível de `v` é `sqrt(1/(n−1)) ≈ 0,065`, então `v > 1e-8` é sempre
+ *      verdadeiro e o piso nunca dispara. Uma feature constante era dividida
+ *      por 0,065 em vez de por 1, inflando-a ~15×.
+ */
+function foldStandardizer(rows: number[][]): {
+  apply: (r: number[]) => number[];
+  means: number[];
+  stds: number[];
+} {
   const n = rows.length;
   const d = n > 0 ? rows[0].length : 0;
   const mean = new Array<number>(d).fill(0);
-  const std = new Array<number>(d).fill(1);
-  if (n === 0) return { apply: (r) => r };
+  // B2.7 — acumulador de soma de quadrados começa em ZERO. Começar em 1
+  // somava uma unidade de variância a toda feature.
+  const std = new Array<number>(d).fill(0);
+  if (n === 0) return { apply: (r) => r, means: mean, stds: std };
   for (const r of rows) for (let j = 0; j < d; j++) mean[j] += r[j];
   for (let j = 0; j < d; j++) mean[j] /= n;
   for (const r of rows) for (let j = 0; j < d; j++) std[j] += (r[j] - mean[j]) ** 2;
   for (let j = 0; j < d; j++) {
     const v = Math.sqrt(std[j] / Math.max(1, n - 1));
+    // Agora esta guarda volta a ter efeito: com o acumulador correto, uma
+    // feature constante produz v = 0 e cai no piso de 1.
     std[j] = Number.isFinite(v) && v > 1e-8 ? v : 1;
   }
-  return { apply: (r) => r.map((v, j) => (v - mean[j]) / std[j]) };
+  return {
+    apply: (r) => r.map((v, j) => (v - mean[j]) / std[j]),
+    means: mean,
+    stds: std,
+  };
+}
+
+/** Exposto só para o teste de regressão de B2.7 verificar os números
+ *  diretamente, em vez de inferi-los pelo λ escolhido. */
+export const __testingFoldStandardizer = foldStandardizer;
+
+/**
+ * Grid de λ varrido pela validação cruzada (B3.9).
+ *
+ * Exportado para que o teste possa travar os extremos — o comentário do
+ * cabeçalho afirmava "de 1e-4 a 1e3" quando o grid de fato começa em **1e-5**,
+ * e documentação divergente do código é o padrão de defeito que este
+ * repositório já paga caro.
+ */
+/**
+ * Grid de λ da especificação (P6.6), para comparar com o `LAMBDA_GRID` atual.
+ *
+ * Cinco valores contra os 25 do grid do projeto. Menos resolução, mas cobre a
+ * mesma faixa útil em ordens de grandeza — e é 5× mais barato, o que importa
+ * quando se roda LOO.
+ */
+export const LAMBDA_GRID_SPEC: readonly number[] = [0.001, 0.01, 0.1, 1.0, 10.0];
+
+export const LAMBDA_GRID: readonly number[] = [
+  1e-5, 2.15e-5, 4.64e-5,
+  1e-4, 2.15e-4, 4.64e-4,
+  1e-3, 2.15e-3, 4.64e-3,
+  1e-2, 2.15e-2, 4.64e-2,
+  1e-1, 2.15e-1, 4.64e-1,
+  1, 2.15, 4.64,
+  10, 21.5, 46.4,
+  100, 215, 464,
+  1000,
+];
+
+/** Tolerância relativa para considerar dois erros de CV empatados (B3.9).
+ *  Sem ela, uma diferença na 15ª casa decimal — ruído de ponto flutuante —
+ *  decide o desempate por acidente. */
+const LAMBDA_TIE_REL_TOL = 1e-9;
+
+export interface EscolhaDeLambda {
+  /** `false` quando NENHUM λ do grid produziu erro finito. */
+  ok: boolean;
+  /** λ escolhido. Só significa alguma coisa quando `ok` é `true`. */
+  lambda: number;
+  /** Erro de CV do λ escolhido. `Infinity` quando `ok` é `false`. */
+  erro: number;
+}
+
+/**
+ * Escolhe o λ de menor erro de validação cruzada (B3.9).
+ *
+ * Duas correções sobre a versão anterior:
+ *
+ * **(a) Empates ficam com o MAIOR λ.** A comparação era `<` estrita, com
+ * `bestLambda` inicializado em `lambdas[0]` — o menor. Num platô de erro
+ * (comum quando o sinal é forte), o empate era sempre resolvido a favor do
+ * modelo MENOS regularizado, isto é, o mais propenso a memorizar. Entre
+ * modelos que erram igual, o certo é o mais regularizado.
+ *
+ * **(b) Falha total é sinalizada.** Se todos os λ falhavam (matriz singular em
+ * todos os folds), `minError` continuava `Infinity`, `bestLambda` continuava
+ * `lambdas[0] = 1e-5`, e a função retornava esse valor com um log dizendo
+ * `erro: Infinity` que ninguém lê. O caller treinava com um λ que nenhum fold
+ * validou.
+ *
+ * `avaliar` pode lançar — exceção conta como falha daquele λ, não da varredura.
+ */
+export function escolherMelhorLambda(
+  lambdas: readonly number[],
+  avaliar: (lambda: number) => number,
+): EscolhaDeLambda {
+  let melhor = Number.NaN;
+  let menorErro = Infinity;
+
+  for (const lambda of lambdas) {
+    let erro: number;
+    try {
+      erro = avaliar(lambda);
+    } catch {
+      continue;
+    }
+    if (!Number.isFinite(erro)) continue;
+
+    if (!Number.isFinite(menorErro)) {
+      menorErro = erro;
+      melhor = lambda;
+      continue;
+    }
+    const empate = Math.abs(erro - menorErro) <= LAMBDA_TIE_REL_TOL * Math.max(1, Math.abs(menorErro));
+    if (erro < menorErro && !empate) {
+      menorErro = erro;
+      melhor = lambda;
+    } else if (empate && lambda > melhor) {
+      // Desempate pelo MAIOR λ — mais regularização entre erros iguais.
+      melhor = lambda;
+    }
+  }
+
+  if (!Number.isFinite(menorErro)) {
+    return { ok: false, lambda: Number.NaN, erro: Infinity };
+  }
+  return { ok: true, lambda: melhor, erro: menorErro };
 }
 
 export class RidgeRegressor {
@@ -395,17 +534,8 @@ export class RidgeRegressor {
   train(features: number[][], targetsX: number[], targetsY: number[]): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
     const groups = targets.map(targetGroupKey);
-    const lambdas = [
-      1e-5, 2.15e-5, 4.64e-5,
-      1e-4, 2.15e-4, 4.64e-4,
-      1e-3, 2.15e-3, 4.64e-3,
-      1e-2, 2.15e-2, 4.64e-2,
-      1e-1, 2.15e-1, 4.64e-1,
-      1, 2.15, 4.64,
-      10, 21.5, 46.4,
-      100, 215, 464,
-      1000,
-    ];
+    // B3.9 — grid único e exportado, para a documentação não poder divergir.
+    const lambdas = LAMBDA_GRID;
     const bestLambdas = RidgeRegressor.lambdaOverride != null
       ? { x: RidgeRegressor.lambdaOverride, y: RidgeRegressor.lambdaOverride }
       : this.selectLambdaCV(features, targets, lambdas, groups);
@@ -436,10 +566,46 @@ export class RidgeRegressor {
       : new Error('[ridge] treino falhou após 3 escalonamentos de λ');
   }
 
+  /**
+   * Seleção de λ com a estratégia de validação explícita (P6.6).
+   *
+   * ── LOTO contra LOO, e por que o default é o primeiro ───────────────────
+   *
+   * `'loto'` (leave-one-TARGET-out) deixa de fora um ALVO INTEIRO por fold.
+   * `'loo'` (leave-one-out) deixa de fora UMA AMOSTRA.
+   *
+   * A diferença não é de rigor acadêmico — é medida neste repositório: segurar
+   * amostras aleatórias dá 22 px de erro, segurar um alvo inteiro dá 140 px. A
+   * distância entre os dois números É o vazamento. Amostras do mesmo alvo são
+   * quadros consecutivos da mesma fixação, quase idênticos; com LOO, o modelo
+   * valida contra um quadro cujos vizinhos ele acabou de ver, e o λ escolhido
+   * fica otimista — pouca regularização parece suficiente porque a validação
+   * é fácil demais.
+   *
+   * A especificação pede "LOOCV sobre os pontos de calibração". Se "ponto"
+   * significa "alvo", é o LOTO que já existia. Esta função permite MEDIR a
+   * diferença em vez de decidir por interpretação de texto.
+   *
+   * ⚠️ O LOO custa N folds em vez de 9. Com ~270 amostras e 25 λ são ~6750
+   * ajustes contra 225. É ferramenta de comparação, não caminho de produção.
+   */
+  selecionarLambdaPorCV(
+    features: number[][],
+    targets: { screenX: number; screenY: number }[],
+    lambdas: readonly number[],
+    modo: 'loto' | 'loo',
+  ): { x: number; y: number } {
+    const keys = modo === 'loto'
+      ? targets.map(targetGroupKey)
+      // Uma chave por amostra: cada fold deixa de fora exatamente um quadro.
+      : targets.map((_, i) => `s${i}`);
+    return this.selectLambdaCV(features, targets, lambdas, keys);
+  }
+
   private selectLambdaCV(
     features: number[][],
     targets: { screenX: number; screenY: number }[],
-    lambdas: number[],
+    lambdas: readonly number[],
     groupKeys?: string[],
   ): { x: number; y: number } {
     const keys = groupKeys ?? targets.map(targetGroupKey);
@@ -457,12 +623,11 @@ export class RidgeRegressor {
 
     if (targetsUnique.length < 2) return { x: 1.0, y: 1.0 };
 
-    let bestLambdaX = lambdas[0];
-    let bestLambdaY = lambdas[0];
-    let bestLambdaJoint = lambdas[0];
-    let minErrorX = Infinity;
-    let minErrorY = Infinity;
-    let minErrorJoint = Infinity;
+    // B3.9 — erro de CV por λ, para a escolha (com desempate e detecção de
+    // falha total) ficar numa função pura e testável.
+    const errosPorLambdaX = new Map<number, number>();
+    const errosPorLambdaY = new Map<number, number>();
+    const errosPorLambdaJoint = new Map<number, number>();
 
     const foldCache = new Map<string, {
       stats: { apply: (r: number[]) => number[] };
@@ -536,30 +701,61 @@ export class RidgeRegressor {
       }
 
       if (failed || foldsCounted === 0) continue;
-      const meanFoldErrorX = foldErrorSumX / foldsCounted;
-      const meanFoldErrorY = foldErrorSumY / foldsCounted;
-      const meanFoldErrorJoint = foldErrorSumJoint / foldsCounted;
-      if (meanFoldErrorX < minErrorX) {
-        minErrorX = meanFoldErrorX;
-        bestLambdaX = lambda;
-      }
-      if (meanFoldErrorY < minErrorY) {
-        minErrorY = meanFoldErrorY;
-        bestLambdaY = lambda;
-      }
-      if (meanFoldErrorJoint < minErrorJoint) {
-        minErrorJoint = meanFoldErrorJoint;
-        bestLambdaJoint = lambda;
-      }
+      // B3.9 — os erros por λ são ACUMULADOS aqui e a escolha é delegada a
+      // `escolherMelhorLambda`, que trata empate e falha total de forma
+      // explícita. Antes a comparação `<` estrita vivia inline e resolvia
+      // todo empate a favor do menor λ (menos regularização).
+      errosPorLambdaX.set(lambda, foldErrorSumX / foldsCounted);
+      errosPorLambdaY.set(lambda, foldErrorSumY / foldsCounted);
+      errosPorLambdaJoint.set(lambda, foldErrorSumJoint / foldsCounted);
     }
+
+    const semErro = () => Infinity;
+    const avaliarX = (l: number) => errosPorLambdaX.get(l) ?? semErro();
+    const avaliarY = (l: number) => errosPorLambdaY.get(l) ?? semErro();
+    const avaliarJ = (l: number) => errosPorLambdaJoint.get(l) ?? semErro();
+
+    /**
+     * B3.9 — fallback EXPLÍCITO quando nenhum λ do grid é validável.
+     *
+     * Antes, esse caso devolvia `lambdas[0] = 1e-5` em silêncio, com um log
+     * dizendo `erro: Infinity` que ninguém lê. O modelo era então treinado com
+     * a MENOR regularização do grid — a pior escolha possível para dado
+     * ruim — e nada na UI ou no relatório indicava que a validação falhou.
+     *
+     * O λ de recuo é o mais regularizado do grid: se não dá para escolher com
+     * evidência, o menos arriscado é o que menos memoriza.
+     */
+    const recuo = lambdas[lambdas.length - 1];
+    const aplicar = (r: ReturnType<typeof escolherMelhorLambda>, eixo: string): number => {
+      if (r.ok) return r.lambda;
+      console.warn(
+        `[ridge] ⚠ NENHUM λ do grid produziu erro finito no eixo ${eixo} — a validação ` +
+        `cruzada falhou em todos os folds (matriz singular é a causa típica: features ` +
+        `constantes ou colineares). Recuando para o λ mais regularizado do grid ` +
+        `(${recuo}). O modelo resultante NÃO foi validado; trate a calibração como suspeita.`,
+      );
+      return recuo;
+    };
 
     if (!RidgeRegressor.independentLambda) {
-      console.log(`[ridge] CV Lambda selecionado (conjunto): ${bestLambdaJoint} (erro: ${minErrorJoint.toFixed(6)})`);
-      return { x: bestLambdaJoint, y: bestLambdaJoint };
+      const rj = escolherMelhorLambda(lambdas, avaliarJ);
+      const lj = aplicar(rj, 'conjunto');
+      if (rj.ok) console.log(`[ridge] CV Lambda selecionado (conjunto): ${lj} (erro: ${rj.erro.toFixed(6)})`);
+      return { x: lj, y: lj };
     }
 
-    console.log(`[ridge] CV Lambda selecionado: X=${bestLambdaX} (erro: ${minErrorX.toFixed(4)}), Y=${bestLambdaY} (erro: ${minErrorY.toFixed(4)})`);
-    return { x: bestLambdaX, y: bestLambdaY };
+    const rx = escolherMelhorLambda(lambdas, avaliarX);
+    const ry = escolherMelhorLambda(lambdas, avaliarY);
+    const lx = aplicar(rx, 'X');
+    const ly = aplicar(ry, 'Y');
+    if (rx.ok && ry.ok) {
+      console.log(
+        `[ridge] CV Lambda selecionado: X=${lx} (erro: ${rx.erro.toFixed(4)}), ` +
+        `Y=${ly} (erro: ${ry.erro.toFixed(4)})`,
+      );
+    }
+    return { x: lx, y: ly };
   }
 
   predict(features: number[]): { x: number; y: number } {

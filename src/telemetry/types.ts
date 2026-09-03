@@ -50,6 +50,23 @@ export interface RecordingHeader {
    */
   featureVectorId?: string;
   startedAt: string;                      // ISO 8601 UTC
+  /**
+   * `performance.timeOrigin` da página, em ms desde a época — B3.28.
+   *
+   * É a ponte que faltava entre os dois relógios da gravação: `startedAt` é
+   * relógio de PAREDE, mas `captureTs`/`emitTs` são `performance.now()`, ou
+   * seja, milissegundos desde o *page load*.
+   *
+   * Sem este campo, `timeOrigin + captureTs` era incalculável e o JSONL não
+   * podia ser alinhado a NENHUM evento externo — nem a um vídeo de
+   * referência, nem a um log clínico, nem à anotação de um observador. Para um
+   * artefato cujo propósito é permitir análise offline, isso é a diferença
+   * entre dado e curiosidade.
+   *
+   * Opcional para gravações anteriores a B3.28; ausente significa "não dá para
+   * cruzar com relógio externo".
+   */
+  timeOrigin?: number;
   resolution: { w: number; h: number };   // viewport CSS px
   videoResolution: { w: number; h: number };
   l2cs?: {

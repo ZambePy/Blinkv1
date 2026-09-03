@@ -3,6 +3,8 @@
   "dataset": "gaze360",
   "file": "l2cs_gaze360.onnx",
   "inputSize": 448,
+  "inputSizeDynamic": true,
+  "supportedInputSizes": [224, 448],
   "inputLayout": "NCHW",
   "inputColorOrder": "RGB",
   "normalization": {
@@ -15,10 +17,11 @@
   "angleUnit": "degrees",
   "inputTensorName": "input",
   "outputTensorNames": { "yaw": "yaw", "pitch": "pitch" },
-  "inferenceLatencyMsCpuNode": 99,
+  "inferenceLatencyMsCpuNode": 78,
+  "inferenceLatencyMsBySize": { "224": 21, "448": 78 },
   "signConvention": {
-    "yaw":   { "positive": "right",  "confidence": "high",       "evidence": "look_right → Δyaw = +25.67° em imagem não espelhada" },
-    "pitch": { "positive": "up",     "confidence": "provisional", "evidence": "look_right (com olhar down-right) → Δpitch = -13.22°; inferência: down → negativo, up → positivo (Gaze360)" }
+    "yaw":   { "positive": "right",  "confidence": "high",        "evidence": "look_right → Δyaw = +25.67° em imagem não espelhada (medido em 448²)" },
+    "pitch": { "positive": "up",     "confidence": "provisional", "evidence": "look_right (com olhar down-right) → Δpitch = -13.22°; inferência: down → negativo, up → positivo (Gaze360). Medido em 448²." }
   },
-  "notes": "Outputs nomeados pelo export ('yaw', 'pitch') — SEMPRE indexar por nome, nunca por posição. Sinal de yaw confirmado empiricamente. Sinal de pitch inferido — para confirmar rodar validação com look_down.jpg (opcional)."
+  "notes": "Outputs nomeados pelo export ('yaw', 'pitch') — SEMPRE indexar por nome, nunca por posição. REEXPORTADO em 2026-09-03 com eixos espaciais dinâmicos: input = ['batch', 3, 'height', 'width']. Os 110 tensores de peso são byte-idênticos ao export anterior (é reexport do mesmo checkpoint, não retreino), e a saída em 448² é bit-idêntica à de antes — a troca do binário não muda o comportamento no tamanho default. O tamanho efetivo do crop NÃO vem daqui: `l2cs.worker.ts` deduz o lado do próprio tensor (`tamanhoDoTensor`), porque com eixos dinâmicos duas fontes de verdade poderiam divergir em silêncio. `inputSize` aqui é o tamanho de REFERÊNCIA (o de treino da rede); quem escolhe o operacional é a flag `l2csInputSize` em src/config/experiment.ts. signConvention foi medido em 448² e NÃO foi revalidado em 224² — rodar frontend/scripts/l2cs_axis_validation.mjs antes de confiar nos sinais em 224."
 }

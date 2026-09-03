@@ -15,6 +15,14 @@ function makeSyntheticLandmarks(): Point3D[] {
 }
 
 describe('featurePipeline: parity with the active extractor', () => {
+  // B1.1: both the extractor and the pipeline now REQUIRE the L2CS angular
+  // block to be present, because the active feature set indexes into [37..38].
+  // Passing no gaze used to yield a 37-dim vector that `projectFeatureSet`
+  // returned intact — the silent corruption B1.1 fixes. Parity is still the
+  // property under test here; the gaze is supplied to BOTH sides so the
+  // comparison is apples-to-apples.
+  const GAZE = { yaw: 0.14, pitch: -0.09, valid: true } as const;
+
   it('extractFeatures returns featuresLeft and featuresRight with identical length, order, and values to the underlying extractor', () => {
     const landmarks = makeSyntheticLandmarks();
 
@@ -24,9 +32,9 @@ describe('featurePipeline: parity with the active extractor', () => {
     // — a silent divergence between the pipeline and its underlying extractor
     // would break stored profiles.
     const direct = USE_COMPACT_FEATURES
-      ? extractCompactFeatures(landmarks)
+      ? extractCompactFeatures(landmarks, undefined, GAZE)
       : extractEyeFeatures(landmarks);
-    const piped = extractFeatures(landmarks);
+    const piped = extractFeatures(landmarks, undefined, GAZE);
 
     // Parity is against the PROJECTION of the extractor onto the active set,
     // not the raw vector. Truncation is contract (see `ACTIVE_FEATURE_SET` in

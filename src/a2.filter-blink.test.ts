@@ -115,11 +115,17 @@ describe('BlinkDetector', () => {
     bd = new BlinkDetector({ histLen: 50, minHistory: 5, blinkRatio: 0.8, thrMin: 0.10, thrMax: 0.22 });
   });
 
-  it('antes de ter histórico suficiente, usa thrMax como default conservador', () => {
-    // EAR=0.21 está ABAIXO de thrMax=0.22 → seria contado como piscada
-    expect(bd.update(0.21)).toBe(true);
-    // EAR=0.23 está ACIMA de thrMax=0.22 → não piscada
-    expect(bd.update(0.23)).toBe(false);
+  it('antes de ter histórico, usa o limiar ABSOLUTO de olho fechado (P5.4)', () => {
+    // ⚠️ INVERTIDO em P5.4. A versão anterior afirmava que o bootstrap usava
+    // `thrMax`, e chamava isso de "default conservador" — mas thrMax é o valor
+    // MAIS EAGER da faixa, e como o histórico só acumula em quadros sem
+    // piscada, qualquer pessoa com repouso abaixo dele ficava presa em piscada
+    // permanente. Ver o teste de PONTO CEGO 2 em `extractor.blinkstate`.
+    //
+    // Agora o bootstrap usa `EAR_CLOSED_ABSOLUTE` (0,18), que é o limiar da
+    // especificação C7 e significa "fechado independente de quem".
+    expect(bd.update(0.21)).toBe(false);  // acima de 0,18 → aberto
+    expect(bd.update(0.15)).toBe(true);   // abaixo de 0,18 → fechado
   });
 
   it('acumula apenas frames de NÃO piscada no histórico', () => {

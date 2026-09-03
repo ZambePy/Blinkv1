@@ -1,5 +1,5 @@
 import React, { Suspense, lazy } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import { HashRouter, Routes, Route } from 'react-router-dom';
 import { GazeProvider } from './context/GazeContext';
 import { AuthProvider } from './context/AuthContext';
 import { SettingsProvider } from './context/SettingsContext';
@@ -100,6 +100,27 @@ const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => (
   <>{children}</>
 );
 
+/**
+ * Router da aplicação — B2.12.
+ *
+ * **`HashRouter`, não `BrowserRouter`.** No build empacotado o Electron faz
+ * `win.loadFile(...)`, então o app roda sob `file://`. `BrowserRouter` usa a
+ * History API: `navigate('/menu')` produz `file:///menu`, um caminho que não
+ * existe no disco. Qualquer reload, crash-recovery do Chromium ou
+ * `location.reload()` cai em "file not found" e o app morre em **tela branca**,
+ * sem console para o cuidador diagnosticar.
+ *
+ * Com `HashRouter` a rota vive depois do `#`, que o `file://` ignora: o
+ * documento carregado é sempre o mesmo `index.html`.
+ *
+ * Exportado para o teste poder afirmar a escolha. A verificação definitiva é
+ * manual, num build empacotado — o plano registra este item como *suspeita*
+ * justamente porque o pacote não foi executado na análise. Mas o par
+ * `BrowserRouter` + `loadFile` é incompatível por construção, e a alternativa
+ * (protocolo customizado via `loadURL`) é bem mais invasiva.
+ */
+export const AppRouter = HashRouter;
+
 function App() {
   return (
     <AuthProvider>
@@ -107,7 +128,7 @@ function App() {
         <ToastProvider>
           <GazeProvider>
             <ReminderProvider>
-              <BrowserRouter>
+              <AppRouter>
                 <EmergencyProvider>
                   <DebugHUD />
                   <DriftIndicator />
@@ -342,7 +363,7 @@ function App() {
                 </Routes>
               </Suspense>
               </EmergencyProvider>
-            </BrowserRouter>
+            </AppRouter>
           </ReminderProvider>
         </GazeProvider>
       </ToastProvider>

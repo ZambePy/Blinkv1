@@ -193,17 +193,41 @@ export class KernelRidgeRegressor implements GazeRegressor {
     };
   }
 
+  /**
+   * Predição em coordenada NORMALIZADA [0,1] — B3.20.
+   *
+   * ## O que estava errado
+   *
+   * Esta função multiplicava por `document.documentElement.clientWidth/Height`
+   * e devolvia PIXELS, enquanto `predictRidge` devolve [0,1]. Os dois
+   * implementam a mesma interface `GazeRegressor`, e todo consumidor
+   * multiplica o resultado por `vw`/`vh`.
+   *
+   * Consequência: trocar `REGRESSOR_MODE` — **um caractere** — fazia o cursor
+   * sair em `x·vw²`, ou seja, coordenadas na casa dos milhões. Um modo
+   * alternativo que não pode ser ligado sem quebrar tudo é código morto com
+   * aparência de opção.
+   *
+   * ## Por que o clamp saiu
+   *
+   * O `Math.min(Math.max(v,0),1)` acontecia POR OLHO, antes da média
+   * binocular. Se o olho direito prevê 1,05 e o esquerdo 0,9, a média correta
+   * é ~0,975; com clamp por olho vira (1,0+0,9)/2 = 0,95 — o cursor é puxado
+   * para dentro da tela justamente nas bordas, onde a UI põe botões.
+   *
+   * O clamp certo é DEPOIS da média, e já existe em `mapGaze`. Mesma decisão
+   * documentada em `predictRidge`.
+   */
   predict(features: number[]): { x: number; y: number } {
     if (!this.model) return { x: 0, y: 0 };
     const m = this.model;
     if (features.length !== m.numFeatures) return { x: 0, y: 0 };
 
-    const kv   = kernelVec(features, m.supportVectors, m.gamma);
-    const clmp = (v: number) => Math.min(Math.max(v, 0), 1);
+    const kv = kernelVec(features, m.supportVectors, m.gamma);
 
     return {
-      x: clmp(dotBias(m.alphaX, m.biasX, kv)) * document.documentElement.clientWidth,
-      y: clmp(dotBias(m.alphaY, m.biasY, kv)) * document.documentElement.clientHeight,
+      x: dotBias(m.alphaX, m.biasX, kv),
+      y: dotBias(m.alphaY, m.biasY, kv),
     };
   }
 

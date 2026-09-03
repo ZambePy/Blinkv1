@@ -17,31 +17,51 @@ import { ACCLIMATION_MS, COLLECTION_MS } from './accuracyProtocol';
 import { ACTIVE_FEATURE_SET, l2csSlotsInSet } from './extractor';
 
 export interface AccuracyResult {
-  meanError: number;      // Erro médio em pixels
-  medianError: number;    // Erro mediano em pixels
-  p90Error: number;       // Erro P90 em pixels
-  meanErrorX: number;     // Erro médio no eixo X
-  meanErrorY: number;     // Erro médio no eixo Y
-  maxError: number;       // Pior erro em pixels
-  errorPct: number;       // Erro médio como % da diagonal da tela
-  meanErrorDeg: number;   // Erro médio em graus angulares
+  // ---------------------------------------------------------------------------
+  // B3.6/B3.7 — POLÍTICA ÚNICA de ausência: `null` significa "não há pontos
+  // medidos para esta métrica". Nunca `NaN`, nunca `0` fabricado.
+  //
+  // Antes havia TRÊS políticas discordando no mesmo JSON: `meanError` filtrava
+  // por `isFinite` (ignorava o ponto), `meanErrorX` fazia `(a/b) || 0` e
+  // reportava **0**, e `maxError` reportava **NaN**. Quem lia o relatório via
+  // três respostas diferentes para o mesmo evento.
+  //
+  // B3.7 — cada métrica declara sua POPULAÇÃO em `nInterior`/`nEdge`. Antes,
+  // `meanError` usava os 9 interiores enquanto `meanErrorX/Y`, `maxError` e o
+  // ajuste afim usavam os 13, e `explainedFraction = 1 − residual₁₃/meanError₉`
+  // comparava conjuntos diferentes.
+  // ---------------------------------------------------------------------------
+  meanError: number | null;      // Erro médio em pixels (pontos INTERIORES)
+  medianError: number | null;    // Erro mediano em pixels
+  p90Error: number | null;       // Erro P90 em pixels
+  meanErrorX: number | null;     // Erro médio no eixo X (mesma população de meanError)
+  meanErrorY: number | null;     // Erro médio no eixo Y (idem)
+  maxError: number | null;       // Pior erro em pixels (todos os pontos medidos)
+  errorPct: number | null;       // Erro médio como % da diagonal da tela
+  meanErrorDeg: number | null;   // Erro médio em graus angulares
   jitterRMS: number;      // RMS da dispersão de predições em torno da própria média por ponto (px)
   /** 0.3 — média dos 9 pontos INTERIORES (25/50/75). Igual a `meanError`;
    *  existe com nome próprio para o leitor não precisar saber que `meanError`
    *  exclui a borda. */
-  meanErrorInner: number;
+  meanErrorInner: number | null;
   /** 0.3 — média dos 4 cantos a 5%/95%, onde a predição EXTRAPOLA a grade de
    *  calibração em X. É a região que a grade 25/50/75 nunca mediu e onde a UI
-   *  de fato posiciona botões. `NaN` se nenhum ponto de borda foi coletado. */
-  meanErrorEdge: number;
+   *  de fato posiciona botões. `null` se nenhum ponto de borda foi coletado. */
+  meanErrorEdge: number | null;
   score: string;          // Rótulo qualitativo
   colorClass: string;     // Classe CSS para colorir o painel
   pointErrors: number[];  // Erro por ponto de validação
   pointJitters: number[]; // Jitter RMS por ponto (px)
+  /** Quantos pontos de validação coletaram amostra, e quantos não (B3.6). */
+  pontosMedidos: number;
+  pontosNaoMedidos: number;
+  /** Tamanho de cada população (B3.7). */
+  nInterior: number;
+  nEdge: number;
   /** Erro por AMOSTRA (não por média do ponto). É o que o dwell sente. */
-  sampleMeanError: number;
-  sampleMedianError: number;
-  sampleP90Error: number;          // p90 real, sobre todas as amostras
+  sampleMeanError: number | null;
+  sampleMedianError: number | null;
+  sampleP90Error: number | null;   // p90 real, sobre todas as amostras
   /** % de amostras dentro de um alvo de raio R centrado no ponto.
    *  Preditor direto da taxa de sucesso do dwell. */
   hitRateByRadius: { radiusPx: number; pct: number }[];
@@ -108,8 +128,198 @@ export interface RunMeta {
   distanciaCm: number;
   /** Diagonal física do monitor em polegadas. */
   telaPolegadas: number;
+  /**
+   * De ONDE veio `telaPolegadas` (B2.10).
+   *
+   * `'default'` significa o hardcode de 23,6″ — um número que ninguém
+   * verificou. `'auto'` é EDID; `'manual'` é o cuidador tendo medido e
+   * digitado.
+   *
+   * Sem este campo, o relatório não tinha como distinguir "medi 23,6″" de
+   * "assumi 23,6″", e reportava `assumed: false` nos dois casos. O erro
+   * angular é calculado sobre essa diagonal — `displayGeometry.ts` documenta
+   * que errá-la vale 34% de erro angular.
+   *
+   * Opcional para relatórios antigos; ausente é tratado como `'default'`.
+   */
+  screenGeometrySource?: ScreenGeometrySource | null;
   /** Fator de escala do SO (1 = 100%, 1.5 = 150%). Documental. */
   screenScaleFactor?: number | null;
+}
+
+/** Origem da diagonal física da tela (B2.10). Espelha o campo homônimo em
+ *  `SettingsContext`. */
+export type ScreenGeometrySource = 'default' | 'auto' | 'manual';
+
+/**
+ * Converte fração de tela em pixels (B3.32).
+ *
+ * Fonte ÚNICA para posicionar alvos e para calcular o ground-truth.
+ *
+ * O bug: o alvo era desenhado com `left: ${x*100}vw` — e `vw` **inclui a barra
+ * de rolagem** — enquanto o ground-truth vinha de
+ * `x * document.documentElement.clientWidth`, que a **exclui**. Com scrollbar
+ * clássica de 15 px, até ~15 px de erro sistemático entravam direto no
+ * relatório de precisão E nos coeficientes do Ridge, porque o modelo era
+ * treinado contra um alvo que não estava onde o código pensava.
+ *
+ * (O plano marca o item como suspeita quanto à magnitude: em kiosk/fullscreen
+ * sem scrollbar o efeito é nulo. Ter uma fonte única elimina a classe de erro
+ * independentemente disso.)
+ */
+export function fracaoDaTelaParaPx(fracao: number, larguraPx: number): number {
+  return fracao * larguraPx;
+}
+
+/**
+ * Métricas agregadas de erro, com POLÍTICA ÚNICA de ausência (B3.6/B3.7).
+ *
+ * `null` significa "não há pontos medidos para esta métrica" — nunca `NaN`,
+ * nunca `0` fabricado.
+ */
+export interface ErrosAgregados {
+  /** Média sobre os pontos INTERIORES medidos. */
+  meanErrorInner: number | null;
+  /** Média sobre os pontos de BORDA medidos. */
+  meanErrorEdge: number | null;
+  /** Métrica histórica: igual a `meanErrorInner`. Mantida com este nome porque
+   *  é a única com série temporal, e mudar sua população tornaria todo
+   *  relatório anterior incomparável sem nada no arquivo indicando a mudança. */
+  meanError: number | null;
+  medianError: number | null;
+  p90Error: number | null;
+  /** Erro em X/Y sobre a MESMA população de `meanError` (interiores). Antes
+   *  usavam os 13 pontos enquanto `meanError` usava 9 — populações diferentes
+   *  no mesmo relatório (B3.7). */
+  meanErrorX: number | null;
+  meanErrorY: number | null;
+  sampleMeanError: number | null;
+  sampleMedianError: number | null;
+  sampleP90Error: number | null;
+  hitRateByRadius: { radiusPx: number; pct: number }[];
+  maxError: number | null;
+  errorPct: number | null;
+  /** Quantos pontos de fato coletaram amostra. */
+  pontosMedidos: number;
+  /** Quantos pontos não coletaram amostra alguma (B3.6). */
+  pontosNaoMedidos: number;
+  /** Tamanho de cada população, para o leitor do JSON saber sobre quantos
+   *  pontos cada número foi calculado (B3.7). */
+  nInterior: number;
+  nEdge: number;
+}
+
+/** Entrada mínima que `agregarErros` consome. */
+export interface PontoAgregavel {
+  isEdge?: boolean;
+  error?: number;
+  errorX?: number;
+  errorY?: number;
+  samplesError?: number[];
+}
+
+const HIT_RADII = [60, 100, 150, 200];
+
+/** Formata uma métrica que pode não ter sido medida (B3.6). "—" é a resposta
+ *  honesta; "0px" ou "NaNpx" na tela do cuidador, não. */
+function mostrarPx(v: number | null): string {
+  return v === null ? '—' : `${Math.round(v)}px`;
+}
+
+/**
+ * Agrega os erros por ponto num conjunto de métricas.
+ *
+ * Pura e total. Toda a política de ausência mora aqui — antes de B3.6 havia
+ * TRÊS políticas discordando dentro do mesmo relatório: `meanError` filtrava
+ * por `isFinite`, `meanErrorX` fazia `(a/b) || 0` e reportava **0**, e
+ * `maxError` reportava **NaN**. Três números no mesmo JSON dizendo coisas
+ * diferentes sobre o mesmo evento.
+ */
+export function agregarErros(
+  pontos: readonly PontoAgregavel[],
+  vw: number,
+  vh: number,
+): ErrosAgregados {
+  const medido = (p: PontoAgregavel) => typeof p.error === 'number' && Number.isFinite(p.error);
+  const medidos = pontos.filter(medido);
+  const interiores = medidos.filter((p) => !p.isEdge);
+  const bordas = medidos.filter((p) => p.isEdge);
+
+  const media = (v: number[]): number | null =>
+    v.length > 0 ? v.reduce((a, b) => a + b, 0) / v.length : null;
+
+  const errosInterior = interiores.map((p) => p.error as number);
+  const errosBorda = bordas.map((p) => p.error as number);
+  const errosTodos = medidos.map((p) => p.error as number);
+
+  const ordenadosInterior = [...errosInterior].sort((a, b) => a - b);
+  const meanErrorInner = media(errosInterior);
+
+  // B3.7 — X e Y sobre a MESMA população de `meanError`. Usar os 13 pontos
+  // aqui e os 9 lá fazia `explainedFraction = 1 − residual₁₃/meanError₉`
+  // comparar populações diferentes, produzindo um número sem significado.
+  const errosX = interiores
+    .map((p) => p.errorX)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+  const errosY = interiores
+    .map((p) => p.errorY)
+    .filter((v): v is number => typeof v === 'number' && Number.isFinite(v));
+
+  const amostras = medidos.flatMap((p) => p.samplesError ?? []).filter(Number.isFinite);
+  const nAmostras = amostras.length;
+  const ordenadasAmostras = [...amostras].sort((a, b) => a - b);
+
+  const diagonal = Math.hypot(vw, vh);
+
+  return {
+    meanErrorInner,
+    meanErrorEdge: media(errosBorda),
+    meanError: meanErrorInner,
+    medianError:
+      ordenadosInterior.length > 0
+        ? ordenadosInterior[Math.floor(ordenadosInterior.length / 2)]
+        : null,
+    // Percentil linear-interpolado (convenção numpy 'linear'). Antes era
+    // `sorted[floor(n*0.9)]`, que com n=9 dá `sorted[8]` — o p90 era
+    // LITERALMENTE o máximo, e o relatório publicava dois nomes para o mesmo
+    // número.
+    p90Error: ordenadosInterior.length > 0 ? percentileLinear(ordenadosInterior, 0.9) : null,
+    meanErrorX: media(errosX),
+    meanErrorY: media(errosY),
+    sampleMeanError: media(amostras),
+    sampleMedianError: nAmostras > 0 ? ordenadasAmostras[Math.floor(nAmostras / 2)] : null,
+    sampleP90Error:
+      nAmostras > 0
+        ? ordenadasAmostras[Math.min(nAmostras - 1, Math.ceil(nAmostras * 0.9) - 1)]
+        : null,
+    hitRateByRadius: HIT_RADII.map((r) => ({
+      radiusPx: r,
+      pct: nAmostras > 0 ? (amostras.filter((e) => e <= r).length / nAmostras) * 100 : 0,
+    })),
+    // B3.6 — `Math.max(...pointErrors)` sobre um array com NaN devolve NaN.
+    // Agora só entram pontos medidos, e sem nenhum a resposta é `null`.
+    maxError: errosTodos.length > 0 ? Math.max(...errosTodos) : null,
+    errorPct:
+      meanErrorInner !== null && diagonal > 0 ? (meanErrorInner / diagonal) * 100 : null,
+    pontosMedidos: medidos.length,
+    pontosNaoMedidos: pontos.length - medidos.length,
+    nInterior: interiores.length,
+    nEdge: bordas.length,
+  };
+}
+
+/**
+ * A geometria da tela foi MEDIDA, ou apenas assumida? (B2.10)
+ *
+ * Só `'auto'` (EDID) e `'manual'` (fita métrica do cuidador) contam como
+ * medição. `'default'` é o hardcode de 23,6″.
+ *
+ * Ausente ou desconhecido conta como **assumida**: na dúvida, a resposta
+ * honesta é a que não afirma uma medição inexistente. O bug tinha o default
+ * invertido — bastava o número existir para ele se declarar medido.
+ */
+export function geometriaFoiMedida(source: ScreenGeometrySource | null | undefined): boolean {
+  return source === 'auto' || source === 'manual';
 }
 
 interface PointDiagnostic {
@@ -117,8 +327,19 @@ interface PointDiagnostic {
   isEdge?: boolean;
   groundX: number;
   groundY: number;
-  predX: number;
-  predY: number;
+  /**
+   * Média das predições neste ponto — `undefined` quando o ponto **não
+   * coletou amostra alguma** (B3.6).
+   *
+   * Antes era inicializado com `targetScreenX`/`targetScreenY`, ou seja, no
+   * PRÓPRIO ALVO. Um ponto sem amostra entrava no relatório com `error: NaN`
+   * mas `predX === groundX` — um acerto exato para o ajuste afim, puxando a
+   * decomposição para a identidade e inflando `explainedFraction`.
+   */
+  predX?: number;
+  predY?: number;
+  /** `NaN`/ausente quando o ponto não foi medido. Ver `agregarErros` para a
+   *  política única de tratamento. */
   error: number;
   errorX: number;
   errorY: number;
@@ -256,7 +477,13 @@ export function startAccuracyTest(
 
   // Guarda de honestidade da métrica. Roda ANTES do teste para que o
   // aviso apareça no console junto do resto do diagnóstico da sessão.
-  const overlap = checkValidationOverlap(getCalibrationTargets(), VALIDATION_POINTS);
+  // B3.8 — a guarda cobre TODOS os pontos de validação, inclusive as bordas.
+  //
+  // Antes recebia só `VALIDATION_POINTS` (os 9 interiores). Os `EDGE_POINTS`
+  // em 5%/95% nunca eram checados — e é justamente em Y que a grade de
+  // calibração cai em 5%/95%, então `meanErrorEdge` podia estar medindo
+  // memorização sem que nada denunciasse.
+  const overlap = checkValidationOverlap(getCalibrationTargets(), ALL_VALIDATION_POINTS);
   if (overlap.length > 0) {
     console.warn(
       `[accuracy] ⚠ ${overlap.length} ponto(s) de validação coincidem com alvos de ` +
@@ -369,8 +596,15 @@ export function startAccuracyTest(
       let errorY = NaN;
       let jitterRMS = NaN;
       let samplesError: number[] = [];
-      let meanPX = targetScreenX;
-      let meanPY = targetScreenY;
+      // B3.6 — `undefined`, não o próprio alvo.
+      //
+      // A inicialização anterior era `meanPX = targetScreenX`. Um ponto que
+      // não coletou amostra alguma (rosto perdido, `mapGaze` nulo o tempo
+      // todo) entrava no relatório com `error: NaN` mas `predX === groundX` —
+      // ou seja, como um ACERTO EXATO para o ajuste afim, puxando a
+      // decomposição para a identidade e inflando `explainedFraction`.
+      let meanPX: number | undefined;
+      let meanPY: number | undefined;
 
       if (predictedX.length > 0) {
         meanPX = predictedX.reduce((s, v) => s + v, 0) / predictedX.length;
@@ -536,15 +770,22 @@ export function percentileLinear(sorted: readonly number[], q: number): number {
  * exibida depende deste cálculo.
  */
 export function affineErrorDecomposition(
-  points: readonly { groundX: number; groundY: number; predX: number; predY: number }[],
+  points: readonly { groundX: number; groundY: number; predX?: number; predY?: number }[],
   vw: number,
   vh: number,
-  meanError: number,
+  meanError: number | null,
 ): AccuracyResult['affine'] {
+  // B3.6 — pontos sem predição são EXCLUÍDOS. Antes eles chegavam aqui com
+  // `predX === groundX` (a inicialização no próprio alvo), o que os fazia
+  // parecer acertos exatos e puxava o ajuste na direção da identidade —
+  // inflando `explainedFraction` justamente quando havia menos dado.
   const usable = points.filter(
-    p => Number.isFinite(p.predX) && Number.isFinite(p.predY),
+    (p): p is { groundX: number; groundY: number; predX: number; predY: number } =>
+      typeof p.predX === 'number' && Number.isFinite(p.predX) &&
+      typeof p.predY === 'number' && Number.isFinite(p.predY),
   );
   if (usable.length < 4 || !(vw > 0) || !(vh > 0)) return undefined;
+  if (meanError === null || !(meanError > 0)) return undefined;
 
   const rows = usable.map(p => [p.groundX / vw, p.groundY / vh, 1]);
 
@@ -626,41 +867,12 @@ function finishTest(
   // A borda entra como `meanErrorEdge`, e a UI mostra os dois — porque a média
   // interior sozinha subestima o uso real: `GazeGrid` põe botões em
   // x ∈ {1/6, 5/6}, fora do que a grade 25/50/75 alcança.
-  const innerErrors = diagnostics.filter((d) => !d.isEdge).map((d) => d.error).filter(Number.isFinite);
-  const edgeErrors = diagnostics.filter((d) => d.isEdge).map((d) => d.error).filter(Number.isFinite);
-  const mediaDe = (v: number[]) => (v.length > 0 ? v.reduce((a, b) => a + b, 0) / v.length : NaN);
-
-  const meanErrorInner = mediaDe(innerErrors);
-  const meanErrorEdge = mediaDe(edgeErrors);
-  const meanError = meanErrorInner;
-  const sortedErrors = [...innerErrors].sort((a, b) => a - b);
-  const medianError = sortedErrors[Math.floor(sortedErrors.length / 2)] || 0;
-  // Antes: `sorted[floor(n*0.9)]`, que com n=9 dá `sorted[8]` — o p90 por
-  // ponto era LITERALMENTE o máximo, e o relatório publicava dois nomes para
-  // o mesmo número (p90Error === maxError em todos os relatórios). Percentil
-  // linear-interpolado (mesma convenção do numpy 'linear') corrige sem mudar
-  // nenhuma outra métrica.
-  const p90Error = percentileLinear(sortedErrors, 0.9);
-
-  const meanErrorX = diagnostics.reduce((s, d) => s + d.errorX, 0) / diagnostics.length || 0;
-  const meanErrorY = diagnostics.reduce((s, d) => s + d.errorY, 0) / diagnostics.length || 0;
-
-  const allSampleErrors = diagnostics.flatMap(d => d.samplesError);
-  const nSamples = allSampleErrors.length;
-  const sampleMeanError = nSamples ? allSampleErrors.reduce((s, v) => s + v, 0) / nSamples : 0;
-  const sortedSampleErrors = [...allSampleErrors].sort((a, b) => a - b);
-  const sampleMedianError = nSamples > 0 ? sortedSampleErrors[Math.floor(nSamples / 2)] : 0;
-  const sampleP90Error = nSamples > 0 ? sortedSampleErrors[Math.min(nSamples - 1, Math.ceil(nSamples * 0.9) - 1)] : 0;
-
-  const radii = [60, 100, 150, 200];
-  const hitRateByRadius = radii.map(r => ({
-    radiusPx: r,
-    pct: nSamples > 0 ? (allSampleErrors.filter(e => e <= r).length / nSamples) * 100 : 0
-  }));
-
-  const maxError = Math.max(...pointErrors);
-  const diagonal = Math.sqrt(vw ** 2 + vh ** 2);
-  const errorPct = (meanError / diagonal) * 100;
+  const agg = agregarErros(diagnostics, vw, vh);
+  const {
+    meanErrorInner, meanErrorEdge, meanError, medianError, p90Error,
+    meanErrorX, meanErrorY, sampleMeanError, sampleMedianError, sampleP90Error,
+    hitRateByRadius, maxError, errorPct,
+  } = agg;
 
   let distPx = ASSUMED_DIST_PX;
   let geometryAssumed = true;
@@ -673,10 +885,18 @@ function finishTest(
     const diagPx = Math.hypot(vw, vh);
     pxPorCm = diagPx / (meta.telaPolegadas * 2.54);
     distPx = meta.distanciaCm * pxPorCm;
-    geometryAssumed = false;
+    // B2.10 — a geometria só deixa de ser "assumida" quando a diagonal veio do
+    // EDID ou de uma medição do cuidador. Antes bastava o NÚMERO existir, e
+    // como `telaPolegadas` é sempre `settings.screenDiagonalIn` (default
+    // 23,6″), todo relatório se declarava medido. Com B2.11 no ar — o escape
+    // quebrado que fazia o EDID nunca funcionar — isso significa que 100% dos
+    // relatórios já emitidos afirmam ter medido um número chutado.
+    geometryAssumed = !geometriaFoiMedida(meta.screenGeometrySource);
   }
 
-  const meanErrorDeg = (Math.atan(meanError / distPx) * 180) / Math.PI;
+  // B3.6 — sem erro médio não há erro angular. `null` em vez de NaN.
+  const meanErrorDeg =
+    meanError !== null ? (Math.atan(meanError / distPx) * 180) / Math.PI : null;
 
   const pointJitters = diagnostics.map(d => d.jitterRMS);
   const jitterRMS = pointJitters.length
@@ -685,7 +905,13 @@ function finishTest(
 
   let score: string;
   let colorClass: string;
-  if (meanError < 30) {
+  if (meanError === null) {
+    // B3.6 — nenhum ponto foi medido. Emitir "Ruim" seria um veredito sobre
+    // uma medição que não aconteceu; o cuidador precisa saber que o teste
+    // falhou, não que o paciente foi mal.
+    score = "Não medido";
+    colorClass = "accuracy-poor";
+  } else if (meanError < 30) {
     score = "Excelente";
     colorClass = "accuracy-excellent";
   } else if (meanError < 60) {
@@ -740,7 +966,7 @@ function finishTest(
       `[accuracy] Decomposição afim: ganhoX=${affine.gainX.toFixed(3)} ` +
       `ganhoY=${affine.gainY.toFixed(3)} cisalhamento=${affine.shearYX.toFixed(3)} ` +
       `offset=(${Math.round(affine.offsetXPx)}, ${Math.round(affine.offsetYPx)})px | ` +
-      `resíduo=${Math.round(affine.residualPx)}px de ${Math.round(meanError)}px ` +
+      `resíduo=${Math.round(affine.residualPx)}px de ${meanError === null ? "?" : Math.round(meanError)}px ` +
       `(${(affine.explainedFraction * 100).toFixed(0)}% do erro é mapa afim)`,
     );
     // Ganho fora de [0.9, 1.1] com resíduo pequeno é a assinatura de amplitude
@@ -761,6 +987,10 @@ function finishTest(
     meanError, medianError, p90Error, meanErrorX, meanErrorY, maxError, errorPct, meanErrorDeg,
     meanErrorInner, meanErrorEdge,
     jitterRMS, score, colorClass, pointErrors, pointJitters,
+    pontosMedidos: agg.pontosMedidos,
+    pontosNaoMedidos: agg.pontosNaoMedidos,
+    nInterior: agg.nInterior,
+    nEdge: agg.nEdge,
     sampleMeanError, sampleMedianError, sampleP90Error, hitRateByRadius,
     poseDrift, affine,
     validationOverlap: validationOverlap && validationOverlap.length > 0
@@ -827,7 +1057,12 @@ function finishTest(
       ? fit
       : null,
     geometry: {
-      assumed: geometryAssumed, distPx, pxPorCm: pxPorCm || undefined,
+      assumed: geometryAssumed,
+      // B2.10 — a ORIGEM vai junto do veredito. Quem lê o JSON meses depois
+      // consegue distinguir "23,6″ medido no EDID" de "23,6″ porque ninguém
+      // configurou", em vez de ter que confiar num booleano sem procedência.
+      source: meta?.screenGeometrySource ?? 'default',
+      distPx, pxPorCm: pxPorCm || undefined,
       // Configuração de display do SO. NÃO participa da
       // conversão px→cm (a escala se cancela: o erro é medido em px CSS e a
       // tela cobre um número fixo de px CSS). Fica registrado porque
@@ -877,20 +1112,43 @@ function finishTest(
   if (meta) {
     console.log(`[accuracy] Condição: ${meta.iluminacao} | cabeça=${meta.movimentoCabeca} | óculos=${meta.oculos ? 'sim' : 'não'} | ${meta.minutosDeSessao} min`);
   }
-  console.log(`[accuracy] Config (${REGRESSOR_MODE}+geo+L2CS): mean=${Math.round(meanError)}px / ${meanErrorDeg.toFixed(2)}° | max=${Math.round(maxError)}px | p90=${Math.round(p90Error)}px | jitter=${jitterRMS.toFixed(1)}px | ${score}`);
+  // B3.6 — `px` formata `null` como "—" em vez de "NaN".
+  const px = (v: number | null) => (v === null ? '—' : `${Math.round(v)}px`);
+  console.log(
+    `[accuracy] Config (${REGRESSOR_MODE}+geo+L2CS): mean=${px(meanError)} / ` +
+    `${meanErrorDeg === null ? '—' : meanErrorDeg.toFixed(2) + '°'} | max=${px(maxError)} | ` +
+    `p90=${px(p90Error)} | jitter=${jitterRMS.toFixed(1)}px | ${score} ` +
+    `(${agg.pontosMedidos} ponto(s) medido(s), ${agg.pontosNaoMedidos} sem amostra)`,
+  );
   for (const d of diagnostics) {
-    const flag = d.error > 45 ? ' ✗' : '';
-    console.log(`[accuracy]   ${d.name.padEnd(18)}: err=${Math.round(d.error)}px jitter=${d.jitterRMS.toFixed(1)}px${flag}`);
+    const medido = Number.isFinite(d.error);
+    const flag = medido && d.error > 45 ? ' ✗' : '';
+    console.log(
+      `[accuracy]   ${d.name.padEnd(18)}: ` +
+      (medido
+        ? `err=${Math.round(d.error)}px jitter=${d.jitterRMS.toFixed(1)}px${flag}`
+        : 'SEM AMOSTRA — excluído de todas as métricas'),
+    );
   }
   console.log(`[accuracy] === FIM ===`);
 
   if (EXPERIMENT.applyGazeCorrection) {
-    setGazeCorrections(diagnostics.map(d => ({
-      refX:    d.predX,
-      refY:    d.predY,
-      offsetX: d.groundX - d.predX,
-      offsetY: d.groundY - d.predY,
-    })));
+    // B3.6 — só pontos MEDIDOS entram no mapa de correção. Um ponto sem
+    // amostra tinha `predX === groundX`, então gerava um offset zero que o
+    // RBF interpolava como "aqui está perfeito" — contaminando a vizinhança.
+    setGazeCorrections(
+      diagnostics
+        .filter(
+          (d): d is typeof d & { predX: number; predY: number } =>
+            typeof d.predX === 'number' && typeof d.predY === 'number',
+        )
+        .map((d) => ({
+          refX: d.predX,
+          refY: d.predY,
+          offsetX: d.groundX - d.predX,
+          offsetY: d.groundY - d.predY,
+        })),
+    );
   }
 
   showDiagnosticOverlay(diagnostics, result, onComplete);
@@ -1026,23 +1284,23 @@ function showDiagnosticOverlay(
 
       <div class="diagnostic-metrics">
         <div class="metric-item">
-          <div class="metric-value" style="color:${scoreColor}">${Math.round(result.meanErrorInner)}px</div>
+          <div class="metric-value" style="color:${scoreColor}">${mostrarPx(result.meanErrorInner)}</div>
           <div class="metric-label">Erro Médio (interior)</div>
         </div>
         <div class="metric-divider"></div>
         <div class="metric-item">
-          <div class="metric-value" style="color:${scoreColor}">${
-            Number.isFinite(result.meanErrorEdge) ? Math.round(result.meanErrorEdge) + 'px' : '—'
-          }</div>
+          <div class="metric-value" style="color:${scoreColor}">${mostrarPx(result.meanErrorEdge)}</div>
           <div class="metric-label">Erro Médio (borda)</div>
         </div>
         <div class="metric">
-          <div class="metric-value" style="color:${scoreColor}">${Math.round(result.maxError)}px</div>
+          <div class="metric-value" style="color:${scoreColor}">${mostrarPx(result.maxError)}</div>
           <div class="metric-label">Erro Máximo</div>
         </div>
         <div class="metric-divider"></div>
         <div class="metric-item">
-          <div class="metric-value" style="color:${scoreColor}">${result.meanErrorDeg.toFixed(2)}°</div>
+          <div class="metric-value" style="color:${scoreColor}">${
+            result.meanErrorDeg === null ? '—' : result.meanErrorDeg.toFixed(2) + '°'
+          }</div>
           <div class="metric-label">Erro Angular</div>
         </div>
         <div class="metric-divider"></div>
@@ -1103,3 +1361,10 @@ function getErrorColor(error: number): string {
   if (error < 100) return '#ffcc00';
   return '#ef4444';
 }
+
+/** Conjuntos de pontos expostos para os testes de B3.8 verificarem que a
+ *  guarda de sobreposição cobre as bordas. Não é API de produção. */
+export const __testingPoints = {
+  VALIDATION_POINTS: VALIDATION_POINTS.map((p) => ({ ...p, isEdge: false })),
+  ALL_VALIDATION_POINTS,
+};

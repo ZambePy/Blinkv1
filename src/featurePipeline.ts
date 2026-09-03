@@ -1,4 +1,11 @@
-import { extractEyeFeatures, extractCompactFeatures, projectFeatureSet } from './extractor';
+import {
+  extractEyeFeatures,
+  extractCompactFeatures,
+  projectFeatureSet,
+  activeFeatureDims,
+  ACTIVE_FEATURE_SET,
+  FEATURE_VECTOR_ID,
+} from './extractor';
 import type { Point3D, AdvancedFrameFeatures, L2CSGazeInput, FeatureSet } from './extractor';
 import type { BlinkDetector } from './extractor';
 
@@ -52,8 +59,11 @@ export function extractFeatures(
   }
 
   const geo = USE_COMPACT_FEATURES
-    ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze, blinkDetector)
-    : extractEyeFeatures(workingLandmarks, faceMatrix, undefined, undefined, blinkDetector);
+    // B2.6 — as dimensões do vídeo seguem até o cálculo do EAR para a correção
+    // de anisotropia. Antes eram descartadas aqui, e o EAR chegava ao detector
+    // inflado por W/H (1,78× em 1080p).
+    ? extractCompactFeatures(workingLandmarks, faceMatrix, l2csGaze, blinkDetector, videoWidth, videoHeight)
+    : extractEyeFeatures(workingLandmarks, faceMatrix, videoWidth, videoHeight, blinkDetector);
 
   // A projeção no conjunto ativo mora AQUI, não dentro do extractor.
   // Motivo: `extractCompactFeatures` é o dono do layout e continua devolvendo
@@ -61,9 +71,37 @@ export function extractFeatures(
   // paridade e do bloco L2CS. Esta função é a fronteira que o engine e a
   // calibração consomem, então é o ponto certo para decidir o que o modelo vê.
   // Ver `ACTIVE_FEATURE_SET` em extractor.ts para a evidência da escolha.
+  const featuresLeft = projectFeatureSet(geo.featuresLeft, featureSet);
+  const featuresRight = projectFeatureSet(geo.featuresRight, featureSet);
+
+  // B1.1 — assertiva de dimensão na fronteira.
+  //
+  // `projectFeatureSet` já lança quando o vetor é curto demais. Esta segunda
+  // barreira pega o caso complementar: o conjunto projetar um comprimento
+  // diferente do que `FEATURE_VECTOR_ID` anuncia. Se isso passasse, um perfil
+  // salvo sob um ID seria carregado por uma sessão cujo vetor tem outra
+  // semântica — e o sintoma só apareceria como cursor deslocado, sem erro.
+  // Vetor vazio (frame sem rosto) é exceção legítima, igual em projectFeatureSet.
+  const esperado = activeFeatureDims(featureSet ?? ACTIVE_FEATURE_SET);
+  if (typeof esperado === 'number') {
+    if (featuresLeft.length > 0 && featuresLeft.length !== esperado) {
+      throw new RangeError(
+        `[featurePipeline] vetor esquerdo com ${featuresLeft.length} dims, ` +
+        `mas o conjunto ativo declara ${esperado} (FEATURE_VECTOR_ID='${FEATURE_VECTOR_ID}'). ` +
+        `Perfis gravados com este ID seriam incompatíveis com o que o modelo vê.`
+      );
+    }
+    if (featuresRight.length > 0 && featuresRight.length !== esperado) {
+      throw new RangeError(
+        `[featurePipeline] vetor direito com ${featuresRight.length} dims, ` +
+        `mas o conjunto ativo declara ${esperado} (FEATURE_VECTOR_ID='${FEATURE_VECTOR_ID}').`
+      );
+    }
+  }
+
   return {
-    featuresLeft: projectFeatureSet(geo.featuresLeft, featureSet),
-    featuresRight: projectFeatureSet(geo.featuresRight, featureSet),
+    featuresLeft,
+    featuresRight,
     blinkDetected: geo.blinkDetected,
     advancedFeatures: geo.advancedFeatures,
     leftEAR: geo.leftEAR,

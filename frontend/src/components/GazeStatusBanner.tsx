@@ -23,6 +23,15 @@ interface Props {
   state: string;
   cameraError: string | null;
   calibrationInvalidated: string | null;
+  /**
+   * Aviso de distância fora da faixa de calibração (`P6.9`). `null` quando a
+   * distância está na faixa ou não há medição.
+   *
+   * Fica ABAIXO dos outros na ordem de precedência de propósito: sem câmera ou
+   * sem calibração, a distância não importa — e empilhar dois banners num
+   * software assistivo é pior que mostrar só o mais grave.
+   */
+  distanceAdvice?: string | null;
 }
 
 const WRAP: React.CSSProperties = {
@@ -56,6 +65,7 @@ export const GazeStatusBanner: React.FC<Props> = ({
   state,
   cameraError,
   calibrationInvalidated,
+  distanceAdvice = null,
 }) => {
   // Ordem de precedência = ordem de gravidade. Sem câmera, nada mais importa.
   let tom: 'erro' | 'aviso' | null = null;
@@ -77,6 +87,13 @@ export const GazeStatusBanner: React.FC<Props> = ({
       'O controle por olhar está desligado, inclusive o botão de emergência — ' +
       'sem calibração o sistema não sabe para onde você está olhando. ' +
       'Peça ao cuidador para abrir a calibração e seguir os pontos na tela.';
+  } else if (distanceAdvice) {
+    // P6.9 — o tom é 'aviso', não 'erro': o sistema continua funcionando, só
+    // com precisão pior que a medida na calibração. Tratar isso como erro
+    // ensinaria o cuidador a ignorar banners vermelhos.
+    tom = 'aviso';
+    titulo = 'Distância diferente da calibração';
+    detalhe = distanceAdvice;
   }
 
   if (!tom) return null;

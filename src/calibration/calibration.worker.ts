@@ -3,6 +3,7 @@
 import { StandardScaler } from '../scaler';
 import { RidgeRegressor } from '../ridge';
 import { expandPolynomialFeatures } from './polynomial';
+import { aplicarConfigDoRegressor, type RegressorConfig } from './regressorConfig';
 import type { RidgeModel } from '../ridge';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -14,8 +15,12 @@ interface TrainRequest {
   featuresRight: number[][];
   targetsX: number[];
   targetsY: number[];
+  /** Recomputado internamente por `RidgeRegressor.train` — ver a nota em
+   *  `client.ts`. Mantido na mensagem por compatibilidade. */
   targetGroups: string[];
   polynomialFeatures: boolean;
+  /** B3.10 — estado estático do regressor, vindo da main thread. */
+  regressorConfig?: RegressorConfig;
 }
 
 interface TrainResponse {
@@ -41,6 +46,16 @@ function scalerSnapshot(s: StandardScaler): { mean: number[]; std: number[] } {
 
 function train(req: TrainRequest): TrainResponse {
   const t0 = performance.now();
+  // B3.10 — instala a configuração da main thread ANTES de instanciar
+  // qualquer regressor.
+  //
+  // Um Web Worker tem registro de módulos próprio: sem esta linha,
+  // `RidgeRegressor.axisScale` vale o default `{1,1}` aqui dentro, e o CV
+  // escolhe λ pesando erro em X e em Y igualmente. Em 1920×1080 isso
+  // reintroduz o bug de aspect-ratio que subponderava o eixo X em 3,16× —
+  // exatamente o que `axisScale` existe para corrigir.
+  aplicarConfigDoRegressor(req.regressorConfig);
+
   const flExp = req.polynomialFeatures
     ? req.featuresLeft.map((f) => expandPolynomialFeatures(f))
     : req.featuresLeft;

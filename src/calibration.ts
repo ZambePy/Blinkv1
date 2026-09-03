@@ -35,6 +35,8 @@ import {
   type OpticalCondition,
   type StoredCalibrationProfile,
   type ProfileListEntry,
+  type CalibrationReferenceState,
+  PROFILE_SCHEMA_VERSION,
 } from './calibrationProfiles';
 import { expandPolynomialFeatures } from './calibration/polynomial';
 
@@ -88,12 +90,20 @@ export function getEyeDominance(): EyeDominance {
 // Diferente do RLS (feedOnlineSample), isto só corrige o VIÉS global (2 dofs),
 // nunca mexe nos coeficientes do Ridge.
 //
-// Default DESLIGADO. `feedOnlineSample` é disparado em todo dwell click da UI
-// (ver GazeContext.tsx:255), não só em contextos onde faz sentido "aprender"
-// deriva. Cada dwell num botão arbitrário injeta um resíduo no EMA — em teste
-// controlado (2 rodadas de accuracy sem recalibrar, 2026-08-22) o bias saturou
-// no clamp e degradou o meanError de 184 px para 521 px. Feature fica pronta,
-// mas exige opt-in explícito via setSessionBiasEnabled(true).
+// Default DESLIGADO. `feedOnlineSample` é disparado em todo dwell click da UI,
+// não só em contextos onde faz sentido "aprender" deriva. Cada dwell num botão
+// arbitrário injeta um resíduo no EMA — em teste controlado (2 rodadas de
+// accuracy sem recalibrar, 2026-08-22) o bias saturou no clamp e degradou o
+// meanError de 184 px para 521 px. Feature fica pronta, mas exige opt-in
+// explícito via setSessionBiasEnabled(true).
+//
+// B2.14 — o comentário acima descrevia o disparo como se ele existisse, mas a
+// chamada NÃO ESTAVA no `GazeContext`: o ramo de clique do dispatcher executava
+// `alvo.click()` e seguia. `biasSamples` ficava sempre 0, o `DriftIndicator`
+// (que exige 20 amostras) nunca renderizava, e o interruptor de calibração
+// online alimentava um caminho sem entrada. A chamada foi conectada — depois
+// de `B2.8`, porque com o RLS anterior uma única amostra anulava o Ridge
+// offline. Ambas as flags seguem desligadas até o F8.4 medir.
 const SESSION_BIAS_ALPHA = 0.35;      // agressividade do EMA (0..1)
 const SESSION_BIAS_MAX_NORM = 0.08;   // clamp em 8% da tela (evita drift patológico)
 let biasX = 0;                        // em coord normalizada [0..1]
@@ -164,6 +174,62 @@ export interface GazeDistanceLogEntry {
 const COLLECTION_MS_BASE = 1680;
 const COLLECTION_MS_RANGE = 1120;
 const COLLECTION_MS_FALLBACK = COLLECTION_MS_BASE + COLLECTION_MS_RANGE;
+
+/**
+ * Janela descartada no início de cada ponto: sacada + acomodação, em ms (B3.17).
+ *
+ * Antes era o literal `400` solto no meio do laço de coleta, com outro `400`
+ * escrito à mão no comentário de budget — dois lugares que podiam divergir sem
+ * nada acusar.
+ *
+ * ⚠️ Divergente de `ACCLIMATION_MS = 600` em `accuracyProtocol.ts`, que foi
+ * MEDIDO (o joelho da curva de erro fica em ~585 ms) para o teste de precisão.
+ * A fisiologia é a mesma, então provavelmente 400 é curto demais aqui também —
+ * mas subir este número muda quanto dado entra no Ridge, e isso é mudança de
+ * comportamento que exige medição. Registrado como tarefa `F8.3a` em
+ * `tasks.md`, com a curva medida, o critério de adoção e o custo em segundos
+ * de sessão para o paciente.
+ */
+export const CALIBRATION_ACCLIMATION_MS = 400;
+
+/**
+ * Janela ÚTIL de coleta de um ponto, em ms (B3.17).
+ *
+ * É exatamente `collectionMs`: o tempo que o log promete e que o budget de
+ * fadiga contabiliza. Antes a implementação parava o cronômetro em
+ * `collectionMs` TOTAL e descartava os primeiros 400 ms dentro dele — a janela
+ * útil real era `collectionMs − 400`, isto é, **~24% menos amostras que o
+ * documentado**, e o comentário de `MIN_ACCEPTED_SAMPLES` foi calibrado contra
+ * a suposição errada.
+ */
+export function janelaUtilDoPonto(collectionMs: number): number {
+  return collectionMs;
+}
+
+/** Duração TOTAL de um ponto: acomodação + janela útil (B3.17). */
+export function duracaoTotalDoPonto(collectionMs: number): number {
+  return CALIBRATION_ACCLIMATION_MS + janelaUtilDoPonto(collectionMs);
+}
+
+/**
+ * Mediana de uma série de distâncias, descartando valores não-finitos (B3.18).
+ *
+ * `null` quando não sobra nenhum valor — fabricar um número aqui contaminaria
+ * `calibrationRefDistance`, que governa a compensação de distância.
+ *
+ * Existe porque o código anterior chamava de "mediana das distâncias dos
+ * quadros aceitos" um ÚNICO quadro replicado: `getCurrentCameraDistanceCm()`
+ * era invocado uma vez no fim do ponto e lia o último frame visto —
+ * possivelmente um rejeitado pelo gate de qualidade, ou um 800 ms posterior se
+ * o ponto terminou por hard timeout. O bloco de comentário afirmava corrigir
+ * "ruído de quadro único (σ≈0,13 cm)" usando o próprio quadro único.
+ */
+export function medianaDeDistancias(valores: readonly number[]): number | null {
+  const v = valores.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (v.length === 0) return null;
+  const meio = v.length >> 1;
+  return v.length % 2 ? v[meio] : (v[meio - 1] + v[meio]) / 2;
+}
 
 export function getCollectionMsForPoint(x: number, y: number): number {
   // Distância euclidiana normalizada do centro (0..1). Centro = 0, cantos = 1.
@@ -616,7 +682,11 @@ export function getCurrentCameraDistanceCm(): number | null {
  * corrigi-la. O certo é descartar o modelo e pedir recalibração.
  */
 export interface CalibrationInvalidated {
-  reason: 'feature_dim_mismatch';
+  /** `viewport_changed` (B2.9): o viewport mudou de tamanho depois da
+   *  calibração. O modelo foi treinado em pixels do viewport antigo, então
+   *  suas predições passam a cair sistematicamente deslocadas — sem virar
+   *  `degraded`, porque `mapGaze` continua devolvendo valores válidos. */
+  reason: 'feature_dim_mismatch' | 'viewport_changed';
   detail: string;
   at: number;
 }
@@ -638,6 +708,69 @@ export function onCalibrationInvalidated(cb: (e: CalibrationInvalidated) => void
   return () => invalidationListeners.delete(cb);
 }
 
+function emitirInvalidacao(e: CalibrationInvalidated): void {
+  invalidation = e;
+  for (const cb of invalidationListeners) {
+    try {
+      cb(e);
+    } catch (err) {
+      // Um listener que lança não pode impedir os outros de saber que a
+      // calibração morreu.
+      console.error('[calib] listener de invalidação lançou:', err);
+    }
+  }
+}
+
+/**
+ * Viewport em que a calibração ativa foi treinada (B2.9).
+ *
+ * `null` quando não há calibração ou quando ela veio de um perfil sem esse
+ * dado. Serve para detectar redimensionamento — o modelo mapeia para pixels
+ * do viewport, então mudá-lo invalida a escala e o offset aprendidos.
+ */
+let viewportDaCalibracao: { w: number; h: number } | null = null;
+
+export function getCalibrationViewport(): { w: number; h: number } | null {
+  return viewportDaCalibracao;
+}
+
+/**
+ * Fração de mudança do viewport tolerada antes de invalidar (B2.9).
+ *
+ * Não é zero de propósito: barras de rolagem aparecendo/sumindo, o teclado
+ * virtual do SO, e o arredondamento de `clientWidth` sob zoom fracionário
+ * produzem variações de poucos pixels que não justificam descartar uma
+ * calibração de 1–2 min. 2% de 1280 px são ~26 px — bem acima desse ruído e
+ * bem abaixo de qualquer redimensionamento intencional.
+ */
+const VIEWPORT_TOLERANCIA = 0.02;
+
+/**
+ * Verifica se o viewport mudou desde a calibração e invalida se mudou (B2.9).
+ *
+ * Chamada pelo listener de `resize` instalado em `init()`. Exportada para o
+ * teste poder exercitar sem DOM.
+ */
+export function checarMudancaDeViewport(w: number, h: number): boolean {
+  if (!viewportDaCalibracao) return false;
+  if (!isCalibrated()) return false;
+  const { w: w0, h: h0 } = viewportDaCalibracao;
+  if (w0 <= 0 || h0 <= 0) return false;
+
+  const dW = Math.abs(w - w0) / w0;
+  const dH = Math.abs(h - h0) / h0;
+  if (dW <= VIEWPORT_TOLERANCIA && dH <= VIEWPORT_TOLERANCIA) return false;
+
+  const detalhe =
+    `O tamanho da janela mudou de ${w0}×${h0} para ${w}×${h} depois da calibração. ` +
+    `O modelo foi treinado em pixels desse viewport, então as predições ficariam ` +
+    `deslocadas sem nenhum aviso visível. Recalibre.`;
+  console.warn(`[calib] calibração invalidada — ${detalhe}`);
+  clearCalibration();
+  emitirInvalidacao({ reason: 'viewport_changed', detail: detalhe, at: Date.now() });
+  return true;
+}
+
 /** Última avaliação de faixa de distância. Diagnóstico para a UI e o relatório. */
 let lastDistanceRange: DistanceRange | null = null;
 
@@ -649,10 +782,107 @@ export function getCalibrationRefDistance(): number | null {
   return calibrationRefDistance;
 }
 
+// ---------------------------------------------------------------------------
+// B1.3 / B1.5 — estado de referência da calibração como parte do PERFIL.
+//
+// Antes destas funções, `calibrationReferencePose`, `calibrationReferenceCenter`,
+// as duas distâncias, `calibrationRefDistance` e `eyeReliability` viviam
+// apenas como estado de módulo. Um F5 os zerava; uma troca de perfil deixava
+// os do perfil anterior. Nos dois casos a predição mudava sem que nada
+// avisasse — a compensação de pose virava no-op (361 px vs 150 px pela nota
+// em `config/experiment.ts`) e a fusão binocular ficava enviesada pelo perfil
+// errado.
+//
+// A captura e a restauração ficam nestas duas funções, e não espalhadas pelos
+// callers, para que adicionar um campo novo ao estado de referência seja uma
+// mudança em UM lugar. O teste `calibration.b1-3-b1-5.test.ts` trava a lista
+// de campos justamente para que um campo esquecido falhe alto.
+// ---------------------------------------------------------------------------
+
+export type { CalibrationReferenceState };
+
+/** Fotografa o estado de referência atual para gravar no perfil. */
+export function captureReferenceStateForProfile(): CalibrationReferenceState {
+  return {
+    pose: calibrationReferencePose,
+    center: calibrationReferenceCenter,
+    cameraDistanceCm: calibrationCameraDistanceCm,
+    screenDistanceCm: calibrationScreenDistanceCm,
+    refDistance: calibrationRefDistance,
+    eyeReliability,
+  };
+}
+
+/**
+ * Reinstala o estado de referência vindo de um perfil.
+ *
+ * `null` zera tudo — usado ao limpar a calibração e nos testes. Passar um
+ * estado parcial NÃO é suportado de propósito: herdar metade do perfil
+ * anterior é o modo de falha que B1.5 corrige.
+ */
+export function restoreReferenceStateFromProfile(
+  ref: CalibrationReferenceState | null,
+): void {
+  // B2.9 — o viewport em que este modelo foi treinado. Restaurar um perfil
+  // significa adotar o viewport dele como referência; o listener de `resize`
+  // compara contra este número.
+  viewportDaCalibracao = ref
+    ? (typeof document !== 'undefined'
+        ? { w: document.documentElement.clientWidth, h: document.documentElement.clientHeight }
+        : null)
+    : null;
+  calibrationReferencePose     = ref?.pose ?? null;
+  calibrationReferenceCenter   = ref?.center ?? null;
+  calibrationCameraDistanceCm  = ref?.cameraDistanceCm ?? null;
+  calibrationScreenDistanceCm  = ref?.screenDistanceCm ?? null;
+  calibrationRefDistance       = ref?.refDistance ?? null;
+  // B1.5 — a confiabilidade por olho é substituída, nunca herdada. Um perfil
+  // sem o campo zera em vez de manter o do perfil anterior: média simples é
+  // neutra, peso herdado é errado E invisível.
+  eyeReliability               = ref?.eyeReliability ?? null;
+}
+
+/**
+ * Um perfil só é carregável se traz o estado de referência (schema v2+).
+ *
+ * Perfis v1 não são migráveis — o estado de referência não é derivável dos
+ * betas nem dos scalers. Carregá-los com `reference: null` restauraria o
+ * modelo e deixaria a compensação desligada em silêncio, que é precisamente
+ * o bug B1.3. Rejeitar força uma recalibração de 1–2 min e devolve um sistema
+ * que se comporta como está documentado.
+ */
+export function profileTemReferencia(p: StoredCalibrationProfile): boolean {
+  const r = p.reference;
+  if (!r) return false;
+  // Presença do objeto não basta: um `reference: {}` gravado por engano
+  // passaria e reintroduziria o bug. Exigimos que as chaves existam (os
+  // valores PODEM ser null — nem toda sessão mede distância, por exemplo).
+  return (
+    'pose' in r &&
+    'center' in r &&
+    'cameraDistanceCm' in r &&
+    'screenDistanceCm' in r &&
+    'refDistance' in r &&
+    'eyeReliability' in r
+  );
+}
+
 // Meta da sessão de calibração em curso. Setada por startCalibrationMode
 // (default: `desconhecido`), consumida por completeCalibration para salvar o
 // perfil resultante no registry por condição óptica.
 let pendingProfileMeta: CalibrationProfileMeta | null = null;
+
+/**
+ * Distâncias câmera→rosto dos frames ACEITOS do ponto corrente (B3.18).
+ *
+ * Zerada no início de cada ponto, empilhada a cada frame que passa no gate de
+ * qualidade, e consumida por `processStaticPoint` para gravar a mediana real
+ * do ponto — em vez do único quadro que a versão anterior lia no fim.
+ */
+const currentPointCameraDistances: number[] = [];
+
+/** Mediana de distância de cada ponto ACEITO da calibração (B3.18). */
+const acceptedPointDistances: number[] = [];
 
 let scaledProfileLeft: number[][] = [];
 let scaledProfileRight: number[][] = [];
@@ -734,6 +964,11 @@ export function clearCalibration() {
   specularWarningsIssued = 0;
   pendingProfileMeta = null;
   currentCalibrationTargets = null;
+  // B1.3/B1.5 — sem isto, `clearCalibration` deixava a pose/centro/distâncias
+  // de referência e a `eyeReliability` do modelo que acabou de ser descartado.
+  // O próximo perfil carregado (ou a próxima sessão sem perfil) herdava pesos
+  // e uma referência que não descrevem nada — enviesando a predição sem log.
+  restoreReferenceStateFromProfile(null);
   resetSessionBias();
 }
 
@@ -801,24 +1036,84 @@ export function getLambdaDiagnostics(): LambdaDiagnostics | null {
 const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles.v2';
 const PROFILES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-function buildContextKey(): string {
-  // Identificador do contexto em que o perfil foi criado. Um perfil só é
-  // reaproveitado quando esta chave bate.
-  //
-  // Codifica o PIPELINE, não só a tela e duas flags. Sem isto, um perfil
-  // salvo antes de uma mudança no vetor de features era carregado e só
-  // falhava lá na frente dentro de `predictRidge` — a 30 Hz, com o cursor
-  // caindo no fallback do nariz e nenhuma explicação para quem está na tela.
-  //
-  //   FEATURE_VECTOR_ID       — quais dimensões saem (conjunto e contagem)
-  //   FEATURE_FORMAT_VERSION  — o que elas significam
-  const sw = typeof window !== 'undefined' ? window.screen.width : 0;
-  const sh = typeof window !== 'undefined' ? window.screen.height : 0;
+/**
+ * Tudo que precisa bater para um perfil salvo poder ser reaproveitado (B2.9).
+ *
+ * Extraído em interface para a construção da chave ser uma função PURA e
+ * testável — antes ela lia `window.screen` direto e só dava para exercitar com
+ * o DOM montado.
+ */
+export interface CalibrationContext {
+  /** Largura do VIEWPORT em px CSS. Ver o comentário de `buildContextKeyFrom`
+   *  sobre por que não é a resolução do monitor. */
+  viewportW: number;
+  viewportH: number;
+  featureVectorId: string;
+  formatVersion: number;
+  isotropicLandmarks: boolean;
+  applyGazeCorrection: boolean;
+  polynomialFeatures: boolean;
+  enableL2CS: boolean;
+  expandFactor: number;
+}
+
+/**
+ * Chave de contexto de um perfil de calibração.
+ *
+ * ## B2.9 — viewport, não resolução de monitor
+ *
+ * A versão anterior usava `window.screen.width/height` — a resolução do
+ * MONITOR. Mas a geometria do treino e o `axisScale` do Ridge vêm de
+ * `document.documentElement.clientWidth/Height` — o VIEWPORT. E não há
+ * listener de `resize` no projeto.
+ *
+ * O resultado: o Electron abre em 1280×800, o paciente calibra, o cuidador
+ * maximiza a janela. `screen.width` não mudou, a chave bate, o perfil é
+ * restaurado — e aplicado com escala e offset errados. O cursor cai
+ * sistematicamente deslocado, **sem virar `degraded`** (o `mapGaze` devolve
+ * valores válidos, apenas errados) e sem nenhum aviso na tela.
+ *
+ * ## B2.9 — as flags que faltavam
+ *
+ * A chave codificava só `isotropicLandmarks` e `applyGazeCorrection`. Ficavam
+ * de fora:
+ *
+ *   - `polynomialFeatures` (default `true`) — muda 6 para 27 dims. Perfil
+ *     incompatível dispara `RangeError` no primeiro frame e o paciente perde a
+ *     calibração no meio da sessão.
+ *   - `enableL2CS` — muda quais dimensões existem.
+ *   - `expandFactor` — **o pior dos três.** Muda os VALORES de `tan yaw` e
+ *     `tan pitch` mantendo a dimensão. Nenhum erro é lançado: o perfil carrega
+ *     e prediz com features cujo significado mudou.
+ */
+export function buildContextKeyFrom(ctx: CalibrationContext): string {
   const expKey = [
-    EXPERIMENT.isotropicLandmarks ? 'iso' : '',
-    EXPERIMENT.applyGazeCorrection ? 'rbf' : '',
-  ].filter(Boolean).join(',') || 'default';
-  return `${sw}x${sh}_${FEATURE_VECTOR_ID}_v${FEATURE_FORMAT_VERSION}_${expKey}`;
+    ctx.isotropicLandmarks ? 'iso' : '',
+    ctx.applyGazeCorrection ? 'rbf' : '',
+    ctx.polynomialFeatures ? 'poly' : '',
+    ctx.enableL2CS ? 'l2cs' : '',
+    `xf${ctx.expandFactor}`,
+  ].filter(Boolean).join(',');
+  return `${ctx.viewportW}x${ctx.viewportH}_${ctx.featureVectorId}_v${ctx.formatVersion}_${expKey}`;
+}
+
+/** Lê o contexto corrente do ambiente e monta a chave. */
+function buildContextKey(): string {
+  // B2.9 — VIEWPORT, não `window.screen`. É o mesmo número que a geometria de
+  // treino e o `axisScale` do Ridge usam; qualquer outro abriria de novo a
+  // divergência que este bug corrige.
+  const doc = typeof document !== 'undefined' ? document.documentElement : null;
+  return buildContextKeyFrom({
+    viewportW: doc?.clientWidth ?? 0,
+    viewportH: doc?.clientHeight ?? 0,
+    featureVectorId: FEATURE_VECTOR_ID,
+    formatVersion: FEATURE_FORMAT_VERSION,
+    isotropicLandmarks: EXPERIMENT.isotropicLandmarks,
+    applyGazeCorrection: EXPERIMENT.applyGazeCorrection,
+    polynomialFeatures: EXPERIMENT.polynomialFeatures,
+    enableL2CS: EXPERIMENT.enableL2CS,
+    expandFactor: EXPERIMENT.expandFactor,
+  });
 }
 
 function tryParseStoredProfiles(): StoredCalibrationProfile[] {
@@ -853,6 +1148,20 @@ export function loadProfile(): boolean {
         console.warn(`[calib] perfil ${p.meta.id} incompatível (contexto diferente) — ignorado`);
         return false;
       }
+      // B1.3 — perfil de schema antigo (sem estado de referência) é
+      // INVALIDADO, não carregado com null. Carregar restauraria o modelo e
+      // deixaria a compensação de pose desligada em silêncio — 361 px vs
+      // 150 px pela nota em config/experiment.ts. Recalibrar custa 1–2 min e
+      // devolve um sistema que se comporta como está documentado.
+      if (!profileTemReferencia(p)) {
+        console.warn(
+          `[calib] perfil ${p.meta.id} é de schema anterior a v${PROFILE_SCHEMA_VERSION} ` +
+          `(sem estado de referência de calibração) — descartado. ` +
+          `Recalibre: sem a pose/centro/distância de referência a compensação ` +
+          `geométrica não teria contra o que comparar e ficaria inativa sem aviso.`
+        );
+        return false;
+      }
       return true;
     })
     .sort((a, b) => new Date(b.meta.createdAt).getTime() - new Date(a.meta.createdAt).getTime());
@@ -876,12 +1185,23 @@ export function loadProfile(): boolean {
     regressorRight = reloadedRight;
     featureScalerLeft.setParams(best.scalerParamsLeft.means, best.scalerParamsLeft.stds);
     featureScalerRight.setParams(best.scalerParamsRight.means, best.scalerParamsRight.stds);
-    console.log(`[calib] perfil restaurado: ${best.meta.label} (${best.meta.opticalCondition}), ${age > PROFILES_MAX_AGE_MS ? '⚠️ >24h' : 'válido'}`);
+    // B1.3/B1.5 — restaura o estado de referência JUNTO com o modelo. O filtro
+    // acima garante que `best.reference` existe.
+    restoreReferenceStateFromProfile(best.reference ?? null);
+    console.log(
+      `[calib] perfil restaurado: ${best.meta.label} (${best.meta.opticalCondition}), ` +
+      `${age > PROFILES_MAX_AGE_MS ? '⚠️ >24h' : 'válido'} — ` +
+      `pose ref ${best.reference?.pose ? 'presente' : 'ausente'}, ` +
+      `confiabilidade ${best.reference?.eyeReliability ? 'presente' : 'ausente'}`
+    );
     return true;
   } catch (e) {
     console.warn('[calib] falha ao restaurar perfil:', e);
     regressorLeft = null;
     regressorRight = null;
+    // Estado parcial é pior que nenhum: um modelo que falhou ao carregar não
+    // pode deixar a referência do perfil anterior em pé.
+    restoreReferenceStateFromProfile(null);
     return false;
   }
 }
@@ -1351,20 +1671,30 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   poseDriftRejects = 0;
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
+  // B3.18 — zera o acumulador de distâncias deste ponto.
+  currentPointCameraDistances.length = 0;
 
-  console.log(`[calib] ▶ Coletando ponto (${(x*100).toFixed(0)}%, ${(y*100).toFixed(0)}%) — aguardando ${currentCollectionMs}ms + 400ms acomodação`);
+  const totalMs = duracaoTotalDoPonto(currentCollectionMs);
+  console.log(
+    `[calib] ▶ Coletando ponto (${(x * 100).toFixed(0)}%, ${(y * 100).toFixed(0)}%) — ` +
+    `${CALIBRATION_ACCLIMATION_MS}ms de acomodação + ${currentCollectionMs}ms de coleta útil ` +
+    `(${totalMs}ms no total)`,
+  );
 
   // Hard timeout: if feedRawData never fires the callback (e.g. all frames
   // discarded by quality filters, or face not detected during the window),
-  // force processStaticPoint after currentCollectionMs + 800ms grace period.
+  // force processStaticPoint after the full point duration + 800ms grace.
+  //
+  // B3.17 — a base do timeout é a duração TOTAL (acomodação + coleta). Com a
+  // base antiga, o timeout podia disparar antes de a janela útil terminar.
   collectionTimeoutHandle = setTimeout(() => {
     collectionTimeoutHandle = null;
     if (isCollecting) {
-      console.warn(`[calib] ⏱ Timeout! isCollecting ainda true após ${currentCollectionMs + 800}ms. Amostras coletadas: ${collectedFeaturesLeft.length}`);
+      console.warn(`[calib] ⏱ Timeout! isCollecting ainda true após ${totalMs + 800}ms. Amostras coletadas: ${collectedFeaturesLeft.length}`);
       isCollecting = false;
       processStaticPoint();
     }
-  }, currentCollectionMs + 800);
+  }, totalMs + 800);
 }
 
 function calculateFeatureVariance(features: number[][]): number {
@@ -1468,8 +1798,8 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
 
   const elapsed = performance.now() - collectionStartTime;
 
-  // Descartar os primeiros 400ms (fase de sacada / acomodação)
-  if (elapsed < 400) {
+  // Descarta a fase de sacada / acomodação (B3.17).
+  if (elapsed < CALIBRATION_ACCLIMATION_MS) {
     lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'acclimation' };
     return;
   }
@@ -1567,7 +1897,21 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
 
   lastDecision = { accepted: true, elapsedMs: elapsed };
 
-  if (elapsed >= currentCollectionMs) {
+  // B3.18 — acumula a distância dos frames EFETIVAMENTE ACEITOS.
+  //
+  // Antes, `calibrationRefDistance` vinha de uma única chamada a
+  // `getCurrentCameraDistanceCm()` no fim do ponto, lendo o último frame
+  // VISTO — possivelmente um rejeitado pelo gate acima, ou um 800 ms posterior
+  // se o ponto terminou por hard timeout. Esse valor era replicado e chamado
+  // de "mediana dos quadros aceitos".
+  {
+    const d = getCurrentCameraDistanceCm();
+    if (d !== null && Number.isFinite(d)) currentPointCameraDistances.push(d);
+  }
+
+  // B3.17 — a coleta para depois da acomodação MAIS a janela útil, para o
+  // tempo de coleta prometido ser o tempo de coleta entregue.
+  if (elapsed >= duracaoTotalDoPonto(currentCollectionMs)) {
     isCollecting = false;
     if (collectionTimeoutHandle !== null) {
       clearTimeout(collectionTimeoutHandle);
@@ -1609,10 +1953,17 @@ function processStaticPoint() {
   // Reflexo especular persistente no ponto. Só avisa (não bloqueia).
   // Diagnóstico direto para o cuidador ver antes de rodar todos os 9 pontos:
   // se o primeiro já dispara, mudar posição da tela vale mais que continuar.
+  // B3.19 — os contadores de diagnóstico são incrementados só quando o ponto
+  // é ACEITO. Ver o bloco de contabilização logo após o gate de
+  // `MIN_ACCEPTED_SAMPLES`; aqui apenas registramos o veredito deste attempt.
+  let esteAttemptTeveSpecular = false;
+  let esteAttemptTeveVarianciaBaixa = false;
+  let esteAttemptTeveVarianciaAlta = false;
+
   if (currentPointFramesAccepted > 0) {
     const specularPct = currentPointSpecularHits / currentPointFramesAccepted;
     if (specularPct > SPECULAR_PERSISTENCE) {
-      specularWarningsIssued++;
+      esteAttemptTeveSpecular = true;
       console.warn(
         `[calib] ⚠ Reflexo especular persistente no crop ocular: ` +
         `${currentPointSpecularHits}/${currentPointFramesAccepted} frames ` +
@@ -1628,13 +1979,13 @@ function processStaticPoint() {
   // agora distingue piso vs. teto e contabiliza breaches para o preflight
   // do treino decidir se aborta.
   if (avgVar < INTRA_POINT_VARIANCE_FLOOR) {
-    varianceFloorBreaches++;
+    esteAttemptTeveVarianciaBaixa = true;
     console.warn(
       `[calib] ⚠ Ponto com variância BAIXA (${avgVar.toFixed(6)} < ${INTRA_POINT_VARIANCE_FLOOR}) — ` +
       `features possivelmente congeladas (reflexo, foco perdido). Aceitando com ${collectedFeaturesLeft.length} amostras.`,
     );
   } else if (avgVar > INTRA_POINT_VARIANCE_CEIL) {
-    varianceCeilBreaches++;
+    esteAttemptTeveVarianciaAlta = true;
     console.warn(
       `[calib] ⚠ Ponto com variância ALTA (${avgVar.toFixed(6)} > ${INTRA_POINT_VARIANCE_CEIL}) — ` +
       `usuário instável ou landmarks ruidosos (reflexo em óculos é o padrão). ` +
@@ -1661,6 +2012,25 @@ function processStaticPoint() {
     return;
   }
 
+  // B3.19 — a contabilização acontece AQUI, depois do gate de amostras
+  // mínimas, e portanto só para pontos que de fato entram no treino.
+  //
+  // Antes, os `++` ficavam junto dos `console.warn` lá em cima — antes do
+  // `return`. Um alvo que precisasse de 3 tentativas contribuía **3×** para
+  // `varianceFloorBreaches` e `specularWarningsIssued`, que são justamente as
+  // métricas que o cuidador usa para comparar perfis. O perfil de um paciente
+  // inquieto parecia pior do que é, e a comparação entre perfis media número
+  // de retentativas em vez de qualidade do dado.
+  if (esteAttemptTeveSpecular) specularWarningsIssued++;
+  if (esteAttemptTeveVarianciaBaixa) varianceFloorBreaches++;
+  if (esteAttemptTeveVarianciaAlta) varianceCeilBreaches++;
+
+  // B3.18 — mediana das distâncias dos frames que este ponto de fato aceitou.
+  {
+    const mediana = medianaDeDistancias(currentPointCameraDistances);
+    if (mediana !== null) acceptedPointDistances.push(mediana);
+  }
+
   // Pose mediana DESTE alvo, para medir a deriva da sessão.
   //
   // Não gateia nada. É o registro que permite ao operador (e ao relatório) ver
@@ -1683,13 +2053,21 @@ function processStaticPoint() {
     }
   }
 
-  // Distância deste ponto, uma entrada por amostra aceita, para que
-  // pontos com mais amostras pesem mais na mediana da sessão.
-  {
-    const d = getCurrentCameraDistanceCm();
-    if (d !== null && d > 0) {
-      for (let i = 0; i < collectedFeaturesLeft.length; i++) acceptedDistancesCm.push(d);
-    }
+  // B3.18 — as distâncias vêm dos frames que ESTE ponto de fato aceitou.
+  //
+  // O código anterior chamava `getCurrentCameraDistanceCm()` UMA vez aqui e
+  // replicava o valor `collectedFeaturesLeft.length` vezes, "para que pontos
+  // com mais amostras pesem mais na mediana". O peso funcionava; a medição,
+  // não: aquele único valor vinha do último frame VISTO, que pode ser um
+  // rejeitado pelo gate de qualidade logo acima, ou um 800 ms posterior
+  // quando o ponto termina por hard timeout.
+  //
+  // O bloco de comentário do módulo afirma que a mediana corrige "ruído de
+  // quadro único (σ≈0,13 cm)" — e estava corrigindo com o próprio quadro
+  // único, replicado. Agora entra a série real, acumulada frame a frame em
+  // `feedRawData` junto com a decisão de aceitar.
+  for (const d of currentPointCameraDistances) {
+    if (d > 0) acceptedDistancesCm.push(d);
   }
 
   for (let i = 0; i < collectedFeaturesLeft.length; i++) {
@@ -2531,10 +2909,15 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
 
   const stored: StoredCalibrationProfile = {
     meta,
+    schemaVersion: PROFILE_SCHEMA_VERSION,
     modelLeft: modelL,
     modelRight: modelR,
     scalerParamsLeft:  featureScalerLeft.getParams(),
     scalerParamsRight: featureScalerRight.getParams(),
+    // B1.3/B1.5 — o estado de referência viaja COM o modelo. Sem isto a
+    // compensação de pose virava no-op após reload e a confiabilidade por
+    // olho vazava entre perfis.
+    reference: captureReferenceStateForProfile(),
     quality: {
       sampleCount: profile.length,
       varianceFloorBreaches,
@@ -2569,6 +2952,21 @@ export function switchActiveProfile(id: string): CalibrationProfileMeta | null {
   regressorRight = ridgeRegressorFromModel(stored.modelRight);
   featureScalerLeft.setParams(stored.scalerParamsLeft.means, stored.scalerParamsLeft.stds);
   featureScalerRight.setParams(stored.scalerParamsRight.means, stored.scalerParamsRight.stds);
+  // B1.3/B1.5 — a referência acompanha a troca de perfil.
+  //
+  // Este era o ponto exato do B1.5: trocar "com óculos" (olho direito ruim,
+  // eyeReliability {0.85, 0.15}) por "sem óculos" mantinha os pesos antigos,
+  // e `mapGaze` seguia enviesando a fusão binocular ~70/30 num modelo que
+  // nunca os produziu — sem nenhum log. Um perfil sem `reference` zera tudo,
+  // que é o comportamento neutro e auditável.
+  restoreReferenceStateFromProfile(stored.reference ?? null);
+  if (!stored.reference) {
+    console.warn(
+      `[calib] perfil '${stored.meta.id}' não traz estado de referência ` +
+      `(schema anterior a v${PROFILE_SCHEMA_VERSION}). Compensação geométrica e ` +
+      `fusão ponderada por olho ficam INATIVAS para este perfil — recalibre.`
+    );
+  }
   // Reset dos regressors online — eles são derivados do offline e precisam
   // ser reinicializados a partir dos novos betas.
   onlineLeft = null;
@@ -2609,6 +3007,9 @@ export function deleteCalibrationProfile(id: string): boolean {
   return ok;
 }
 
+/** Cancela o listener de resize instalado por `init()`. */
+let removerListenerResize: (() => void) | null = null;
+
 export function init() {
   loadProfile();
   try {
@@ -2617,6 +3018,32 @@ export function init() {
       // O React consumirá isso futuramente
     }
   } catch (_) {}
+
+  // B2.9 — listener de `resize`.
+  //
+  // O modelo mapeia para pixels do VIEWPORT. Sem este listener, maximizar a
+  // janela (ou dar Ctrl+`+`) mantinha o perfil ativo com escala e offset
+  // errados: o cursor caía sistematicamente deslocado, sem virar `degraded` e
+  // sem nada na UI que explicasse.
+  //
+  // `resize` dispara muitas vezes durante o arrasto da borda; o debounce evita
+  // invalidar no meio do gesto e só avalia quando o usuário para.
+  if (typeof window !== 'undefined' && !removerListenerResize) {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const aoRedimensionar = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => {
+        const doc = document.documentElement;
+        checarMudancaDeViewport(doc.clientWidth, doc.clientHeight);
+      }, 300);
+    };
+    window.addEventListener('resize', aoRedimensionar);
+    removerListenerResize = () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('resize', aoRedimensionar);
+      removerListenerResize = null;
+    };
+  }
 
   (window as unknown as Record<string, unknown>).__exportGazeDistanceLog = exportGazeDistanceLog;
 

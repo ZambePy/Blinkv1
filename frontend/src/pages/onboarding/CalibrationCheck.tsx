@@ -9,6 +9,8 @@ import { startAccuracyTest } from '@tracker/accuracy';
 import { buildAutoTestMeta } from '../../utils/autoTestMeta';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { VeredictoDeriva } from '@tracker/calibration';
+import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
+import { ReadinessPanel } from '../../components/ui/ReadinessPanel';
 
 interface CalibrationPointUI { x: number; y: number; name: string; }
 const POINT_NAME: Record<string, string> = {
@@ -274,6 +276,9 @@ export const CalibrationCheck: React.FC = () => {
       opticalCondition: calibration.getActiveOpticalCondition?.() ?? 'desconhecido',
       distanciaCm: sessionDistanceRef.current ?? settings.viewingDistanceCm,
       telaPolegadas: settings.screenDiagonalIn,
+      // B2.10 — a procedência da diagonal. `'default'` significa o hardcode de
+      // 23,6″, e o relatório precisa dizer isso em vez de afirmar que mediu.
+      screenGeometrySource: settings.screenGeometrySource,
     });
     meta.screenScaleFactor = settings.screenScaleFactor;
     startAccuracyTest((_result, action) => {
@@ -399,18 +404,32 @@ export const CalibrationCheck: React.FC = () => {
     // reais diferiam 30% em tamanho de rosto exatamente por esse efeito. Fica
     // registrado em `sessionDistanceRef` para o relatório usar a MESMA
     // distância que a grade usou.
-    const estimatedDistanceCm = calibration.getCurrentCameraDistanceCm?.() ?? null;
-    const distCm = estimatedDistanceCm ?? settings.viewingDistanceCm;
-    sessionDistanceRef.current = distCm;
+    // B1.4 — as duas distâncias são grandezas DIFERENTES e não podem se
+    // substituir. Antes desta correção o código fazia
+    // `distCm = estimatedDistanceCm ?? settings.viewingDistanceCm`, e a
+    // medida de câmera assumia o papel da distância de tela sempre que
+    // existisse (isto é, sempre que o FOV estivesse calibrado). Num setup
+    // câmera-perto/tela-longe — o RECOMENDADO pelo README — isso colapsava a
+    // grade de calibração de 17%/83% para 28%/72%, errava o denominador da
+    // compensação de distância (0,76 no lugar de 0,90) e inflava o erro
+    // angular do relatório por ~2,4×.
+    const { cameraCm, screenCm } = resolveCalibrationDistances({
+      measuredCameraDistanceCm: calibration.getCurrentCameraDistanceCm?.() ?? null,
+      configuredViewingDistanceCm: settings.viewingDistanceCm,
+    });
+    sessionDistanceRef.current = screenCm;
 
-    console.log(`[calib] distância da sessão: ${distCm.toFixed(1)} cm.`);
+    console.log(
+      `[calib] distâncias da sessão — tela ${screenCm.toFixed(1)} cm ` +
+      `(configurada), câmera ${cameraCm === null ? 'não medida' : `${cameraCm.toFixed(1)} cm`}.`,
+    );
 
     // Congela as distâncias desta calibração. A compensação de distância usa
     // a VARIAÇÃO em relação a estes dois números para reescalar a predição
     // quando o paciente sentar mais perto ou mais longe depois.
     calibration.setCalibrationDistancesCm?.(
-      estimatedDistanceCm,
-      distCm,
+      cameraCm,
+      screenCm,
     );
 
     calibration.startCalibrationMode?.({
@@ -418,7 +437,11 @@ export const CalibrationCheck: React.FC = () => {
       opticalCondition,
       geometry: {
         screenDiagonalIn: settings.screenDiagonalIn,
-        viewingDistanceCm: distCm,
+        // A grade é posicionada por orçamento de excentricidade ANGULAR, que
+        // depende da distância até a TELA — o ângulo que o olho precisa girar
+        // para alcançar o alvo. A distância até a câmera não tem relação
+        // alguma com essa geometria.
+        viewingDistanceCm: screenCm,
       },
     });
 
@@ -515,6 +538,15 @@ export const CalibrationCheck: React.FC = () => {
                   Olhe <strong style={{ color: TEXT_PRIMARY }}>direto para ele</strong> e fique parado até sumir.
                 </p>
               </div>
+
+              {/* B3.16 — verificação de prontidão do posto de uso.
+                  `evaluateReadiness` existia, era testada e correta, e NUNCA
+                  tinha chamador de produção. O README anuncia esta tela como
+                  recurso; até aqui ela não existia. O item mais caro que ela
+                  traz de volta é a checagem de viewport, única defesa contra
+                  calibrar em janela não-maximizada — o que infla o erro
+                  angular do relatório (B2.9/B2.10). */}
+              <ReadinessPanel />
 
               {errorMessage && (
                 <div style={{
@@ -635,11 +667,20 @@ export const CalibrationCheck: React.FC = () => {
                 </span>
               </label>
 
+              {/* B3.25 — `data-no-dwell` REMOVIDO daqui.
+                  Com ele, um usuário gaze-only não conseguia iniciar a própria
+                  (re)calibração: o único caminho para restaurar o rastreamento
+                  exigia um cuidador com mouse. Para o público-alvo (ELA, uso
+                  possivelmente desacompanhado), isso é perda de autonomia
+                  exatamente no momento em que ela mais importa.
+                  Em vez de bloquear, um dwell LONGO (`data-dwell-ms`): iniciar
+                  a calibração por acidente custa 1–2 min de sessão, então o
+                  acionamento tem que ser deliberado — mas possível. */}
               <button
                 type="button"
                 onClick={() => handleStart(false)}
                 disabled={!l2csReady}
-                data-no-dwell="true"
+                data-dwell-ms="2500"
                 data-testid="start-calibration-full"
                 aria-disabled={!l2csReady}
                 aria-describedby="l2cs-status-message"
@@ -670,7 +711,10 @@ export const CalibrationCheck: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => handleStart(true)}
-                  data-no-dwell="true"
+                  /* B3.25 — idem ao botão de 9 pontos: dwell longo em vez de
+                     bloqueio, para a recalibração rápida ser alcançável só
+                     com o olhar. */
+                  data-dwell-ms="2500"
                   data-testid="start-calibration-quick"
                   style={{
                     background: 'transparent',

@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { loadEnvOverrides, EXPERIMENT } from './experiment';
+import { describe, it, expect, vi } from 'vitest';
+import { loadEnvOverrides, sanitizeExperiment, EXPERIMENT } from './experiment';
 
 // A config de experimento em Node aceita override via env-var
 // `IRISFLOW_EXP_<key>=<value>`. Estes testes garantem que:
@@ -43,6 +43,97 @@ describe('loadEnvOverrides', () => {
 
   it('chave desconhecida é ignorada (typo não trava)', () => {
     expect(loadEnvOverrides({ IRISFLOW_EXP_flagInexistente: 'true' })).toEqual({});
+  });
+
+  // ── AE-4: os overrides eram silenciosamente ignorados no Windows ──────────
+  //
+  // No Windows os nomes de variável de ambiente são case-insensitive, e o Node
+  // devolve a forma canônica EM MAIÚSCULAS ao enumerar `process.env`. Medido na
+  // máquina do projeto:
+  //
+  //   process.env.IRISFLOW_EXP_dynamicGamma  →  "true"   (acesso direto: ok)
+  //   Object.keys(process.env)               →  ["IRISFLOW_EXP_DYNAMICGAMMA"]
+  //
+  // A comparação `key in DEFAULTS` recebia `DYNAMICGAMMA` contra a chave real
+  // `dynamicGamma`, falhava, e caía no `continue` — que era silencioso por
+  // decisão de projeto ("typo em CLI não trava a rodada").
+  //
+  // O resultado: NENHUMA flag de chave camelCase — ou seja, todas — podia ser
+  // ligada por env-var nesta máquina, sem nada indicando o problema. É
+  // pré-requisito de `F8.4`: cada condição da ablação rodaria com os defaults e
+  // produziria medições idênticas, que seriam lidas como "a flag não teve
+  // efeito". Dado de aparência boa e conclusão invertida.
+  it('aceita a chave em MAIÚSCULAS, como o Windows enumera', () => {
+    expect(loadEnvOverrides({ IRISFLOW_EXP_DYNAMICGAMMA: 'true' }))
+      .toEqual({ dynamicGamma: true });
+    expect(loadEnvOverrides({ IRISFLOW_EXP_ISOTROPICLANDMARKS: 'true' }))
+      .toEqual({ isotropicLandmarks: true });
+    expect(loadEnvOverrides({ IRISFLOW_EXP_EXPANDFACTOR: '1.6' }))
+      .toEqual({ expandFactor: 1.6 });
+  });
+
+  it('aceita qualquer capitalização — é o que "case-insensitive" significa', () => {
+    for (const chave of [
+      'IRISFLOW_EXP_claheEyeRegion',
+      'IRISFLOW_EXP_CLAHEEYEREGION',
+      'IRISFLOW_EXP_claheeyeregion',
+      'IRISFLOW_EXP_ClaheEyeRegion',
+    ]) {
+      expect(loadEnvOverrides({ [chave]: 'true' })).toEqual({ claheEyeRegion: true });
+    }
+  });
+
+  it('TODA flag do config é alcançável em maiúsculas', () => {
+    // A garantia que importa não é sobre uma chave: é sobre o conjunto. Se
+    // alguém adicionar uma flag nova amanhã, este teste cobre ela sozinho.
+    for (const [chave, valorPadrao] of Object.entries(EXPERIMENT)) {
+      // Um valor SINTATICAMENTE válido por tipo. A validação semântica (faixa
+      // numérica, lista fechada de strings) é de `sanitizeExperiment`; aqui o
+      // que se testa é se a chave chega, e ela chegava para nenhuma delas no
+      // Windows antes de AE-4.
+      const bruto = typeof valorPadrao === 'boolean' ? 'true'
+                  : typeof valorPadrao === 'number' ? '1.5'
+                  : String(valorPadrao);
+      const r = loadEnvOverrides({ [`IRISFLOW_EXP_${chave.toUpperCase()}`]: bruto });
+      expect(Object.keys(r)).toEqual([chave]);
+    }
+  });
+
+  it('flag de STRING chega pelo env e é validada contra a lista fechada (P5.2)', () => {
+    expect(loadEnvOverrides({ IRISFLOW_EXP_HEADPOSESOURCE: 'pnp' })).toEqual({ headPoseSource: 'pnp' });
+    // Valor inválido chega em `loadEnvOverrides` (que só coleta) e é barrado
+    // em `sanitizeExperiment`, com aviso — nunca escolhe um caminho de pose
+    // em silêncio.
+    const avisos = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(sanitizeExperiment({ headPoseSource: 'inventado' }).headPoseSource).toBe('matrix');
+    expect(avisos).toHaveBeenCalled();
+    avisos.mockRestore();
+  });
+
+  it('chave com o prefixo mas sem correspondente AVISA em vez de sumir', () => {
+    // O silêncio era a metade do bug: quem escreveu `IRISFLOW_EXP_` na frente
+    // de alguma coisa quase sempre queria ligar uma flag, e um typo aí custava
+    // uma rodada de medição inteira sem sintoma.
+    const avisos = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(loadEnvOverrides({ IRISFLOW_EXP_flagInexistente: 'true' })).toEqual({});
+    expect(avisos).toHaveBeenCalledWith(expect.stringContaining('flagInexistente'));
+    avisos.mockRestore();
+  });
+
+  it('variável sem o prefixo continua ignorada em silêncio', () => {
+    // Aqui o silêncio é certo: `PATH` não é typo de flag nenhuma.
+    const avisos = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    expect(loadEnvOverrides({ PATH: '/usr/bin', HOME: '/root' })).toEqual({});
+    expect(avisos).not.toHaveBeenCalled();
+    avisos.mockRestore();
+  });
+
+  it('duas capitalizações da mesma flag não se multiplicam', () => {
+    const r = loadEnvOverrides({
+      IRISFLOW_EXP_dynamicGamma: 'false',
+      IRISFLOW_EXP_DYNAMICGAMMA: 'true',
+    });
+    expect(Object.keys(r)).toEqual(['dynamicGamma']);
   });
 
   it('override numérico com valor não-parseável é ignorado', () => {

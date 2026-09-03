@@ -1,10 +1,24 @@
 import React, { useRef, useEffect } from 'react';
+import { alvoMinimoPx } from '../../design/gazeMetrics';
 
 interface GazeButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
   children: React.ReactNode;
   width?: number;
   height?: number;
   emergency?: boolean;
+  /**
+   * Alvo de RECUPERAÇÃO (B1.9).
+   *
+   * Marca o botão como acionável mesmo com o rastreamento em `degraded`, onde
+   * o dispatcher bloqueia todo alvo comum. Existe para o botão "Recalibre
+   * aqui": ele só aparece em `degraded` e, sem esta marcação, era inalcançável
+   * pelo olhar — o paciente via a saída anunciada e não conseguia usá-la.
+   *
+   * Use APENAS em controles que consertam o próprio rastreamento. O dwell é
+   * mais longo nesses alvos (2,5× em degradado) porque um acionamento
+   * acidental custa uma recalibração inteira.
+   */
+  recovery?: boolean;
   noWarn?: boolean;
 }
 
@@ -13,6 +27,7 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
   width,
   height,
   emergency = false,
+  recovery = false,
   noWarn = false,
   disabled,
   style,
@@ -20,7 +35,10 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
   ...props
 }) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const minPx = 198; // Equivale a 5.0° (GAZE_TOKENS.targetMinDeg)
+  // B3.24 — fonte única. Antes era o literal `198` aqui E em `GazeGrid`,
+  // derivado de 5,0° a 60 cm com 96 dpi hardcoded — números que o app conhece
+  // de verdade em `settings` e que o design system ignorava.
+  const minPx = alvoMinimoPx();
 
   useEffect(() => {
     if (import.meta.env?.DEV && !noWarn) {
@@ -39,6 +57,7 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
       ref={buttonRef}
       disabled={disabled}
       data-emergency={emergency ? 'true' : undefined}
+      data-recovery={recovery ? 'true' : undefined}
       data-no-dwell={disabled ? 'true' : undefined}
       className={`gaze-button ${emergency ? 'emergency' : ''} ${className}`}
       style={{

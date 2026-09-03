@@ -11,11 +11,53 @@ const MODEL_PATH = path.resolve(__dirname, '../public/models/l2cs/l2cs_gaze360.o
 const META_PATH = path.resolve(__dirname, '../public/models/l2cs/l2cs.meta.json');
 const DEFAULT_PHOTO_DIR = path.resolve(__dirname, '../python_scripts/l2cs_validation');
 
-// ⚠️ CANONICAL: as constantes e a fórmula de normalização abaixo DEVEM bater
-// com src/l2cs/crop.ts. Este script é uma implementação shadow em Node só
-// para validar o modelo com sharp — o pipeline browser usa crop.ts.
+// ─── O QUE ESTE SCRIPT MEDE, E O QUE NÃO MEDE (B3.29) ───────────────────────
+//
+// O cabeçalho anterior dizia: "⚠️ CANONICAL: as constantes e a fórmula de
+// normalização abaixo DEVEM bater com src/l2cs/crop.ts". A NORMALIZAÇÃO bate
+// (ImageNet, NCHW, RGB, /255 antes de (x−mean)/std — auditado em P4.7). A
+// GEOMETRIA DO CROP não bate, e nunca bateu:
+//
+//   este script:  quadrado de `min(w,h)·0.6` no CENTRO GEOMÉTRICO DA FOTO
+//   crop.ts:      quadrado da BBOX DOS 478 LANDMARKS × EXPAND_FACTOR (1.4)
+//
+// São regiões diferentes da imagem. Onde o rosto não está exatamente no centro
+// do enquadramento — o caso comum, já que a câmera fica abaixo ou acima do
+// monitor — o modelo vê coisas distintas nos dois caminhos.
+//
+// CONSEQUÊNCIA: as magnitudes que este script produz (±25° no relatório de
+// eixos) **não são transferíveis** para o runtime, e o `EXPAND_FACTOR = 1.4`
+// continua sem validação empírica. O que o script mede de forma confiável é o
+// SINAL de cada eixo — se yaw positivo é direita ou esquerda —, porque o sinal
+// não depende de qual recorte quadrado do rosto entrou.
+//
+// Use `--bbox x,y,side` para reproduzir a geometria de `crop.ts` quando a
+// posição do rosto for conhecida; sem isso, o recorte central é usado e o
+// script avisa.
+//
+// (Nota factual: a análise que originou esta tarefa afirmava que o
+// `resize(448,448,{fit:'fill'})` distorcia o aspect ratio. Isso está
+// incorreto — o `extract` acima já é quadrado (`side × side`), então o resize
+// de quadrado para quadrado não distorce nada. O defeito real é apenas a
+// REGIÃO recortada.)
+/**
+ * Lado default do crop. O ONNX foi reexportado com eixos espaciais dinâmicos
+ * (P5.5a), então o mesmo binário roda 224² e 448² — use `--size` para escolher.
+ * Os sinais gravados no `meta.json` foram medidos em 448²; validar em 224²
+ * exige rodar este script com `--size 224`.
+ */
+const INPUT_SIZE = 448;
+
 const IMAGENET_MEAN = [0.485, 0.456, 0.406];
 const IMAGENET_STD = [0.229, 0.224, 0.225];
+
+/**
+ * Fração do menor lado usada no recorte central de fallback.
+ *
+ * Sem relação com `EXPAND_FACTOR` de `crop.ts` — são parametrizações de coisas
+ * diferentes (aquele expande a bbox do rosto; este escolhe um pedaço do meio
+ * da foto). Mantido para o script continuar utilizável sem `--bbox`.
+ */
 const CENTER_CROP_RATIO = 0.6;
 
 const POSE_CATALOG = [
@@ -30,11 +72,31 @@ const CENTER_TOL_DEG = 10;
 const MIN_DELTA_DEG = 5;
 
 function parseArgs(argv) {
-  const args = { dirs: null };
+  const args = { dirs: null, bbox: null, size: INPUT_SIZE };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--dir') args.dirs = [argv[++i]];
     else if (a === '--dirs') args.dirs = argv[++i].split(',').map((s) => s.trim());
+    else if (a === '--size') {
+      // P5.5a — o ONNX passou a aceitar eixos espaciais dinâmicos, então o
+      // mesmo binário valida 224² e 448². Os sinais de yaw/pitch foram medidos
+      // em 448²; revalidar em 224 é pré-requisito para confiar neles lá.
+      const n = Number(argv[++i]);
+      if (!Number.isFinite(n) || n <= 0 || n % 32 !== 0) {
+        throw new Error('--size espera um múltiplo de 32 (a ResNet-50 reduz por 32). Ex.: 224 ou 448.');
+      }
+      args.size = n;
+    }
+    else if (a === '--bbox') {
+      // B3.29 — reproduz a geometria de `crop.ts` quando a posição do rosto é
+      // conhecida. Formato: `x,y,side` em pixels da foto original, já com o
+      // EXPAND_FACTOR aplicado (é o que `computeSquareBBox` devolve).
+      const partes = String(argv[++i]).split(',').map((s) => Number(s.trim()));
+      if (partes.length !== 3 || partes.some((n) => !Number.isFinite(n) || n < 0)) {
+        throw new Error('--bbox espera três números não-negativos: x,y,side');
+      }
+      args.bbox = { x: partes[0], y: partes[1], side: partes[2] };
+    }
     else if (a === '--help' || a === '-h') { printHelp(); process.exit(0); }
     else throw new Error(`Argumento desconhecido: ${a}. --help para uso.`);
   }
@@ -49,6 +111,25 @@ Uso:
   node frontend/scripts/l2cs_axis_validation.mjs               (usa ${DEFAULT_PHOTO_DIR})
   node frontend/scripts/l2cs_axis_validation.mjs --dir <path>
   node frontend/scripts/l2cs_axis_validation.mjs --dirs <p1>,<p2>[,<p3>...]
+  node frontend/scripts/l2cs_axis_validation.mjs --bbox <x>,<y>,<side>
+  node frontend/scripts/l2cs_axis_validation.mjs --size 224        (P5.5a)
+
+⚠️ TAMANHO DE ENTRADA (P5.5a)
+  O ONNX foi reexportado com eixos espaciais dinâmicos, então o mesmo binário
+  roda 224² e 448². O default aqui é 448 — a resolução em que a rede foi
+  TREINADA e em que os sinais gravados no meta.json foram medidos.
+
+  Os sinais NÃO foram revalidados em 224². Rodar com --size 224 antes de
+  confiar em yaw/pitch naquele tamanho é pré-requisito, não formalidade.
+
+⚠️ GEOMETRIA DO RECORTE (B3.29)
+  Sem --bbox, o script recorta um quadrado no CENTRO da foto. Isso NÃO é o que
+  o runtime faz: crop.ts recorta a bbox dos 478 landmarks expandida por
+  EXPAND_FACTOR (1.4). Os SINAIS medidos continuam válidos — não dependem do
+  recorte —, mas as MAGNITUDES não são transferíveis para o pipeline.
+
+  Passe --bbox x,y,side (px da foto original, já com EXPAND_FACTOR aplicado)
+  para reproduzir a geometria real quando a posição do rosto for conhecida.
 
 Fotos suportadas (todas opcionais — o script pula as ausentes com WARN):
 ${POSE_CATALOG.map((p) => '  ' + p.name.padEnd(14) + ' — ' + p.hint).join('\n')}
@@ -62,22 +143,62 @@ Total: 10 fotos. O script valida sinais + simetria + consistência entre distân
 
 let sharp; // populado no main()
 
-async function preprocess(filepath) {
+/**
+ * Recorte quadrado a usar (B3.29).
+ *
+ * Com `bbox` (de `--bbox x,y,side`) reproduz a geometria de `crop.ts`: um
+ * quadrado da bbox dos landmarks já expandida por `EXPAND_FACTOR`. Sem ela,
+ * cai no recorte central — que NÃO é o que o runtime faz, e por isso avisa.
+ *
+ * O quadrado é clampado à imagem: `crop.ts` também pode produzir uma bbox que
+ * ultrapassa a borda quando o rosto está perto do limite do frame.
+ */
+function resolverRecorte(w, h, bbox) {
+  if (bbox) {
+    const side = Math.max(1, Math.min(Math.floor(bbox.side), Math.min(w, h)));
+    const left = Math.max(0, Math.min(Math.floor(bbox.x), w - side));
+    const top = Math.max(0, Math.min(Math.floor(bbox.y), h - side));
+    return { left, top, side, origem: 'bbox' };
+  }
+  const side = Math.floor(Math.min(w, h) * CENTER_CROP_RATIO);
+  return {
+    left: Math.floor((w - side) / 2),
+    top: Math.floor((h - side) / 2),
+    side,
+    origem: 'centro',
+  };
+}
+
+let avisouRecorteCentral = false;
+
+async function preprocess(filepath, bbox, size = INPUT_SIZE) {
   const meta = await sharp(filepath).metadata();
   const w = meta.width;
   const h = meta.height;
-  const side = Math.floor(Math.min(w, h) * CENTER_CROP_RATIO);
-  const left = Math.floor((w - side) / 2);
-  const top = Math.floor((h - side) / 2);
+  const { left, top, side, origem } = resolverRecorte(w, h, bbox);
+
+  if (origem === 'centro' && !avisouRecorteCentral) {
+    avisouRecorteCentral = true;
+    console.warn(
+      '[axis] ⚠ Usando recorte CENTRAL da foto — não é a geometria de crop.ts,\n' +
+      '        que recorta a bbox dos 478 landmarks expandida por EXPAND_FACTOR.\n' +
+      '        Os SINAIS medidos são confiáveis; as MAGNITUDES não são\n' +
+      '        transferíveis para o runtime. Use --bbox x,y,side para reproduzir\n' +
+      '        a geometria real quando a posição do rosto for conhecida.',
+    );
+  }
 
   const { data } = await sharp(filepath)
+    // Quadrado → quadrado: `fill` aqui não distorce (o `extract` acima já é
+    // `side × side`). Mantido explícito para o comportamento não depender do
+    // default do sharp.
     .extract({ left, top, width: side, height: side })
-    .resize(448, 448, { fit: 'fill' })
+    .resize(size, size, { fit: 'fill' })
     .removeAlpha()
     .raw()
     .toBuffer({ resolveWithObject: true });
 
-  const px = 448 * 448;
+  const px = size * size;
   const chw = new Float32Array(3 * px);
   for (let i = 0; i < px; i++) {
     const r = data[i * 3] / 255;
@@ -113,9 +234,9 @@ function decodeAngleDegWithConfidence(logits, binWidth, binOffset) {
   return { deg, confidence };
 }
 
-async function runPose(session, meta, filepath, ort) {
-  const { chw, srcW, srcH, cropSide } = await preprocess(filepath);
-  const input = new ort.Tensor('float32', chw, [1, 3, 448, 448]);
+async function runPose(session, meta, filepath, ort, bbox, size = INPUT_SIZE) {
+  const { chw, srcW, srcH, cropSide } = await preprocess(filepath, bbox, size);
+  const input = new ort.Tensor('float32', chw, [1, 3, size, size]);
   const t0 = performance.now();
   const out = await session.run({ [session.inputNames[0]]: input });
   const dt = performance.now() - t0;
@@ -152,7 +273,7 @@ function verdictSymmetryPair(name, axis, posDelta, negDelta, otherPos, otherNeg)
   };
 }
 
-async function runOne(dirPath, session, meta, tagLabel, ort) {
+async function runOne(dirPath, session, meta, tagLabel, ort, bbox, size = INPUT_SIZE) {
   const dirResults = { dir: dirPath, poses: {}, verdicts: [], warnings: [] };
   let anyMissing = false;
 
@@ -163,7 +284,7 @@ async function runOne(dirPath, session, meta, tagLabel, ort) {
       anyMissing = true;
       continue;
     }
-    const r = await runPose(session, meta, filepath, ort);
+    const r = await runPose(session, meta, filepath, ort, bbox, size);
     dirResults.poses[pose.name] = r;
     console.log(
       `[axis${tagLabel}] ${pose.name.padEnd(14)}  yaw=${String(r.yawDeg).padStart(7)}°  pitch=${String(r.pitchDeg).padStart(7)}°  ` +
@@ -283,7 +404,7 @@ async function main() {
     }
     const tagLabel = dirs.length > 1 ? `#${i + 1}` : '';
     console.log(`\n[axis] === diretório ${i + 1}/${dirs.length}: ${dir} ===`);
-    perDir.push(await runOne(dir, session, meta, tagLabel, ort));
+    perDir.push(await runOne(dir, session, meta, tagLabel, ort, args.bbox, args.size));
   }
 
   // Consistência entre distâncias (se >1 diretório) — o sinal do eixo dominante

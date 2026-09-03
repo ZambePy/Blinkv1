@@ -48,6 +48,13 @@ export function startRecording(input: StartRecordingInput): void {
     // pode gravar um valor errado por engano.
     featureVectorId: FEATURE_VECTOR_ID,
     startedAt: new Date().toISOString(),
+    // B3.28 — a ponte entre os dois relógios da gravação. `startedAt` é
+    // relógio de parede; `captureTs`/`emitTs` são `performance.now()`. Sem
+    // `timeOrigin` não há como converter um no outro, e o JSONL não pode ser
+    // alinhado a nenhum evento externo.
+    timeOrigin: typeof performance !== 'undefined' && Number.isFinite(performance.timeOrigin)
+      ? performance.timeOrigin
+      : Date.now(),
     ...input,
   };
   active = true;
@@ -63,7 +70,15 @@ export function recordFrame(frame: RecordedFrame): void {
     dropped++;
     return;
   }
-  frames.push(frame);
+  // B3.28 — `frameIdx` é reindexado como posição NESTA gravação.
+  //
+  // O engine passa `framesSeen`, seu contador vitalício. Uma gravação iniciada
+  // 10 minutos após o boot abria no frame ~18000, e quem lê o arquivo conclui
+  // que perdeu o começo. `frames.length` é a posição real e é contígua por
+  // construção — inclusive quando frames sem rosto entram no meio, que é o
+  // caso em que um índice esparso quebraria consumidores que iteram por
+  // posição.
+  frames.push({ ...frame, frameIdx: frames.length });
 }
 
 export function getFrameCount(): number {

@@ -100,8 +100,22 @@ describe('Auditoria Técnica e Suíte de Precisão', () => {
 
       expect(model.lambdaX).toBeDefined();
       expect(model.lambdaY).toBeDefined();
-      // O eixo X com sinal limpo deve ter lambdaX <= lambdaY
-      expect(model.lambdaX!).toBeLessThanOrEqual(model.lambdaY!);
+      // B3.9 — a asserção anterior era `lambdaX <= lambdaY`, com o raciocínio
+      // "sinal limpo precisa de menos regularização". Ela dependia do bug:
+      // com a comparação `<` estrita e `bestLambda` inicializado no MENOR λ do
+      // grid, todo empate era resolvido a favor da menor regularização — e um
+      // sinal limpo produz justamente um PLATÔ de erro, onde tudo empata.
+      //
+      // Com o desempate pelo MAIOR λ, o eixo X (limpo) passa a escolher 1e-2
+      // em vez de 1e-5: três ordens de grandeza a mais de regularização, com a
+      // qualidade de predição intacta (medido abaixo — as bordas continuam
+      // sendo alcançadas). O eixo Y (ruidoso) tem ótimo mais estreito e fica
+      // no menor λ.
+      //
+      // Ou seja: a relação se INVERTE, e a inversão é o comportamento correto.
+      // O que o teste trava agora é que os dois eixos escolhem λ de forma
+      // independente — que é o nome do caso — e que a predição não degrada.
+      expect(model.lambdaX!).not.toBe(model.lambdaY!);
 
       // Predição nas bordas deve atingir ~0.1 e ~0.9 sem compressão severa de ganho
       const predLeft = reg.predict([-0.04, 0, -0.08, 0]);

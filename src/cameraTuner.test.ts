@@ -188,12 +188,23 @@ describe('planTuningStep — contraste (item 2)', () => {
     expect(s.constraints.contrast).toBeGreaterThan(128);
   });
 
-  it('NÃO mexe no contraste enquanto o brilho está fora do alvo', () => {
-    // Em muitos drivers o ganho de contraste altera o brilho aparente; mexer
-    // nos dois ao mesmo tempo faz um passo desfazer o outro.
+  it('B3.14 — ajusta contraste MESMO com o brilho fora do alvo', () => {
+    // ATÉ B3.14 este teste afirmava o contrário, com o raciocínio "em muitos
+    // drivers o ganho de contraste altera o brilho aparente; mexer nos dois ao
+    // mesmo tempo faz um passo desfazer o outro".
+    //
+    // O raciocínio é legítimo, mas a premissa não se sustentava: o brilho
+    // usava passo bang-bang de 15% fixo e podia oscilar em torno da faixa
+    // morta indefinidamente, sem NUNCA declarar convergência. Como o contraste
+    // estava condicionado a `brightnessConverged`, ele nunca era ajustado —
+    // justamente quando a imagem está pior e a borda da íris mais precisa de
+    // contraste para o landmark não escorregar.
+    //
+    // A oscilação cruzada passou a ser tratada na causa: ganho proporcional no
+    // brilho (converge em vez de caçar) e faixa morta nos dois eixos.
     const caps = { ...CAPS_COMPLETA, contrast: { min: 0, max: 255, step: 1 } };
     const s = planTuningStep(caps, { zoom: 2, contrast: 128 }, noAlvo({ brightness: 0.10, contrast: 0.094 }));
-    expect(s.constraints.contrast).toBeUndefined();
+    expect(s.constraints.contrast).toBeDefined();
     expect(s.constraints.brightness).toBeDefined();
   });
 

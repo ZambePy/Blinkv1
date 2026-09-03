@@ -33,6 +33,19 @@ export interface FlickerReport {
   relativeAmplitude: number;
   /** Amostras usadas. Abaixo de MIN_SAMPLES o veredito não é confiável. */
   samples: number;
+  /**
+   * Redes elétricas cujo batimento é INDETECTÁVEL nesta taxa de amostragem
+   * (B3.15).
+   *
+   * A 30 fps, uma rede de 60 Hz (Brasil) produz `alias(120) = 120 mod 30 = 0`:
+   * não há batimento observável, e o período residual (a 29,97 fps são 0,12 Hz
+   * ≈ 8,3 s) é maior que a janela de 3,2 s.
+   *
+   * Sem este campo, `detected: false` numa rede de 60 Hz era lido como
+   * "não há cintilação" — uma afirmação falsa. O detector não achou porque não
+   * podia achar, e a UI precisa dizer isso.
+   */
+  redeIndetectavel: number[];
 }
 
 /** Série curta demais não permite distinguir oscilação de deriva. */
@@ -47,6 +60,68 @@ export const MIN_SAMPLES = 32;
  * aperiódico medido, então é um piso defensável.
  */
 const AMPLITUDE_THRESHOLD = 0.03;
+
+/** Redes elétricas consideradas. O batimento observável é o alias de 2× a
+ *  frequência da rede (a lâmpada pisca duas vezes por ciclo). */
+const REDES_HZ = [50, 60] as const;
+
+/** Abaixo disto o alias caiu em ~DC e o batimento é indetectável por
+ *  construção — não há período que caiba na janela. */
+const ALIAS_MIN_HZ = 0.5;
+
+/** Tolerância, em bins, em torno da frequência de batimento esperada (B3.15).
+ *  ±2 cobre erro de estimativa do fps e vazamento espectral da janela
+ *  retangular, sem abrir a varredura para a banda inteira. */
+const BIN_TOLERANCIA = 2;
+
+/** Frequência de batimento que uma rede de `redeHz` produz a `fps`. */
+function aliasDaRede(redeHz: number, fps: number): number {
+  const m = (redeHz * 2) % fps;
+  return Math.min(m, fps - m);   // dobra em torno de Nyquist
+}
+
+/**
+ * Bins da DFT que podem carregar batimento de rede elétrica (B3.15).
+ *
+ * A varredura anterior elegia o bin de maior amplitude em **toda** a banda.
+ * Com n=96 a 30 fps o bin 1 vale 0,31 Hz, e depois da remoção de tendência
+ * apenas LINEAR sobra toda a variação lenta não-linear do brilho — nuvem
+ * passando, auto-exposure caçando, alguém acendendo uma luz. Essa energia cai
+ * nos primeiros bins, ganha o máximo e passa do limiar.
+ *
+ * O usuário lia *"Cintilação de 0.6 Hz — troque a lâmpada"* sem haver
+ * cintilação nenhuma. Trocar lâmpada não é conselho gratuito para a família de
+ * um paciente com ELA.
+ *
+ * Restringir aos bins compatíveis com `alias(100)` e `alias(120)` significa
+ * que o que não é candidato a batimento de rede não pode ser reportado como
+ * batimento de rede.
+ */
+export function binsCandidatos(n: number, fps: number): number[] {
+  if (!(n > 0) || !(fps > 0)) return [];
+  const maxK = Math.floor(n / 2);
+  const bins = new Set<number>();
+  for (const rede of REDES_HZ) {
+    const alias = aliasDaRede(rede, fps);
+    if (alias < ALIAS_MIN_HZ) continue;      // indetectável nesta taxa
+    const kCentral = (alias * n) / fps;
+    for (let d = -BIN_TOLERANCIA; d <= BIN_TOLERANCIA; d++) {
+      const k = Math.round(kCentral) + d;
+      if (k >= 1 && k < maxK) bins.add(k);
+    }
+  }
+  return [...bins].sort((a, b) => a - b);
+}
+
+/** Redes cujo batimento NÃO é observável nesta taxa de amostragem (B3.15).
+ *
+ *  A 30 fps, `alias(120) = 0` — uma rede de 60 Hz (Brasil) é indetectável por
+ *  construção. Sem declarar isso, "nenhuma cintilação detectada" vira uma
+ *  afirmação falsa: o detector não achou porque não podia achar. */
+export function redesIndetectaveis(fps: number): number[] {
+  if (!(fps > 0)) return [...REDES_HZ];
+  return REDES_HZ.filter((r) => aliasDaRede(r, fps) < ALIAS_MIN_HZ);
+}
 
 /**
  * Analisa uma série temporal de brilho e devolve a componente periódica
@@ -63,12 +138,12 @@ const AMPLITUDE_THRESHOLD = 0.03;
 export function detectFlicker(series: readonly number[], fps: number): FlickerReport {
   const n = series.length;
   if (n < MIN_SAMPLES || !(fps > 0)) {
-    return { detected: false, dominantHz: 0, relativeAmplitude: 0, samples: n };
+    return { detected: false, dominantHz: 0, relativeAmplitude: 0, samples: n, redeIndetectavel: redesIndetectaveis(fps) };
   }
 
   const mean = series.reduce((a, b) => a + b, 0) / n;
   if (!(Math.abs(mean) > 1e-9)) {
-    return { detected: false, dominantHz: 0, relativeAmplitude: 0, samples: n };
+    return { detected: false, dominantHz: 0, relativeAmplitude: 0, samples: n, redeIndetectavel: redesIndetectaveis(fps) };
   }
 
   // Remoção de tendência linear por mínimos quadrados sobre o índice.
@@ -79,11 +154,16 @@ export function detectFlicker(series: readonly number[], fps: number): FlickerRe
   const intercept = (sy - slope * sx) / n;
   const detrended = series.map((v, i) => v - (intercept + slope * i));
 
-  // Varre bins de 1 até n/2 - 1. O bin 0 é a DC (já removida pela tendência).
+  // B3.15 — varre APENAS os bins compatíveis com batimento de rede elétrica.
+  //
+  // Antes: `for (k = 1; k < n/2; k++)` sobre a banda inteira, elegendo o
+  // máximo global. Os primeiros bins concentram a variação lenta que a
+  // remoção de tendência linear não elimina (curvatura do auto-exposure,
+  // sombra passando), ganham o máximo, e viram "cintilação de 0,6 Hz".
   let bestAmp = 0;
   let bestK = 0;
-  const maxK = Math.floor(n / 2);
-  for (let k = 1; k < maxK; k++) {
+  const candidatos = binsCandidatos(n, fps);
+  for (const k of candidatos) {
     let re = 0, im = 0;
     for (let i = 0; i < n; i++) {
       const ang = (2 * Math.PI * k * i) / n;
@@ -102,6 +182,7 @@ export function detectFlicker(series: readonly number[], fps: number): FlickerRe
     detected: relativeAmplitude >= AMPLITUDE_THRESHOLD,
     dominantHz,
     relativeAmplitude,
+    redeIndetectavel: redesIndetectaveis(fps),
     samples: n,
   };
 }

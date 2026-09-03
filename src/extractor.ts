@@ -1,5 +1,10 @@
 import { buildL2CSBlock } from './l2cs/block';
 import { EXPERIMENT } from './config/experiment';
+// P5.1 — topologia do Face Mesh com nome, e a guarda de contagem.
+import {
+  OLHO_ESQUERDO, OLHO_DIREITO, IRIS_ESQUERDA, IRIS_DIREITA,
+  TESTA_TOPO, assertFaceMeshCompleto, meshAusenteOuParcial,
+} from './faceLandmarks';
 
 export type Point3D = { x: number; y: number; z: number; visibility?: number };
 
@@ -121,6 +126,15 @@ function dist3D(p1: Point3D, p2: Point3D): number {
   return Math.sqrt((p1.x - p2.x) ** 2 + (p1.y - p2.y) ** 2 + (p1.z - p2.z) ** 2);
 }
 
+/** As dimensões do vídeo permitem calcular o fator de anisotropia? (B2.6) */
+function aspectoValido(w?: number, h?: number): boolean {
+  return (
+    typeof w === 'number' && typeof h === 'number' &&
+    Number.isFinite(w) && Number.isFinite(h) &&
+    w > 0 && h > 0
+  );
+}
+
 // R^T * v = [dot(x_axis, v), dot(y_axis, v), dot(z_axis, v)]
 function mulRT(xAxis: Point3D, yAxis: Point3D, zAxis: Point3D, v: Point3D): Point3D {
   return {
@@ -144,6 +158,62 @@ function mulRT(xAxis: Point3D, yAxis: Point3D, zAxis: Point3D, v: Point3D): Poin
 //
 // BlinkDetector corrige tudo isso. Sem flag — o comportamento anterior era
 // indefensável.
+
+/**
+ * Piso do limiar adaptativo de piscada, na escala ISOTRÓPICA do EAR (B2.6).
+ *
+ * Abaixo disto o olho está fisicamente fechado em qualquer pessoa; usar um
+ * piso evita que uma sequência de frames ruins arraste o limiar para zero e
+ * desligue a detecção.
+ */
+export const EAR_THR_MIN = 0.12;
+
+/**
+ * Teto do limiar adaptativo, na escala ISOTRÓPICA do EAR (B2.6).
+ *
+ * Precisa ficar ACIMA de `repouso_típico × blinkRatio` para a adaptação de
+ * fato acontecer: com repouso isotrópico ~0,31 e ratio 0,8, o alvo é 0,248.
+ * O valor antigo (0,22) foi calibrado para a escala isotrópica mas aplicado
+ * sobre um EAR inflado 1,78×, o que travava o limiar no clamp em 100% dos
+ * frames.
+ *
+ * Também serve de proteção contra confundir olho semi-fechado (ptose) com
+ * piscada — daí não ser simplesmente `Infinity`. O público-alvo tem ELA, e
+ * ptose é comum: um teto alto demais transformaria a condição basal do
+ * paciente em piscada permanente.
+ */
+export const EAR_THR_MAX = 0.28;
+
+/**
+ * Limiar ABSOLUTO de olho fechado, na escala isotrópica (P5.4 / conflito C7).
+ *
+ * ── É o 0,18 que a especificação pede, e ele só faz sentido depois de B2.6 ──
+ *
+ * Num EAR anisotrópico (mediana 0,551) o valor 0,18 nunca dispararia. Com a
+ * escala corrigida, repouso mediano 0,314, ele fica a ~57% do repouso: um olho
+ * abaixo disso está fechado em praticamente qualquer anatomia.
+ *
+ * ── Por que ele NÃO é o limiar principal ───────────────────────────────────
+ *
+ * Um corte fixo seria perigoso justamente para o público-alvo. Ptose é comum em
+ * ELA, e alguém com repouso em 0,20 teria margem de apenas 0,02 até o corte —
+ * tremor de landmark viraria piscada. Quem decide no regime normal continua
+ * sendo o limiar ADAPTATIVO, que aprende o repouso da pessoa.
+ *
+ * O 0,18 vale onde ele de fato significa "fechado independente de quem": no
+ * BOOTSTRAP, antes de existir histórico para adaptar.
+ */
+export const EAR_CLOSED_ABSOLUTE = 0.18;
+
+/**
+ * Quantos quadros o bootstrap tolera sem acumular NENHUM histórico antes de
+ * concluir que a premissa do limiar absoluto não vale para esta pessoa.
+ *
+ * 60 quadros ≈ 2 s a 30 fps. Ninguém fica 2 s com os olhos fechados na frente
+ * da tela de calibração sem que isso seja o estado normal daquele rosto.
+ */
+const BOOTSTRAP_MAX_FRAMES = 60;
+
 export class BlinkDetector {
   private nonBlinkHistory: number[] = [];
   private readonly histLen: number;
@@ -161,17 +231,29 @@ export class BlinkDetector {
   // olho seco; normal em repouso são ~17/min).
   private blinkStartTimestamps: number[] = [];
   private wasBlinking = false;
+  /** Quadros consecutivos abaixo do limiar absoluto SEM nenhum histórico
+   *  acumulado. Alimenta a guarda anti-deadlock do bootstrap (P5.4). */
+  private quadrosSemHistorico = 0;
+  /** Latch do aviso de bootstrap — uma vez por sessão, não por quadro. */
+  private avisouBootstrap = false;
   private static readonly TIMESTAMP_RETENTION_MS = 5 * 60 * 1000;   // 5 min basta pra sliding windows
 
-  // thrMin/thrMax derivados da fisiologia: EAR mínimo do olho aberto
-  // (0.10) e máximo prático para não confundir olho semi-fechado (ptose)
-  // com piscada (0.22).
+  // thrMin/thrMax na escala ISOTRÓPICA do EAR (B2.6).
+  //
+  // Os valores antigos (0,10 e 0,22) foram escolhidos para um EAR isotrópico,
+  // mas o EAR que chegava estava inflado por W/H = 1,78×. Com repouso medido
+  // em 0,551, `mean × 0,8 = 0,44` ficava SEMPRE cortado pelo teto de 0,22 — o
+  // limiar adaptativo nunca adaptava e o `blinkRatio` não tinha efeito nenhum.
+  //
+  // Corrigida a escala do EAR, o repouso passa a ~0,31 e o limiar desejado a
+  // 0,80 × 0,31 = 0,248. Manter o teto em 0,22 continuaria cortando: reescalar
+  // os limiares é parte indissociável da correção, não um ajuste separado.
   constructor({
     histLen = 50,
     minHistory = 15,
     blinkRatio = 0.8,
-    thrMin = 0.10,
-    thrMax = 0.22,
+    thrMin = EAR_THR_MIN,
+    thrMax = EAR_THR_MAX,
   }: {
     histLen?: number;
     minHistory?: number;
@@ -193,13 +275,54 @@ export class BlinkDetector {
   // testes determinísticos e para o caller cotar seu próprio relógio
   // monótono (performance.now() no engine).
   update(ear: number, nowMs: number = Date.now()): boolean {
-    // Calcula threshold adaptativo sobre frames de não-piscada anteriores
-    let thr = this.thrMax; // default conservador: só olho bem fechado conta
+    // ── Limiar do quadro ─────────────────────────────────────────────────────
+    //
+    // P5.4 — o bootstrap usa `EAR_CLOSED_ABSOLUTE` (0,18), não `thrMax`.
+    //
+    // O código anterior era `let thr = this.thrMax;` com o comentário "default
+    // conservador: só olho bem fechado conta". O comentário dizia o oposto do
+    // que o código fazia: 0,28 é o valor MAIS EAGER da faixa, e como o
+    // histórico só acumula em quadros SEM piscada, qualquer pessoa com repouso
+    // abaixo de 0,28 entrava em deadlock — todo quadro virava piscada, o
+    // histórico nunca enchia, e o limiar ficava travado em 0,28 para sempre.
+    //
+    // Medido: repouso 0,25 dava 200 piscadas em 200 quadros, com `restingEar`
+    // preso em `null`. Na prática, o app liga, roda e nunca rastreia para essa
+    // pessoa. E repouso baixo (ptose) é comum em ELA — o público-alvo.
+    let thr = EAR_CLOSED_ABSOLUTE;
     if (this.nonBlinkHistory.length >= this.minHistory) {
       const mean = this.nonBlinkHistory.reduce((a, b) => a + b, 0) / this.nonBlinkHistory.length;
       thr = Math.max(this.thrMin, Math.min(this.thrMax, mean * this.blinkRatio));
     }
-    const blink = ear < thr;
+    let blink = ear < thr;
+
+    // Segunda guarda: ptose severa, com o olho ABERTO abaixo de 0,18.
+    //
+    // Aí o bootstrap por limiar absoluto repetiria o deadlock. A conclusão
+    // certa não é "esta pessoa está piscando há dois segundos" — é que a
+    // premissa "0,18 = fechado" não vale para ela. Adotamos o observado como
+    // repouso e deixamos o limiar adaptativo assumir a partir daí.
+    // A condição é `< minHistory`, não `=== 0`: liberar um único quadro não
+    // resolve nada, porque o limiar adaptativo só entra quando o histórico
+    // ATINGE `minHistory`. Com a guarda presa em "histórico vazio", o detector
+    // acumulava exatamente 1 quadro e voltava a travar.
+    if (blink && this.nonBlinkHistory.length < this.minHistory) {
+      this.quadrosSemHistorico++;
+      if (this.quadrosSemHistorico >= BOOTSTRAP_MAX_FRAMES) {
+        blink = false;
+        if (!this.avisouBootstrap) {
+          this.avisouBootstrap = true;
+          console.warn(
+            `[blink] nenhum quadro acima de ${EAR_CLOSED_ABSOLUTE} em ` +
+            `${this.quadrosSemHistorico} quadros (EAR atual ${ear.toFixed(3)}). ` +
+            'Adotando o valor observado como repouso — provável ptose ou anatomia ' +
+            'de abertura reduzida. O limiar adaptativo assume a partir daqui.',
+          );
+        }
+      }
+    } else if (!blink) {
+      this.quadrosSemHistorico = 0;
+    }
 
     // Edge de "abriu → fechou": conta uma piscada nova.
     if (blink && !this.wasBlinking) {
@@ -228,6 +351,8 @@ export class BlinkDetector {
     this.nonBlinkHistory.length = 0;
     this.blinkStartTimestamps.length = 0;
     this.wasBlinking = false;
+    this.quadrosSemHistorico = 0;
+    this.avisouBootstrap = false;
   }
 
   /**
@@ -249,6 +374,58 @@ export class BlinkDetector {
   get nonBlinkCount(): number {
     return this.nonBlinkHistory.length;
   }
+
+  /**
+   * EAR de repouso DESTA PESSOA: média dos quadros sem piscada (B3.31).
+   *
+   * `null` enquanto não houver `minHistory` quadros — a mesma guarda que o
+   * limiar adaptativo usa. Sem base observada não há razão a calcular, e
+   * inventar uma é justamente o defeito que `B3.31` corrige.
+   *
+   * A estatística já existia para adaptar o limiar de piscada; expô-la é o que
+   * permite `irisVisibilityPercentage` deixar de ser comparado contra uma
+   * constante universal que não existe.
+   */
+  get restingEar(): number | null {
+    if (this.nonBlinkHistory.length < this.minHistory) return null;
+    return this.nonBlinkHistory.reduce((a, b) => a + b, 0) / this.nonBlinkHistory.length;
+  }
+}
+
+/**
+ * Fração da abertura ocular de repouso visível neste quadro (B3.31).
+ *
+ * ── O que estava errado ─────────────────────────────────────────────────────
+ *
+ * A expressão era `Math.min(1.0, ear / 0.25)` — um divisor FIXO contra o EAR de
+ * um rosto qualquer. Mas o EAR de repouso não é universal: depende da anatomia
+ * da pálpebra, da distância à câmera e da pose. Com as medianas registradas
+ * neste repositório a conta saturava nos dois regimes:
+ *
+ *     antes de B2.6 (EAR anisotrópico):  0,551 / 0,25 = 2,20  → min → 1,0
+ *     depois de B2.6 (EAR isotrópico):   0,314 / 0,25 = 1,26  → min → 1,0
+ *
+ * Nem a correção de anisotropia resolveu, porque o divisor continuava abaixo do
+ * repouso típico. O campo publicava 1,0 em praticamente todo quadro — inclusive
+ * com o olho parcialmente fechado, que é exatamente o caso que o gate de
+ * qualidade da calibração tenta barrar com `irisVisibilityPercentage < 0.3`.
+ * Um critério que nunca dispara é pior que critério nenhum: ele dá a impressão
+ * de que o quadro foi verificado.
+ *
+ * ── A correção ──────────────────────────────────────────────────────────────
+ *
+ * Medir contra o repouso da própria pessoa, que o `BlinkDetector` já acumula.
+ * O resultado passa a ser uma fração real de abertura, comparável entre
+ * anatomias e entre sessões.
+ *
+ * `undefined` enquanto a base não existe: devolver 0 afirmaria "íris oculta" e
+ * reprovaria o quadro; devolver 1 afirmaria "perfeitamente visível" e aprovaria
+ * qualquer coisa. As duas são medições que ninguém fez — a política de `B3.3`.
+ */
+export function irisVisibilityFromEar(ear: number, earDeRepouso: number | null): number | undefined {
+  if (earDeRepouso === null || !Number.isFinite(earDeRepouso) || earDeRepouso <= 0) return undefined;
+  if (!Number.isFinite(ear)) return undefined;
+  return Math.min(1, Math.max(0, ear / earDeRepouso));
 }
 
 // EAR Blink Detection — instância do módulo (compat com resetEarHistory)
@@ -302,6 +479,14 @@ export const FEATURE_FORMAT_VERSION = 2;
 //   [22..24] yaw, pitch, roll da cabeça
 //   [25..36] interações pose × offset (12 termos)
 //   [37..43] bloco L2CS (7 termos) — só quando o engine passa gaze
+//   [44..49] bloco `spec11` (P6.5) — só quando o engine passa gaze:
+//              [44] distância da câmera        [45] EAR esquerdo
+//              [46] EAR direito                [47] gazeYaw × gazePitch
+//              [48] gazeYaw²                   [49] gazePitch²
+//            Existe porque o conjunto de 11 da especificação (conflito C6) pede
+//            seis termos que o vetor não tinha: a distância nunca entrou, o
+//            vetor é POR OLHO e carregava um `ear` só, e as interações
+//            [25..36] são pose × offset — não gaze × gaze.
 //
 // POR QUE REDUZIR — medido em duas gravações reais, treinando na janela de
 // calibração e medindo na janela do teste de precisão:
@@ -337,7 +522,14 @@ export type FeatureSet =
   | 'iris12+posecross'
   | 'iris12+l2cs'
   | 'iris12+l2cs+pose'
+  /** Conjunto de 11 da especificação (P6.5 / conflito C6). Alternativa a
+   *  MEDIR: o repositório tem evidência contra ampliar o vetor (322 px contra
+   *  140 px). A decisão sai do `F8.4`. */
+  | 'spec11'
   | 'compact';
+
+/** Dimensões do conjunto `spec11`. */
+export const SPEC11_DIMS = 11;
 
 /** Índices mantidos por `iris12`: offset, rel e contorno da íris. */
 export const IRIS12_DIMS = 12;
@@ -375,6 +567,9 @@ const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly numbe
     22, 23, 24,
     37, 38, 39, 40, 41, 42, 43,
   ],
+  // P6.5 — na ORDEM da especificação: pitch, yaw, head_pitch, head_yaw,
+  // head_roll, distância, EAR_left, EAR_right, pitch×yaw, pitch², yaw².
+  'spec11': [37, 38, 22, 23, 24, 44, 45, 46, 47, 48, 49],
 };
 
 /** Maior índice que cada conjunto exige do vetor completo. Um vetor mais curto
@@ -390,6 +585,7 @@ const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
   'iris12+posecross': 31,
   'iris12+l2cs': 44,
   'iris12+l2cs+pose': 44,
+  'spec11': 50,
 };
 
 /** Índices do bloco L2CS no vetor COMPLETO (ver o mapa em [37..43]). */
@@ -449,23 +645,83 @@ export function activeFeatureDims(set: FeatureSet = ACTIVE_FEATURE_SET): number 
 export const FEATURE_VECTOR_ID = `${ACTIVE_FEATURE_SET}:${activeFeatureDims()}`;
 
 /**
+ * Identidade de um conjunto QUALQUER, não só do ativo (P6.5).
+ *
+ * Existe porque a contagem de dimensões sozinha NÃO identifica: `spec11` e
+ * `irisCore+l2cs+pose` têm 11 dims cada e significam coisas completamente
+ * diferentes. Um perfil trocado entre eles produziria predições plausíveis e
+ * erradas — o modo de falha que este repositório combate.
+ */
+export function featureVectorId(set: FeatureSet = ACTIVE_FEATURE_SET): string {
+  return `${set}:${activeFeatureDims(set)}`;
+}
+
+/**
+ * A expansão polinomial deve rodar sobre este conjunto? (P6.5)
+ *
+ * `false` para `spec11`: ele JÁ traz `pitch×yaw`, `pitch²` e `yaw²`
+ * explicitamente. Expandir por cima duplicaria exatamente esses termos, e
+ * duplicata em regressão linear não é inofensiva — é colinearidade perfeita,
+ * que é o que o Ridge regulariza contra. Gastaríamos λ desfazendo o que nós
+ * mesmos criamos.
+ *
+ * E o custo cresce: 11 dims expandidas viram 77, sobre 9 alvos de calibração.
+ * O cabeçalho deste módulo já registra o que acontece quando o vetor cresce
+ * sem restrições correspondentes — 322 px contra 140 px.
+ */
+export function expandirPolinomioNoConjunto(set: FeatureSet = ACTIVE_FEATURE_SET): boolean {
+  return set !== 'spec11';
+}
+
+/**
  * Projeta o vetor completo do extractor no conjunto ativo.
  *
- * Pura e total: com `compact` devolve a entrada intacta, com `iris12` devolve
- * as 12 primeiras dimensões. Um vetor mais curto que 12 (extractor devolveu
- * vazio por falta de landmarks) passa sem alteração — quem trata frame sem
- * rosto é o caller.
+ * Com `compact` devolve a entrada intacta; com os demais conjuntos seleciona os
+ * índices declarados em `FEATURE_SET_INDICES`.
+ *
+ * ## Contrato de comprimento (B1.1)
+ *
+ * - **Vetor vazio** → devolve `[]`. É o frame sem rosto, e quem trata é o
+ *   caller (o engine tem ramo próprio para `featuresLeft.length === 0`).
+ * - **Vetor curto demais** → **lança `RangeError`**.
+ * - Caso contrário → projeta.
+ *
+ * Por que lançar em vez de devolver intacto (o comportamento até B1.1): o
+ * fallback silencioso deixava `ACTIVE_FEATURE_SET = 'irisCore+l2cs'` (6 dims,
+ * exige 39) receber um vetor de 37 dims — o que acontece sempre que
+ * `EXPERIMENT.enableL2CS` está desligado, porque aí o bloco angular [37..43]
+ * nunca é anexado. O Ridge então treinava com 37 dims, incluindo a pose
+ * [22..24] e as 12 interações [25..36] que a análise em `extractCompactFeatures`
+ * exclui DE PROPÓSITO por memorização (322 px medidos contra 140 px). Pior:
+ * `FEATURE_VECTOR_ID` continuava gravando `"irisCore+l2cs:6"`, então
+ * `buildContextKey()` produzia a mesma chave dos perfis legítimos de 6 dims —
+ * um perfil de 37 dims era aceito por uma sessão de 6, `predictRidge` lançava
+ * `RangeError` no primeiro frame, `mapGaze` chamava `clearCalibration()` e o
+ * paciente perdia a calibração no meio da sessão.
+ *
+ * Falhar aqui, alto e cedo, troca uma corrupção silenciosa por um erro
+ * diagnosticável no primeiro frame.
  */
 export function projectFeatureSet(
   full: number[],
   set: FeatureSet = ACTIVE_FEATURE_SET,
 ): number[] {
   if (set === 'compact') return full;
-  // Vetor curto demais para o conjunto pedido: devolve intacto. Acontece com
-  // frame sem rosto (extractor devolve vazio) e com o path legado
-  // `extractEyeFeatures`, que não produz pose nem interações. Quem trata isso
-  // é o caller — projetar zeros aqui inventaria dados.
-  if (full.length < FEATURE_SET_MIN_LENGTH[set]) return full;
+  // Frame sem rosto: o extractor devolve vazio e o caller já tem ramo para
+  // isso. Única exceção legítima ao contrato de comprimento.
+  if (full.length === 0) return [];
+  const min = FEATURE_SET_MIN_LENGTH[set];
+  if (full.length < min) {
+    throw new RangeError(
+      `[extractor] projectFeatureSet: conjunto '${set}' exige comprimento >= ${min}, ` +
+      `recebeu ${full.length}. Causa provável: o bloco angular L2CS (índices 37..43) ` +
+      `não foi anexado porque o engine passou l2csGaze=null — o que acontece quando ` +
+      `EXPERIMENT.enableL2CS está desligado, ou quando o worker L2CS nunca saiu de ` +
+      `'loading'. Verifique __irisflowExp.dump() e o estado de getL2CSStatus(). ` +
+      `Projetar assim mesmo produziria um vetor com pose e interações que o modelo ` +
+      `ativo exclui de propósito, gravado sob um FEATURE_VECTOR_ID que mente.`
+    );
+  }
   const idx = FEATURE_SET_INDICES[set];
   const out = new Array<number>(idx.length);
   for (let i = 0; i < idx.length; i++) out[i] = full[idx[i]];
@@ -480,7 +736,20 @@ export function extractEyeFeatures(
   /** Ver `blinkDetector` em `extractCompactFeatures`. */
   blinkDetector?: BlinkDetector,
 ): ExtractorResult {
-  if (landmarks.length < 478) {
+  // P5.1 — falha VISÍVEL, não vetor vazio.
+  //
+  // O código anterior devolvia `featuresLeft: []` aqui. O engine tem ramo para
+  // features vazias, então um modelo de 468 pontos produzia um app que liga,
+  // roda e nunca rastreia — sem uma linha no console dizendo por quê.
+  //
+  // Lançar coloca o problema no `loopGuard`, que conta erros consecutivos e os
+  // expõe em `EngineDiagnostics.loop` (B2.4): condição permanente vira erro
+  // permanente. Em produção nunca dispara — o `FaceLandmarker` é criado com
+  // refinamento de íris e sempre devolve 478.
+  assertFaceMeshCompleto(landmarks);
+  // Ausente ou parcial (quadro sem rosto, detecção truncada): contrato de
+  // `B1.1` — vetor vazio, sem lançar. É transitório e normal.
+  if (meshAusenteOuParcial(landmarks)) {
     return { featuresLeft: [], featuresRight: [], blinkDetected: false };
   }
 
@@ -648,8 +917,13 @@ export function extractEyeFeatures(
   );
 
   // 2. Blink Detection & Dimensions
-  const lInner = landmarks[133], lOuter = landmarks[33], lTop = landmarks[159], lBottom = landmarks[145];
-  const rInner = landmarks[362], rOuter = landmarks[263], rTop = landmarks[386], rBottom = landmarks[374];
+  // P5.1 — índices por nome. `landmarks[374]` não é revisável: ninguém sabe,
+  // lendo, se é a pálpebra inferior direita. Um índice trocado produz um EAR
+  // plausível e errado, que é o modo de falha mais caro deste projeto.
+  const lInner = landmarks[OLHO_ESQUERDO.interno], lOuter = landmarks[OLHO_ESQUERDO.externo];
+  const lTop = landmarks[OLHO_ESQUERDO.superior], lBottom = landmarks[OLHO_ESQUERDO.inferior];
+  const rInner = landmarks[OLHO_DIREITO.interno], rOuter = landmarks[OLHO_DIREITO.externo];
+  const rTop = landmarks[OLHO_DIREITO.superior], rBottom = landmarks[OLHO_DIREITO.inferior];
 
   // BUG-3: dist2D perdia a componente Z dos landmarks 3D do MediaPipe.
   // Para cabeça inclinada (pitch > 0), a altura do olho em 2D parece menor
@@ -657,11 +931,42 @@ export function extractEyeFeatures(
   // na calibração. dist3D corrige isso sem custo adicional (já definida).
   const lWidth = dist3D(lOuter, lInner);
   const lHeight = dist3D(lTop, lBottom);
-  const leftEAR = lHeight / (lWidth + 1e-9);
 
   const rWidth = dist3D(rOuter, rInner);
   const rHeight = dist3D(rTop, rBottom);
-  const rightEAR = rHeight / (rWidth + 1e-9);
+
+  // B2.6 — correção de anisotropia do EAR.
+  //
+  // O MediaPipe normaliza x pela LARGURA e y pela ALTURA do vídeo. Uma
+  // distância física de `d` px vira `d/W` no eixo x e `d/H` no eixo y. Como
+  // W > H, o mesmo comprimento físico aparece MAIOR na vertical:
+  //
+  //   EAR_bruto = (dy/H)/(dx/W) = (dy/dx)·(W/H) = EAR_isotrópico · 1,78
+  //
+  // Em 1920×1080 o EAR saía inflado por 1,78×. O cabeçalho deste módulo
+  // registra a medição: mediana 0,551 onde a escala isotrópica daria 0,314 —
+  // e 0,314 × 1,78 = 0,559.
+  //
+  // O efeito prático era desligar o limiar adaptativo: `mean*0.8 = 0,44`
+  // ficava sempre cortado pelo teto de 0,22, então o detector exigia que o
+  // olho fechasse até 40% da abertura de repouso em vez dos 80% pretendidos.
+  // Piscadas parciais, ptose e as fases de abertura/fechamento passavam como
+  // fixação válida e entravam na calibração.
+  //
+  // A correção mora AQUI, e não numa transformação global dos landmarks, de
+  // propósito: `EXPERIMENT.isotropicLandmarks` conserta o EAR por acidente mas
+  // muda o vetor de features junto, e o plano exige que os dois efeitos sejam
+  // separáveis para o benchmark do Dia 7 poder atribuí-los.
+  //
+  // Sem `videoWidth`/`videoHeight` não há como saber o fator: devolvemos o
+  // valor bruto em vez de chutar 16:9. Fabricar a correção seria o mesmo
+  // padrão de defeito que o projeto combate.
+  const earAspecto = aspectoValido(videoWidth, videoHeight)
+    ? (videoHeight as number) / (videoWidth as number)
+    : 1;
+
+  const leftEAR = (lHeight / (lWidth + 1e-9)) * earAspecto;
+  const rightEAR = (rHeight / (rWidth + 1e-9)) * earAspecto;
 
   const ear = (leftEAR + rightEAR) / 2;
   
@@ -671,17 +976,35 @@ export function extractEyeFeatures(
   // anteriores. Injetar o detector torna `extractFeatures` pura — o mesmo
   // quadro produz sempre o mesmo `blinkDetected`, independente do que rodou
   // antes no processo.
-  const blinkDetected = (blinkDetector ?? _blinkDetector).update(ear);
+  const detector = blinkDetector ?? _blinkDetector;
+  const blinkDetected = detector.update(ear);
+  // B3.31 — lido DEPOIS do `update`, de propósito: com o olho aberto o quadro
+  // atual entra na média e a razão dá 1,0, que é a leitura certa; numa piscada
+  // o quadro NÃO entra, então a base continua sendo a de olho aberto e a razão
+  // despenca — que também é a leitura certa. Ler antes deixaria o primeiro
+  // quadro após o histórico encher sem base.
+  const earDeRepouso = detector.restingEar;
 
   // 3. Geometry Extractions
-  const irisCenterL = landmarks[468];
-  const irisCenterR = landmarks[473];
-  
-  const irisRadiusL = (dist3D(irisCenterL, landmarks[469]) + dist3D(irisCenterL, landmarks[471])) / 2;
-  const irisRadiusR = (dist3D(irisCenterR, landmarks[474]) + dist3D(irisCenterR, landmarks[476])) / 2;
-  
-  const pEllL = { width: dist3D(landmarks[469], landmarks[471]), height: dist3D(landmarks[470], landmarks[472]) };
-  const pEllR = { width: dist3D(landmarks[474], landmarks[476]), height: dist3D(landmarks[475], landmarks[477]) };
+  const irisCenterL = landmarks[IRIS_ESQUERDA.centro];
+  const irisCenterR = landmarks[IRIS_DIREITA.centro];
+
+  // Raio = média das distâncias aos dois pontos HORIZONTAIS do anel. O eixo
+  // horizontal é o menos afetado por pálpebra: a vertical some numa piscada
+  // parcial e o raio encolheria sem a íris ter mudado de tamanho.
+  const irisRadiusL = (dist3D(irisCenterL, landmarks[IRIS_ESQUERDA.direita])
+                     + dist3D(irisCenterL, landmarks[IRIS_ESQUERDA.esquerda])) / 2;
+  const irisRadiusR = (dist3D(irisCenterR, landmarks[IRIS_DIREITA.direita])
+                     + dist3D(irisCenterR, landmarks[IRIS_DIREITA.esquerda])) / 2;
+
+  const pEllL = {
+    width: dist3D(landmarks[IRIS_ESQUERDA.direita], landmarks[IRIS_ESQUERDA.esquerda]),
+    height: dist3D(landmarks[IRIS_ESQUERDA.superior], landmarks[IRIS_ESQUERDA.inferior]),
+  };
+  const pEllR = {
+    width: dist3D(landmarks[IRIS_DIREITA.direita], landmarks[IRIS_DIREITA.esquerda]),
+    height: dist3D(landmarks[IRIS_DIREITA.superior], landmarks[IRIS_DIREITA.inferior]),
+  };
 
   const geometry: GeometryFeatures = {
     pupilCenterLeft: irisCenterL,
@@ -711,8 +1034,14 @@ export function extractEyeFeatures(
   // `irisVisibilityPercentage` sai do EAR, que é calculado aqui. Os demais
   // dependem dos PIXELS do crop ocular, que o extractor não vê — quem mede é
   // o `EyeQualityAnalyzer`. Preencher com constantes era fabricar medição.
+  //
+  // B3.31 — e este campo ERA uma dessas constantes, disfarçada. Ver
+  // `irisVisibilityFromEar`: o divisor fixo de 0,25 ficava abaixo do EAR de
+  // repouso típico, então o `min` grampeava em 1,0 quase sempre. Agora a
+  // referência é o repouso da própria pessoa, e `undefined` significa
+  // "ainda não há base observada" em vez de um número inventado.
   const quality: QualityFeatures = {
-    irisVisibilityPercentage: Math.min(1.0, ear / 0.25),
+    irisVisibilityPercentage: irisVisibilityFromEar(ear, earDeRepouso),
     specularRatio: 0, // sobrescrito por qualityAnalyzer quando disponível
   };
 
@@ -744,13 +1073,18 @@ export function extractCompactFeatures(
   l2csGaze?: L2CSGazeInput | null,
   /** Detector de piscada a usar. Sem ele vale o singleton do módulo. */
   blinkDetector?: BlinkDetector,
+  /** Dimensões do vídeo, para a correção de anisotropia do EAR (B2.6).
+   *  Ausentes → o EAR volta cru (anisotrópico) em vez de ser corrigido com um
+   *  aspecto chutado. */
+  videoWidth?: number,
+  videoHeight?: number,
 ): ExtractorResult {
-  const baseResult = extractEyeFeatures(landmarks, faceMatrix, undefined, undefined, blinkDetector);
+  const baseResult = extractEyeFeatures(landmarks, faceMatrix, videoWidth, videoHeight, blinkDetector);
   if (baseResult.featuresLeft.length === 0) return baseResult;
 
-  const leftCorner = landmarks[33];
-  const rightCorner = landmarks[263];
-  const topOfHead = landmarks[10];
+  const leftCorner = landmarks[OLHO_ESQUERDO.externo];
+  const rightCorner = landmarks[OLHO_DIREITO.externo];
+  const topOfHead = landmarks[TESTA_TOPO];
 
   const eyeCenter = scale(add(leftCorner, rightCorner), 0.5);
   let xAxis = normalize(sub(rightCorner, leftCorner));
@@ -840,10 +1174,51 @@ export function extractCompactFeatures(
       l2csGaze.pitch,
       l2csGaze.valid,
       face.cameraDistanceEstimate,
+      // B3.1 — a confiança da softmax passa a ser CONSUMIDA. Era calculada em
+      // todo frame e descartada; é o único sinal que distingue "o modelo diz
+      // centro" de "o modelo não faz ideia" quando o crop está degenerado.
+      l2csGaze.confidence,
     );
     for (let i = 0; i < block.length; i++) {
       compLeft.push(block[i]);
       compRight.push(block[i]);
+    }
+
+    // ── Bloco `spec11` [44..49] — P6.5 ────────────────────────────────────
+    //
+    // Anexado junto do bloco L2CS porque depende dele: três dos seis termos
+    // são funções do gaze. Anexar sempre deixaria [44..49] presentes com
+    // gaze zerado, e o conjunto `spec11` treinaria sobre constantes.
+    //
+    // Os seis são idênticos nos dois olhos, como já acontece com a pose e com
+    // o bloco angular: distância, EAR do par e termos de gaze são grandezas de
+    // ROSTO, não de olho.
+    //
+    // ⚠️ Os quadráticos usam as MESMAS grandezas das features lineares —
+    // `tan(yaw)` e `tan(pitch)`, que são `block[0]` e `block[1]`.
+    //
+    // A primeira versão usava o gaze CRU aqui, e isso quebrava a única
+    // propriedade que dá sentido ao conjunto: os termos de grau 2 têm que ser a
+    // expansão polinomial dos de grau 1. Com `[0] = tan(yaw)` e
+    // `[9] = yaw_cru²`, os dois descrevem coisas diferentes, e desligar a
+    // expansão polinomial (`expandirPolinomioNoConjunto`) deixaria de ser
+    // justificável — não haveria duplicata a evitar, haveria termo faltando.
+    //
+    // O polo da tangente não é problema: `buildL2CSBlock` clampa em ±π/4 antes
+    // de aplicá-la, então `tan` fica em [−1, 1] e o quadrado em [0, 1].
+    const gy = block[0];
+    const gp = block[1];
+    const spec11Block = [
+      face.cameraDistanceEstimate,
+      baseResult.leftEAR ?? 0,
+      baseResult.rightEAR ?? 0,
+      gy * gp,
+      gy * gy,
+      gp * gp,
+    ];
+    for (let i = 0; i < spec11Block.length; i++) {
+      compLeft.push(spec11Block[i]);
+      compRight.push(spec11Block[i]);
     }
   }
 

@@ -3,6 +3,7 @@ import {
   clearCalibration, startCalibrationMode, startCollectingPoint, feedRawData,
   completeCalibration, getEyeReliability, mapGaze,
 } from './calibration';
+import { RidgeRegressor } from './ridge';
 
 // 3.2 — a fusão binocular era média simples, que supõe os dois olhos
 // igualmente bons. Na gravação de referência eles não são:
@@ -59,23 +60,69 @@ function calibrar(ruidoDireito: number) {
 }
 
 /**
- * Cada `calibrar()` faz uma calibração inteira — 9 alvos × 40 amostras, com
- * treino do ridge e CV de λ nos dois olhos. Sozinho o arquivo roda em ~4 s;
- * junto com a suíte, disputando CPU, o mesmo trabalho passa de 19 s. Com o
- * timeout padrão de 5 s isso aparecia como falha intermitente (~1 em 8 rodadas)
- * num teste cuja matemática estava certa o tempo todo — o erro real era
- * `Test timed out in 5000ms`, não uma asserção. O teto abaixo é folga para a
- * máquina mais lenta, não licença para o teste ficar mais pesado.
+ * λ fixo, no lugar da validação cruzada.
+ *
+ * ── Por que isto é legítimo AQUI ─────────────────────────────────────────────
+ *
+ * Este arquivo mede **fusão binocular**: como o peso de cada olho é derivado da
+ * qualidade de ajuste de cada um. Ele não mede seleção de λ — quem faz isso é
+ * `ridge.test.ts` e `regression_precision_audit.test.ts`, e lá o override
+ * continua desligado.
+ *
+ * A CV custa 9 alvos × 25 λ = 225 ajustes de mínimos quadrados por olho, por
+ * calibração. Com 2 olhos e 6 calibrações no arquivo, são ~2700 ajustes gastos
+ * escolhendo um parâmetro que nenhuma asserção daqui observa.
+ *
+ * ── Verificado, não presumido ────────────────────────────────────────────────
+ *
+ * Trocar o λ MUDA o modelo treinado, então a pergunta certa não é "passa?" e
+ * sim "continua medindo a mesma coisa?". As seis asserções do arquivo são todas
+ * sobre a RELAÇÃO entre os olhos — pesos somam 1, o olho ruidoso pesa menos, a
+ * degradação é monótona — e nenhuma depende do λ ter vindo da CV. Todas
+ * continuam valendo com o λ fixo, incluindo a monotonicidade, que é a mais
+ * sensível das seis.
+ *
+ * 1e-3 é o meio da faixa útil do `LAMBDA_GRID`: regulariza o bastante para o
+ * ajuste não memorizar 40 amostras por alvo, e de leve o bastante para o olho
+ * bom continuar distinguível do ruidoso — que é justamente o efeito medido.
  */
-const TIMEOUT_CALIBRACAO_MS = 30_000;
+const LAMBDA_FIXO = 1e-3;
+
+/**
+ * Teto de tempo por caso.
+ *
+ * ⚠️ **Este valor SOBRESCREVE o `testTimeout` global do `vitest.config.ts`.**
+ * Elevar só o global não tem efeito aqui; os dois precisam acompanhar.
+ *
+ * Histórico, porque a trajetória é a lição: 5 s (default) → 30 s → 60 s, cada
+ * degrau depois de o anterior estourar sob carga paralela. Subir o teto trata o
+ * sintoma; o arquivo continuava fazendo ~2700 ajustes de mínimos quadrados para
+ * medir uma propriedade que não depende de nenhum deles.
+ *
+ * Com `LAMBDA_FIXO` o custo caiu de **78,97 s para 2,40 s** (medido, arquivo
+ * isolado, wall-clock do vitest), e o teto voltou para 10 s — margem de sobra
+ * sobre o pior caso, agora sobre um número honesto em vez de um teto que ia
+ * subindo atrás do problema.
+ */
+const TIMEOUT_CALIBRACAO_MS = 10_000;
 
 describe('confiabilidade por olho', () => {
+  /** Salvo e restaurado: o estático é global ao processo, e vazá-lo faria
+   *  outros arquivos treinarem com λ fixo sem saber — o tipo de acoplamento
+   *  por estado de módulo que a análise I.3 do plano lista como problema. */
+  let lambdaSalvo: number | null = null;
+
   beforeEach(() => {
     clearCalibration();
     relogio = 0;
+    lambdaSalvo = RidgeRegressor.lambdaOverride;
+    RidgeRegressor.lambdaOverride = LAMBDA_FIXO;
     vi.spyOn(performance, 'now').mockImplementation(() => relogio);
   });
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => {
+    RidgeRegressor.lambdaOverride = lambdaSalvo;
+    vi.restoreAllMocks();
+  });
 
   it('não existe antes de calibrar', () => {
     expect(getEyeReliability()).toBeNull();

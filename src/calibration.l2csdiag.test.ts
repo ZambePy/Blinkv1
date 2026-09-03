@@ -36,7 +36,19 @@ function amostras(dims: number, preencherSlots: number[] | null) {
   return { featuresLeft, featuresRight, targets };
 }
 
-describe('l2csValidFraction — distingue "não se aplica" de "falhou"', () => {
+// Timeout explícito — o racional completo está em `vitest.config.ts`.
+//
+// `computeFitDiagnostics` treina um Ridge completo, incluindo CV
+// leave-one-target-out sobre um grid de 25 λ (9 alvos × 25 λ = 225 ajustes por
+// chamada). Isolado o arquivo custa 3,43 s (medido); sob a suíte inteira em
+// workers paralelos a contenção de CPU chegou a estourar o default de 5 s em
+// ~metade das execuções.
+//
+// Aqui a CV NÃO pode ser trocada por `lambdaOverride` como se fez em
+// `calibration.eyefusion.test.ts`: o que este arquivo mede é o próprio
+// diagnóstico de ajuste, e ele depende do λ escolhido. O custo é inerente ao
+// caminho sob teste.
+describe('l2csValidFraction — distingue "não se aplica" de "falhou"', { timeout: 20_000 }, () => {
   it('conjunto ativo hoje carrega bloco: mede em vez de devolver null', () => {
     // `irisCore+l2cs` leva as posições [4, 5]. Com o L2CS efetivamente entrando
     // no vetor, o relatório passa a ter valor de decisão (`x%` de amostras com

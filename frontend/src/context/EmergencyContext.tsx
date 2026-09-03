@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertOctagon } from 'lucide-react';
 import { GazeButton } from '../components/ui/GazeButton';
 import { useGaze } from './GazeContext';
+import { playTickSound, playCancelSound } from '../utils/emergencyAudio';
 
 interface EmergencyContextValue {
   isConfirming: boolean;
@@ -41,25 +42,14 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return true;
   };
 
-  const playTickSound = () => {
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioCtx) {
-      try {
-        const ctx = new AudioCtx();
-        const osc = ctx.createOscillator();
-        const gain = ctx.createGain();
-        osc.connect(gain);
-        gain.connect(ctx.destination);
-        osc.frequency.value = 600;
-        gain.gain.setValueAtTime(0.2, ctx.currentTime);
-        gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.1);
-        osc.start();
-        osc.stop(ctx.currentTime + 0.1);
-      } catch {
-        // WebAudio bloqueado (autoplay policy) não pode quebrar o fluxo.
-      }
-    }
-  };
+  // B2.13 — o som vem de `utils/emergencyAudio`, que mantém UM `AudioContext`
+  // para a sessão inteira.
+  //
+  // Antes, cada tick criava `new AudioCtx()` e nada era fechado. O Chromium
+  // limita ~50 contextos por documento: depois de ~8 acionamentos o construtor
+  // passava a lançar dentro de um `catch` silencioso, e o feedback sonoro da
+  // emergência sumia pelo resto da sessão — o canal que avisa o cuidador,
+  // falhando exatamente num dia de acionamentos frequentes.
 
   const startEmergencyCountdown = () => {
     if (isConfirming) return;
@@ -75,29 +65,10 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
     setIsConfirming(false);
     setCountdown(5);
-    
-    // Som de cancelamento (bip duplo rápido de confirmação de recuo)
-    const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-    if (AudioCtx) {
-      try {
-        const ctx = new AudioCtx();
-        const playTone = (freq: number, start: number, duration: number) => {
-          const osc = ctx.createOscillator();
-          const gain = ctx.createGain();
-          osc.connect(gain);
-          gain.connect(ctx.destination);
-          osc.frequency.value = freq;
-          gain.gain.setValueAtTime(0.15, ctx.currentTime + start);
-          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + start + duration);
-          osc.start(ctx.currentTime + start);
-          osc.stop(ctx.currentTime + start + duration);
-        };
-        playTone(400, 0, 0.1);
-        playTone(300, 0.12, 0.1);
-      } catch {
-        // Idem.
-      }
-    }
+
+    // Som de cancelamento (bip duplo rápido de confirmação de recuo).
+    // B2.13 — reutiliza o contexto compartilhado; ver o comentário acima.
+    playCancelSound();
   };
 
   const triggerEmergencyImmediately = () => {
@@ -186,6 +157,17 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               width: 'auto',
             }}
             noWarn
+            /*
+             * B1.9 — sem `recovery`, este botão era decorativo.
+             *
+             * O banner só aparece quando `isDegraded === true`, e o dispatcher
+             * de dwell bloqueava todo alvo não-emergency exatamente nesse
+             * estado. O paciente ficava com o cursor amarelo tracejado, este
+             * banner piscando "Recalibre aqui", e nenhuma forma de acioná-lo
+             * pelo único meio de entrada que tem. Para alguém com ELA usando
+             * o sistema sem acompanhante, era perda total de autonomia.
+             */
+            recovery
           >
             <AlertOctagon size={20} color="#d97706" />
             <span style={{ fontSize: '1.1rem', fontWeight: 700 }}>

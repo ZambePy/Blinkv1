@@ -64,31 +64,40 @@ describe('KernelRidgeRegressor — Gate 1: out-of-hull', () => {
     const ridgePred  = predictRidge(ridgeModel, probeScaled);
     const ridgeSaturates = ridgePred.x < 0 || ridgePred.x > 1;
 
-    // Kernel Ridge (ainda retorna pixels).
+    // Kernel Ridge — B3.20: agora devolve [0,1], igual ao Ridge.
     const t0 = performance.now();
     const kr  = new KernelRidgeRegressor();
     kr.train(scaled, tgtsX, tgtsY);
     const elapsed = performance.now() - t0;
     const krPred  = kr.predict(probeScaled);
-    const krSaturates = krPred.x === 0 || krPred.x === SCREEN_WIDTH;
+    // B3.20 — o clamp por olho saiu junto. Ele acontecia ANTES da média
+    // binocular: com o olho direito prevendo 1,05 e o esquerdo 0,9, a média
+    // correta é ~0,975, mas o clamp por olho dava (1,0+0,9)/2 = 0,95 —
+    // puxando o cursor para dentro da tela justamente nas bordas, onde a UI
+    // põe botões. O clamp certo é depois da média, em `mapGaze`.
+    //
+    // "Saturar" passa a significar sair de [0,1], como no Ridge — não bater
+    // no clamp, que já não existe aqui.
+    const krSaturates = krPred.x < 0 || krPred.x > 1;
 
     // ── Relatório lado a lado ─────────────────────────────────────────────────
     console.log('[gate1] treino KernelRidge (n=9, LOO-CV 7×6 grid): %s ms', elapsed.toFixed(1));
     console.log('[gate1] Ridge  out-of-hull → x=%s  y=%s  (normalizado) | satura=%s',
       ridgePred.x.toFixed(4), ridgePred.y.toFixed(4), ridgeSaturates ? 'SIM' : 'NÃO');
-    console.log('[gate1] KR     out-of-hull → x=%s  y=%s  (px)          | satura=%s',
-      krPred.x.toFixed(1), krPred.y.toFixed(1), krSaturates ? 'SIM' : 'NÃO');
+    console.log('[gate1] KR     out-of-hull → x=%s  y=%s  (normalizado) | satura=%s',
+      krPred.x.toFixed(4), krPred.y.toFixed(4), krSaturates ? 'SIM' : 'NÃO');
     console.log('[gate1] ref (ponto de borda mais próximo, px): x=%s  y=%s',
       (0.95 * SCREEN_WIDTH).toFixed(0), (0.5 * SCREEN_HEIGHT).toFixed(0));
 
     // Ridge satura — comportamento antigo documentado, não alterado
     expect(ridgeSaturates).toBe(true);
 
-    // KR fica estritamente dentro dos limites: sem salto para as bordas
+    // KR fica estritamente dentro dos limites: sem salto para as bordas.
+    // B3.20 — limites agora em [0,1], não em pixels.
     expect(krPred.x).toBeGreaterThan(0);
-    expect(krPred.x).toBeLessThan(SCREEN_WIDTH);
+    expect(krPred.x).toBeLessThan(1);
     expect(krPred.y).toBeGreaterThan(0);
-    expect(krPred.y).toBeLessThan(SCREEN_HEIGHT);
+    expect(krPred.y).toBeLessThan(1);
   });
 
   it('relata looErr para todas as 20 combinações do grid e verifica vencedor', () => {
@@ -200,15 +209,23 @@ describe('KernelRidgeRegressor — Gate 2: precisão in-hull vs Ridge', () => {
     for (const { label, rawFeat, targetX, targetY } of interpolatedProbes) {
       const probeScaled = scaler.transformSingle(rawFeat);
 
-      // predictRidge retorna [0,1]. Multiplica por SCREEN_* para
-      // comparar com KR (que retorna pixels) sob o mesmo threshold em px.
+      // B3.20 — os DOIS regressores devolvem [0,1]. Antes, `KernelRidge`
+      // devolvia pixels e `predictRidge` devolvia fração, apesar de ambos
+      // implementarem `GazeRegressor` e de todo consumidor multiplicar o
+      // resultado por `vw`/`vh`. Trocar `REGRESSOR_MODE` — um caractere —
+      // fazia o cursor sair em `x·vw²`.
+      //
+      // Agora a conversão para pixel é a mesma nos dois lados, que é o que
+      // torna a comparação abaixo legítima.
       const ridgePred = predictRidge(ridgeModel, probeScaled);
       const ridgePxX  = ridgePred.x * SCREEN_WIDTH;
       const ridgePxY  = ridgePred.y * SCREEN_HEIGHT;
       const ridgeErr  = Math.hypot(ridgePxX - targetX, ridgePxY - targetY);
 
       const krPred = kr.predict(probeScaled);
-      const krErr  = Math.hypot(krPred.x - targetX, krPred.y - targetY);
+      const krPxX  = krPred.x * SCREEN_WIDTH;
+      const krPxY  = krPred.y * SCREEN_HEIGHT;
+      const krErr  = Math.hypot(krPxX - targetX, krPxY - targetY);
 
       console.log(
         '[gate2]  %s → target(%s,%s)  Ridge err=%s px  KR err=%s px',

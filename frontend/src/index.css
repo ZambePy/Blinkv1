@@ -636,12 +636,29 @@ select:focus-visible,
 }
 
 /* 2. Área de acionamento 1.2x */
+/*
+ * Zona de acerto ampliada do botão — B3.27.
+ *
+ * A extensão existe porque o cursor de gaze tem jitter: sem ela, um tremor de
+ * poucos pixels na borda do botão faz `elementFromPoint` devolver o container
+ * e o dwell zera.
+ *
+ * ⚠️ A versão anterior usava `-10%` em todos os lados, o que estende a área
+ * POR CIMA dos vizinhos. Onde o espaçamento entre botões for menor que 20% da
+ * altura — o caso do teclado ocular — `elementFromPoint` passa a devolver o
+ * botão ERRADO, e o paciente clica numa tecla que não estava olhando.
+ *
+ * A extensão agora é em pixels e limitada a metade do menor espaçamento usado
+ * na UI (`--gaze-grid-gap`, 24px), com teto de 12px. Assim duas zonas vizinhas
+ * se encostam no máximo, nunca se sobrepõem.
+ */
 .gaze-button-hit-area {
   position: absolute;
-  top: -10%;
-  left: -10%;
-  right: -10%;
-  bottom: -10%;
+  --gaze-hit-inset: min(12px, calc(var(--gaze-grid-gap, 24px) / 2));
+  top: calc(-1 * var(--gaze-hit-inset));
+  left: calc(-1 * var(--gaze-hit-inset));
+  right: calc(-1 * var(--gaze-hit-inset));
+  bottom: calc(-1 * var(--gaze-hit-inset));
   border-radius: inherit;
   z-index: 1;
   pointer-events: auto; /* Garante que o hover seja disparado nessa zona maior */
