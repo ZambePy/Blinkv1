@@ -1672,6 +1672,453 @@ Isto é pré-requisito de `F8.4`: numa máquina Windows, cada condição da abla
 
 ---
 
+## Log de execução — Preparação para o Dia 7 (2026-09-03)
+
+Fechamento da preparação: monitor de referência caracterizado, verificação pré-sessão construída, e o procedimento operacional escrito em `docs/SETUP_MEDICAO.md`.
+
+### Estado final do gate
+
+| Verificação | Resultado |
+|---|---|
+| `npx vitest run` (núcleo) | **1567 passaram**, 2 pulados, 0 falharam (131 arquivos) |
+| `npm --prefix frontend test` | 25 arquivos, 142 testes ✅ |
+| `tsc` núcleo · `type-check` frontend | OK · OK |
+| `build` frontend | OK (5,17 s) |
+| `lint` | **0 erros** |
+| Detector de flags órfãs | limpo (1 órfã declarada, com motivo) |
+| Detector de módulos sem fio | `illumination.ts` e `invariants.ts` — os dois registrados |
+
+1549 → **1567** testes. **`git commit` não foi rodado.**
+
+### `__irisflowPreflight()` — a lista de conferência virou um comando
+
+O protocolo do `F8.1` depende de o operador lembrar de: fullscreen, diagonal informada, WebGPU de fato ativo, recarregar depois de cada `__irisflowExp.set`, conferir o staleness, não deixar flag da rodada anterior ligada.
+
+Cada item é uma forma de perder a sessão. E o público-alvo tem fadiga limitante: uma sessão perdida não é meia hora de trabalho refeito — é meia hora que o paciente não tem para dar de novo.
+
+**O modo de falha que mais preocupa não é esquecer, é esquecer e não perceber.** Rodar a condição inteira com a flag da anterior produz dado de aparência perfeita, atribuído à condição errada. Por isso o comando aceita a condição pretendida e a confere contra as flags ativas:
+
+```js
+__irisflowPreflight({ filterMode: 'kalmanEma', l2csInputSize: 224 })
+```
+
+Três níveis, e a diferença importa: `bloqueio` não é "cuidado", é "o dado desta sessão vai para o lixo". A distinção existe para que `atencao` continue significando alguma coisa — uma lista em que tudo é vermelho é uma lista que se aprende a ignorar.
+
+Módulo puro em `src/diagnostics/preflight.ts` (18 casos). Verifica engine, calibração, geometria, viewport, taxa de atualização, status e staleness do L2CS, fila de submissão, degradação da cadeia de filtragem, e a condição declarada. **Todo item não-ok diz o que fazer** — há um teste que afirma isso, porque uma verificação que aponta o problema sem dar a saída transfere o trabalho para quem está com o paciente esperando.
+
+E o HUD ganhou duas coisas: `stale` fica **vermelho** acima de 50%, e um contador `fila` aparece quando há submissão pendente — a única evidência ao vivo de fila travada.
+
+### O monitor de referência, caracterizado
+
+Mancer Valak 24 (`MCR-VLK24-BL01`). Dois achados úteis.
+
+**A diagonal é 23,6", não 24.** O anúncio arredonda. Confirmado por caminho independente: o pixel pitch calculado dá 0,2721 mm, que bate com o padrão de 0,2715 mm para 23,6" FHD (a 24" reais daria 0,2767 mm). O `DEFAULT_SCREEN_DIAGONAL_IN` do código já era 23,6.
+
+**A curvatura R1650 AJUDA — contraintuitivo.** O projeto modela a tela como plano a distância constante, e não trata curvatura em lugar nenhum. Verificou-se que não precisa:
+
+```
+sagitta R1650: 20,8 mm (borda 2,1 cm mais perto que o centro)
+
+                centro    borda     desvio do modelo constante
+PLANO           60,0 cm   65,44 cm  +9,1%
+CURVO R1650     60,0 cm   63,54 cm  +5,9%
+```
+
+A curva aproxima a realidade do modelo — um terço melhor que um monitor plano do mesmo tamanho. Os 5,9% restantes superestimam o erro angular de borda em ~6%, e isso **soma com o `softClamp`**, que distorce a borda na direção oposta. Duas distorções em sentidos contrários, em métricas diferentes: não se cancelam. `meanErrorEdge` deve ser lido com reserva.
+
+**180 Hz é uma variável de sessão que ninguém tinha listado.** O rAF roda na taxa do monitor e a câmera a 30 fps: são 6 callbacks por quadro, 5 sem trabalho (83% desperdiçados; a 60 Hz seriam 50%). O bug de instrumentação que isso causava já está corrigido, então as métricas estão seguras — o que sobra é carga, num thread principal já em 42,3 ms contra 33 ms de orçamento. Recomendação: fixar 60 Hz. O `preflight` avisa com o número.
+
+### O que continua fora do alcance do código
+
+Registrado em `docs/SETUP_MEDICAO.md` como responsabilidade do operador: diagonal do EDID (caminho morto por falta de UI de consentimento), `signConvention` do L2CS não revalidado em 224² (mitigação: calibrar cada braço de C8 separadamente), iluminação ambiente (o `setupReadiness` mede mas não tem chamador), e o contrabalanceamento da ordem das condições.
+
+---
+
+## Log de execução — Revisão de código pré-Sprint 8 (2026-09-03)
+
+Revisão em três frentes: `/code-review` sobre o diff de trabalho, e dois agentes sobre o código **já commitado** — um no caminho de medição/relatório, outro no L2CS e no crop.
+
+A pergunta que guiou tudo não foi "o código está certo", e sim: **o que produziria um número errado com aparência plausível no Dia 7?** Um erro que derruba o app é inofensivo aqui — alguém percebe. O que mata é o número crível.
+
+### Estado final do gate
+
+| Verificação | Resultado |
+|---|---|
+| `npx vitest run` (núcleo) | **1540 passaram**, 2 pulados, 0 falharam (129 arquivos) |
+| `npm --prefix frontend test` | 25 arquivos, 142 testes ✅ |
+| `tsc` núcleo · `type-check` frontend | OK · OK |
+| `build` frontend | OK (5,07 s) |
+
+1525 → **1540** testes. **`git commit` não foi rodado.**
+
+---
+
+### Frente 1 — `/code-review` sobre o diff: 9 achados, todos corrigidos
+
+O primeiro era meu, do dia anterior, e é o mais grave dos nove.
+
+**1. A piscada-clique furava TODAS as guardas do dwell, menos emergência.**
+`stepBlinkClick` conhece duração, estabilidade, refratário e emergência. Ele não sabe se o sistema está calibrado — e essa política vive no `GazeContext`, que eu não apliquei ao ligar o módulo. A piscada clicava onde o `stepDwell` se recusa:
+
+- **`uncalibrated`** — o ponto emitido é o fallback do **nariz**. Uma piscada ali aciona um botão escolhido pela posição da cabeça. O dwell bloqueia tudo nesse estado, inclusive a emergência, exatamente por isso.
+- **`degraded`** — a predição falhou; o dwell só permite emergência e recuperação, as duas com dwell mais **longo**. A piscada dava o caminho mais curto no estado menos confiável.
+- **`isDisabled`** — cobre `disabled`, `aria-disabled` e `data-no-dwell`.
+
+Corrigido com `piscadaPermitida`, e o alvo vira `null` quando o estado proíbe — filtrar só na hora do clique deixaria o relógio de estabilidade acumulando sobre um alvo inclicável, que dispararia no instante em que o estado voltasse ao normal.
+
+**2. A projeção da piscada contaminava a "última posição conhecida".**
+`emit` grava `lastEmittedX/Y` sempre que `hasFace` é true, e a piscada emite com `hasFace: true` (o rosto está lá; são os olhos que fecharam). Cada quadro de piscada sobrescrevia a âncora com o ponto extrapolado pelo Kalman.
+
+O dano aparecia justamente onde o `P6.3` prometia segurança: passados os 2 s de teto, o código cai em `lastEmittedX/Y` — que deveria ser a última posição **medida** e passava a ser a última **extrapolada**. O fallback "congela na última posição real" congelava num palpite. E vazava para os ramos `!hasFace`, de features vazias, e para `getLastSample`.
+
+**3. O banner "Posicione o rosto" ficava preso a calibração inteira.** O `GazeFallback` só roda no `else` de `isInCalibration || !isCalibrated`, então a mensagem nunca era limpa — ficava 1–2 minutos sobre a própria UI de calibração, mandando o paciente fazer o que ele já estava fazendo.
+
+**4. A varredura não tinha duração MÁXIMA de piscada.** Escrevi esse teste para o `blinkClick` ("olho fechado por muito tempo não vira clique") e não reapliquei o raciocínio ao scanning. A ausência é pior lá: a varredura **liga** depois de 3 s sem gaze, e uma das causas mais comuns disso é o paciente estar de olhos fechados descansando. Sem teto, ele reabre depois de 10 s e seleciona o item destacado dez segundos e vários ciclos atrás — um item aleatório, na condição de fadiga que é a do público-alvo.
+
+**5. A varredura clicava na própria UI de calibração.** Durante a coleta, `uncalibrated` vale `true`, então `gazeValido` fica `false` e o scanning ligava sozinho depois de 3 s. No Dia 7 isso corromperia a coleta **em silêncio**: o relatório registraria uma calibração concluída, sobre dados que uma piscada involuntária interrompeu.
+
+**6. A varredura podia acionar a EMERGÊNCIA.** `blinkClick.ts` declara essa guarda como a única não-configurável do módulo; a varredura seleciona por piscada e não a aplicava. E aqui é pior que no `P7.3`: lá a pessoa escolhe o alvo olhando para ele; na varredura o ciclo percorre os botões sozinho, e basta uma piscada involuntária no instante em que ele passa pela emergência. O paciente não escolheu — o relógio escolheu por ele.
+
+**7. O fallback de último recurso era cronometrado pelo fluxo que ele existe para cobrir.**
+`stepScanning` rodava dentro do `subscribe` de gaze. O engine só emite amostra enquanto `videoEl.currentTime` avança — câmera desconectada, driver travado, aba suspensa, `loopGuard` disparando, e o fluxo **para**. Cronometrada por ele, a varredura nunca chegava aos 3 s de "sem gaze", porque nem tempo ela conseguia contar. O paciente ficava com o cursor congelado, sem varredura e sem aviso: a falha silenciosa que o Sprint 7 inteiro existe para eliminar.
+
+Agora o relógio é um `setInterval` próprio, e as amostras apenas alimentam um ref com o que se sabe e **quando** se soube. Limite honesto registrado no código: com a câmera realmente morta não há sinal de piscada, então a varredura ativa e destaca mas não é selecionável. Continua melhor que congelar em silêncio.
+
+**8. Custo de layout no caminho quente.** `querySelectorAll` no documento inteiro mais um `getBoundingClientRect()` por nó, a cada quadro de gaze, **inclusive com a varredura desligada** — mais um `setState` por quadro. Num sprint cujo objeto é medir latência, instrumento que altera o que mede é o pior defeito possível. Agora a lista só é consultada com a varredura ativa ou prestes a ativar, e o `setState` só quando o item muda.
+
+**9. `setFilterPreset` recusado dessincronizava o estado.** `activePreset = preset` rodava antes da guarda; uma troca recusada gravava o preset e voltava sem tocar em `activeConfig`.
+
+---
+
+### Frente 2 — L2CS: um bug que mataria a condição C8 inteira
+
+**O reuso de ROI ressubmetia um buffer DETACHED.** Verificado por leitura própria antes de agir.
+
+`submitTensor` passa `[tensor.buffer]` como lista de **transferência** para o worker, o que detacha o `ArrayBuffer` no thread principal. O engine guardava `ultimoTensorL2CS = tensor` e depois submetia o mesmo objeto — então o guardado já nascia detachado. Ressubmetê-lo faz o `postMessage` lançar `DataCloneError`, e a cascata é toda silenciosa:
+
+1. o `throw` acontece **depois** de `inFlight.set(id, now)`, então o id fica preso para sempre;
+2. com o slot preso, `canSubmit` devolve `false` e nenhuma submissão nova acontece;
+3. `getLatestGaze` fica stale e `buildL2CSBlock` zera o bloco angular pelo **resto da sessão**;
+4. o `L2CSHealthMonitor` não dispara (trata `valid:false` como reset) e o status continua `'ready'`;
+5. a exceção estava **fora** do `try` do crop, então escapava para o `loopBody`, cujo remédio recria o **FaceLandmarker** — que não tem relação nenhuma com a falha.
+
+`dynamicRoiCache` é explicitamente uma flag para ser alternada durante a medição. Ligada, a condição inteira rodaria com o bloco angular zerado e produziria **"o L2CS não contribui nada"** — a conclusão errada mais forte possível, sobre uma condição em que ele simplesmente parou de rodar.
+
+Corrigido guardando uma **cópia** antes da submissão (só quando a flag está ligada: ~2,3 MB por quadro em 448², um memcpy de ~1 ms trocando por um crop de 11–13 ms) e envolvendo o ramo de reuso num `try`.
+
+**O kernel de reamostragem era um confundidor não controlado.** `imageSmoothingEnabled`/`Quality` nunca eram definidos em lugar nenhum do repositório, então o `drawImage` usava o default do navegador — que varia por versão e plataforma. Com a mesma bbox de origem, 448² é tipicamente um *upscale* e 224² um *downscale* de ~2×. A condição C8 mediria "o modelo em N² **mais** a reamostragem do browser para N²" e atribuiria a diferença ao modelo. Fixado em `'high'`: não torna o kernel ideal, torna-o o **mesmo** nos dois braços.
+
+**`l2csInputSize` aceitava qualquer número entre 224 e 448.** A faixa era fraca demais: o backbone é uma ResNet-50, que reduz por 32 (224/32 = 7, 448/32 = 14). Um valor intermediário padeia assimetricamente e o pooling adaptativo do PyTorch mascara a diferença — roda sem erro nenhum e mede outra coisa. O risco concreto é um dedo trocado: **244** em vez de 224 passava em silêncio. Virou lista fechada.
+
+---
+
+### Frente 3 — validade de medição: o erro angular saía 2,4× errado, num dos dois fluxos
+
+**O `B1.4` foi corrigido no fluxo automático e reintroduzido no manual.**
+
+`SettingsScreen.tsx` chamava `estimateDistanceCm` (que mede olho→**câmera**) e deixava `effectiveViewingDistanceCm` preferir a medida, gravando o resultado como `distanciaCm` — que é olho→**tela**. O comentário no local afirmava esse raciocínio como se fosse correto; `src/calibrationDistances.ts` existe exatamente para proibi-lo, e o `CalibrationCheck` já fazia certo.
+
+Num setup câmera-perto/tela-longe — o **recomendado pelo README** — a medida cai para ~25 cm onde a tela está a 60. `meanErrorDeg` sai inflado por **~2,4×**, na direção pessimista.
+
+E era **intermitente**: só dispara quando o FOV está calibrado e a medida cai na faixa plausível. Ou seja, os dois fluxos reportavam graus em escalas diferentes, e comparar uma rodada disparada pelas Configurações com uma disparada pós-calibração inverteria qualquer A/B do dia.
+
+**O relatório não gravava as flags que o Sprint 8 existe para decidir.** Um relatório de `l2csInputSize: 224` era **byte-indistinguível** de um de 448; `filterMode: 'kalman'` de `'oneEuro'`. Duas das três decisões do dia não eram recuperáveis do arquivo depois.
+
+O modo de falha não é hipotético: `__irisflowExp.set` só passa a valer no **reload**. Esquecer de recarregar entre condições atribui a rodada à condição errada, e nada denunciaria. `experimentSnapshot()` já existia e **não tinha nenhum chamador** — o comentário do módulo dizia "vai no relatório", e não ia. Agora vai.
+
+**Cada rodada apagava o relatório da anterior.** O middleware do Vite removia todo `accuracy-report-*.json` antes de gravar o novo. O `F8.1` pede no mínimo 3 repetições × ~8 condições; o dia inteiro terminaria com **um** arquivo. E o pior não é perder o dado: é que quem abrisse o sobrevivente o leria como "a medição do dia".
+
+**Toda sessão manual saía marcada como geometria assumida**, inclusive as em que o cuidador mediu a tela com fita — `screenGeometrySource` não era propagado nesse fluxo. Depois do Dia 7 não haveria como separar as sessões válidas das inválidas.
+
+**`hitRateByRadius` fabricava 0%.** Única violação restante da política declarada no cabeçalho do próprio `accuracy.ts` ("nunca `0` fabricado"), e o zero é especialmente perigoso aqui: 0% de acerto é um resultado catastrófico perfeitamente plausível. Um teste em que nada foi medido saía idêntico a um em que o rastreamento errou todos os alvos, e a UI imprimia "Taxa de acerto: 0%" para o cuidador. Agora é `null`, e a UI escreve "não medido".
+
+---
+
+### O que NÃO foi corrigido, e por quê
+
+Registrado para decisão humana. Todos vêm dos agentes e foram considerados; nenhum foi esquecido.
+
+| Achado | Por que ficou |
+|---|---|
+| **EDID inalcançável.** O escape `\w` **está corrigido de verdade** (`displayGeometry.ts:49`), mas `SettingsContext.tsx:200` exige `systemAccessGranted === true`, que nunca é setado em produção — não existe UI de consentimento. `screenGeometrySource: 'auto'` é inalcançável e a diagonal será **23,6″** amanhã, salvo digitação manual. | Exige decidir e construir um fluxo de consentimento. É trabalho de produto, não correção. **Ação para o Dia 7: digitar a diagonal real antes de começar.** |
+| **`softClamp` trunca o erro nas bordas**, e só para um lado. Uma predição em −0,03 vira 0; `meanErrorEdge` fica **otimista** justamente na métrica criada para responder "a borda funciona?". | Mudar o clamp altera a predição, não só o relatório. É mudança de produto na véspera da medição. |
+| **Métricas por amostra misturam interior + borda** (`sampleMeanError`, `sampleP90Error`, `hitRateByRadius`), enquanto `meanError` é só interior. Recorrência do `B3.7` num conjunto de campos que a correção não cobriu. | Separar muda a semântica de campos que já existem em relatórios anteriores. Precisa de decisão sobre compatibilidade. |
+| **`signConvention` é metadado morto** — nenhum código o lê, e ele foi medido em 448² e nunca revalidado em 224². | **Ação de protocolo, não de código: calibrar cada condição de C8 separadamente.** Uma inversão de sinal é absorvida pelo Ridge quando cada braço tem a própria calibração. |
+| **O script de validação de eixos decodifica com média LINEAR**, enquanto a produção usa **circular** — e o comentário afirma que são idênticos. | Corrigir o script é barato, mas rodá-lo exige o ambiente Node com `onnxruntime-node` e `sharp`. Fica como pré-requisito se alguém for revalidar 224². |
+| **Sem contador de rejeição pelos gates.** Um quadro com `valid:true` zerado pelo gate de confiança conta como válido e aparece como 0% stale. | Corrigível, mas mexe na contabilidade que alimenta o HUD e o relatório. Registrado. |
+| ~~**`calibration.ts` usa 23,6″/60 cm hardcoded** no caminho quente de `mapGaze`~~ | ✅ **CORRIGIDO** — ver a seção abaixo. |
+
+---
+
+### Ação recomendada para o Dia 7, em ordem
+
+1. **Digitar a diagonal real do monitor** nas Configurações antes de qualquer rodada. O EDID não vai preenchê-la.
+2. **Calibrar cada condição de C8 separadamente** (224² e 448²). É o que neutraliza o `signConvention` não revalidado sem tocar em código.
+3. **Abrir com `?debug=1`** e vigiar `stale %` no HUD durante as sessões.
+4. **Recarregar a página** depois de todo `__irisflowExp.set` — e agora dá para conferir depois: as flags vão no relatório.
+5. Conferir que os relatórios estão se acumulando na raiz do projeto, não se substituindo.
+
+---
+
+
+### Adendo — `screenDistancePx()` corrigido, e por que o argumento que eu tinha dado estava errado
+
+Eu havia deixado este achado de fora com o raciocínio: *"o usuário-alvo não mexe a cabeça, então a compensação de pose quase não atua; com a cabeça parada o erro é exatamente zero"*. A medição de fato mostra 0,0 px a 0° de desvio.
+
+**O raciocínio confunde duas coisas.** "Cabeça parada" é premissa no sentido de que não se pode **contar com movimento voluntário como entrada** — não no sentido de que a pose fica constante ao longo de uma sessão. A postura cede, a cadeira é reajustada, o pescoço cansa. E em ELA a fraqueza cervical é característica (queda de cabeça é sintoma comum), então a deriva é **mais** provável nessa população, não menos.
+
+O baseline do próprio repositório mede isso e desmente o argumento:
+
+| trajetória | erro médio | p90 |
+|---|---|---|
+| **pose-drift-5deg** | **97,0 px** | **154,6 px** |
+| saccade-20deg | 53,2 px | 80,6 px |
+| static-fixation | 50,4 px | 82,4 px |
+| slow-pursuit | 41,4 px | 64,0 px |
+| blink-during-fixation | 36,8 px | 64,1 px |
+| face-loss-2s | 35,1 px | 51,4 px |
+
+**Deriva de pose é a pior trajetória das seis, com quase o dobro do erro da segunda colocada.** É a maior fonte de erro do pipeline — e a compensação que existe para corrigi-la estava rodando com a densidade de tela errada.
+
+**O erro medido, por desvio de pose** (tela real de 27″ com o default de 23,6″):
+
+```
+0° → 0,0 px    1° → 4,8 px    2° → 9,7 px    5° → 24,3 px    10° → 49,0 px
+```
+
+A 10° o erro introduzido é do tamanho do erro **total** do pipeline em fixação estática (50,4 px) — vindo de um número de configuração que ninguém tinha conectado.
+
+**A correção.** `sessionGeometry` como estado de módulo em `calibration.ts`, com `setSessionGeometry()` exportado. `currentCalibrationGeometry()` passou a mesclar: defaults → sessão → overrides explícitos (nessa ordem, para o posicionamento da grade continuar podendo passar a geometria por parâmetro). `startCalibrationMode` registra, e o `SettingsContext` propaga no mesmo `useEffect` que já alimentava o design system — então corrigir a diagonal vale **na hora**, sem exigir recalibração.
+
+9 casos novos, incluindo um que delimita o argumento em vez de apoiá-lo: sim, a 0° o erro é zero — o que isso **não** autoriza é concluir que a diagonal é irrelevante.
+
+**Nota de escopo:** isto conserta o pipeline. O campo de diagonal continua sendo, para o paciente, um parâmetro de instalação preenchido uma vez pelo cuidador — o mapeamento base íris→tela é aprendido em coordenadas normalizadas e nunca precisou de tamanho físico. O que a correção muda é que agora o valor informado **de fato governa** a compensação de pose, em vez de decorar o relatório.
+
+---
+
+## Log de execução — Auditoria pré-Sprint 8 (2026-09-03)
+
+Varredura dos Sprints 0–7 antes do dia de medição com humano. A pergunta não era "os testes passam" — passavam, 1493 deles. Era **"o que foi construído chega ao produto?"**.
+
+### O método
+
+Dois detectores, os dois automatizáveis:
+
+1. **Toda flag de `EXPERIMENT` é lida por código de produção?** (`testUtils/` não conta — o harness é instrumento, não produto.)
+2. **Todo módulo de `src/` é importado por algo que não seja teste?**
+
+### Estado final do gate
+
+| Verificação | Resultado |
+|---|---|
+| `npx vitest run` (núcleo) | **1525 passaram**, 2 pulados, 0 falharam (127 arquivos) |
+| `npm --prefix frontend test` | 25 arquivos, 142 testes ✅ |
+| `tsc` núcleo · `type-check` frontend | OK · OK |
+| `build` frontend | OK (5,02 s) |
+| `lint` | OK — só avisos pré-existentes |
+| Harness `T0.3` | baseline reproduzido, zero regressões |
+
+1493 → **1525** testes. **`git commit` não foi rodado.**
+
+### Quatro bugs de fiação, todos bloqueando o Sprint 8
+
+**BUG 1 — `filterMode` não chegava ao engine.** `src/tracker/engine.ts` instanciava `OneEuroFilter2D` direto. O harness sabia selecionar as três cadeias; o **app só sabia rodar uma**.
+
+Isso bloqueava o `F8.5` inteiro. Das sete métricas do benchmark, a **7** (estabilidade do dwell: taxa de conclusão em 20 tentativas, abortos, cliques no alvo errado) e metade da **2** (atraso end-to-end captura → render) só existem com o app rodando — não dá para obtê-las de reprodução offline. E, mesmo que a recomendação do Dia 7 fosse "adotar kalmanEma", **não havia caminho para embarcá-la**.
+
+Corrigido: `FilterChain` no engine, selecionada por `EXPERIMENT.filterMode`. O One Euro **não** passa pela cadeia — fica no caminho de sempre, com presets v1/v2, espaço normalizado e `setFilterPreset` em tempo real. Nada disso se aplica ao Kalman, e roteá-lo por ali mudaria o baseline por refatoração em vez de por decisão.
+
+Três detalhes que a ligação exigiu:
+
+- **`dt` real, não nominal.** O Kalman estima velocidade; alimentar `1/30` fixo faria a velocidade errar na mesma proporção do desvio de cadência da câmera.
+- **Geometria de tela.** `kalmanEma` precisa dela para escolher α em graus. Ela chega em `startCalibrationMode` e em nenhum outro lugar; capturada ali via `geometriaDeDiagonal`.
+- **`setFilterPreset` agora AVISA em vez de aceitar em silêncio** quando a cadeia Kalman está ativa. Aceitar calado faria a UI mostrar um preset ativo que não governa nada, e o operador do `F8.5` acharia que trocou de condição sem ter trocado.
+
+E o diagnóstico ganhou `filtro: { pedido, efetivo, degradado, geometriaConhecida }`. `efetivo` pode diferir de `pedido` — `kalmanEma` sem geometria degrada para `kalman`. Sem esse campo, uma sessão do Dia 7 poderia rodar degradada com o relatório dizendo "kalmanEma", e o resultado viraria conclusão sobre uma cadeia que nunca rodou.
+
+**BUG 2 — `blinkClick` (`P7.3`) não era lido em lugar nenhum.** Módulo entregue, 18 casos de teste, **zero** referências fora deles. Ligado no `GazeContext`, em paralelo ao dwell (o plano pede "combinável: fixa + pisca = confirma").
+
+Um detalhe importou: o alvo passado é o `node` cru, **não** `outcome.hoverKey`. O `hoverKey` já reflete a política do dwell, que zera durante a piscada porque não há amostra válida — alimentar a piscada-clique com ele faria o alvo sumir justamente no quadro em que a piscada começa. É exatamente o defeito que a guarda de estabilidade do módulo teve e que os testes dele pegaram; ligá-lo pelo caminho errado o reintroduziria pela porta dos fundos.
+
+E o clique por piscada zera o dwell junto — senão o relógio continuaria correndo sobre o mesmo alvo e dispararia um **segundo** clique pouco depois: o paciente confirma uma vez, a letra sai duas.
+
+**BUG 3 — o recorder não gravava o ponto pré-filtro.** O `F8.5` define o método assim: *"gravar as amostras pré-filtro uma única vez e reproduzir o mesmo JSONL pelos três filtros offline. Assim as diferenças são do filtro, não da sessão."*
+
+Só `predicted` era gravado, e ele é **pós-filtro**. O método não tinha como rodar.
+
+Dava para reconstruir o pré-filtro re-executando o regressor sobre `featuresLeft`/`featuresRight` (que são gravados), mas isso amarra a reprodução ao modelo salvo daquela sessão: uma recalibração posterior, ou qualquer mudança no scaler, mudaria a entrada dos três filtros ao mesmo tempo — e a comparação deixaria de isolar o filtro, que é a única coisa que ela existe para isolar.
+
+Campo `preFilter` adicionado ao schema e preenchido pelo engine.
+
+**BUG 4 — `blinkHold` (`P6.3`) nunca foi ligado.** A condição **F-A** do `F8.5` é definida como `P6.1 + P6.2 + P6.3 + P6.4`. Sem esta ligação, medir "F-A" mediria três dos quatro e o relatório atribuiria o resultado a uma combinação que não rodou.
+
+Ligado no ramo de piscada do engine: com Kalman ativo, projeta em vez de congelar. Congelar assume velocidade zero — se a pessoa fechou os olhos no meio de um movimento, a posição fica para trás e o cursor salta ao reabrir. Sem Kalman (o default `oneEuro`), ou depois do teto de 2 s, cai na posição congelada de sempre.
+
+### O padrão, agora com um teste que o pega
+
+Quatro sprints, o mesmo defeito, sempre com os testes unitários verdes:
+
+| onde | o que existia | o que faltava |
+|---|---|---|
+| `spec11` (`P6.5`) | tipo + projeção | `ACTIVE_FEATURE_SET` era constante de módulo |
+| filtros (Sprint 6) | módulos testados | a flag `filterMode` |
+| harness (`P7.6`) | a flag | `runHarness` instanciava One Euro direto |
+| engine (aqui) | flag + harness | o engine instanciava One Euro direto |
+
+Em todos, o módulo estava certo. **Faltava o fio.** E o custo não é estético: cada um bloqueava uma condição de medição do Dia 7. Descobrir isso com o paciente na cadeira custa a sessão inteira.
+
+`src/config/flagsLigadas.test.ts` agora falha se qualquer flag não for lida por produção. Foi ele que encontrou o quinto caso, que eu não conhecia.
+
+### O quinto caso: `calibrationWorker`
+
+Órfã **documentada**: o doc da própria flag diz "não é consultada por ninguém em produção hoje", e o teste do `B3.10` chama o caminho de "MORTO". Mas o default é `true` — ou seja, **a configuração mente**. Quem lê `calibrationWorker: true` conclui que o treino roda fora da thread principal, e ele não roda.
+
+Consequência real: o treino congela a UI por 1–3 s a cada calibração. O `F8.1` pede recalibração entre as 3 repetições de cada condição, então esse custo entra no tempo de sessão que o protocolo manda registrar.
+
+Não liguei o caminho — isso é mudança de pipeline com risco, a dois passos do dia de medição, e o próprio repositório já decidiu que é "trabalho de sprint de pipeline, com medição". O que fiz foi tornar o status **declarado e revisável**: `FLAGS_NAO_LIGADAS` em `experiment.ts`, com o motivo por extenso, e o teste de auditoria exige que toda flag esteja lida **ou** listada ali. A lista é dívida, não permissão: o teste também falha se uma flag listada passar a ser lida sem sair da lista.
+
+`src/calibration/trainCore.ts`, extraído no Sprint 6, existe justamente para tornar essa ligação possível sem duplicar a lógica de treino.
+
+### O que continua faltando — reportado, não corrigido
+
+**`src/preprocess/illumination.ts` (Sprint 4) não é usado.** A escada `ok → sensor → software → advise` decide **quando** aplicar CLAHE e gama. O engine hoje os aplica direto da flag, sempre que ligada.
+
+Isso muda o que a condição **C2** do `F8.4` mede: "CLAHE sempre ligado" em vez de "CLAHE quando a iluminação pede". As duas são perguntas legítimas, mas são perguntas **diferentes**, e o relatório precisa dizer qual foi respondida. Não liguei: mexer em controle de câmera sem cobertura de teste integrado, antes da medição, troca um risco conhecido por um desconhecido.
+
+**`src/invariants.ts` não é chamado em produção.** O cabeçalho promete: *"Produção: conta as violações e loga uma vez... O cuidador pode consultar o painel de diagnóstico"*. Nenhum `assertInvariant` roda fora de teste, então o painel nunca teria o que mostrar. Baixo impacto para o Dia 7; registrado.
+
+**Não há runner de reprodução offline.** `parseJSONL` lê um `Recording` de volta, mas nada consome isso para reproduzir o pipeline. Com o `preFilter` gravado (BUG 3), o dado necessário passa a existir; o executor que roda as três cadeias sobre ele e calcula as sete métricas ainda precisa ser escrito. **É a maior peça faltante do `F8.5`.**
+
+**As fixtures de replay não existem mais.** `fixtures/replay/` foi deletado no commit `a28bdb0` — o mesmo que serve de baseline — junto com `ci-baseline.report.json`. A árvore não tem nenhum `.jsonl`. Sem câmera, a única verificação de ponta a ponta disponível hoje é o harness sintético.
+
+### Verificação de ponta a ponta — o que foi de fato verificado
+
+| caminho | como | resultado |
+|---|---|---|
+| features → scaler → Ridge → filtro → erro | harness `T0.3`, 6 trajetórias × 3 cadeias | ✅ sem NaN, baseline reproduzido |
+| seleção de filtro no engine | auditoria de fiação + `tsc` | ✅ `FilterChain` + `EXPERIMENT.filterMode` presentes |
+| interface (cursor, anel, varredura, fallback, piscada-clique) | 142 testes de frontend + build | ✅ |
+| câmera → MediaPipe → L2CS → landmarks | **não verificado** | exige navegador e câmera |
+
+O último item é honesto: nenhum teste automatizado deste repositório abre uma webcam. A verificação real desse trecho é a primeira sessão do `F8.1`, e o `l2csStatus != ready` já está no critério de descarte de sessão do protocolo.
+
+---
+
+## Log de execução — Sprint 7 (2026-09-03)
+
+Etapa 9 do pipeline: pós-processamento e interface. Seis tarefas (`P7.1`–`P7.6`).
+
+### Estado final do gate
+
+| Verificação | Resultado |
+|---|---|
+| `npx vitest run` (núcleo) | **1493 passaram, 2 pulados, 0 falharam** (126 arquivos + 1 pulado) |
+| `npm --prefix frontend test` | **25 arquivos, 142 testes** ✅ |
+| `type-check` frontend | OK |
+| `lint` frontend | OK — só avisos pré-existentes (`no-console` em `scripts/`, `no-alert` em `SettingsScreen`) |
+| Harness `T0.3` | **6/6 sem regressão** com as flags desligadas; com `filterMode: 'kalmanEma'`, **regride** — ver abaixo |
+
+1360 → **1493 testes** no núcleo. **133 novos.**
+
+**`git commit` não foi rodado.**
+
+### As seis tarefas
+
+**`P7.1` — `src/interaction/cursorStyle.ts`** · 18 casos
+Tamanho ajustável (32/48/72/96 px, faixa 24–128) e contraste por **anel duplo**.
+
+O tamanho ajustável introduzia um bug próprio: o cursor era desenhado em `sample.x - 24`, onde `24` é a metade de um `width:48px` escrito à mão **em outro arquivo**. Com o tamanho variável, um cursor de 96 px sairia 24 px acima e à esquerda do ponto olhado — e esse erro não se parece com bug de layout, se parece com **erro de calibração**: viés constante que piora conforme o cursor cresce. O paciente compensa olhando torto e a calibração online aprende o viés compensado. `offsetPx` agora é derivado e testado nos quatro tamanhos.
+
+O contraste virou uma razão medida em vez de uma cor escolhida. O cursor atual, `rgba(239,68,68,0.6)`, tem contraste de **1,04:1** contra o botão de emergência — ele desaparece exatamente sobre o alvo onde sumir é pior. O anel duplo (quase-preto + quase-branco) é varrido contra o cubo RGB inteiro no teste: **nenhum fundo deixa os dois anéis abaixo de 3:1**.
+
+**`P7.2` — `src/interaction/dwellRing.ts` + faixa em `dwell.ts`** · 21 casos
+Anel de progresso ao redor do cursor, e não só no alvo: num teclado ocular o botão tem ~40 px e o progresso desenhado nele fica debaixo do próprio cursor; e olhando para o vazio não há onde desenhá-lo.
+
+A armadilha era geométrica: um traço de espessura `w` num círculo de raio `r` ocupa de `r - w/2` a `r + w/2`, então dimensionar o `viewBox` como `2r` — a conta intuitiva — corta metade da espessura nas quatro bordas. O corte aparece como quatro achatados nos pontos cardeais, que se leem como "o anel está tremendo" num indicador cuja única função é dizer "estou contando".
+
+**Sobre a faixa de 0,8–1,5 s: ela não foi imposta.** Os presets do app são `fast` 800 ms, `normal` 1500 ms e `slow` **2500 ms** — o `slow` está fora da faixa do plano. Estreitar para cumprir o número retiraria a opção de quem tem fadiga avançada, para quem 2,5 s é a diferença entre clicar e não clicar. A faixa do plano virou a **recomendada** (o que o `F8.5` mede e a UI destaca) e a **permitida** é 400–3000 ms, com `foraDaFaixaRecomendada` sinalizando sem impedir.
+
+**`P7.3` — `src/interaction/blinkClick.ts`** · 18 casos
+Cinco guardas: piscada de 150–800 ms, alvo estável há 300 ms, refratário de 1 s, nunca em alvo de emergência, e **desligada por default**.
+
+Dois testes falharam, e o segundo era bug real meu. A guarda de estabilidade lia `estado.piscandoDesde` — o estado ANTERIOR — que ainda é `null` no primeiro quadro da piscada. Como o `alvo` chega `null` durante a piscada (olho fechado, sem gaze), a âncora era limpa justo nesse quadro, e **nenhuma piscada jamais passava pela guarda**. A guarda mataria a funcionalidade inteira em vez de protegê-la, com sintoma "piscada como clique não funciona" e nenhuma pista de por quê. Corrigido olhando `entrada.piscando` também.
+
+O primeiro era expectativa errada minha: cinco piscadas em 1,5 s com refratário de 1 s produzem **2** cliques, não 1. Ajustei o teste para verificar o que importa (a rajada não vira um clique por piscada, e os cliques que passam respeitam o refratário) em vez do número que eu tinha chutado.
+
+**`P7.4` — `src/interaction/scanning.ts` + `frontend/src/components/ScanningMode.tsx`** · 23 casos
+Destaque sequencial, piscada seleciona, ciclo infinito.
+
+O gatilho é **"não há gaze utilizável"**, não `state === 'degraded'`. Pendurar o fallback de último recurso no estado do engine faria ele herdar os modos de falha que nunca alcançam esse estado — foi o `B2.3`, em que com features vazias o app congelava em silêncio sem nunca entrar em degradado, e todo fallback preso a ele jamais disparava.
+
+A saída exige gaze válido **sustentado** (500 ms), e isso não é polimento. Sair ao primeiro quadro válido parece óbvio e é a pior escolha possível: quando o rastreamento está ruim — que é exatamente quando o scanning está ligado — quadros válidos chegam esparsos, cada um derrubaria a varredura, os 3 s recomeçariam e o destaque voltaria ao item 0. O paciente veria o destaque reiniciando sem parar e nunca alcançaria o botão que quer. **Pareceria funcionar e seria inutilizável.** Testado com um quadro bom a cada 300 ms por 20 s.
+
+**Um teste meu passava por acaso e escondia um bug.** "Seleciona o item destacado quando a piscada COMEÇOU" passava com o passo de produção (1200 ms), porque uma piscada de 250 ms quase nunca cruza a fronteira — o código TINHA o defeito e o teste não o via. Medido com passo de 200 ms: destaque no item 1, piscada de 264 ms, **selecionava o item 2**. Corrigido congelando o índice na borda de subida da piscada; o teste agora afirma que o cruzamento de fato aconteceu, senão volta a ser vácuo.
+
+**`P7.5` — `src/interaction/gazeFallback.ts`** · 20 casos
+Hoje o rosto sumir baixa a opacidade do cursor para 0.35 e **para por aí**: cursor congelado na última posição, para sempre, sem mensagem. O `stepDwell` não clica (o `sampleIsValid` já exige `hasFace`), então não há clique cego — mas o paciente não tem como distinguir "a câmera não me vê" de "o app travou".
+
+Segura 2 s, depois esconde e mostra "Posicione o rosto na câmera". **Congela** a posição em vez de projetar e **zera** o dwell em vez de preservá-lo — política oposta à do `blinkHold`, e de propósito: numa piscada a pessoa continua olhando para o alvo; com o rosto perdido, o olhar pode ter ido para a porta. É a distinção que o `B2.5` deixou anotada como pendente.
+
+Um teste corrigiu minha ancoragem: eu contava o hold desde o **primeiro quadro perdido observado**. Se o loop inteiro travar, nenhum quadro perdido chega, o contador nunca avança e o cursor fantasma volta — o defeito que o módulo veio corrigir. Ancorado no último gaze válido.
+
+**`P7.6` — harness ponta a ponta** · 10 casos
+O aceite pedia `filterMode: 'kalmanEma'` no harness, e isso era **literalmente impossível**: `runHarness` instanciava `OneEuroFilter2D` direto, sem caminho que trocasse o filtro. Terceira ocorrência do mesmo padrão no plano (`spec11` no `P6.5`, `filterMode` ausente no Sprint 6): *uma alternativa que não se consegue selecionar não é alternativa.* Trocado por `FilterChain`, com o modo **efetivo** reportado no resultado — `kalmanEma` sem geometria degrada para `kalman`, e um resultado que não diz isso faria "kalmanEma não ajudou" passar por conclusão quando é artefato de configuração.
+
+`oneEuro` reproduz o baseline com **zero regressões**, o que prova que a troca não mexeu no produto que roda hoje.
+
+### O que a medição do `T0.3` mostrou — e o aceite que NÃO se cumpre
+
+O aceite pedia todas as métricas dentro da tolerância com `kalmanEma`. **Não se cumpre.** A tolerância não foi afrouxada: ajustá-la à regressão que ela detectou seria apagar o instrumento e transformar o portão do Sprint 8 num carimbo.
+
+Mas o número isolado ("regrediu") é enganoso. A tabela completa:
+
+| trajetória | métrica | oneEuro | kalman | kalmanEma |
+|---|---|---|---|---|
+| static-fixation | erro médio | **50,4** | 71,6 | 76,1 |
+| static-fixation | jitter RMS | 81,5 | 24,2 | **20,9** |
+| saccade-20deg | erro médio | **53,2** | 127,9 | 148,5 |
+| saccade-20deg | jitter RMS | 103,4 | 33,8 | **29,9** |
+| slow-pursuit | erro médio | 41,4 | 43,9 | **37,3** |
+| slow-pursuit | jitter RMS | 51,0 | 16,6 | **15,0** |
+| blink-during-fixation | erro médio | 36,8 | 24,6 | **23,3** |
+| blink-during-fixation | jitter RMS | 42,3 | 5,8 | **1,1** |
+| face-loss-2s | erro médio | 35,1 | 21,2 | **20,6** |
+| face-loss-2s | jitter RMS | 35,4 | 5,5 | **1,2** |
+| pose-drift-5deg | erro médio | 97,0 | 98,4 | **92,6** |
+| pose-drift-5deg | jitter RMS | 54,8 | 13,7 | **8,6** |
+
+O `kalmanEma` **ganha em jitter nas seis trajetórias** (de 4× a 38× menos) e **ganha em erro médio em quatro das seis**. Perde em `static-fixation` e perde muito em `saccade-20deg` — e é essa perda que reprova o aceite, porque a tolerância é aplicada por métrica.
+
+A troca é nítida: o Kalman paga rastreamento de sacádico (ele fica para trás num degrau) por estabilidade em todo o resto. Para usuários com ELA, que não mexem a cabeça e passam a maior parte do tempo em fixação, essa troca **pode ser a certa** — mas quem decide é o `F8.5`, com humano.
+
+Uma parte do custo do sacádico é a predição, e ela é medível. Erro médio em `saccade-20deg` por horizonte:
+
+```
+pa=0 → 123,5    pa=1 → 127,9    pa=2 → 133,2    pa=3 → 139,2
+```
+
+Monotônico, e por um motivo estrutural: **o harness não tem latência para a predição cancelar.** Ele roda `predict` e `filter` no mesmo quadro da medição. Predizer à frente de um sinal que não está atrasado é overshoot puro — é o mesmo achado do Sprint 6 (`pa=0 → 0,80` sem atraso; `pa=2 → 0,89` com 2 quadros de atraso), agora visível no harness inteiro.
+
+**Consequência para o Sprint 8:** o harness **não pode** decidir sobre o `kalmanEma`. Ele mede um pipeline sem latência, e a latência é justamente o que a predição existe para cancelar. `predictAheadFrames` foi exposto em `HarnessOptions` para que o `F8.5` varra o horizonte contra a latência real (2–3 quadros medidos). O default em produção continua `'oneEuro'`, e um teste trava isso enquanto ninguém mediu com humano.
+
+### Achado registrado — teste de convenção com falso positivo
+
+`src/anthropometry.test.ts` ("nenhum literal antropométrico solto") acusou `filterChain.ts:151`, uma linha de JSDoc contendo o ID de tarefa `P6.3`. Duas lacunas: ele excluía as linhas de *continuação* do JSDoc (`*`) mas não a de **abertura** (`/**`), e o regex não distinguia `6.3` de `P6.3`.
+
+IDs de tarefa do plano (`P6.3`, `B2.5`, `C6.3`) aparecem no código o tempo todo. Um teste de convenção que acusa o inocente acaba desligado pela equipe — que é o único jeito de ele parar de proteger o que veio proteger. Corrigido com `(?<![\d.A-Za-z])` e a exclusão de `/*`, e verificado que continua pegando `= 6.3;`, `= 9.0;` e `x*6.3` enquanto ignora `P6.3`, `B6.3`, `0.9`, `19.0` e `6.35`.
+
+### Flags novas — todas com o comportamento atual como default
+
+| flag | default | por quê |
+|---|---|---|
+| `cursorSizePx` | `48` | o tamanho de hoje; tornar ajustável não é trocar o default |
+| `dwellRingOnCursor` | `false` | pixel novo no caminho quente — ligar depois de medir o custo de composição |
+| `blinkClick` | `false` | é a guarda, não um default tímido: é a "chave para desativar por paciente" que o plano exige, com o sinal invertido |
+| `scanningMode` | `false` | um scanning que liga sozinho numa sessão boa é pior que nenhum |
+| `gazeLostFallback` | `false` | o cursor fantasma de hoje continua sendo o default |
+
+---
+
 ## Log de execução — Sprint 6 (2026-09-03)
 
 Etapas 6, 7 e 8 do pipeline: filtragem temporal adaptativa, calibração Ridge e mapeamento para tela. Nove tarefas (`P6.1`–`P6.9`).
@@ -1680,13 +2127,13 @@ Etapas 6, 7 e 8 do pipeline: filtragem temporal adaptativa, calibração Ridge e
 
 | Verificação | Resultado |
 |---|---|
-| `npx vitest run` (núcleo) | **1349 passaram, 2 pulados, 0 falharam** (118 arquivos + 1 pulado) |
-| `npm --prefix frontend test` | 24 arquivos, **134 testes** ✅ |
+| `npx vitest run` (núcleo) | **1360 passaram, 2 pulados, 0 falharam** (119 arquivos + 1 pulado) |
+| `npm --prefix frontend test` | **25 arquivos, 142 testes** ✅ |
 | `tsc` núcleo · electron · `type-check` frontend | OK · OK · OK |
 | `build` frontend · electron | OK (4,61 s) · OK |
 | Harness `T0.3` | **6/6 sem regressão**, flags novas desligadas **e** ligadas |
 
-1232 → **1349 testes**. **117 novos.**
+1232 → **1360 testes** no núcleo + 8 no frontend. **136 novos.**
 
 ### Etapa 6 — filtragem temporal (63 casos)
 
@@ -1716,7 +2163,7 @@ Isso tem consequência prática: a latência medida do pipeline é `mediapipe` 1
 
 ### Etapa 7 — calibração (27 casos)
 
-**`P6.5` — conjunto `spec11`** · 15 casos
+**`P6.5` — conjunto `spec11`** · 19 casos
 Aqui a especificação não cabia no código: dos 11 termos pedidos, **só 5 existiam** no vetor. Distância da câmera nunca entrou; o vetor é POR OLHO e carregava um `ear` só, não o par; e as interações `[25..36]` são pose × offset, não gaze × gaze. Foi preciso estender o vetor com um bloco `[44..49]`.
 
 Duas decisões: os quadráticos usam as MESMAS grandezas das features lineares (`tan(yaw)`, não `yaw` cru), senão os termos de grau 2 não seriam a expansão dos de grau 1; e `expandirPolinomioNoConjunto('spec11')` é `false`, porque expandir por cima duplicaria exatamente esses termos — colinearidade perfeita, que é o que o Ridge regulariza contra.
@@ -1739,6 +2186,42 @@ Ligado ao `GazeStatusBanner`, abaixo dos outros avisos na precedência: sem câm
 ### O que quebrou e por quê
 
 O bloco `[44..49]` do `P6.5` fez o vetor completo ir de 44 para 50 dims, e **seis testes** quebraram — todos afirmando "o vetor tem 44" ou localizando o bloco L2CS pelos "últimos 7". Nenhum código de produção dependia disso: `l2csSlotsInSet` existe justamente porque "os últimos N" já se provou a pergunta errada (`B3.x`). Os testes passaram a usar o índice fixo `[37..43]`.
+
+### A lacuna que o `it.skip` escondia
+
+Investigando por que a suíte reportava 2 testes pulados, um deles se revelou uma cobertura inexistente disfarçada de skip educado.
+
+`src/calibration/client.test.ts` tinha o teste certo — *"produz mesmos pesos que treino síncrono (tolerância 1e-9)"* — atrás deste guard:
+
+```ts
+const hasWorker = typeof Worker !== 'undefined';
+if (!hasWorker) { it.skip('sem Worker global disponível — skip', () => {}); return; }
+```
+
+**E jsdom não implementa Web Workers.** Confirmado no ambiente do projeto: `typeof Worker === 'undefined'`. O `describe` retornava cedo, o teste real **nunca era registrado**, e o que aparecia na saída era um placeholder vazio. A suíte ficava verde afirmando que a equivalência entre treinar no worker e treinar na main thread estava verificada. Não estava — em lugar nenhum.
+
+**Correção**: o núcleo de treino foi extraído de `calibration.worker.ts` para `src/calibration/trainCore.ts`, e o worker virou casca de `postMessage` em volta dele. Mesmo padrão que `P4.2` usou para a captura: separar lógica de transporte. Com isso a equivalência deixa de precisar de Worker — os dois lados chamam a MESMA função —, e passou a ser verificada em 7 casos, incluindo com e sem expansão polinomial.
+
+O skip que restou é honesto: `describe.skipIf(typeof Worker === 'undefined')` com o nome dizendo "exige Worker real", e o teste de fato registrado. Ele roda no dia em que houver um ambiente de teste com Worker; até lá, declara o que não cobre.
+
+**Dois achados de bônus, dos testes que escrevi:**
+
+- **A primeira versão do teste de `axisScale` não discriminava nada.** Com um conjunto sintético simétrico, o CV escolhia λ = 1000 com e sem escala — o teste passaria mesmo se `B3.10` fosse revertido. Foi preciso um conjunto ASSIMÉTRICO (X bem predito, Y ruidoso) e fixar `independentLambda` explicitamente, porque ele é estático global e o resultado dependia de quem tinha rodado antes.
+- **Treino com entrada VAZIA não lança.** Eu esperava que lançasse; `RidgeRegressor.train` com zero amostras devolve `betaX: []` — não-nulo, então a guarda `if (!modelL || !modelR)` não pega, e o resultado é um "modelo" que prediz (0,0) para tudo. Não é alcançável hoje (`completeCalibration` barra por `MIN_ACCEPTED_SAMPLES`), então ficou registrado em teste em vez de corrigido — para o dia em que outro chamador aparecer.
+
+### Sobre o outro teste pulado
+
+`writeBaseline.test.ts` fica pulado **de propósito**, e está certo: o baseline só é regravado com `IRISFLOW_WRITE_BASELINE=1`. Um baseline que se regrava sozinho não detecta regressão — ela viraria o novo normal. E há um segundo teste no mesmo arquivo, que PASSA, afirmando justamente que o primeiro fica pulado sem a variável. O skip é comportamento verificado, não omissão.
+
+### Auditoria de fechamento — duas lacunas encontradas e corrigidas
+
+Conferindo tarefa a tarefa contra os critérios de ACEITE (não contra "tem código e teste"), duas coisas estavam faltando:
+
+**1. `spec11` não podia ser selecionado.** `ACTIVE_FEATURE_SET` era uma constante de módulo hardcoded em `extractor.ts`. O conjunto existia como tipo e como projeção, mas **nenhum caminho podia ativá-lo** — e ativar é exatamente o que `F8.4` precisa fazer para medir o conflito C6. Uma alternativa que não se consegue ligar não é alternativa.
+
+Corrigido: o conjunto virou a flag `featureSet` (lista fechada de três, default `'irisCore+l2cs'`). Com isso, dois pedaços do aceite que estavam inalcançáveis passaram a ser testáveis — `buildContextKey` codificando o conjunto, e um perfil de um conjunto sendo recusado no outro. E a expansão polinomial passou a respeitar `expandirPolinomioNoConjunto`, que antes existia sem chamador.
+
+**2. O texto do banner do `P6.9` não era exercitado na tela.** O módulo estava testado, a ligação estava feita, mas nada verificava que a mensagem CHEGA ao usuário nem que a ordem de precedência a suprime quando há coisa mais grave. Oito casos novos no frontend, incluindo o que confirma que o tom é de aviso e não de erro — tratar distância como erro ensinaria o cuidador a ignorar banners vermelhos, e aí o que importa de verdade também seria ignorado.
 
 ### Ressalvas honestas
 

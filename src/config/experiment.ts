@@ -162,6 +162,92 @@ export interface ExperimentConfig {
   dynamicGamma: boolean;
 
   /**
+   * Cadeia de filtragem temporal (`P7.6` / etapa 6).
+   *
+   * `'oneEuro'` (default) é o que roda hoje e é o baseline do `F8.5`.
+   * `'kalman'` tem modelo de movimento e pode antecipar. `'kalmanEma'`
+   * acrescenta o EMA adaptativo com zona morta.
+   *
+   * ⚠️ `'kalmanEma'` exige geometria de tela — o α adaptativo e a zona morta
+   * trabalham em GRAUS. Sem ela a cadeia degrada para `'kalman'` puro e
+   * ANUNCIA no console: uma cadeia que vira outra em silêncio faria o `F8.5`
+   * comparar duas coisas achando que comparou três.
+   *
+   * DEFAULT `'oneEuro'`. Quem escolhe é o benchmark, não este sprint.
+   */
+  filterMode: 'oneEuro' | 'kalman' | 'kalmanEma';
+
+  // ── Sprint 7 — pós-processamento e interface ──────────────────────────────
+
+  /**
+   * Diâmetro do cursor de gaze, em px (`P7.1`).
+   *
+   * DEFAULT `48` — o tamanho de hoje. Presa à faixa 24–128 em
+   * `cursorStyle.limitarTamanho`; um valor fora dela é ajustado, nunca
+   * rejeitado, porque sem cursor o paciente não chega à tela onde consertaria
+   * o valor que quebrou o cursor.
+   */
+  cursorSizePx: number;
+
+  /**
+   * Anel de progresso do dwell desenhado ao redor do CURSOR (`P7.2`).
+   *
+   * DEFAULT `false`: hoje o progresso aparece só no alvo. O anel no cursor
+   * resolve alvos pequenos e o caso "nenhum alvo sob o olhar", mas é pixel novo
+   * no caminho quente — liga depois de medir o custo de composição.
+   */
+  dwellRingOnCursor: boolean;
+
+  /**
+   * Piscada como clique (`P7.3`).
+   *
+   * DEFAULT `false`, e este é o default mais deliberado do arquivo. Piscar é
+   * involuntário; um falso positivo escreve uma letra errada no melhor caso.
+   * Ninguém ganha isto sem alguém decidir que quer — é a "chave para desativar
+   * por paciente" que o plano exige, com o sinal invertido.
+   */
+  blinkClick: boolean;
+
+  /**
+   * Modo de varredura após 3 s sem gaze (`P7.4`).
+   *
+   * DEFAULT `false` porque é comportamento novo na tela, não porque seja
+   * opcional: é o fallback de acessibilidade mais importante do plano. Sai de
+   * `false` assim que o `F8.x` confirmar que o gatilho não dispara em uso
+   * normal — um scanning que liga sozinho no meio de uma sessão boa é pior que
+   * nenhum.
+   */
+  scanningMode: boolean;
+
+  /**
+   * Fallback de gaze perdido: segura 2 s, depois some e avisa (`P7.5`).
+   *
+   * DEFAULT `false` mantém o comportamento atual — cursor congelado a 35% de
+   * opacidade, para sempre, sem mensagem.
+   */
+  gazeLostFallback: boolean;
+
+  /**
+   * Conjunto de features ativo (`P6.5` / conflito C6).
+   *
+   * Era uma constante de módulo em `extractor.ts`, o que tornava o `spec11`
+   * inalcançável: ele existia como tipo e como projeção, mas nenhum caminho
+   * podia selecioná-lo — e selecionar é exatamente o que `F8.4` precisa fazer
+   * para medi-lo.
+   *
+   * ⚠️ Trocar este valor INVALIDA perfis salvos, e isso é desejado: o conjunto
+   * entra em `buildContextKey` via `FEATURE_VECTOR_ID`, então um perfil
+   * treinado com `irisCore+l2cs` é recusado ao carregar sob `spec11`. Sem
+   * isso, o modelo receberia 11 dimensões onde foi treinado com 6, e as
+   * predições sairiam plausíveis e erradas.
+   *
+   * DEFAULT `'irisCore+l2cs'` — o conjunto medido como melhor no repositório.
+   * O `spec11` é candidato a MEDIR: a evidência registrada é contra ampliar o
+   * vetor (322 px contra 140 px).
+   */
+  featureSet: 'irisCore+l2cs' | 'iris12+l2cs' | 'spec11';
+
+  /**
    * Execution provider do L2CS (`P5.5`, passo 2).
    *
    * `'wasm'` (default) é o caminho de hoje: bundle wasm-only, SIMD,
@@ -274,7 +360,9 @@ export interface ExperimentConfig {
   dynamicRoiCache: boolean;
 }
 
-const DEFAULTS: ExperimentConfig = {
+/** Exportado para a auditoria de fiação (`flagsLigadas.test.ts`) poder
+ *  enumerar as chaves sem uma segunda lista que sairia de sincronia. */
+export const DEFAULTS: ExperimentConfig = {
   expandFactor: 1.4,
   l2csCadenceMs: 100,
   applyGazeCorrection: false,
@@ -312,6 +400,21 @@ const DEFAULTS: ExperimentConfig = {
   dynamicNeutralReference: false,
   // P5.5 — wasm é o caminho medido; webgpu é o que falta medir.
   l2csExecutionProvider: 'wasm',
+  // P6.5 — o conjunto medido como melhor. `spec11` é candidato a medir.
+  featureSet: 'irisCore+l2cs',
+  // P7.6 — o filtro atual. As alternativas do Sprint 6 existem e são
+  // selecionáveis; quem decide é o `F8.5`.
+  filterMode: 'oneEuro',
+  // P7.1 — o tamanho de hoje. Tornar ajustável não é trocar o default.
+  cursorSizePx: 48,
+  // P7.2 — o progresso continua só no alvo até o custo de composição ser medido.
+  dwellRingOnCursor: false,
+  // P7.3 — desligado. Ver a nota no campo: é a guarda, não um default tímido.
+  blinkClick: false,
+  // P7.4 — desligado até o gatilho ser medido em sessão boa.
+  scanningMode: false,
+  // P7.5 — o cursor fantasma de hoje continua sendo o comportamento default.
+  gazeLostFallback: false,
 };
 
 const STORAGE_KEY = 'irisflow.experiment';
@@ -412,13 +515,59 @@ export function loadEnvOverrides(env: EnvLike = getProcessEnvOrEmpty()): Partial
  */
 /** Valores aceitos por flag de string (P5.2). Lista fechada: um valor
  *  desconhecido escolheria um caminho de pose em silêncio. */
+/**
+ * Flags que reconhecidamente NÃO são lidas por código de produção.
+ *
+ * Existe para que "flag órfã" seja um fato declarado e revisável, e não algo
+ * que só se descobre lendo o código — ou, pior, no meio de uma sessão de
+ * medição, quando ligar a condição não muda nada e o relatório registra a
+ * condição como se tivesse mudado.
+ *
+ * `flagsLigadas.test.ts` exige que toda flag esteja lida em produção OU
+ * listada aqui com motivo. Tirar uma daqui é tão obrigatório quanto ligá-la:
+ * a lista é dívida, não permissão.
+ */
+export const FLAGS_NAO_LIGADAS: Readonly<Record<string, string>> = {
+  calibrationWorker:
+    'O caminho é morto: `createCalibrationClient` só é chamado em teste. O '
+    + '`B3.10` corrigiu o worker para treinar CERTO quando for ligado (a '
+    + 'configuração estática do RidgeRegressor não atravessava a fronteira, '
+    + 'subponderando o eixo X em 3,16×), mas ligar o caminho é trabalho de '
+    + 'sprint de pipeline com medição. Consequência hoje: o treino roda na '
+    + 'thread principal e congela a UI por 1–3 s a cada calibração — e o '
+    + 'protocolo do `F8.1` pede recalibração entre as 3 repetições de cada '
+    + 'condição, então esse custo entra no tempo de sessão que o relatório '
+    + 'registra. `src/calibration/trainCore.ts` já existe justamente para '
+    + 'tornar essa ligação possível sem duplicar a lógica de treino.',
+};
+
+/**
+ * Tamanhos de entrada aceitos pelo L2CS (`P5.5a`).
+ *
+ * Lista FECHADA, não faixa. A faixa `{min:224, max:448}` aceitava qualquer
+ * inteiro no meio — e o backbone é uma ResNet-50, que reduz por 32: só
+ * múltiplos de 32 produzem mapas limpos (224/32 = 7, 448/32 = 14). Um valor
+ * como 300 padeia assimetricamente, e o pooling adaptativo do PyTorch mascara
+ * a diferença: roda sem erro, com aparência perfeitamente normal.
+ *
+ * O risco concreto no Dia 7 é um dedo trocado: `244` em vez de `224` cai
+ * dentro da faixa antiga, não é múltiplo de 32, e seria aceito em silêncio —
+ * a condição C8 mediria uma terceira coisa que ninguém pediu.
+ */
+export const L2CS_INPUT_SIZES_ACEITOS = [224, 448] as const;
+
 export const VALORES_ACEITOS = {
   headPoseSource: ['matrix', 'pnp'],
   poseCompensationMode: ['geometric', 'additive', 'both'],
   l2csExecutionProvider: ['wasm', 'webgpu'],
+  featureSet: ['irisCore+l2cs', 'iris12+l2cs', 'spec11'],
+  filterMode: ['oneEuro', 'kalman', 'kalmanEma'],
 } as const;
 
 export const EXPERIMENT_RANGES = {
+  /** `P7.1` — abaixo de 24 px o cursor some no jitter; acima de 128 cobre o
+   *  alvo que deveria apontar. */
+  cursorSizePx: { min: 24, max: 128 },
   /** Abaixo de 1,0 o crop corta o próprio rosto; acima de 3 é quase só fundo. */
   expandFactor: { min: 1.0, max: 3.0 },
   /** 33 ms ≈ 1 submissão por frame a 30 fps — o teto do que faz sentido.
@@ -434,7 +583,6 @@ export const EXPERIMENT_RANGES = {
    * múltiplo de 32 vive em `L2CS_INPUT_SIZES` e no teste que a cobre. Quem
    * quiser varrer tamanhos intermediários precisa validar o grafo antes.
    */
-  l2csInputSize: { min: 224, max: 448 },
 } as const;
 
 /**
@@ -483,6 +631,22 @@ export function sanitizeExperiment(bruto: unknown): ExperimentConfig {
     if (typeof padrao === 'number') {
       if (typeof v !== 'number' || !Number.isFinite(v)) {
         console.warn(`[exp] '${k}' esperava número finito, recebeu ${JSON.stringify(v)} — usando o default (${padrao}).`);
+        continue;
+      }
+      // Lista fechada tem precedência sobre faixa: uma faixa aceitaria 244
+      // entre 224 e 448, e a ResNet-50 reduz por 32 — ver
+      // `L2CS_INPUT_SIZES_ACEITOS`.
+      if (chave === 'l2csInputSize') {
+        if (!(L2CS_INPUT_SIZES_ACEITOS as readonly number[]).includes(v)) {
+          console.warn(
+            `[exp] 'l2csInputSize' = ${v} não é um tamanho aceito `
+            + `(${L2CS_INPUT_SIZES_ACEITOS.join(', ')}) — usando o default (${padrao}). `
+            + 'Só múltiplos de 32 produzem mapas limpos na ResNet-50; outros valores '
+            + 'rodam sem erro e medem outra coisa.',
+          );
+          continue;
+        }
+        (out as unknown as Record<string, unknown>)[chave] = v;
         continue;
       }
       const faixa = EXPERIMENT_RANGES[chave as keyof typeof EXPERIMENT_RANGES];

@@ -11,7 +11,13 @@ import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 import { stepDwell, createDwellState, type DwellTarget } from '@tracker/interaction/dwell';
+import { estiloDoCursor, limitarTamanho } from '@tracker/interaction/cursorStyle';
+import { geometriaDoAnel } from '@tracker/interaction/dwellRing';
+import { GazeFallback } from '@tracker/interaction/gazeFallback';
+import { preflight, podeComecar } from '@tracker/diagnostics/preflight';
+import { stepBlinkClick, criarEstadoBlinkClick } from '@tracker/interaction/blinkClick';
 import { GazeStatusBanner } from '../components/GazeStatusBanner';
+import { ScanningMode } from '../components/ScanningMode';
 import type { FilterPreset, FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import {
@@ -41,7 +47,7 @@ const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
 const REFRACTORY_MS = 800;
 // Selector for elements the global dispatcher treats as clickable. Add
 // data-no-dwell="true" on any element that should opt out.
-const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
+export const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 
 // Em estado 'degraded' o cursor está sobre o nariz (fallback do engine), não
 // sobre o olhar. Permitir dwell nesse estado dispara cliques aleatórios — em
@@ -102,6 +108,13 @@ interface GazeContextValue {
   isComposing: boolean;
   setIsComposing: (val: boolean) => void;
   isDegraded: boolean;
+  /**
+   * `P7.5` — mensagem quando o gaze está perdido além do hold, ou `null`.
+   *
+   * Só existe com a flag `gazeLostFallback` ligada. Sem ela o comportamento
+   * continua o de sempre: cursor congelado a 35% de opacidade, sem aviso.
+   */
+  gazeLostMessage: string | null;
 }
 
 const GazeContext = createContext<GazeContextValue | null>(null);
@@ -279,6 +292,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // em pontos diferentes do callback e saíam de sincronia — foi assim que o
   // dwell chegou a completar com os olhos fechados.
   const dwellStateRef = useRef(createDwellState());
+  // P7.5 — segura a última posição válida por 2 s, depois esconde e avisa.
+  const fallbackRef = useRef(new GazeFallback());
+  const [gazeLostMessage, setGazeLostMessage] = useState<string | null>(null);
+  const gazeLostMessageRef = useRef<string | null>(null);
+  // P7.2 — o `<circle>` do anel de progresso, quando a flag está ligada.
+  const anelRef = useRef<SVGCircleElement | null>(null);
+  // P7.3 — piscada como clique. Desligada por default; ver a flag.
+  const blinkClickRef = useRef(criarEstadoBlinkClick());
   // Nó que está com o realce `gaze-hover` aplicado no DOM.
   const hoveredNodeRef = useRef<HTMLElement | null>(null);
 
@@ -569,14 +590,19 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // transform-origin: center lets scale() grow around the cursor's centre
     // (used by the dwell dispatcher for visual feedback) without breaking
     // the translate3d positioning.
+    // P7.1 — o diâmetro vem da flag. `limitarTamanho` prende à faixa em vez de
+    // rejeitar: um valor corrompido não pode deixar o paciente sem cursor, que
+    // é justamente o que ele usaria para chegar às configurações e consertá-lo.
+    const tamanhoCursor = limitarTamanho(EXPERIMENT.cursorSizePx);
+
     const cursor = document.createElement('div');
     cursor.setAttribute('aria-hidden', 'true');
     cursor.style.cssText = [
       'position:fixed',
       'left:0',
       'top:0',
-      'width:48px',
-      'height:48px',
+      `width:${tamanhoCursor}px`,
+      `height:${tamanhoCursor}px`,
       'border-radius:50%',
       'background:rgba(239,68,68,0.6)',
       'box-shadow:0 0 16px rgba(255,0,0,0.9)',
@@ -590,6 +616,47 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     ].join(';');
     document.body.appendChild(cursor);
     cursorRef.current = cursor;
+
+    // P7.2 — anel de progresso ao redor do cursor.
+    //
+    // Fica FORA do fluxo do dwell no alvo (que continua existindo): alvos
+    // pequenos escondem o próprio progresso debaixo do cursor, e olhando para
+    // o vazio não há onde desenhá-lo. O anel acompanha o olhar, então está
+    // sempre onde a fóvea está — ler um indicador fora dele exigiria um
+    // sacádico, que cancelaria o dwell que se queria acompanhar.
+    if (EXPERIMENT.dwellRingOnCursor) {
+      const g = geometriaDoAnel(tamanhoCursor, 0);
+      const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+      svg.setAttribute('aria-hidden', 'true');
+      svg.setAttribute('viewBox', `0 0 ${g.lado} ${g.lado}`);
+      svg.style.cssText = [
+        'position:fixed',
+        'left:0',
+        'top:0',
+        `width:${g.lado}px`,
+        `height:${g.lado}px`,
+        'pointer-events:none',
+        'z-index:9998',
+        'transform:translate3d(-9999px,-9999px,0)',
+        'opacity:0',
+      ].join(';');
+      const circulo = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
+      circulo.setAttribute('cx', String(g.centro));
+      circulo.setAttribute('cy', String(g.centro));
+      circulo.setAttribute('r', String(g.raio));
+      circulo.setAttribute('fill', 'none');
+      circulo.setAttribute('stroke', 'rgba(34,197,94,0.95)');
+      circulo.setAttribute('stroke-width', String(g.espessura));
+      circulo.setAttribute('stroke-linecap', 'round');
+      circulo.setAttribute('stroke-dasharray', String(g.circunferencia));
+      circulo.setAttribute('stroke-dashoffset', String(g.offset));
+      // Começa às 12 h: o zero do SVG fica às 3 h, e um indicador circular que
+      // não começa no topo se lê como andando para trás.
+      circulo.setAttribute('transform', `rotate(${g.rotacaoDeg} ${g.centro} ${g.centro})`);
+      svg.appendChild(circulo);
+      document.body.appendChild(svg);
+      anelRef.current = circulo;
+    }
 
     // 0.2 — calibração descartada por incompatibilidade de pipeline.
     const unsubInvalid = engine.calibration.onInvalidated(() => {
@@ -727,6 +794,65 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         );
         dwellStateRef.current = outcome.state;
 
+        // ── P7.3 — piscada como clique ──────────────────────────────────
+        //
+        // Roda em PARALELO ao dwell, não no lugar dele: o plano pede
+        // "combinável com dwell (fixa + pisca = confirma)". As cinco guardas
+        // (duração 150–800 ms, alvo estável há 300 ms, refratário de 1 s,
+        // nunca em emergência) vivem no módulo puro.
+        //
+        // O alvo passado é `node`, não `outcome.hoverKey`: o `hoverKey` já
+        // reflete a política do dwell (que zera durante a piscada, porque com
+        // o olho fechado não há amostra válida). Alimentar a piscada-clique
+        // com ele faria o alvo sumir justamente no quadro em que a piscada
+        // começa — que é o mesmo defeito que a guarda de estabilidade do
+        // módulo teve, e que os testes dele pegaram.
+        //
+        // ⚠️ As guardas de ESTADO DO SISTEMA vivem aqui, não no módulo puro.
+        // `stepBlinkClick` conhece duração, estabilidade, refratário e
+        // emergência — ele não sabe se o sistema está calibrado. Sem o filtro
+        // abaixo, a piscada clicava onde o `stepDwell` se RECUSA a clicar:
+        //
+        //   - `uncalibrated`: o ponto emitido é o fallback do NARIZ, que não
+        //     tem relação nenhuma com a direção do olhar. Uma piscada ali
+        //     aciona um botão escolhido pela posição da cabeça — e o `dwell`
+        //     bloqueia tudo nesse estado, inclusive a emergência, exatamente
+        //     por isso.
+        //   - `degraded`: a predição falhou. O `dwell` só permite emergência e
+        //     recuperação, as duas com dwell mais LONGO. Deixar a piscada
+        //     passar aqui daria o caminho mais curto justamente no estado
+        //     menos confiável — e um "Recalibre aqui" disparado por engano
+        //     custa 1–2 min de sessão a quem tem fadiga limitante.
+        //   - `isDisabled`: cobre `disabled`, `aria-disabled` e
+        //     `data-no-dwell`. Um botão que o dwell não clica não pode virar
+        //     clicável só porque a pessoa piscou.
+        const piscadaPermitida =
+          sample.uncalibrated !== true
+          && !isDegraded
+          && target?.isDisabled !== true;
+
+        if (EXPERIMENT.blinkClick) {
+          const rb = stepBlinkClick(blinkClickRef.current, {
+            piscando: sample.eyeState === 'closed',
+            nowMs: now,
+            // `null` quando o estado proíbe: o relógio de estabilidade não
+            // deve acumular sobre um alvo que não poderia ser clicado.
+            alvo: piscadaPermitida ? node : null,
+            alvoEhEmergencia: target?.isEmergency === true,
+          });
+          blinkClickRef.current = rb.estado;
+          if (rb.clicou) {
+            const alvoDaPiscada = rb.clicou as HTMLElement;
+            // Zera o dwell junto: sem isso, o relógio do dwell continuaria
+            // correndo sobre o mesmo alvo e dispararia um SEGUNDO clique
+            // pouco depois — o paciente confirmaria uma vez e a letra sairia
+            // duas.
+            clearDwellVisuals();
+            dwellStateRef.current = createDwellState();
+            if (alvoDaPiscada?.isConnected) alvoDaPiscada.click();
+          }
+        }
+
         // Realce: só o alvo apontado pelo outcome fica com `gaze-hover`.
         const hoverNode = outcome.hoverKey as HTMLElement | null;
         if (hoverNode !== hoveredNodeRef.current) {
@@ -807,25 +933,109 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           // Hard-hide: move offscreen + opacity 0
           cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
           cursorRef.current.style.opacity = '0';
+          if (anelRef.current) anelRef.current.ownerSVGElement!.style.opacity = '0';
+
+          // P7.5 — o fallback NÃO roda aqui (não há cursor para segurar), mas
+          // a mensagem dele precisa ser limpa.
+          //
+          // Sem isto, um "Posicione o rosto na câmera" emitido antes de a
+          // calibração começar sobrevive à transição e fica na tela durante
+          // os 1–2 minutos inteiros da coleta — sobre a própria UI de
+          // calibração, mandando o paciente fazer algo que ele já está
+          // fazendo. O `GazeFallback` também é zerado, senão ele retomaria
+          // com uma âncora de posição de antes da calibração.
+          if (gazeLostMessageRef.current !== null) {
+            gazeLostMessageRef.current = null;
+            setGazeLostMessage(null);
+            fallbackRef.current.reset();
+          }
         } else {
-          const scale = hitTarget ? 1 + dwellPct * 0.3 : 1;
-          cursorRef.current.style.transform =
-            `translate3d(${sample.x - 24}px, ${sample.y - 24}px, 0) scale(${scale})`;
-          cursorRef.current.style.opacity = sample.hasFace ? '1' : '0.35';
-          // Aparência distinta em degraded: amarelo com borda tracejada,
-          // sinaliza que o cursor não é confiável. O background verde só entra
-          // quando hitTarget existe (que em degraded só é possível se for
-          // emergency), então o feedback verde permanece coerente.
-          if (isDegraded) {
-            cursorRef.current.style.background = hitTarget
-              ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
-              : 'rgba(234,179,8,0.55)'; // amarelo tailwind-500 c/ transparência
-            cursorRef.current.style.border = '2px dashed rgba(234,179,8,0.9)';
+          // ── P7.5 — fallback de gaze perdido ────────────────────────────
+          //
+          // Com a flag desligada, `fb` reproduz o comportamento de sempre
+          // (posição da amostra, cursor visível), então o caminho abaixo é o
+          // mesmo de antes — nenhum paciente vê mudança sem alguém ligar.
+          const fb = EXPERIMENT.gazeLostFallback
+            ? fallbackRef.current.step({
+                gazeValido: sample.hasFace,
+                x: sample.x,
+                y: sample.y,
+                nowMs: now,
+              })
+            : {
+                estado: 'ativo' as const,
+                posicao: { x: sample.x, y: sample.y },
+                mostrarCursor: true,
+                mensagem: null,
+                zerarDwell: false,
+              };
+
+          // O dwell é DESCARTADO na perda, não preservado — política oposta à
+          // do `blinkHold`, e de propósito: numa piscada a pessoa continua
+          // olhando para o alvo; com o rosto perdido, o olhar pode ter ido
+          // para a porta.
+          if (fb.zerarDwell) {
+            clearDwellVisuals();
+            dwellStateRef.current = createDwellState();
+          }
+
+          if (fb.mensagem !== gazeLostMessageRef.current) {
+            gazeLostMessageRef.current = fb.mensagem;
+            setGazeLostMessage(fb.mensagem);
+          }
+
+          if (!fb.mostrarCursor || fb.posicao === null) {
+            cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
+            cursorRef.current.style.opacity = '0';
+            if (anelRef.current) anelRef.current.ownerSVGElement!.style.opacity = '0';
           } else {
-            cursorRef.current.style.background = hitTarget
-              ? `rgba(34,197,94,${(0.5 + dwellPct * 0.4).toFixed(2)})`
-              : 'rgba(239,68,68,0.6)';
-            cursorRef.current.style.border = '';
+            // ── P7.1 — geometria e cores vêm do módulo puro ──────────────
+            //
+            // Em especial o `offsetPx`. O código anterior subtraía `24` — a
+            // metade do `width:48px` escrita à mão em outro arquivo. Com o
+            // tamanho ajustável, esse `24` desenharia um cursor de 96 px a
+            // 24 px do ponto olhado; e esse erro não parece bug de layout,
+            // parece erro de calibração: viés constante que piora conforme o
+            // cursor cresce.
+            const est = estiloDoCursor({
+              tamanhoPx: limitarTamanho(EXPERIMENT.cursorSizePx),
+              estado: hitTarget
+                ? 'sobreAlvo'
+                : isDegraded
+                  ? 'degradado'
+                  : fb.estado === 'segurando'
+                    ? 'segurando'
+                    : 'normal',
+              dwellPct,
+            });
+
+            cursorRef.current.style.transform =
+              `translate3d(${fb.posicao.x - est.offsetPx}px, ${fb.posicao.y - est.offsetPx}px, 0) scale(${est.escala})`;
+            cursorRef.current.style.opacity =
+              fb.estado === 'segurando' ? '0.5' : sample.hasFace ? '1' : '0.35';
+            cursorRef.current.style.background = est.preenchimento;
+            // O anel duplo é o que torna o cursor visível sobre QUALQUER
+            // fundo: nenhuma cor sozinha contrasta com todos, e o vermelho
+            // translúcido de antes sumia sobre o botão de emergência — que é
+            // o pior alvo possível para o cursor sumir.
+            cursorRef.current.style.boxShadow = est.anel;
+            cursorRef.current.style.border = est.tracejado
+              ? '2px dashed rgba(234,179,8,0.9)'
+              : '';
+
+            // ── P7.2 — anel de progresso do dwell ──────────────────────────
+            if (anelRef.current) {
+              const svg = anelRef.current.ownerSVGElement!;
+              if (hitTarget) {
+                const g = geometriaDoAnel(est.tamanhoPx, dwellPct);
+                anelRef.current.setAttribute('stroke-dashoffset', String(g.offset));
+                svg.style.transform =
+                  `translate3d(${fb.posicao.x - g.centro}px, ${fb.posicao.y - g.centro}px, 0)`;
+                svg.style.opacity = '1';
+              } else {
+                svg.style.opacity = '0';
+              }
+            }
           }
         }
       } else if (cbInvocations === 0) {
@@ -1019,8 +1229,85 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             }
             return linhas;
           };
+          // ── Verificação pré-sessão ────────────────────────────────────
+          //
+          // Transforma a lista de "lembre-se de" do protocolo `F8.1` num
+          // comando só. Cada item dessa lista é uma forma de perder a sessão —
+          // e o modo de falha que mais preocupa não é esquecer, é esquecer e
+          // NÃO PERCEBER: rodar a condição inteira com a flag da anterior
+          // produz dado de aparência perfeita, atribuído à condição errada.
+          //
+          // O parâmetro opcional é a condição PRETENDIDA. Declará-la é o que
+          // pega o erro mais provável do dia — `__irisflowExp.set` só passa a
+          // valer depois de recarregar a página.
+          //
+          //   __irisflowPreflight()
+          //   __irisflowPreflight({ filterMode: 'kalmanEma', l2csInputSize: 224 })
+          w.__irisflowPreflight = async (
+            condicaoEsperada?: Record<string, unknown>,
+          ) => {
+            const d = engineRef.current?.getDiagnostics();
+            if (!d) {
+              console.warn('[preflight] engine não está rodando.');
+              return null;
+            }
+
+            // Taxa de atualização medida na hora: 30 quadros de rAF. É curto
+            // de propósito — o operador não vai esperar, e a taxa não varia.
+            const hz = await new Promise<number | null>((resolve) => {
+              const t: number[] = [];
+              const passo = () => {
+                t.push(performance.now());
+                if (t.length <= 30) requestAnimationFrame(passo);
+                else {
+                  const dt = (t[t.length - 1] - t[0]) / (t.length - 1);
+                  resolve(dt > 0 ? 1000 / dt : null);
+                }
+              };
+              requestAnimationFrame(passo);
+            });
+
+            const itens = preflight({
+              estadoEngine: engineRef.current?.getState() ?? 'desconhecido',
+              calibrado: engineRef.current?.calibration.isCalibrated() ?? false,
+              telaPolegadas: settings.screenDiagonalIn,
+              origemGeometria: settings.screenGeometrySource ?? 'default',
+              distanciaCm: settings.viewingDistanceCm,
+              viewportPx: {
+                w: document.documentElement.clientWidth,
+                h: document.documentElement.clientHeight,
+              },
+              telaPx: { w: window.screen.width, h: window.screen.height },
+              taxaAtualizacaoHz: hz,
+              l2cs: {
+                status: d.l2cs.status,
+                executionProvider: d.l2cs.executionProvider ?? null,
+                stalePct: d.l2cs.stalePct,
+                pendingCount: d.l2cs.pendingCount,
+              },
+              filtro: d.filtro,
+              flags: EXPERIMENT as unknown as Record<string, unknown>,
+              condicaoEsperada,
+            });
+
+            const icone = { ok: '✅', atencao: '⚠️', bloqueio: '⛔' } as const;
+            console.table(itens.map((i) => ({
+              '': icone[i.nivel], item: i.item, detalhe: i.detalhe, ação: i.acao ?? '',
+            })));
+            if (podeComecar(itens)) {
+              console.log('[preflight] ✅ PODE COMEÇAR.');
+            } else {
+              console.warn(
+                '[preflight] ⛔ NÃO COMECE — os itens marcados produziriam dado que '
+                + 'será descartado. Resolva-os e rode de novo.',
+              );
+            }
+            return itens;
+          };
+
           console.log(
-            '[IrisFlow] console: __irisflowLatencia() para a tabela de estágios, ' +
+            '[IrisFlow] console: __irisflowPreflight() ANTES de medir · ' +
+            '__irisflowLatencia() para a tabela de estágios · ' +
             '__irisflowDiag() para o diagnóstico completo.',
           );
         }
@@ -1072,6 +1359,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (typeof window !== 'undefined') {
         delete (window as unknown as Record<string, unknown>).__irisflowDiag;
         delete (window as unknown as Record<string, unknown>).__irisflowLatencia;
+        delete (window as unknown as Record<string, unknown>).__irisflowPreflight;
       }
       // Libera o guard de instância única. Vem DEPOIS do dispose para que um
       // remount imediato não encontre recursos meio liberados.
@@ -1117,6 +1405,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       cursorRef.current?.remove();
       cursorRef.current = null;
+      anelRef.current?.ownerSVGElement?.remove();
+      anelRef.current = null;
     };
   }, []);
 
@@ -1218,11 +1508,12 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       isDegraded,
       cameraError,
       calibrationInvalidated,
+      gazeLostMessage,
     }),
     // `isDwelling` deliberadamente FORA das deps — ver o comentário acima e
     // `DwellContext`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subscribe, state, l2csStatus, calibration, recording, isComposing, setIsComposing, isDegraded, cameraError, calibrationInvalidated],
+    [subscribe, state, l2csStatus, calibration, recording, isComposing, setIsComposing, isDegraded, cameraError, calibrationInvalidated, gazeLostMessage],
   );
 
   return (
@@ -1236,7 +1527,12 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         cameraError={cameraError}
         calibrationInvalidated={calibrationInvalidated}
         distanceAdvice={distanceAdvice}
+        gazeLostMessage={gazeLostMessage}
       />
+      {/* P7.4 — a varredura fica DENTRO do provider e FORA do `DwellContext`:
+          ela não depende de dwell (é o que resta quando o dwell não é
+          alcançável) e não deve re-renderizar a cada alternância dele. */}
+      <ScanningMode />
       {/* B3.23 — `isDwelling` num provider próprio, POR DENTRO do principal.
           Uma alternância de dwell agora só invalida este contexto; os
           consumidores que assinam apenas `useGaze()` não re-renderizam. */}

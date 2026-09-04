@@ -27,7 +27,11 @@ import {
   type DistanceRange,
 } from './distanceCompensation';
 import type { RecordedSampleDecision } from './telemetry/types';
-import { resetEarHistory, FEATURE_VECTOR_ID, FEATURE_FORMAT_VERSION } from './extractor';
+import {
+  resetEarHistory, FEATURE_VECTOR_ID, FEATURE_FORMAT_VERSION,
+  // P6.5 — a expansão polinomial não se aplica a todo conjunto.
+  ACTIVE_FEATURE_SET, expandirPolinomioNoConjunto,
+} from './extractor';
 import {
   profileRegistry,
   shouldWarnPrecisionForCondition,
@@ -45,13 +49,25 @@ import { expandPolynomialFeatures } from './calibration/polynomial';
  * ponto onde features cruas entram no StandardScaler ou Ridge — não fazer aqui
  * dupla a dimensão silenciosamente no meio do pipeline.
  */
+/**
+ * A expansão vale para este conjunto? (P6.5)
+ *
+ * `spec11` já traz `pitch×yaw`, `pitch²` e `yaw²` explicitamente. Expandir por
+ * cima duplicaria exatamente esses termos — colinearidade perfeita, que é o que
+ * o Ridge regulariza contra: gastaríamos λ desfazendo o que nós criamos. E 11
+ * dims expandidas viram 77, sobre 9 alvos de calibração.
+ */
+function expansaoAtiva(): boolean {
+  return EXPERIMENT.polynomialFeatures && expandirPolinomioNoConjunto(ACTIVE_FEATURE_SET);
+}
+
 function maybeExpand(features: number[][]): number[][] {
-  if (!EXPERIMENT.polynomialFeatures) return features;
+  if (!expansaoAtiva()) return features;
   return features.map((f) => expandPolynomialFeatures(f));
 }
 
 function maybeExpandSingle(features: number[]): number[] {
-  if (!EXPERIMENT.polynomialFeatures) return features;
+  if (!expansaoAtiva()) return features;
   return expandPolynomialFeatures(features);
 }
 
@@ -1486,6 +1502,52 @@ export function computeCalibrationTargets(
 
 /** Geometria da janela atual + defaults físicos. Fora do browser (testes)
  *  cai num 1920×1080 nominal para continuar determinístico. */
+/**
+ * Geometria física da sessão em curso. `null` até alguém informá-la.
+ *
+ * ── Por que isto precisou existir ───────────────────────────────────────────
+ *
+ * A geometria configurada chegava só em `startCalibrationMode`, como `const`
+ * LOCAL. Ela posicionava a grade de alvos e morria ali. Todo o resto do módulo
+ * chamava `currentCalibrationGeometry()` sem overrides e recebia os defaults
+ * de 23,6" / 60 cm — inclusive `screenDistancePx()` e `screenPxPerCm()`, que
+ * estão no caminho quente de TODO `mapGaze` porque
+ * `geometricPoseCompensation` é `true` por default.
+ *
+ * O efeito: numa tela de 27" o `pxPerCm` saía 1,14× grande demais, e o
+ * deslocamento `d·tan(Δ)` da compensação de pose era super-aplicado em ~14%.
+ * O relatório gravava uma diagonal e o pipeline usava outra.
+ *
+ * ── Por que isso importa mais do que parece ─────────────────────────────────
+ *
+ * A tentação é dizer "o usuário-alvo não mexe a cabeça, então a compensação de
+ * pose quase não atua e o erro é quase zero". Isso confunde duas coisas.
+ *
+ * "Cabeça parada" é premissa no sentido de que NÃO SE PODE CONTAR com
+ * movimento voluntário como entrada — não no sentido de que a pose fica
+ * constante. Ao longo de uma sessão a postura cede, a cadeira é reajustada, o
+ * pescoço cansa. Em ELA a fraqueza cervical é característica, então a deriva é
+ * MAIS provável nessa população, não menos.
+ *
+ * E o baseline do próprio repositório mede isso: `pose-drift-5deg` é a PIOR
+ * das seis trajetórias, com 97,0 px de erro médio contra 53,2 px da segunda
+ * colocada. Deriva de pose é a maior fonte de erro do pipeline, e a
+ * compensação que a corrige estava rodando com a densidade de tela errada.
+ */
+let sessionGeometry: Partial<CalibrationGeometry> | null = null;
+
+/**
+ * Informa a geometria física da sessão.
+ *
+ * Chamada por `startCalibrationMode`, e exposta para que a UI possa atualizá-la
+ * quando o cuidador corrigir a diagonal sem recalibrar.
+ *
+ * `null` limpa e volta aos defaults — usado pelos testes para isolamento.
+ */
+export function setSessionGeometry(g: Partial<CalibrationGeometry> | null): void {
+  sessionGeometry = g;
+}
+
 export function currentCalibrationGeometry(
   overrides?: Partial<CalibrationGeometry>,
 ): CalibrationGeometry {
@@ -1496,6 +1558,8 @@ export function currentCalibrationGeometry(
     screenDiagonalIn: DEFAULT_SCREEN_DIAGONAL_IN,
     viewingDistanceCm: DEFAULT_VIEWING_DISTANCE_CM,
     maxEccentricityDeg: MAX_ECCENTRICITY_DEG,
+    // A da sessão vence os defaults; um `overrides` explícito vence tudo.
+    ...(sessionGeometry ?? {}),
     ...overrides,
   };
 }
@@ -1605,6 +1669,10 @@ export function startCalibrationMode(
   }
 
   // Grade posicionada pelo orçamento de excentricidade da tela em uso.
+  //
+  // E REGISTRADA: antes ela era um `const` local que morria nesta função,
+  // deixando a compensação de pose rodar com os defaults de 23,6"/60 cm.
+  if (opts?.geometry) setSessionGeometry(opts.geometry);
   const geometry = currentCalibrationGeometry(opts?.geometry);
   currentCalibrationTargets = computeCalibrationTargets(
     geometry,

@@ -9,6 +9,8 @@ import {
   BlinkDetector,
 } from './extractor';
 import type { Point3D } from './extractor';
+import { buildContextKeyFrom } from './calibration';
+import { sanitizeExperiment, VALORES_ACEITOS } from './config/experiment';
 
 // -----------------------------------------------------------------------------
 // P6.5 — o conjunto de 11 features da especificação, atrás de flag.
@@ -196,5 +198,59 @@ describe('identidade do conjunto — um perfil não carrega no outro', () => {
     expect(activeFeatureDims('irisCore+l2cs+pose')).toBe(11);
     expect(activeFeatureDims('spec11')).toBe(11);
     expect(onzeDims).not.toBe(outro);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// O resto do aceite de P6.5: `buildContextKey` codifica o conjunto, e um perfil
+// treinado num conjunto não carrega no outro.
+//
+// Isto só passou a ser testável quando `ACTIVE_FEATURE_SET` deixou de ser
+// constante de módulo e virou a flag `featureSet`. Antes, `spec11` existia como
+// tipo e como projeção mas NENHUM caminho podia selecioná-lo — e uma
+// alternativa que não se consegue ligar não é alternativa.
+// -----------------------------------------------------------------------------
+
+describe('P6.5 — isolamento de perfil entre conjuntos', () => {
+  const base = {
+    viewportW: 1920,
+    viewportH: 1080,
+    formatVersion: 7,
+    isotropicLandmarks: false,
+    applyGazeCorrection: false,
+    polynomialFeatures: true,
+    enableL2CS: true,
+    expandFactor: 1.4,
+  };
+
+  it('buildContextKey CODIFICA o conjunto de features', () => {
+    const chaveSpec11 = buildContextKeyFrom({ ...base, featureVectorId: featureVectorId('spec11') });
+    const chaveAtual = buildContextKeyFrom({ ...base, featureVectorId: featureVectorId('irisCore+l2cs') });
+    expect(chaveSpec11).toContain('spec11');
+    expect(chaveSpec11).not.toBe(chaveAtual);
+  });
+
+  it('um perfil de um conjunto NÃO carrega no outro', () => {
+    // O mecanismo: a chave de contexto é comparada no load e o perfil é
+    // recusado quando difere. Sem isso, o modelo receberia 11 dimensões onde
+    // foi treinado com 6 — e as predições sairiam plausíveis e erradas, que é
+    // o pior modo de falha possível aqui.
+    const chaves = (['irisCore+l2cs', 'iris12+l2cs', 'spec11'] as const)
+      .map((set) => buildContextKeyFrom({ ...base, featureVectorId: featureVectorId(set) }));
+    expect(new Set(chaves).size).toBe(3);
+  });
+
+  it('a flag `featureSet` aceita os três conjuntos, e só eles', () => {
+    for (const set of VALORES_ACEITOS.featureSet) {
+      expect(sanitizeExperiment({ featureSet: set }).featureSet).toBe(set);
+    }
+    // Um conjunto que existe no TIPO mas não na lista da flag não pode ser
+    // selecionado por acidente — trocar o vetor é mudança grande demais para
+    // acontecer por um valor solto no localStorage.
+    expect(sanitizeExperiment({ featureSet: 'compact' }).featureSet).toBe('irisCore+l2cs');
+  });
+
+  it('o default é o conjunto medido como melhor', () => {
+    expect(sanitizeExperiment({}).featureSet).toBe('irisCore+l2cs');
   });
 });

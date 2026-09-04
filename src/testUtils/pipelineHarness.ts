@@ -38,7 +38,9 @@
 
 import { StandardScaler } from '../scaler';
 import { RidgeRegressor } from '../ridge';
-import { OneEuroFilter2D } from '../oneEuroFilter';
+import { FilterChain, type FilterMode } from '../filters/filterChain';
+import type { GeometriaDeTela } from '../filters/angularVelocity';
+import { EXPERIMENT } from '../config/experiment';
 import { StageTimer, STAGE } from '../telemetry/stageTimer';
 import {
   GazeSimSession,
@@ -61,6 +63,33 @@ export interface HarnessOptions {
   screenHpx?: number;
   /** Configuração de simulação. Padrão herda de `SIM_DEFAULTS`. */
   sim?: Partial<SimOptions>;
+  /**
+   * Cadeia de filtragem (`P7.6`).
+   *
+   * O harness instanciava `OneEuroFilter2D` diretamente, o que tornava o
+   * aceite do `P7.6` — "o harness roda com `filterMode: 'kalmanEma'`" —
+   * literalmente impossível de satisfazer: não havia caminho que trocasse o
+   * filtro. Mesma classe de problema do `spec11` no `P6.5` e do `filterMode`
+   * ausente no Sprint 6: uma alternativa que não se consegue selecionar não é
+   * alternativa.
+   *
+   * Omitido, segue `EXPERIMENT.filterMode` (default `'oneEuro'`), então o
+   * baseline gravado continua reproduzível sem passar nada.
+   */
+  filterMode?: FilterMode;
+  /**
+   * Parâmetros do Kalman, com destaque para `predictAheadFrames`.
+   *
+   * Exposto porque o harness NÃO tem latência de pipeline: a predição roda no
+   * mesmo quadro da medição. Predizer à frente ali é overshoot puro — medido
+   * sobre um sacádico de 400 px, o erro médio cresce monotonicamente com o
+   * horizonte (0 quadros: 34,82 px; 1: 36,50 px; 2: 38,66 px).
+   *
+   * No pipeline real há 2–3 quadros de atraso para cancelar, e é lá que a
+   * predição pode pagar. O `F8.5` precisa varrer o horizonte para achar o
+   * ponto; sem este campo ele varreria um parâmetro que não pode mudar.
+   */
+  kalman?: { predictAheadFrames?: number; processVariance?: number; measurementVariance?: number };
 }
 
 export interface TrajectoryMetrics {
@@ -97,6 +126,17 @@ export interface HarnessResult {
   measuredStageLatency: Record<string, StageLatencyEntry>;
   /** Configuração da simulação de fato usada (após merge com defaults). */
   simConfig: SimOptions;
+  /**
+   * Cadeia de filtragem EFETIVAMENTE usada.
+   *
+   * "Efetivamente" e não "pedida": `kalmanEma` sem geometria de tela degrada
+   * para `kalman`. Sem este campo, uma comparação de três cadeias poderia ter
+   * medido duas — e o resultado "kalmanEma não ajudou" seria lido como
+   * conclusão quando é artefato de configuração.
+   */
+  filterMode: FilterMode;
+  /** Conjunto de features ativo, para o resultado dizer o que mediu. */
+  featureSet: string;
 }
 
 // -----------------------------------------------------------------------------
@@ -214,6 +254,22 @@ export function runHarness(opts: HarnessOptions = {}): HarnessResult {
   const seed = opts.seed ?? 12345;
   const screenW = opts.screenWpx ?? SIM_SCREEN_W_PX;
   const screenH = opts.screenHpx ?? SIM_SCREEN_H_PX;
+  const filterMode = opts.filterMode ?? EXPERIMENT.filterMode;
+
+  // Geometria da tela virtual do harness. O `kalmanEma` precisa dela para
+  // escolher α em GRAUS; sem ela a cadeia degradaria para `kalman` puro e o
+  // harness estaria medindo outra coisa do que diz medir.
+  //
+  // 52,25 cm de largura e 60 cm de distância são os mesmos números do
+  // `docs/DECISOES_PIPELINE.md` (monitor de 24" 16:9 na distância nominal de
+  // uso). São premissas da SIMULAÇÃO, não medições: o harness não tem tela
+  // física. Números diferentes mudam apenas o α do EMA, não as trajetórias.
+  const geometria = {
+    larguraPx: screenW,
+    alturaPx: screenH,
+    larguraCm: 52.25,
+    distanciaCm: 60,
+  };
 
   // Zera flags estáticas do RidgeRegressor para o harness rodar independente
   // de estado herdado de qualquer teste anterior no mesmo processo. Sem isso,
@@ -276,6 +332,9 @@ export function runHarness(opts: HarnessOptions = {}): HarnessResult {
         modelL,
         modelR,
         stageTimer,
+        filterMode,
+        geometria,
+        kalman: opts.kalman,
       });
       trajectories.push(metrics);
     }
@@ -304,6 +363,8 @@ export function runHarness(opts: HarnessOptions = {}): HarnessResult {
         hypometria: true,
         ...opts.sim,
       },
+      filterMode,
+      featureSet: EXPERIMENT.featureSet,
     };
   } finally {
     RidgeRegressor.lambdaOverride = savedOverride;
@@ -328,11 +389,21 @@ interface RunTrajectoryArgs {
   modelL: RidgeRegressor;
   modelR: RidgeRegressor;
   stageTimer: StageTimer;
+  filterMode: FilterMode;
+  geometria: GeometriaDeTela;
+  kalman: HarnessOptions['kalman'];
 }
 
 function runTrajectory(a: RunTrajectoryArgs): TrajectoryMetrics {
   const session = new GazeSimSession({ ...a.simOverrides, seed: a.seed });
-  const filter = new OneEuroFilter2D(30, 0.02, 1.5);
+  // Mesmos parâmetros do One Euro de antes quando o modo é `'oneEuro'`, para
+  // que o baseline gravado continue reproduzível bit a bit.
+  const filter = new FilterChain({
+    mode: a.filterMode,
+    geometria: a.geometria,
+    kalman: a.kalman,
+    oneEuro: { freq: 30, mincutoff: 0.02, beta: 1.5 },
+  });
 
   let lastEmittedX = a.screenW / 2;
   let lastEmittedY = a.screenH / 2;
@@ -382,7 +453,7 @@ function runTrajectory(a: RunTrajectoryArgs): TrajectoryMetrics {
     const py = clamp01(normY) * a.screenH;
 
     a.stageTimer.begin(STAGE.filter);
-    const smoothed = filter.filter(px, py, tSec);
+    const smoothed = filter.filter(px, py, tSec, tSec * 1000, dt);
     a.stageTimer.end(STAGE.filter);
     tSec += dt;
 

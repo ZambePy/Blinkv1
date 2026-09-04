@@ -136,6 +136,25 @@ export interface RecordedFrame {
   // Undefined quando o frame não gerou emissão (piscada + features vazias,
   // por exemplo).
   predicted?: { x: number; y: number };
+
+  /**
+   * Ponto do regressor ANTES do filtro temporal, em px (`F8.5`).
+   *
+   * O `F8.5` define o método assim: *"gravar as amostras pré-filtro uma única
+   * vez e reproduzir o mesmo JSONL pelos três filtros offline. Assim as
+   * diferenças são do filtro, não da sessão."*
+   *
+   * Só `predicted` era gravado, e ele é PÓS-filtro — o método não tinha como
+   * rodar. Dava para reconstruir o pré-filtro re-executando o regressor sobre
+   * `featuresLeft`/`featuresRight`, mas isso amarra a reprodução ao modelo
+   * salvo daquela sessão: uma recalibração posterior, ou qualquer mudança no
+   * scaler, mudaria a entrada dos três filtros ao mesmo tempo — e a comparação
+   * deixaria de isolar o filtro, que é a única coisa que ela existe para
+   * isolar.
+   *
+   * Undefined nos mesmos casos que `predicted`.
+   */
+  preFilter?: { x: number; y: number };
 }
 
 export interface Recording {

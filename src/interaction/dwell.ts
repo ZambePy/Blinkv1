@@ -93,6 +93,63 @@ export const DEFAULT_DWELL_CONFIG: DwellConfig = {
   lostResetMs: 500,
 };
 
+// ── P7.2 — a faixa de dwell por paciente ────────────────────────────────────
+//
+// O plano pede "faixa 0,8–1,5 s exposta por paciente". O app hoje oferece três
+// presets: `fast` 800 ms, `normal` 1500 ms, `slow` 2500 ms.
+//
+// Os dois extremos do pedido batem com `fast` e `normal`. O `slow` NÃO cabe na
+// faixa — e este módulo não o remove.
+//
+// O motivo é clínico, não de compatibilidade. Um paciente com ELA em fadiga
+// avançada tem dificuldade de manter fixação por 1,5 s; para ele, 2,5 s é a
+// diferença entre conseguir clicar e não conseguir. Estreitar a faixa para
+// cumprir o número do plano retiraria a opção exatamente de quem tem menos
+// alternativas — e a alternativa dele, se o dwell não funcionar, é não se
+// comunicar.
+//
+// A resolução: a faixa do plano vira a faixa RECOMENDADA (o que a UI destaca e
+// o que o `F8.5` mede), e a faixa PERMITIDA é maior. `dwellMsPorPaciente`
+// devolve os dois fatos, para que a tela possa dizer "fora da faixa medida"
+// sem impedir a escolha.
+//
+// Quem decide se o teto de 3 s fica é o Dia 7, com humano.
+
+/** Faixa do plano — a que o `F8.5` mede e a que a UI destaca. */
+export const DWELL_FAIXA_RECOMENDADA_MS = { min: 800, max: 1500 } as const;
+
+/** Faixa aceita. Mais larga que a recomendada — ver a nota acima. */
+export const DWELL_FAIXA_PERMITIDA_MS = { min: 400, max: 3000 } as const;
+
+export interface DwellPorPaciente {
+  /** Valor efetivo, já preso à faixa permitida. */
+  ms: number;
+  /** O valor pedido caiu fora da faixa recomendada pelo plano. */
+  foraDaFaixaRecomendada: boolean;
+  /** O valor pedido foi ajustado para caber na faixa permitida. */
+  ajustado: boolean;
+}
+
+/**
+ * Resolve o dwell escolhido para um paciente.
+ *
+ * Não rejeita: um valor absurdo vindo de um `localStorage` corrompido tem que
+ * virar um dwell utilizável, porque sem dwell o paciente não chega à tela onde
+ * consertaria o valor.
+ */
+export function dwellMsPorPaciente(pedido: number): DwellPorPaciente {
+  const { min, max } = DWELL_FAIXA_PERMITIDA_MS;
+  const ms = Number.isFinite(pedido)
+    ? Math.min(max, Math.max(min, pedido))
+    : DEFAULT_DWELL_CONFIG.dwellMs;
+  return {
+    ms,
+    foraDaFaixaRecomendada:
+      ms < DWELL_FAIXA_RECOMENDADA_MS.min || ms > DWELL_FAIXA_RECOMENDADA_MS.max,
+    ajustado: !Number.isFinite(pedido) || ms !== pedido,
+  };
+}
+
 export interface DwellState {
   /** Alvo atualmente acumulando progresso. */
   targetKey: unknown | null;

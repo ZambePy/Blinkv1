@@ -7,7 +7,7 @@ import {
   createCropContext,
   eyeRegionInCrop,
 } from './crop';
-import { sanitizeExperiment, EXPERIMENT_RANGES } from '../config/experiment';
+import { sanitizeExperiment, L2CS_INPUT_SIZES_ACEITOS } from '../config/experiment';
 
 // -----------------------------------------------------------------------------
 // P5.5a — o L2CS passou a aceitar mais de um tamanho de entrada.
@@ -77,10 +77,16 @@ describe('flag l2csInputSize', () => {
     expect(sanitizeExperiment({ l2csInputSize: 4096 }).l2csInputSize).toBe(448);
   });
 
-  it('a faixa é declarada em EXPERIMENT_RANGES', () => {
-    expect(EXPERIMENT_RANGES.l2csInputSize).toBeDefined();
-    expect(EXPERIMENT_RANGES.l2csInputSize.min).toBe(224);
-    expect(EXPERIMENT_RANGES.l2csInputSize.max).toBe(448);
+  it('os tamanhos aceitos são uma LISTA FECHADA, não uma faixa', () => {
+    // Era `{min:224, max:448}`, e faixa é fraca demais aqui: ela aceitava 244,
+    // 300, 256 — nenhum múltiplo de 32. O backbone é uma ResNet-50, que reduz
+    // por 32 (224/32 = 7, 448/32 = 14); um tamanho intermediário padeia
+    // assimetricamente e o pooling adaptativo mascara a diferença, então roda
+    // sem erro nenhum e mede outra coisa.
+    expect([...L2CS_INPUT_SIZES_ACEITOS]).toEqual([...L2CS_INPUT_SIZES]);
+    for (const t of L2CS_INPUT_SIZES_ACEITOS) {
+      expect(t % 32, `${t} não é múltiplo de 32`).toBe(0);
+    }
   });
 });
 

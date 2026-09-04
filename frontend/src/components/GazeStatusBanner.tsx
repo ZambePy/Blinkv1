@@ -24,6 +24,15 @@ interface Props {
   cameraError: string | null;
   calibrationInvalidated: string | null;
   /**
+   * `P7.5` — gaze perdido além do hold de 2 s. `null` no caminho feliz.
+   *
+   * Vem pronto do `GazeFallback` (que já aplicou a histerese) em vez de ser
+   * derivado aqui de `state === 'no_face'`: o banner não pode piscar a cada
+   * quadro que o detector pula, senão o paciente aprende a ignorá-lo — e aí
+   * ele não serve para a perda que importa.
+   */
+  gazeLostMessage?: string | null;
+  /**
    * Aviso de distância fora da faixa de calibração (`P6.9`). `null` quando a
    * distância está na faixa ou não há medição.
    *
@@ -66,6 +75,7 @@ export const GazeStatusBanner: React.FC<Props> = ({
   cameraError,
   calibrationInvalidated,
   distanceAdvice = null,
+  gazeLostMessage = null,
 }) => {
   // Ordem de precedência = ordem de gravidade. Sem câmera, nada mais importa.
   let tom: 'erro' | 'aviso' | null = null;
@@ -87,6 +97,18 @@ export const GazeStatusBanner: React.FC<Props> = ({
       'O controle por olhar está desligado, inclusive o botão de emergência — ' +
       'sem calibração o sistema não sabe para onde você está olhando. ' +
       'Peça ao cuidador para abrir a calibração e seguir os pontos na tela.';
+  } else if (gazeLostMessage) {
+    // P7.5 — acima do aviso de distância e abaixo dos erros de configuração.
+    //
+    // A ordem não é arbitrária: sem rosto na câmera, dizer que a distância
+    // está diferente da calibração é responder a uma pergunta que ninguém
+    // fez. E é 'aviso' e não 'erro' porque a situação é reversível pela
+    // própria pessoa em um segundo — que é exatamente o que a mensagem pede.
+    tom = 'aviso';
+    titulo = gazeLostMessage;
+    detalhe =
+      'O rastreamento perdeu o rosto. O cursor volta assim que a câmera ' +
+      'enxergar você de novo.';
   } else if (distanceAdvice) {
     // P6.9 — o tom é 'aviso', não 'erro': o sistema continua funcionando, só
     // com precisão pior que a medida na calibração. Tratar isso como erro

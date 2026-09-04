@@ -25,7 +25,7 @@ import {
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
 import { deriveHorizontalFovDeg } from '@tracker/cameraTuner';
-import { effectiveViewingDistanceCm, estimateDistanceCm } from '@tracker/setupReadiness';
+import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { api, ApiError } from '../utils/api';
@@ -306,23 +306,45 @@ export const SettingsScreen: React.FC = () => {
     // uptime real do engine. Se ele escolheu manualmente no select (para
     // simular teste de deriva), a escolha manual é preservada.
     // A geometria SEMPRE vem das settings, mesmo que o state local esteja
-    // defasado. E a distância MEDIDA manda quando existe — sem isto, o fluxo
-    // automático e o manual reportariam graus calculados com geometrias
-    // diferentes e o histórico ficaria incomparável consigo mesmo dependendo
-    // de por onde o teste foi disparado.
-    const dLive = getDiagnostics();
-    const medida = dLive && dLive.framing.hasFace
-      ? estimateDistanceCm(dLive.framing.iodPx, dLive.video.width, settings.cameraHorizontalFovDeg)
-      : null;
-    const dist = effectiveViewingDistanceCm(medida, settings.viewingDistanceCm);
-    if (dist.rejectedReason) console.warn(`[distance] ${dist.rejectedReason}`);
+    // defasado.
+    //
+    // ⚠️ A distância da TELA é a CONFIGURADA, nunca a medida.
+    //
+    // O comentário anterior aqui dizia o contrário — "a distância MEDIDA manda
+    // quando existe" — e isso reintroduzia, neste fluxo, exatamente o `B1.4`
+    // que `src/calibrationDistances.ts` existe para proibir.
+    //
+    // `estimateDistanceCm` mede olho→CÂMERA. `distanciaCm` do relatório é
+    // olho→TELA. Num setup câmera-perto/tela-longe — o RECOMENDADO pelo
+    // README — a medida cai para ~25 cm onde a tela está a 60, e o erro
+    // angular do relatório sai inflado por ~2,4×.
+    //
+    // Pior: o `effectiveViewingDistanceCm` só prefere a medida quando ela cai
+    // na faixa plausível E o FOV está calibrado. Ou seja, o defeito era
+    // INTERMITENTE — aparecia em alguns postos e não em outros, e o mesmo
+    // paciente teria históricos em escalas diferentes.
+    //
+    // E o `CalibrationCheck` (o fluxo automático) já fazia certo. Os dois
+    // caminhos reportavam graus em escalas diferentes: comparar uma rodada
+    // disparada pelas Configurações com uma disparada pós-calibração inverte
+    // qualquer A/B do Dia 7.
+    const { screenCm } = resolveCalibrationDistances({
+      measuredCameraDistanceCm: null,
+      configuredViewingDistanceCm: settings.viewingDistanceCm,
+    });
 
     const metaWithUptime = applyUptimeToRunMetaIfDefault(
       {
         ...accuracyMeta,
-        distanciaCm: dist.cm,
+        distanciaCm: screenCm,
         telaPolegadas: settings.screenDiagonalIn,
         screenScaleFactor: settings.screenScaleFactor,
+        // Sem isto, `geometriaFoiMedida(undefined)` devolve `false` e TODA
+        // sessão manual sai marcada como geometria assumida — inclusive as em
+        // que o cuidador mediu a tela com fita. O dano é simétrico ao do bug
+        // original: depois do Dia 7 não haveria como separar as sessões com
+        // geometria válida das inválidas neste fluxo.
+        screenGeometrySource: settings.screenGeometrySource,
       },
       getSessionUptimeMs(),
     );

@@ -5,6 +5,9 @@
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import * as calibration from '../calibration';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2 } from '../oneEuroFilter';
+import { FilterChain } from '../filters/filterChain';
+import { BlinkHold } from '../filters/blinkHold';
+import { geometriaDeDiagonal, type GeometriaDeTela } from '../filters/angularVelocity';
 import type { FilterPreset, FilterPresetV2 } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
 import { feedAccuracyRaw, getCurrentTargetPx as getAccuracyTargetPx } from '../accuracy';
@@ -245,6 +248,17 @@ export interface EngineDiagnostics {
   gaze: {
     yaw: number;
     pitch: number;
+  };
+  /** `P7.6` / `F8.5` — a cadeia de filtragem que está governando de fato. */
+  filtro: {
+    pedido: 'oneEuro' | 'kalman' | 'kalmanEma';
+    /** Pode diferir de `pedido`: `kalmanEma` sem geometria vira `kalman`. */
+    efetivo: 'oneEuro' | 'kalman' | 'kalmanEma';
+    degradado: boolean;
+    geometriaConhecida: boolean;
+    /** Preset do One Euro, ou `null` quando a cadeia Kalman está ativa —
+     *  os presets não a parametrizam. */
+    preset: string | null;
   };
   pose: {
     yaw: number;
@@ -525,6 +539,51 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     ? FILTER_PRESETS_V2[activePreset as FilterPresetV2]
     : FILTER_PRESETS[activePreset as FilterPreset];
   const oneEuro = new OneEuroFilter2D(60, activeConfig.mincutoff, activeConfig.beta);
+
+  // ── P7.6 / F8.5 — a cadeia alternativa de filtragem ───────────────────────
+  //
+  // O `filterMode` existia, era testado e era selecionável no HARNESS — mas o
+  // engine instanciava `OneEuroFilter2D` direto, então o APP nunca conseguiu
+  // rodar nada além de One Euro.
+  //
+  // Isso bloqueava o `F8.5` inteiro: das sete métricas do benchmark, a 7
+  // (estabilidade do dwell: taxa de conclusão, abortos, cliques no alvo
+  // errado) e metade da 2 (atraso end-to-end captura → render) só existem com
+  // o app rodando. E, mesmo que a recomendação do Dia 7 fosse "adotar
+  // kalmanEma", não havia caminho para embarcá-la.
+  //
+  // Quarta ocorrência do mesmo padrão no plano — `spec11`, `filterMode` no
+  // Sprint 6, o harness no `P7.6`, e agora o engine: *uma alternativa que não
+  // se consegue selecionar não é alternativa.*
+  //
+  // O One Euro NÃO passa pela cadeia. Ele fica no caminho de sempre, com os
+  // presets v1/v2, o espaço normalizado e o `setFilterPreset` em tempo real —
+  // nada disso se aplica ao Kalman, e roteá-lo por aqui mudaria o baseline
+  // por refatoração em vez de por decisão.
+  /** Instante do último quadro filtrado, em segundos. `null` antes do
+   *  primeiro — o Kalman precisa de `dt` REAL, não do nominal de 1/30: a
+   *  câmera entrega 30 fps nominais e quadros irregulares na prática, e um
+   *  `dt` fixo faria a velocidade estimada errar na mesma proporção do desvio. */
+  let ultimoFiltroSec: number | null = null;
+  let geometriaDeTela: GeometriaDeTela | null = null;
+  let cadeia: FilterChain | null = null;
+  // P6.3 — projeta a posição pelo Kalman durante a piscada, em vez de congelar.
+  //
+  // Só tem efeito quando há Kalman, ou seja, nunca no modo `'oneEuro'` — que é
+  // o default. A condição F-A do `F8.5` é definida como `P6.1 + P6.2 + P6.3 +
+  // P6.4`; sem esta ligação, medir "F-A" mediria três dos quatro e o relatório
+  // atribuiria o resultado a uma combinação que não rodou.
+  const blinkHold = new BlinkHold();
+
+  /** Constrói (ou reconstrói) a cadeia. Chamada quando a geometria aparece. */
+  function montarCadeia(): void {
+    if (EXPERIMENT.filterMode === 'oneEuro') { cadeia = null; return; }
+    cadeia = new FilterChain({
+      mode: EXPERIMENT.filterMode,
+      geometria: geometriaDeTela,
+    });
+  }
+  montarCadeia();
   const qualityAnalyzer = new EyeQualityAnalyzer();
   const bufferX: number[] = [];
   const bufferY: number[] = [];
@@ -702,6 +761,15 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     bufferX.length = 0;
     bufferY.length = 0;
     oneEuro.reset();
+    cadeia?.reset();
+    ultimoFiltroSec = null;
+    // Encerra qualquer episódio de hold em curso. O `predict` nunca é chamado
+    // no ramo `piscando: false`, então o stub abaixo só existe para satisfazer
+    // a assinatura sem forçar a cadeia a existir durante um reset.
+    blinkHold.update(false, performance.now(), {
+      predict: () => ({ x: 0, y: 0 }),
+      ready: false,
+    });
     brightnessHistory.length = 0;
     brightnessHistoryTs.length = 0;
     latestFeaturesLeft = [];
@@ -1088,13 +1156,46 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             }
 
             if (reusarRoi && ultimoTensorL2CS) {
-              // Resubmete o MESMO tensor. Não pular a submissão é deliberado:
+              // Resubmete o crop guardado. Não pular a submissão é deliberado:
               // pular reduziria a taxa de inferência e deixaria o gaze mais
               // velho, trocando 1–2 ms de crop por centenas de ms de
               // staleness. O que se economiza aqui é o `getImageData` + a
               // normalização, não a inferência.
-              if (l2csClient.submitTensor(ultimoTensorL2CS)) l2csFramesSubmitted++;
-              roiCropsEvitados++;
+              //
+              // ⚠️ CÓPIA, não o mesmo objeto — e isto não é micro-otimização
+              // invertida, é o que impede a sessão inteira de morrer.
+              //
+              // `submitTensor` passa `[tensor.buffer]` como lista de
+              // TRANSFERÊNCIA para o worker, o que DETACHA o ArrayBuffer no
+              // thread principal. Ressubmeter o mesmo objeto faz o
+              // `postMessage` lançar `DataCloneError` — e a cascata é toda
+              // silenciosa:
+              //
+              //   1. o `throw` acontece DEPOIS de `inFlight.set(id, now)` no
+              //      cliente, então o id fica presente para sempre;
+              //   2. com o slot preso, `canSubmit` passa a devolver `false` e
+              //      nenhuma submissão nova acontece;
+              //   3. `getLatestGaze` fica stale, e `buildL2CSBlock` zera o
+              //      bloco angular pelo resto da sessão;
+              //   4. o `L2CSHealthMonitor` NÃO dispara (ele trata
+              //      `valid:false` como reset), e o status continua `'ready'`.
+              //
+              // No Dia 7 isso produziria a conclusão errada mais forte
+              // possível: "o L2CS não contribui nada" — sobre uma condição em
+              // que ele simplesmente parou de rodar. E `dynamicRoiCache` é
+              // justamente uma flag para ser alternada durante a medição.
+              try {
+                if (l2csClient.submitTensor(new Float32Array(ultimoTensorL2CS))) {
+                  l2csFramesSubmitted++;
+                }
+                roiCropsEvitados++;
+              } catch (e) {
+                // O ramo de reuso estava FORA de qualquer try. A exceção
+                // escapava para o `loopBody` e o remédio acionado recriava o
+                // FaceLandmarker — que não tem relação nenhuma com a falha.
+                ultimoTensorL2CS = null;
+                console.warn('[L2CS] reuso de ROI falhou:', e, `(roi: ${motivoRoi})`);
+              }
             } else {
               try {
                 stageTimer.begin(STAGE.l2csCrop);
@@ -1106,7 +1207,17 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
                   preprocessRGBA: preprocessadorDoFrame(landmarks),
                 });
                 stageTimer.end(STAGE.l2csCrop);
-                ultimoTensorL2CS = tensor;
+                // A cópia é feita ANTES da submissão, enquanto o buffer ainda
+                // existe — depois do `submitTensor` ele está detachado e
+                // `new Float32Array(tensor)` devolveria um vetor vazio.
+                //
+                // Só copia quando o reuso está ligado: são ~2,3 MB por quadro
+                // em 448², e pagar isso com a flag desligada seria custo puro.
+                // Com ela ligada, o memcpy (~1 ms) troca por um crop de
+                // 11–13 ms — que é o ganho que a flag existe para medir.
+                ultimoTensorL2CS = EXPERIMENT.dynamicRoiCache
+                  ? new Float32Array(tensor)
+                  : null;
                 if (EXPERIMENT.dynamicRoiCache) roiCache.store(true);
                 if (l2csClient.submitTensor(tensor)) l2csFramesSubmitted++;
               } catch (e) {
@@ -1202,6 +1313,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         diagBlink = extractorResult.blinkDetected;
 
         let recordedPredicted: { x: number; y: number } | undefined;
+        // F8.5 — a entrada do filtro, gravada para a reprodução offline das
+        // três cadeias sobre exatamente a mesma sessão.
+        let recordedPreFilter: { x: number; y: number } | undefined;
         let recordedQuality: RecordedQuality | undefined;
 
         if (!extractorResult.blinkDetected && extractorResult.featuresLeft.length > 0) {
@@ -1435,8 +1549,28 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // resolução da tela: mincutoff=0.5 produz alpha≈0.50 em vez de 0.99.
           // Desligado por default — só os presets "-v2" ativam essa flag.
           let smoothed: { x: number; y: number };
+          // Capturado ANTES do `stageTimer.begin`: é a entrada do filtro, e
+          // gravá-lo depois arriscaria pegar um `targetX` já mexido por
+          // qualquer coisa que se acrescente entre os dois pontos.
+          recordedPreFilter = { x: targetX, y: targetY };
+          // Encerra o episódio de hold: este quadro TEM medição.
+          if (cadeia?.kalmanInterno) {
+            blinkHold.update(false, performance.now(), cadeia.kalmanInterno);
+          }
           stageTimer.begin(STAGE.filter);
-          if (activeConfig.filterInNormalizedSpace) {
+          if (cadeia) {
+            // Cadeia Kalman: trabalha em PIXELS. O `filterInNormalizedSpace`
+            // dos presets v2 é uma propriedade do One Euro (mincutoff
+            // independente de resolução) e não tem análogo aqui — o Kalman já
+            // é independente de resolução porque modela velocidade em px/s com
+            // dt explícito.
+            const dtSec = ultimoFiltroSec === null
+              ? undefined
+              : Math.max(1e-3, now - ultimoFiltroSec);
+            ultimoFiltroSec = now;
+            const r = cadeia.filter(targetX, targetY, now, now * 1000, dtSec);
+            smoothed = { x: r.x, y: r.y };
+          } else if (activeConfig.filterInNormalizedSpace) {
             const vwN = document.documentElement.clientWidth || 1;
             const vhN = document.documentElement.clientHeight || 1;
             const normX = targetX / vwN;
@@ -1521,15 +1655,53 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             currentNullSinceMs: mapGazeNullSinceMs,
             now: performance.now(),
           }).isDegraded;
+          // P6.3 — com Kalman ativo, projeta em vez de congelar.
+          //
+          // Congelar assume velocidade zero; se a pessoa fechou os olhos no
+          // meio de um movimento, a posição congelada fica para trás e o
+          // cursor "salta" ao reabrir. O Kalman tem modelo de movimento, então
+          // sabe para onde o olhar ia.
+          //
+          // `predict` CONSULTA o filtro sem avançá-lo: avançar reescreveria o
+          // modelo com dados que não existem (o olho fechado não mede nada).
+          const kalmanDaCadeia = cadeia?.kalmanInterno ?? null;
+          const hold = kalmanDaCadeia
+            ? blinkHold.update(true, performance.now(), kalmanDaCadeia)
+            : null;
+
+          // ⚠️ A projeção NÃO pode virar "última posição conhecida".
+          //
+          // `emit` grava `lastEmittedX/Y` sempre que `hasFace` é true, e a
+          // piscada emite com `hasFace: true` (o rosto ESTÁ lá; são os olhos
+          // que fecharam). Sem a restauração abaixo, cada quadro de piscada
+          // sobrescrevia a âncora com o ponto extrapolado.
+          //
+          // A consequência aparecia justamente onde o `P6.3` prometia
+          // segurança: passados os 2 s de teto, `hold.posicao` vira `null` e o
+          // código cai em `lastEmittedX/Y` — que deveria ser a última posição
+          // MEDIDA e passava a ser a última EXTRAPOLADA. O fallback "congela
+          // na última posição real" congelava num palpite.
+          //
+          // E vazava para fora da piscada: os ramos `!hasFace`, de features
+          // vazias e o `getLastSample` leem a mesma âncora.
+          const ancoraX = lastEmittedX;
+          const ancoraY = lastEmittedY;
           emit({
-            x: lastEmittedX,
-            y: lastEmittedY,
+            // Sem Kalman, ou depois do teto de 2 s, cai na posição congelada de
+            // sempre — que é o comportamento default e o que sobra quando não
+            // há projeção defensável.
+            x: hold?.posicao?.x ?? lastEmittedX,
+            y: hold?.posicao?.y ?? lastEmittedY,
             timestamp: performance.now(),
             hasFace: true,
             degraded: !semCalibracaoBlink && degradadoNaPiscada,
             uncalibrated: semCalibracaoBlink,
             eyeState: 'closed',
           });
+          if (hold?.posicao) {
+            lastEmittedX = ancoraX;
+            lastEmittedY = ancoraY;
+          }
         } else {
           // B2.3 — features VAZIAS sem piscada: o ramo que não existia.
           //
@@ -1604,6 +1776,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
               : undefined,
             quality: recordedQuality,
             predicted: recordedPredicted,
+            preFilter: recordedPreFilter,
             target: getRecorderTarget(),
             sampleDecision: calibration.consumeLastSampleDecision() ?? undefined,
           });
@@ -1817,6 +1990,22 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     },
 
     setFilterPreset(preset: FilterPreset | FilterPresetV2): void {
+      if (cadeia) {
+        // Os presets são parâmetros do One Euro (`mincutoff`, `beta`,
+        // `filterInNormalizedSpace`). Não existe tradução deles para o Kalman,
+        // e aceitar a chamada em silêncio faria a UI mostrar um preset ativo
+        // que não governa nada — o operador de `F8.5` acharia que trocou de
+        // condição sem ter trocado.
+        console.warn(
+          `[engine] setFilterPreset('${preset}') ignorado: filterMode é ` +
+          `'${EXPERIMENT.filterMode}', e os presets só parametrizam o One Euro.`,
+        );
+        return;
+      }
+      // Atribuído DEPOIS da guarda: antes, uma troca recusada já tinha gravado
+      // `activePreset` e voltava sem tocar em `activeConfig` — os dois ficavam
+      // permanentemente dessincronizados, e a UI passava a exibir um preset
+      // que não correspondia aos parâmetros em uso.
       activePreset = preset;
       // Resolve o config de presets v1 (pixel) ou v2 (normalizado)
       const isV2 = preset.endsWith('-v2');
@@ -1867,6 +2056,20 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         gaze: {
           yaw: diagL2csYaw,
           pitch: diagL2csPitch,
+        },
+        // P7.6 / F8.5 — qual cadeia de filtragem está REALMENTE governando.
+        //
+        // `efetivo` pode diferir de `pedido`: `kalmanEma` sem geometria de
+        // tela degrada para Kalman puro. Sem este campo no diagnóstico, uma
+        // sessão do Dia 7 poderia rodar degradada e o relatório diria
+        // "kalmanEma" — o resultado viraria conclusão sobre uma cadeia que
+        // nunca rodou.
+        filtro: {
+          pedido: EXPERIMENT.filterMode,
+          efetivo: cadeia ? cadeia.modoEfetivo : 'oneEuro',
+          degradado: cadeia?.degradado ?? false,
+          geometriaConhecida: geometriaDeTela !== null,
+          preset: cadeia ? null : activePreset,
         },
         pose: {
           ...diagPose,
@@ -1982,6 +2185,28 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         label?: string;
         geometry?: Partial<import('../calibration').CalibrationGeometry>;
       }): void {
+        // A geometria física da sessão chega aqui e em nenhum outro lugar. O
+        // `kalmanEma` precisa dela para escolher α em GRAUS; sem ela a cadeia
+        // degrada para Kalman puro e AVISA — e uma medição de `F8.5` feita sob
+        // degradação silenciosa compararia duas cadeias achando que comparou
+        // três.
+        const g = opts?.geometry;
+        if (g?.screenDiagonalIn && g?.viewingDistanceCm) {
+          const nova = geometriaDeDiagonal(
+            document.documentElement.clientWidth || 0,
+            document.documentElement.clientHeight || 0,
+            g.screenDiagonalIn,
+            g.viewingDistanceCm,
+          );
+          if (nova) {
+            geometriaDeTela = nova;
+            // Reconstruir descarta o estado interno (velocidade estimada,
+            // média corrente). É o certo: a geometria mudar significa que as
+            // grandezas em graus mudaram de escala, e continuar com um estado
+            // calibrado para a escala antiga seria pior que recomeçar.
+            montarCadeia();
+          }
+        }
         calibration.startCalibrationMode(opts);
       },
       getCalibrationTargets(): readonly { x: number; y: number }[] {

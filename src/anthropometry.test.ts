@@ -141,10 +141,19 @@ describe('nenhum literal antropométrico solto no código de produção', () => 
         // Só código: comentário citando o número é registro histórico, e é
         // desejável — foi assim que o bug de 43% ficou documentado.
         const semComentario = linha.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
-        if (semComentario.trim().startsWith('*')) return;
+        const conteudo = semComentario.trim();
+        // `*` pega as linhas de continuação do JSDoc; `/*` pega a de ABERTURA,
+        // que a primeira versão deixava passar. Foi por ali que `P6.3` — um ID
+        // de tarefa numa `/** ... */` de uma linha — entrou como infrator.
+        if (conteudo.startsWith('*') || conteudo.startsWith('/*')) return;
         // `9.0` ou `6.3` como VALOR, não como parte de outro número
-        // (0.9, 19.0, 6.35 não contam).
-        if (/(?<![\d.])(9\.0|6\.3)(?![\d])/.test(semComentario)) {
+        // (0.9, 19.0, 6.35 não contam) e não como sufixo de um IDENTIFICADOR:
+        // `P6.3`, `B2.5` e `C6.3` são IDs de tarefa do plano, e eles aparecem
+        // no código o tempo todo. Sem a letra na lookbehind, todo ID que
+        // termine em `6.3` ou `9.0` vira falso positivo — e um teste de
+        // convenção que acusa o inocente é desligado pela equipe, que é o
+        // único jeito de ele parar de proteger o que veio proteger.
+        if (/(?<![\d.A-Za-z])(9\.0|6\.3)(?![\d])/.test(semComentario)) {
           infratores.push(`${arquivo.replace(raiz, 'src')}:${i + 1}: ${linha.trim()}`);
         }
       });

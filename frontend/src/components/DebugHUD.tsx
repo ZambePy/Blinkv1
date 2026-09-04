@@ -45,7 +45,23 @@ export const DebugHUD: React.FC = () => {
 
         <span style={{ color: '#88f' }}>L2CS</span>
         <span>
-          {diag.l2cs.status} &middot; {diag.l2cs.hz.toFixed(1)} Hz &middot; {diag.l2cs.latencyMs.toFixed(0)} ms &middot; stale {diag.l2cs.stalePct.toFixed(0)} % &middot; conf {diag.l2cs.confidence.toFixed(2)}
+          {diag.l2cs.status} &middot; {diag.l2cs.hz.toFixed(1)} Hz &middot; {diag.l2cs.latencyMs.toFixed(0)} ms &middot;{' '}
+          {/* `stale` em vermelho acima de 50%: com o bloco angular zerado o
+              modelo roda com 4 das 6 dimensões, e nada mais na tela diz isso. */}
+          <span style={{ color: diag.l2cs.stalePct > 50 ? '#f66' : undefined }}>
+            stale {diag.l2cs.stalePct.toFixed(0)} %
+          </span>
+          {' '}&middot; conf {diag.l2cs.confidence.toFixed(2)}
+          {/* `fila` é a evidência AO VIVO de submissão travada. Presa acima de
+              zero significa que nenhuma inferência nova acontece pelo resto da
+              sessão — com o status ainda dizendo 'ready'. Só aparece quando há
+              pendência, para não virar ruído permanente no painel. */}
+          {diag.l2cs.pendingCount > 0 && (
+            <>
+              {' '}&middot;{' '}
+              <span style={{ color: '#fa0' }}>fila {diag.l2cs.pendingCount}</span>
+            </>
+          )}
         </span>
 
         <span style={{ color: '#88f' }}>yaw / pitch</span>

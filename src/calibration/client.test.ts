@@ -4,15 +4,23 @@ import { StandardScaler } from '../scaler';
 import { RidgeRegressor } from '../ridge';
 import { expandPolynomialFeatures } from './polynomial';
 
-// Roda em jsdom+worker mock (Vitest suporta workers via `pool: 'threads'`).
-// Se o ambiente não tiver Worker global, o teste é skippado com aviso.
+// ⚠️ ESTE ARQUIVO NUNCA RODOU, e o skip escondia isso.
+//
+// O guard era `if (typeof Worker === 'undefined') { it.skip(...); return; }`, e
+// **jsdom não implementa Web Workers** — confirmado no ambiente do projeto.
+// O `describe` retornava cedo, o teste de equivalência nunca era registrado, e
+// a suíte ficava verde afirmando uma cobertura que não existia.
+//
+// A equivalência migrou para `trainCore.test.ts`, que a verifica SEM Worker: o
+// núcleo de treino foi extraído de `calibration.worker.ts` para `trainCore.ts`,
+// e os dois lados passaram a chamar a mesma função. Mesmo padrão de `P4.2`.
+//
+// O que sobra aqui — e roda de verdade — é o transporte: que a config viaja na
+// mensagem (`B3.10`) e que nenhuma promise fica pendente (`B3.11`).
 
-describe('CalibrationClient — equivalência com treino síncrono', () => {
-  const hasWorker = typeof Worker !== 'undefined';
-  if (!hasWorker) {
-    it.skip('sem Worker global disponível — skip', () => {});
-    return;
-  }
+describe.skipIf(typeof Worker === 'undefined')(
+  'CalibrationClient — equivalência com treino síncrono (exige Worker real)',
+  () => {
 
   it('produz mesmos pesos que treino síncrono (tolerância 1e-9)', async () => {
     // Dataset sintético: 5 alvos × 6 amostras = 30 samples, 4 features por olho.
@@ -66,7 +74,8 @@ describe('CalibrationClient — equivalência com treino síncrono', () => {
       client.stop();
     }
   }, 15000);
-});
+  },
+);
 
 // PRNG determinístico
 function mulberry32(seed: number) {

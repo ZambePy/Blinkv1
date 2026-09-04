@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { sanitizeExperiment, EXPERIMENT_RANGES } from './experiment';
+import {
+  sanitizeExperiment,
+  EXPERIMENT_RANGES,
+  L2CS_INPUT_SIZES_ACEITOS,
+} from './experiment';
 
 // -----------------------------------------------------------------------------
 // B3.13 — `{...DEFAULTS, ...JSON.parse(raw)}` com cast de tipo e ZERO validação.
@@ -99,14 +103,41 @@ describe('B3.13 — sanitize aplica faixa por chave', () => {
   it('toda chave numérica tem faixa declarada', () => {
     // Defesa contra alguém adicionar uma flag numérica nova e esquecer a
     // faixa — que é como este bug nasceu.
+    //
+    // Uma faixa NÃO é a única forma válida de restringir. `l2csInputSize` usa
+    // lista fechada porque faixa é fraca demais para ele: `{min:224,max:448}`
+    // aceitava 244, que não é múltiplo de 32 e faz a ResNet-50 padear
+    // assimetricamente — rodando sem erro e medindo outra coisa. O que este
+    // teste exige é que exista ALGUMA restrição declarada, não que ela seja
+    // sempre uma faixa.
+    const listasFechadas: Record<string, readonly number[]> = {
+      l2csInputSize: L2CS_INPUT_SIZES_ACEITOS,
+    };
     const defaults = sanitizeExperiment({});
     for (const [k, v] of Object.entries(defaults)) {
       if (typeof v === 'number') {
+        const temFaixa = EXPERIMENT_RANGES[k as keyof typeof EXPERIMENT_RANGES] !== undefined;
+        const temLista = listasFechadas[k] !== undefined;
         expect(
-          EXPERIMENT_RANGES[k as keyof typeof EXPERIMENT_RANGES],
-          `chave numérica '${k}' sem faixa em EXPERIMENT_RANGES`,
-        ).toBeDefined();
+          temFaixa || temLista,
+          `chave numérica '${k}' sem faixa em EXPERIMENT_RANGES nem lista fechada`,
+        ).toBe(true);
       }
+    }
+  });
+
+  it('`l2csInputSize` recusa valores que não são múltiplos de 32', () => {
+    // O risco concreto do Dia 7 é um dedo trocado: `244` em vez de `224`.
+    // Sob a faixa antiga ele passava, e a condição C8 mediria uma terceira
+    // coisa que ninguém pediu — sem erro, sem aviso, com aparência normal.
+    for (const bom of L2CS_INPUT_SIZES_ACEITOS) {
+      expect(sanitizeExperiment({ l2csInputSize: bom }).l2csInputSize).toBe(bom);
+    }
+    for (const ruim of [244, 300, 256, 0, -224]) {
+      expect(
+        sanitizeExperiment({ l2csInputSize: ruim }).l2csInputSize,
+        `${ruim} deveria cair no default`,
+      ).toBe(448);
     }
   });
 

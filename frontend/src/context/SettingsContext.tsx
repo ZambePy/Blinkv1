@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { computeDisplayGeometry, pickPanelForDisplay } from '@tracker/displayGeometry';
 import { aplicarGeometriaDoUsuario } from '../design/gazeMetrics';
+import { setSessionGeometry } from '@tracker/calibration';
 
 type DwellSpeed = 'slow' | 'normal' | 'fast';
 type Theme = 'light' | 'dark';
@@ -305,6 +306,22 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // aprende a ignorá-lo.
   useEffect(() => {
     aplicarGeometriaDoUsuario(settings.viewingDistanceCm, settings.screenDiagonalIn);
+
+    // E a MESMA geometria vai para o pipeline.
+    //
+    // Ela chegava só em `startCalibrationMode`, como valor local que morria na
+    // função. `screenDistancePx()` e `screenPxPerCm()` — que estão no caminho
+    // quente de todo `mapGaze`, porque `geometricPoseCompensation` é `true`
+    // por default — liam os defaults de 23,6"/60 cm. Numa tela de 27" o
+    // `pxPerCm` saía 1,14× grande demais e a compensação de pose era
+    // super-aplicada em ~14%.
+    //
+    // Propagar aqui, e não só ao calibrar, é o que faz o cuidador corrigir a
+    // diagonal e a correção valer na hora — sem exigir recalibração.
+    setSessionGeometry({
+      viewingDistanceCm: settings.viewingDistanceCm,
+      screenDiagonalIn: settings.screenDiagonalIn,
+    });
   }, [settings.viewingDistanceCm, settings.screenDiagonalIn]);
 
   // B3.22 — `useMemo` no value do provider.

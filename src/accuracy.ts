@@ -12,7 +12,7 @@ import {
   getCalibrationFitDiagnostics, getDistanceRange, getCalibrationDistancesCm,
 } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
-import { EXPERIMENT } from './config/experiment';
+import { EXPERIMENT, experimentSnapshot } from './config/experiment';
 import { ACCLIMATION_MS, COLLECTION_MS } from './accuracyProtocol';
 import { ACTIVE_FEATURE_SET, l2csSlotsInSet } from './extractor';
 
@@ -64,7 +64,7 @@ export interface AccuracyResult {
   sampleP90Error: number | null;   // p90 real, sobre todas as amostras
   /** % de amostras dentro de um alvo de raio R centrado no ponto.
    *  Preditor direto da taxa de sucesso do dwell. */
-  hitRateByRadius: { radiusPx: number; pct: number }[];
+  hitRateByRadius: { radiusPx: number; pct: number | null }[];
   /** Decomposição afim do erro. Ajusta, por mínimos quadrados sobre os pares
    *  (ground-truth → predito) em coordenadas NORMALIZADAS:
    *
@@ -196,7 +196,7 @@ export interface ErrosAgregados {
   sampleMeanError: number | null;
   sampleMedianError: number | null;
   sampleP90Error: number | null;
-  hitRateByRadius: { radiusPx: number; pct: number }[];
+  hitRateByRadius: { radiusPx: number; pct: number | null }[];
   maxError: number | null;
   errorPct: number | null;
   /** Quantos pontos de fato coletaram amostra. */
@@ -292,9 +292,17 @@ export function agregarErros(
       nAmostras > 0
         ? ordenadasAmostras[Math.min(nAmostras - 1, Math.ceil(nAmostras * 0.9) - 1)]
         : null,
+    // `null`, não `0` — a única violação que restava da política declarada no
+    // cabeçalho deste arquivo ("nunca `0` fabricado").
+    //
+    // E aqui o zero é especialmente perigoso: 0% de acerto é um resultado
+    // catastrófico perfeitamente plausível. Um teste em que NADA foi medido
+    // (rosto perdido a sessão inteira, por exemplo) saía indistinguível de um
+    // teste em que o rastreamento errou todos os alvos — e a UI imprimia
+    // "Taxa de acerto em alvo de 150 px: 0%" para o cuidador ler.
     hitRateByRadius: HIT_RADII.map((r) => ({
       radiusPx: r,
-      pct: nAmostras > 0 ? (amostras.filter((e) => e <= r).length / nAmostras) * 100 : 0,
+      pct: nAmostras > 0 ? (amostras.filter((e) => e <= r).length / nAmostras) * 100 : null,
     })),
     // B3.6 — `Math.max(...pointErrors)` sobre um array com NaN devolve NaN.
     // Agora só entram pontos medidos, e sem nenhum a resposta é `null`.
@@ -1019,6 +1027,21 @@ function finishTest(
     l2csDims: l2csSlotsInSet().length,
     regressor: REGRESSOR_MODE,
     gazeCorrectionApplied: EXPERIMENT.applyGazeCorrection,
+
+    // ⚠️ O SNAPSHOT COMPLETO DAS FLAGS.
+    //
+    // Sem ele, um relatório de `l2csInputSize: 224` era byte-indistinguível de
+    // um de 448, e um `filterMode: 'kalman'` de um `'oneEuro'`. Duas das três
+    // decisões que o Sprint 8 existe para tomar não eram recuperáveis do
+    // arquivo depois da sessão.
+    //
+    // O modo de falha não é hipotético: `__irisflowExp.set` só passa a valer
+    // no RELOAD. Esquecer de recarregar entre condições atribui a rodada à
+    // condição errada, e nada no relatório denunciaria isso.
+    //
+    // `experimentSnapshot()` já existia e NÃO tinha nenhum chamador — o
+    // comentário do módulo dizia "vai no relatório", e não ia.
+    experiment: experimentSnapshot(),
   };
 
   // Diagnóstico do AJUSTE da calibração que gerou este modelo. É o que
@@ -1313,7 +1336,13 @@ function showDiagnosticOverlay(
       ${gridAviso}
 
       <div style="text-align:center; font-size:14px; font-weight:600; color:#fff; margin-bottom:16px;">
-        Taxa de acerto em alvo de 150 px: <span style="color:${scoreColor}">${result.hitRateByRadius.find(r => r.radiusPx === 150)?.pct.toFixed(0) || 0}%</span>
+        Taxa de acerto em alvo de 150 px: <span style="color:${scoreColor}">${(() => {
+          const h = result.hitRateByRadius.find(r => r.radiusPx === 150)?.pct;
+          // `??` e não `||`: com `||`, um acerto legítimo de 0% viraria o
+          // texto de "não medido". São coisas diferentes e precisam ler
+          // diferente.
+          return h === null || h === undefined ? 'não medido' : `${h.toFixed(0)}%`;
+        })()}</span>
       </div>
 
       <div class="diagnostic-point-grid">

@@ -1,9 +1,7 @@
 /// <reference lib="webworker" />
 
-import { StandardScaler } from '../scaler';
-import { RidgeRegressor } from '../ridge';
-import { expandPolynomialFeatures } from './polynomial';
-import { aplicarConfigDoRegressor, type RegressorConfig } from './regressorConfig';
+import { treinarCalibracao } from './trainCore';
+import type { RegressorConfig } from './regressorConfig';
 import type { RidgeModel } from '../ridge';
 
 const ctx = self as unknown as DedicatedWorkerGlobalScope;
@@ -39,54 +37,33 @@ interface ErrorResponse {
   error: string;
 }
 
-function scalerSnapshot(s: StandardScaler): { mean: number[]; std: number[] } {
-  const params = s.getParams();
-  return { mean: params.means, std: params.stds };
-}
-
+/**
+ * Casca de transporte. A MATEMÁTICA vive em `trainCore.ts`.
+ *
+ * A separação existe porque a equivalência entre treinar aqui e treinar na main
+ * thread não estava sendo verificada: o teste que a cobriria começava com um
+ * guard `typeof Worker !== 'undefined'`, e **jsdom não implementa Web Workers**
+ * — o `describe` retornava cedo e o teste real nunca rodava. A suíte ficava
+ * verde afirmando uma cobertura inexistente.
+ *
+ * Com o núcleo extraído, os dois lados chamam a MESMA função, e a equivalência
+ * deixa de ser algo a testar através de um Worker que o ambiente de teste não
+ * tem. Mesmo padrão de `P4.2` para a captura.
+ */
 function train(req: TrainRequest): TrainResponse {
   const t0 = performance.now();
-  // B3.10 — instala a configuração da main thread ANTES de instanciar
-  // qualquer regressor.
-  //
-  // Um Web Worker tem registro de módulos próprio: sem esta linha,
-  // `RidgeRegressor.axisScale` vale o default `{1,1}` aqui dentro, e o CV
-  // escolhe λ pesando erro em X e em Y igualmente. Em 1920×1080 isso
-  // reintroduz o bug de aspect-ratio que subponderava o eixo X em 3,16× —
-  // exatamente o que `axisScale` existe para corrigir.
-  aplicarConfigDoRegressor(req.regressorConfig);
-
-  const flExp = req.polynomialFeatures
-    ? req.featuresLeft.map((f) => expandPolynomialFeatures(f))
-    : req.featuresLeft;
-  const frExp = req.polynomialFeatures
-    ? req.featuresRight.map((f) => expandPolynomialFeatures(f))
-    : req.featuresRight;
-
-  const sL = new StandardScaler();
-  sL.fit(flExp);
-  const sR = new StandardScaler();
-  sR.fit(frExp);
-
-  const rL = new RidgeRegressor();
-  rL.train(sL.transform(flExp), req.targetsX, req.targetsY);
-  const rR = new RidgeRegressor();
-  rR.train(sR.transform(frExp), req.targetsX, req.targetsY);
-
-  const modelL = rL.getModel();
-  const modelR = rR.getModel();
-
-  if (!modelL || !modelR) {
-    throw new Error('[calibration.worker] treino retornou modelo nulo');
-  }
-
+  const treinado = treinarCalibracao({
+    featuresLeft: req.featuresLeft,
+    featuresRight: req.featuresRight,
+    targetsX: req.targetsX,
+    targetsY: req.targetsY,
+    polynomialFeatures: req.polynomialFeatures,
+    regressorConfig: req.regressorConfig,
+  });
   return {
     type: 'trained',
     id: req.id,
-    scalerLeft: scalerSnapshot(sL),
-    scalerRight: scalerSnapshot(sR),
-    modelLeft: modelL,
-    modelRight: modelR,
+    ...treinado,
     trainTimeMs: performance.now() - t0,
   };
 }

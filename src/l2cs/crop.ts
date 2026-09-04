@@ -265,6 +265,21 @@ export function createCropContext(size: number = INPUT_SIZE): CropContext {
     | OffscreenCanvasRenderingContext2D
     | null;
   if (!ctx) throw new Error('createCropContext: 2D context indisponível');
+
+  // ⚠️ Kernel de reamostragem FIXADO.
+  //
+  // `imageSmoothingEnabled`/`Quality` nunca eram definidos, então o
+  // `drawImage` usava o default do navegador — que varia por versão e por
+  // plataforma. Com a mesma bbox de origem, 448² é tipicamente um upscale e
+  // 224² um downscale de ~2×: kernels diferentes, aplicados de forma
+  // diferente, em cada braço da comparação.
+  //
+  // A condição C8 do `F8.4` mediria então "o modelo em N² MAIS a reamostragem
+  // do browser para N²", e atribuiria a diferença ao modelo. Fixar aqui não
+  // torna o kernel ideal — torna-o o MESMO nos dois braços, que é o que a
+  // ablação precisa.
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = 'high';
   return { canvas, ctx };
 }
 

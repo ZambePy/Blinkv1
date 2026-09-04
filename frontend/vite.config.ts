@@ -20,11 +20,24 @@ function saveAccuracyReportPlugin(): Plugin {
         req.on('data', (chunk) => { body += chunk; });
         req.on('end', () => {
           try {
-            for (const f of fs.readdirSync(projectRoot)) {
-              if (/^accuracy-report-.*\.json$/.test(f)) {
-                fs.unlinkSync(path.join(projectRoot, f));
-              }
-            }
+            // ⚠️ NÃO apagar os relatórios anteriores.
+            //
+            // Este bloco removia todo `accuracy-report-*.json` antes de gravar
+            // o novo, deixando exatamente UM arquivo sobrevivente por sessão
+            // de dev-server — que é como o Electron carrega o app
+            // (`VITE_DEV_SERVER_URL`).
+            //
+            // O protocolo do `F8.1` pede no mínimo 3 repetições por condição,
+            // com recalibração entre elas, e são ~8 condições. Um dia inteiro
+            // de medição terminaria com um único relatório no disco.
+            //
+            // E o pior não é perder o dado: é que quem abrisse o arquivo
+            // depois o leria como "a medição do dia", sem nada indicando que
+            // outras 20 existiram e foram apagadas.
+            //
+            // O nome já carrega `Date.now()`, então não há colisão. Limpeza,
+            // se for desejada, é decisão de quem opera — não efeito colateral
+            // de gravar.
             const fname = `accuracy-report-${Date.now()}.json`;
             fs.writeFileSync(path.join(projectRoot, fname), body, 'utf-8');
             res.statusCode = 200;

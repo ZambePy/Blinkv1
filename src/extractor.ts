@@ -625,7 +625,18 @@ export function l2csSlotsInSet(set: FeatureSet = ACTIVE_FEATURE_SET): number[] {
  *  + interações já cobrem parte do sinal de 2ª ordem, e o Ridge precisa de mais
  *  alvos que dims para não memorizar aglomerados.
  */
-export const ACTIVE_FEATURE_SET: FeatureSet = 'irisCore+l2cs';
+/**
+ * Conjunto ativo, vindo da flag `featureSet` (`P6.5`).
+ *
+ * Era uma constante literal aqui. O problema: `spec11` existia como tipo e
+ * como projeção, mas NENHUM caminho podia selecioná-lo — e o `F8.4` precisa
+ * exatamente disso para medir o conflito C6. Uma alternativa que não se
+ * consegue ligar não é alternativa.
+ *
+ * Continua sendo resolvido UMA vez, no boot: mudar o conjunto no meio da
+ * sessão trocaria o vetor sob um modelo já treinado.
+ */
+export const ACTIVE_FEATURE_SET: FeatureSet = EXPERIMENT.featureSet;
 
 /** Número de dimensões por olho que o conjunto ativo entrega ao modelo.
  *  `compact` é variável (37 sem bloco L2CS, 44 com), então o identificador
