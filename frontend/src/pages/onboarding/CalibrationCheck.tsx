@@ -5,8 +5,10 @@ import { useGaze } from '../../context/GazeContext';
 import { useSettings } from '../../context/SettingsContext';
 import { BackButton } from '../../components/ui/BackButton';
 import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hoverFocus';
-import { startAccuracyTest, type RuntimeInfo } from '@tracker/accuracy';
+import { startAccuracyTest, abortAccuracyTest } from '@tracker/accuracy';
+import { esperarPintura } from '@tracker/aguardarPintura';
 import { buildAutoTestMeta } from '../../utils/autoTestMeta';
+import { buildRuntimeInfo } from '../../utils/runtimeInfo';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { VeredictoDeriva } from '@tracker/calibration';
 import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
@@ -233,6 +235,10 @@ export const CalibrationCheck: React.FC = () => {
       // completar uma calibração inteira. Abortar não descarta o modelo
       // anterior — só encerra a sessão em curso.
       calibration.abort?.();
+      // Mesmo motivo, para o teste de precisão: sem isto `isAccuracyTesting`
+      // ficava presa em `true` e o painel de preflight sumia pelo resto da
+      // sessão. Idempotente quando não há teste em curso.
+      abortAccuracyTest();
       // Sair da tela no meio de uma gravação auto-iniciada: descarta pra não
       // deixar JSONL parcial em lugar nenhum.
       finalizeAutoRecordingRef.current(false);
@@ -288,17 +294,7 @@ export const CalibrationCheck: React.FC = () => {
 
     // Sem isto o relatório não sabe em que provider o L2CS rodou nem qual
     // filtro governava — e duas condições viram um número só.
-    const d = getDiagnostics();
-    const runtime: RuntimeInfo | undefined = d ? {
-      l2csExecutionProvider: d.l2cs?.executionProvider ?? null,
-      l2csFallback: d.l2cs?.fallback,
-      l2csLatencyMs: d.l2cs?.latencyMs,
-      l2csStalePct: d.l2cs?.stalePct,
-      filterEffective: d.filtro?.efetivo,
-      filterPreset: d.filtro?.preset ?? null,
-      fpsRender: d.fpsRender,
-      video: d.video ? { width: d.video.width, height: d.video.height } : undefined,
-    } : undefined;
+    const runtime = buildRuntimeInfo(getDiagnostics());
 
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
@@ -322,36 +318,52 @@ export const CalibrationCheck: React.FC = () => {
 
     if (step >= order.length) {
       setStage('testing');
-      calibration.completeCalibration?.((outcome) => {
-        if (!outcome || outcome.ok !== false) {
-          // a deriva de pose já era medida e só ia para o console. Se a
-          // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
-          // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
-          // decidir, em vez de seguir para o teste com um ajuste contaminado.
-          const veredito = calibration.getPoseDriftVerdict?.() ?? null;
-          const pulados = calibration.getCalibrationFitDiagnostics?.()?.targetsSkipped?.length ?? 0;
-          if ((veredito || pulados > 0) && isMounted.current) {
-            if (veredito) console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
-            if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
-            setDriftVerdict(veredito);
-            setAlvosPulados(pulados);
-            setStage('drift-warning');
-            return;
+      // `completeCalibration` é SÍNCRONO e caro: os dois treinos com busca de
+      // λ (25 λ × 9 folds) mais o diagnóstico de ajuste (9 folds
+      // leave-one-target-out × 2 olhos) deram ~4 s num perfil realista de 225
+      // amostras. Chamado no mesmo tick do `setStage`, o React agrupa a
+      // atualização e o navegador nunca pinta a tela de transição: o paciente
+      // fica encarando "9 / 9" congelado, sem sinal de que o sistema está
+      // vivo, exatamente quando NÃO pode se mexer.
+      //
+      // Dois rAF garantem que a pintura aconteceu: o primeiro roda antes do
+      // quadro que mostra a tela nova, o segundo já depois dele.
+      esperarPintura(() => {
+        if (!isMounted.current) return;
+        calibration.completeCalibration?.((outcome) => {
+          if (!outcome || outcome.ok !== false) {
+            // a deriva de pose já era medida e só ia para o console. Se a
+            // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
+            // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
+            // decidir, em vez de seguir para o teste com um ajuste contaminado.
+            const veredito = calibration.getPoseDriftVerdict?.() ?? null;
+            // `getTargetsSkipped` e não `getCalibrationFitDiagnostics`: o
+            // segundo dispara o leave-one-target-out (~9 s de main thread
+            // travado) e aqui só se quer a contagem de alvos pulados.
+            const pulados = calibration.getTargetsSkipped?.()?.length ?? 0;
+            if ((veredito || pulados > 0) && isMounted.current) {
+              if (veredito) console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
+              if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
+              setDriftVerdict(veredito);
+              setAlvosPulados(pulados);
+              setStage('drift-warning');
+              return;
+            }
+            console.log('[React] Calibração concluída — disparando teste de precisão automático');
+            setTimeout(() => { if (isMounted.current) runAccuracyTestThenExit(); }, 400);
+          } else {
+            if (isMounted.current) {
+              const reason = outcome.reason || 'unknown';
+              const msg = humanMessage[reason] || humanMessage.unknown;
+              console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
+              // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
+              // Descarta em vez de exportar; próxima tentativa recomeça limpa.
+              finalizeAutoRecordingRef.current(false);
+              setErrorMessage(msg);
+              setStage('tutorial');
+            }
           }
-          console.log('[React] Calibração concluída — disparando teste de precisão automático');
-          setTimeout(() => { if (isMounted.current) runAccuracyTestThenExit(); }, 400);
-        } else {
-          if (isMounted.current) {
-            const reason = outcome.reason || 'unknown';
-            const msg = humanMessage[reason] || humanMessage.unknown;
-            console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
-            // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
-            // Descarta em vez de exportar; próxima tentativa recomeça limpa.
-            finalizeAutoRecordingRef.current(false);
-            setErrorMessage(msg);
-            setStage('tutorial');
-          }
-        }
+        });
       });
       return;
     }

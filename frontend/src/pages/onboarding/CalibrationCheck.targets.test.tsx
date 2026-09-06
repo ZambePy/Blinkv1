@@ -42,6 +42,7 @@ const startAccuracyTest = vi.fn();
 
 vi.mock('@tracker/accuracy', () => ({
   startAccuracyTest: (...a: unknown[]) => startAccuracyTest(...a),
+  abortAccuracyTest: vi.fn(),
 }));
 vi.mock('../../utils/autoTestMeta', () => ({ buildAutoTestMeta: () => ({}) }));
 

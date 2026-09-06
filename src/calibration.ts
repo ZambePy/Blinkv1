@@ -1212,6 +1212,10 @@ export function startCalibrationMode(
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
+  // Sem isto, uma calibração que FALHA deixa em pé o diagnóstico da anterior, e
+  // o relatório seguinte descreve um ajuste que não é o dele.
+  lastFitDiagnostics = null;
+  pendingFitInputs = null;
 
   // Modo ativo. Consulta pública via getCalibrationTargets() para a UI
   // renderizar 4 cantos (quick) ou grade 3×3 (full). Comportamento default
@@ -1711,7 +1715,76 @@ export interface CalibrationFitDiagnostics {
 
 let lastFitDiagnostics: CalibrationFitDiagnostics | null = null;
 
+/**
+ * Entradas do diagnóstico de ajuste, guardadas no treino para a conta rodar
+ * DEPOIS do teste de precisão.
+ *
+ * O diagnóstico custa ~9 s com as 606 amostras que uma calibração de 9 alvos
+ * coleta (o LOO refaz a busca das 25 λ dentro de cada fold, para cada olho:
+ * 3.600 solves). Rodando dentro de `completeCalibration`, esse tempo é main
+ * thread travado entre "calibração terminou" e o teste começar — logo depois
+ * de mandar o paciente não se mexer, e sem nada na tela indicando vida.
+ *
+ * Ele é diagnóstico PURO: não entra no modelo treinado, e o primeiro
+ * consumidor real é o relatório, no fim do teste. Então adiamos a conta, sem
+ * mudar uma vírgula dela. `reliability` vai junto porque é o único estado que
+ * ela lê e que muda a cada quadro — congelá-lo aqui é o que garante que o
+ * número adiado seja idêntico ao número imediato.
+ */
+/**
+ * Estado mutável do módulo, congelado no fim do treino.
+ *
+ * Tudo aqui é lido por `computeFitDiagnostics` e muda depois do treino:
+ * `reliability` a cada quadro, `planejados` e `poseDrift` quando
+ * `abortCalibration()` roda (a tela chama no unmount). Congelar é o que faz o
+ * número adiado ser idêntico ao número imediato.
+ */
+export interface FitSnapshot {
+  reliability: { left: number; right: number } | null;
+  planejados: readonly { x: number; y: number }[];
+  poseDrift: SessionPoseDrift | null;
+  lambda: LambdaDiagnostics | null;
+}
+
+let pendingFitInputs: {
+  featuresLeft: number[][];
+  featuresRight: number[][];
+  targets: { screenX: number; screenY: number }[];
+  profile: readonly CalibrationPoint[];
+  viewport: { w: number; h: number };
+  congelado: FitSnapshot;
+} | null = null;
+
+/** Alvos planejados que não entraram no treino. Barato de propósito: a tela
+ *  precisa disto imediatamente após o treino, e não pode pagar o LOO. */
+export function getTargetsSkipped(): { x: number; y: number }[] {
+  return calcularTargetsSkipped(profile, currentCalibrationTargets ?? []);
+}
+
+function calcularTargetsSkipped(
+  perfil: readonly CalibrationPoint[] | undefined,
+  planejados: readonly { x: number; y: number }[],
+): { x: number; y: number }[] {
+  // Comparação pela chave ORIGINAL do alvo (o perfil guarda o alvo nominal;
+  // os targets de treino podem estar compensados por pose).
+  const treinados = new Set(
+    (perfil ?? []).map((p) => targetGroupKey({ screenX: p.screenX, screenY: p.screenY })),
+  );
+  return planejados
+    .filter((t) => !treinados.has(targetGroupKey({ screenX: t.x, screenY: t.y })))
+    .map((t) => ({ x: t.x, y: t.y }));
+}
+
 export function getCalibrationFitDiagnostics(): CalibrationFitDiagnostics | null {
+  if (lastFitDiagnostics) return lastFitDiagnostics;
+  const inp = pendingFitInputs;
+  if (!inp) return null;
+  // Uma vez só: a conta é cara e o resultado é imutável para este treino.
+  pendingFitInputs = null;
+  lastFitDiagnostics = computeFitDiagnostics(
+    inp.featuresLeft, inp.featuresRight, inp.targets, inp.profile, inp.viewport, inp.congelado,
+  );
+  logarDiagnosticoDeAjuste(lastFitDiagnostics);
   return lastFitDiagnostics;
 }
 
@@ -1861,11 +1934,29 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }),
   );
 
-  lastFitDiagnostics = computeFitDiagnostics(
-    trainFeaturesLeft, trainFeaturesRight, trainTargets, trainingProfile,
-    { w: vw, h: vh },
-  );
-  const d = lastFitDiagnostics;
+  // Só guarda as entradas. A conta (e o log dela) sai no primeiro
+  // `getCalibrationFitDiagnostics()`, que na prática é o relatório no fim do
+  // teste de precisão. Ver a nota em `pendingFitInputs`.
+  lastFitDiagnostics = null;
+  pendingFitInputs = {
+    featuresLeft: trainFeaturesLeft,
+    featuresRight: trainFeaturesRight,
+    targets: trainTargets,
+    profile: trainingProfile,
+    viewport: { w: vw, h: vh },
+    congelado: {
+      reliability: eyeReliability ? { ...eyeReliability } : null,
+      planejados: [...(currentCalibrationTargets ?? [])],
+      poseDrift: getSessionPoseDrift(),
+      lambda: getLambdaDiagnostics(),
+    },
+  };
+
+  return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
+}
+
+/** Log do diagnóstico de ajuste. Sai junto com a conta, que é adiada. */
+function logarDiagnosticoDeAjuste(d: CalibrationFitDiagnostics): void {
   console.log(
     `[calib] ajuste — treino=${d.trainErrorPx.toFixed(0)}px | LOO=${d.looErrorPx.toFixed(0)}px | ` +
     `λ=${d.lambda ? `${d.lambda.left}/${d.lambda.right}` : '?'} | dims=${d.dimsPerEye} | ` +
@@ -1891,8 +1982,6 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     const veredito = avaliarDerivaDePose(pd);
     if (veredito) console.warn(`[calib] ⚠️ ${veredito.mensagem}`);
   }
-
-  return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
 }
 
 /**
@@ -1910,13 +1999,26 @@ export function computeFitDiagnostics(
   targets: { screenX: number; screenY: number }[],
   profile?: readonly CalibrationPoint[],
   viewport?: { w: number; h: number },
+  /**
+   * Estado do treino congelado. Omitido, lê os valores VIVOS do módulo.
+   *
+   * A conta é adiada para depois do teste de precisão (ver
+   * `getCalibrationFitDiagnostics`), e tudo o que ela lê de estado mutável tem
+   * de vir congelado — senão o número muda só por causa de QUANDO ela roda.
+   * `eyeReliability` muda a cada quadro; `currentCalibrationTargets` e
+   * `sessionPoseByTarget` são ZERADOS por `abortCalibration()`, que a tela
+   * chama no unmount. Sem congelar, um relatório gerado pela tela de
+   * Configurações sairia com `targetsPlanned: 0` e sem deriva de pose.
+   */
+  congelado?: FitSnapshot,
 ): CalibrationFitDiagnostics {
   const n = featuresLeft.length;
   const vw = viewport?.w ?? (typeof document !== 'undefined' ? document.documentElement.clientWidth : 1920);
   const vh = viewport?.h ?? (typeof document !== 'undefined' ? document.documentElement.clientHeight : 1080);
   const errPx = (dx: number, dy: number) => Math.hypot(dx * vw, dy * vh);
-  const wL = eyeReliability ? Math.max(MIN_EYE_WEIGHT, eyeReliability.left) : 1;
-  const wR = eyeReliability ? Math.max(MIN_EYE_WEIGHT, eyeReliability.right) : 1;
+  const rel = congelado ? congelado.reliability : eyeReliability;
+  const wL = rel ? Math.max(MIN_EYE_WEIGHT, rel.left) : 1;
+  const wR = rel ? Math.max(MIN_EYE_WEIGHT, rel.right) : 1;
   const fundir = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
     x: (a.x * wL + b.x * wR) / (wL + wR),
     y: (a.y * wL + b.y * wR) / (wL + wR),
@@ -2019,15 +2121,10 @@ export function computeFitDiagnostics(
     l2csValidFraction = l2csValid / n;
   }
 
-  // Alvos da grade que não treinaram. Comparação pela chave ORIGINAL do alvo
-  // (o `profile` guarda o alvo nominal; `targets` pode estar compensado).
-  const planejados = currentCalibrationTargets ?? [];
-  const treinados = new Set((profile ?? []).map((p) => targetGroupKey({ screenX: p.screenX, screenY: p.screenY })));
-  const targetsSkipped = planejados
-    .filter((t) => !treinados.has(targetGroupKey({ screenX: t.x, screenY: t.y })))
-    .map((t) => ({ x: t.x, y: t.y }));
+  const planejados = congelado ? congelado.planejados : (currentCalibrationTargets ?? []);
+  const targetsSkipped = calcularTargetsSkipped(profile, planejados);
 
-  const lam = getLambdaDiagnostics();
+  const lam = congelado ? congelado.lambda : getLambdaDiagnostics();
 
   return {
     trainErrorPx,
@@ -2035,7 +2132,7 @@ export function computeFitDiagnostics(
     looByTarget,
     poseMean,
     poseStd,
-    poseDrift: getSessionPoseDrift(),
+    poseDrift: congelado ? congelado.poseDrift : getSessionPoseDrift(),
     gridDiagnosis: diagnosticarGrade(looByTarget),
     l2csValidFraction,
     samplesPerTarget,

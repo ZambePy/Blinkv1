@@ -30,7 +30,10 @@ const startAccuracyTest = vi.fn();
 
 const alvos = Array.from({ length: 9 }, (_, i) => ({ x: 0.1 + (i % 3) * 0.4, y: 0.1 + Math.floor(i / 3) * 0.4 }));
 
-vi.mock('@tracker/accuracy', () => ({ startAccuracyTest: (...a: unknown[]) => startAccuracyTest(...a) }));
+vi.mock('@tracker/accuracy', () => ({
+  startAccuracyTest: (...a: unknown[]) => startAccuracyTest(...a),
+  abortAccuracyTest: vi.fn(),
+}));
 vi.mock('../../utils/autoTestMeta', () => ({ buildAutoTestMeta: () => ({}) }));
 
 vi.mock('../../context/GazeContext', () => ({

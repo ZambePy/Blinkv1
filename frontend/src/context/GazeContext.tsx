@@ -1208,10 +1208,13 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Deriva de pose da calibração recém-treinada, para a tela poder avisar
       // em vez de deixar o usuário seguir com um modelo contaminado.
       getPoseDriftVerdict: () => engineRef.current?.calibration.getPoseDriftVerdict() ?? null,
-      // Diagnóstico do ajuste: a tela usa `targetsSkipped` para avisar que a
-      // calibração treinou sem parte da grade.
+      // Diagnóstico do ajuste. CARO: a primeira chamada roda o LOO (~9 s).
+      // Quem só quer os alvos pulados usa `getTargetsSkipped`.
       getCalibrationFitDiagnostics: () =>
         engineRef.current?.calibration.getCalibrationFitDiagnostics() ?? null,
+      // Alvos que ficaram fora do treino, para a tela avisar que a calibração
+      // treinou sem parte da grade. Barato: não dispara o LOO.
+      getTargetsSkipped: () => engineRef.current?.calibration.getTargetsSkipped() ?? [],
       abort: () => engineRef.current?.calibration.abort(),
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,

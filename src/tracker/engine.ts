@@ -169,8 +169,14 @@ export interface CalibrationApi {
   /**
    * Diagnóstico do ajuste da última calibração — erro de treino, LOO, λ e os
    * alvos que ficaram de fora. `null` antes de qualquer treino.
+   *
+   * CARO: a primeira chamada dispara o leave-one-target-out (~9 s com uma
+   * grade de 9 alvos). Quem só precisa dos alvos pulados deve usar
+   * `getTargetsSkipped()`.
    */
   getCalibrationFitDiagnostics(): import('../calibration').CalibrationFitDiagnostics | null;
+  /** Alvos planejados que não entraram no treino. Barato. */
+  getTargetsSkipped(): { x: number; y: number }[];
   /**
    * Encerra uma calibração em curso SEM treinar e sem descartar o
    * modelo anterior. A tela chama no unmount e quando a janela perde o foco;
@@ -1572,6 +1578,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getCalibrationFitDiagnostics() {
         return calibration.getCalibrationFitDiagnostics();
+      },
+      getTargetsSkipped() {
+        return calibration.getTargetsSkipped();
       },
       abort(): void {
         calibration.abortCalibration();

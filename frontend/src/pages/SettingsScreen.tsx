@@ -43,6 +43,7 @@ import {
 } from '../utils/clinicalLogger';
 import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
 import { startAccuracyTest } from '@tracker/accuracy';
+import { buildRuntimeInfo } from '../utils/runtimeInfo';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { applyUptimeToRunMetaIfDefault } from '../utils/autoTestMeta';
@@ -359,7 +360,10 @@ export const SettingsScreen: React.FC = () => {
           `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
         );
       }
-    }, metaWithUptime);
+      // Sem o terceiro argumento o relatório sai com `pipeline.runtime: null`
+      // — sem provider efetivo, sem fallback, sem staleness e sem fps. Uma
+      // sessão assim não diz em que condição foi medida.
+    }, metaWithUptime, buildRuntimeInfo(getDiagnostics()));
   };
 
   const handleLogin = (e: React.FormEvent) => {

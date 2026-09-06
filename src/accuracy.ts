@@ -13,6 +13,7 @@ import {
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { experimentSnapshot } from './config/experiment';
 import { ACCLIMATION_MS, COLLECTION_MS } from './accuracyProtocol';
+import { esperarPintura } from './aguardarPintura';
 import { ACTIVE_FEATURE_SET, l2csSlotsInSet } from './extractor';
 
 /** Amostras mínimas para um ponto contar como medido. Abaixo disto a média do
@@ -337,6 +338,32 @@ export let isAccuracyTesting = false;
 
 let currentValidationTarget: { xPx: number; yPx: number; label: string } | null = null;
 
+/** Overlay do teste em curso, para o abort conseguir removê-lo. */
+let activeAccuracyOverlay: HTMLDivElement | null = null;
+
+/**
+ * Encerra um teste de precisão em curso sem produzir relatório.
+ *
+ * `isAccuracyTesting` só voltava a `false` na conclusão bem-sucedida. Sair da
+ * tela no meio deixava a flag ligada para o resto da sessão, e com ela
+ * `medicaoEmAndamento()` — que esconde o HUD de debug e o painel de preflight.
+ * O operador perdia o preflight justamente entre uma rodada de medição e a
+ * seguinte, que é quando o protocolo exige conferi-lo. Mesmo modo de falha que
+ * o `isCalibrating` preso, que já tinha abort no unmount.
+ *
+ * Idempotente: chamar sem teste em curso não faz nada.
+ */
+export function abortAccuracyTest(): void {
+  if (!isAccuracyTesting) return;
+  // Os laços de `runNextPoint`/`collect` leem esta flag e param de reagendar.
+  isAccuracyTesting = false;
+  currentValidationTarget = null;
+  document.getElementById('accuracy-dot')?.remove();
+  activeAccuracyOverlay?.remove();
+  activeAccuracyOverlay = null;
+  console.warn('[accuracy] teste interrompido — nenhum relatório gerado.');
+}
+
 export function getCurrentTargetPx(): { xPx: number; yPx: number; label: string } | null {
   return currentValidationTarget;
 }
@@ -379,6 +406,7 @@ export function startAccuracyTest(
     );
   }
   const overlay = createAccuracyOverlay();
+  activeAccuracyOverlay = overlay;
   let pointIndex = 0;
   const pointErrors: number[] = [];
   const diagnostics: PointDiagnostic[] = [];
@@ -388,9 +416,12 @@ export function startAccuracyTest(
   const vh = document.documentElement.clientHeight;
 
   function runNextPoint() {
+    // Interrompido (ver `abortAccuracyTest`): não reagenda nem gera relatório.
+    if (!isAccuracyTesting) return;
     if (pointIndex >= ALL_VALIDATION_POINTS.length) {
       isAccuracyTesting = false;
       currentValidationTarget = null;
+      activeAccuracyOverlay = null;
       finishTest(overlay, pointErrors, diagnostics, onComplete, meta, runtime, poseBaseline, overlap);
       return;
     }
@@ -418,6 +449,7 @@ export function startAccuracyTest(
     let lastSeenSeq = currentFrameSeq;
 
     function collect() {
+      if (!isAccuracyTesting) return;
       const elapsed = performance.now() - startTime;
       const frameNovo = currentFrameSeq !== lastSeenSeq;
 
@@ -673,8 +705,32 @@ function finishTest(
   poseBaseline?: { yaw: number; pitch: number; roll: number } | null,
   validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[],
 ) {
-  overlay.remove();
+  // O diagnóstico de ajuste (leave-one-target-out, ~9 s numa grade de 9 alvos)
+  // é calculado sob demanda, e o relatório é o primeiro a pedir. Removendo o
+  // overlay antes disso, a tela ficava PRETA e travada entre o último alvo e o
+  // resumo — indistinguível, para quem olha, do travamento que este fluxo
+  // acabou de deixar de ter. Mostra o estado, deixa pintar, e só então paga.
+  const instrucao = overlay.querySelector('.accuracy-instruction');
+  if (instrucao) instrucao.textContent = 'Calculando resultados…';
+  document.getElementById('accuracy-dot')?.remove();
 
+  esperarPintura(() => {
+    // Memoizado: a leitura lá dentro de `montarRelatorio` sai de graça.
+    getCalibrationFitDiagnostics();
+    overlay.remove();
+    montarRelatorio(pointErrors, diagnostics, onComplete, meta, runtime, poseBaseline, validationOverlap);
+  });
+}
+
+function montarRelatorio(
+  pointErrors: number[],
+  diagnostics: PointDiagnostic[],
+  onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
+  meta?: RunMeta,
+  runtime?: RuntimeInfo,
+  poseBaseline?: { yaw: number; pitch: number; roll: number } | null,
+  validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[],
+) {
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
