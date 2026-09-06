@@ -1,155 +1,91 @@
 import React, { useState } from 'react';
-import { MousePointer2, Power, Info, CheckCircle2, ShieldAlert } from 'lucide-react';
-import { PageHeader } from '../components/ui/PageHeader';
+import { MousePointer2, Power, CircleCheck, ShieldAlert } from 'lucide-react';
+import { GazePageLayout } from '../components/ui/GazePageLayout';
+import { GazeButton } from '../components/ui/GazeButton';
 import { useGaze } from '../context/GazeContext';
-import { PrimaryButton } from '../components/ui/PrimaryButton';
 
+/**
+ * Controle do computador pelo olhar. A ligação com o cursor do sistema ainda é
+ * uma demonstração: a tela guarda só o estado ligado/desligado.
+ */
 export const VirtualMouseScreen: React.FC = () => {
   const { state } = useGaze();
   const [active, setActive] = useState(false);
-  // Motor considerado disponível para acionar o mouse virtual quando não está ocioso/carregando.
+  // O rastreador está pronto quando não está ocioso nem carregando.
   const isConnected = state !== 'idle' && state !== 'loading';
 
-  const toggle = () => {
-    setActive((prev) => !prev);
-  };
+  const toggle = () => setActive((prev) => !prev);
 
   return (
-    <>
-      <main
-        role="main"
+    <GazePageLayout backRoute="/menu" title="Computador">
+      <h1 className="sr-only">Controle do computador pelo olhar</h1>
+      <div
         style={{
-          minHeight: '100vh',
-          background: 'var(--color-bg-base)',
-          padding: '2rem 2.5rem',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: '2rem',
+          textAlign: 'center',
         }}
       >
-        <PageHeader
-          title="Controle do Cursor pelo Olhar (Mouse Virtual)"
-          subtitle="Permite interagir livremente com a área de trabalho do Windows utilizando apenas o movimento dos olhos."
-          icon={<MousePointer2 color="#1B54A8" size={28} aria-hidden="true" />}
-        />
-
         <div
+          data-no-dwell="true"
           style={{
-            maxWidth: 760,
-            margin: '0 auto',
+            width: 'min(720px, 100%)',
+            padding: '2rem 2.5rem',
+            borderRadius: 'var(--r-lg)',
+            border: '2px solid var(--border)',
+            background: 'var(--surface)',
             display: 'flex',
             flexDirection: 'column',
-            gap: '1.75rem',
+            alignItems: 'center',
+            gap: '1rem',
           }}
         >
-          <section
-            aria-labelledby="vm-status"
-            className="glass-card animate-scale-in"
+          <MousePointer2 size={56} color="var(--primary)" aria-hidden="true" />
+          <p style={{ fontSize: 'var(--fs-24)', color: 'var(--text)', fontWeight: 700 }}>
+            {active ? 'O cursor do computador está seguindo o seu olhar.' : 'O cursor do computador está parado.'}
+          </p>
+          <p style={{ fontSize: 'var(--fs-18)', color: 'var(--text-2)', lineHeight: 1.5 }}>
+            Quando ligado, o ponteiro do computador acompanha para onde você olha. Para pausar, volte a esta tela ou use o botão de emergência.
+          </p>
+
+          <div
+            role="status"
             style={{
-              background: 'var(--color-card-bg)',
-              padding: '2.5rem',
-              borderRadius: '2rem',
-              boxShadow: '0 12px 32px rgba(27, 84, 168, 0.08)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '1.5rem',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <h2
-                  id="vm-status"
-                  style={{ fontSize: '1.35rem', color: 'var(--color-text-base)', fontWeight: 800, margin: 0 }}
-                >
-                  Navegação no Sistema Operacional
-                </h2>
-                <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '0.95rem', marginTop: '0.4rem', margin: 0, lineHeight: 1.5 }}>
-                  Ao ativar, o cursor do computador responderá ao ponto de foco do seu olhar.
-                </p>
-              </div>
-
-              <div
-                role="status"
-                style={{
-                  padding: '0.4rem 0.9rem',
-                  borderRadius: '1rem',
-                  background: isConnected ? 'rgba(22, 163, 74, 0.1)' : 'rgba(220, 38, 38, 0.1)',
-                  color: isConnected ? '#15803d' : '#991b1b',
-                  fontSize: '0.85rem',
-                  fontWeight: 700,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.4rem',
-                  flexShrink: 0,
-                }}
-              >
-                {isConnected ? <CheckCircle2 size={16} color="#16a34a" /> : <ShieldAlert size={16} color="#dc2626" />}
-                {isConnected ? 'Motor Conectado' : 'Aguardando Motor'}
-              </div>
-            </div>
-
-            <div
-              style={{
-                background: active ? 'rgba(22, 163, 74, 0.06)' : 'var(--color-bg-base)',
-                border: active ? '1px solid rgba(22, 163, 74, 0.2)' : '1px solid var(--color-card-border)',
-                padding: '1.25rem 1.5rem',
-                borderRadius: '1.25rem',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
-                <div
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: '50%',
-                    background: active ? '#16a34a' : '#94a3b8',
-                    boxShadow: active ? '0 0 10px rgba(22, 163, 74, 0.8)' : 'none',
-                  }}
-                />
-                <span style={{ fontWeight: 700, color: active ? '#15803d' : 'var(--color-text-base)', fontSize: '1rem' }}>
-                  {active ? 'Mouse Virtual em Execução' : 'Mouse Virtual Desativado'}
-                </span>
-              </div>
-            </div>
-
-            <PrimaryButton
-              type="button"
-              onClick={toggle}
-              disabled={!isConnected}
-              variant={active ? 'danger' : 'primary'}
-              aria-pressed={active}
-              style={{ padding: '1.25rem', fontSize: '1.15rem' }}
-            >
-              <Power size={22} aria-hidden="true" />
-              {active ? 'Desativar Controle pelo Olhar' : 'Ativar Controle pelo Olhar'}
-            </PrimaryButton>
-          </section>
-
-          <section
-            aria-labelledby="vm-info"
-            style={{
-              padding: '1.5rem 1.75rem',
-              borderRadius: '1.5rem',
-              background: 'var(--color-card-bg)',
-              border: '1px solid var(--color-card-border)',
-              display: 'flex',
-              flexDirection: 'column',
+              display: 'inline-flex',
+              alignItems: 'center',
               gap: '0.5rem',
+              padding: '0.5rem 1rem',
+              borderRadius: 'var(--r-pill)',
+              background: isConnected ? 'var(--ok-soft)' : 'var(--danger-soft)',
+              color: isConnected ? 'var(--ok)' : 'var(--danger)',
+              fontSize: 'var(--fs-16)',
+              fontWeight: 700,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-              <Info size={20} color="#1B54A8" aria-hidden="true" />
-              <h3 id="vm-info" style={{ fontSize: '1.05rem', color: '#1B54A8', fontWeight: 700, margin: 0 }}>
-                Orientações de Uso Assistivo
-              </h3>
-            </div>
-            <p style={{ color: 'var(--color-text-base)', opacity: 0.9, fontSize: '0.95rem', lineHeight: 1.6, margin: 0 }}>
-              O rastreamento converte as coordenadas de seu olho diretamente no ponteiro do mouse do sistema Windows. Para pausar a qualquer momento, olhe para o topo da tela ou utilize o atalho de emergência.
-            </p>
-          </section>
+            {isConnected ? <CircleCheck size={20} aria-hidden="true" /> : <ShieldAlert size={20} aria-hidden="true" />}
+            {isConnected ? 'Rastreamento pronto' : 'Aguardando o rastreamento'}
+          </div>
         </div>
-      </main>
-    </>
+
+        <GazeButton
+          onClick={toggle}
+          disabled={!isConnected}
+          size="xl"
+          variant={active ? 'danger' : 'primary'}
+          icon={<Power />}
+          label={active ? 'Desligar controle' : 'Ligar controle'}
+          aria-pressed={active}
+          aria-label={active ? 'Desligar o controle do computador pelo olhar' : 'Ligar o controle do computador pelo olhar'}
+          // Ligar o cursor do sistema muda o que o computador inteiro faz:
+          // dwell mais longo que o padrão.
+          dwellMs={2500}
+          style={{ minWidth: 360 }}
+        />
+      </div>
+    </GazePageLayout>
   );
 };
-

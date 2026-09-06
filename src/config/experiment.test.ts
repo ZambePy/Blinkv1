@@ -21,18 +21,18 @@ describe('loadEnvOverrides', () => {
     expect(loadEnvOverrides({ NODE_ENV: 'production', PATH: '/usr/bin' })).toEqual({});
   });
 
-  it('IRISFLOW_EXP_isotropicLandmarks=true liga a flag', () => {
-    expect(loadEnvOverrides({ IRISFLOW_EXP_isotropicLandmarks: 'true' })).toEqual({ isotropicLandmarks: true });
+  it('IRISFLOW_EXP_polynomialFeatures=true liga a flag', () => {
+    expect(loadEnvOverrides({ IRISFLOW_EXP_polynomialFeatures: 'true' })).toEqual({ polynomialFeatures: true });
   });
 
-  it('IRISFLOW_EXP_isotropicLandmarks=1 também liga (equivalência "1"/"true")', () => {
-    expect(loadEnvOverrides({ IRISFLOW_EXP_isotropicLandmarks: '1' })).toEqual({ isotropicLandmarks: true });
+  it('IRISFLOW_EXP_polynomialFeatures=1 também liga (equivalência "1"/"true")', () => {
+    expect(loadEnvOverrides({ IRISFLOW_EXP_polynomialFeatures: '1' })).toEqual({ polynomialFeatures: true });
   });
 
-  it('IRISFLOW_EXP_isotropicLandmarks=false devolve override false explícito', () => {
+  it('IRISFLOW_EXP_polynomialFeatures=false devolve override false explícito', () => {
     // Falso EXPLÍCITO tem que sobrepor localStorage (ou default), então o
     // override é passado adiante, não omitido.
-    expect(loadEnvOverrides({ IRISFLOW_EXP_isotropicLandmarks: 'false' })).toEqual({ isotropicLandmarks: false });
+    expect(loadEnvOverrides({ IRISFLOW_EXP_polynomialFeatures: 'false' })).toEqual({ polynomialFeatures: false });
   });
 
   it('override numérico converte string para Number', () => {
@@ -45,41 +45,41 @@ describe('loadEnvOverrides', () => {
     expect(loadEnvOverrides({ IRISFLOW_EXP_flagInexistente: 'true' })).toEqual({});
   });
 
-  // ── AE-4: os overrides eram silenciosamente ignorados no Windows ──────────
+  // ── Os overrides eram silenciosamente ignorados no Windows ────────────────
   //
   // No Windows os nomes de variável de ambiente são case-insensitive, e o Node
   // devolve a forma canônica EM MAIÚSCULAS ao enumerar `process.env`. Medido na
   // máquina do projeto:
   //
-  //   process.env.IRISFLOW_EXP_dynamicGamma  →  "true"   (acesso direto: ok)
-  //   Object.keys(process.env)               →  ["IRISFLOW_EXP_DYNAMICGAMMA"]
+  //   process.env.IRISFLOW_EXP_dwellRingOnCursor  →  "true"   (acesso direto: ok)
+  //   Object.keys(process.env)               →  ["IRISFLOW_EXP_DWELLRINGONCURSOR"]
   //
-  // A comparação `key in DEFAULTS` recebia `DYNAMICGAMMA` contra a chave real
-  // `dynamicGamma`, falhava, e caía no `continue` — que era silencioso por
+  // A comparação `key in DEFAULTS` recebia `DWELLRINGONCURSOR` contra a chave real
+  // `dwellRingOnCursor`, falhava, e caía no `continue` — que era silencioso por
   // decisão de projeto ("typo em CLI não trava a rodada").
   //
   // O resultado: NENHUMA flag de chave camelCase — ou seja, todas — podia ser
-  // ligada por env-var nesta máquina, sem nada indicando o problema. É
-  // pré-requisito de `F8.4`: cada condição da ablação rodaria com os defaults e
-  // produziria medições idênticas, que seriam lidas como "a flag não teve
-  // efeito". Dado de aparência boa e conclusão invertida.
+  // ligada por env-var nesta máquina, sem nada indicando o problema. Numa
+  // ablação, cada condição rodaria com os defaults e produziria medições
+  // idênticas, que seriam lidas como "a flag não teve efeito". Dado de
+  // aparência boa e conclusão invertida.
   it('aceita a chave em MAIÚSCULAS, como o Windows enumera', () => {
-    expect(loadEnvOverrides({ IRISFLOW_EXP_DYNAMICGAMMA: 'true' }))
-      .toEqual({ dynamicGamma: true });
-    expect(loadEnvOverrides({ IRISFLOW_EXP_ISOTROPICLANDMARKS: 'true' }))
-      .toEqual({ isotropicLandmarks: true });
+    expect(loadEnvOverrides({ IRISFLOW_EXP_DWELLRINGONCURSOR: 'true' }))
+      .toEqual({ dwellRingOnCursor: true });
+    expect(loadEnvOverrides({ IRISFLOW_EXP_POLYNOMIALFEATURES: 'true' }))
+      .toEqual({ polynomialFeatures: true });
     expect(loadEnvOverrides({ IRISFLOW_EXP_EXPANDFACTOR: '1.6' }))
       .toEqual({ expandFactor: 1.6 });
   });
 
   it('aceita qualquer capitalização — é o que "case-insensitive" significa', () => {
     for (const chave of [
-      'IRISFLOW_EXP_claheEyeRegion',
-      'IRISFLOW_EXP_CLAHEEYEREGION',
-      'IRISFLOW_EXP_claheeyeregion',
-      'IRISFLOW_EXP_ClaheEyeRegion',
+      'IRISFLOW_EXP_blinkClick',
+      'IRISFLOW_EXP_BLINKCLICK',
+      'IRISFLOW_EXP_blinkclick',
+      'IRISFLOW_EXP_BlinkClick',
     ]) {
-      expect(loadEnvOverrides({ [chave]: 'true' })).toEqual({ claheEyeRegion: true });
+      expect(loadEnvOverrides({ [chave]: 'true' })).toEqual({ blinkClick: true });
     }
   });
 
@@ -89,8 +89,8 @@ describe('loadEnvOverrides', () => {
     for (const [chave, valorPadrao] of Object.entries(EXPERIMENT)) {
       // Um valor SINTATICAMENTE válido por tipo. A validação semântica (faixa
       // numérica, lista fechada de strings) é de `sanitizeExperiment`; aqui o
-      // que se testa é se a chave chega, e ela chegava para nenhuma delas no
-      // Windows antes de AE-4.
+      // que se testa é se a chave chega, e ela não chegava para nenhuma delas
+      // no Windows.
       const bruto = typeof valorPadrao === 'boolean' ? 'true'
                   : typeof valorPadrao === 'number' ? '1.5'
                   : String(valorPadrao);
@@ -99,13 +99,13 @@ describe('loadEnvOverrides', () => {
     }
   });
 
-  it('flag de STRING chega pelo env e é validada contra a lista fechada (P5.2)', () => {
-    expect(loadEnvOverrides({ IRISFLOW_EXP_HEADPOSESOURCE: 'pnp' })).toEqual({ headPoseSource: 'pnp' });
+  it('flag de STRING chega pelo env e é validada contra a lista fechada', () => {
+    expect(loadEnvOverrides({ IRISFLOW_EXP_L2CS: 'wasm' })).toEqual({ l2cs: 'wasm' });
     // Valor inválido chega em `loadEnvOverrides` (que só coleta) e é barrado
-    // em `sanitizeExperiment`, com aviso — nunca escolhe um caminho de pose
-    // em silêncio.
+    // em `sanitizeExperiment`, com aviso — nunca escolhe um provider em
+    // silêncio.
     const avisos = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    expect(sanitizeExperiment({ headPoseSource: 'inventado' }).headPoseSource).toBe('matrix');
+    expect(sanitizeExperiment({ l2cs: 'inventado' }).l2cs).toBe('auto');
     expect(avisos).toHaveBeenCalled();
     avisos.mockRestore();
   });
@@ -130,10 +130,10 @@ describe('loadEnvOverrides', () => {
 
   it('duas capitalizações da mesma flag não se multiplicam', () => {
     const r = loadEnvOverrides({
-      IRISFLOW_EXP_dynamicGamma: 'false',
-      IRISFLOW_EXP_DYNAMICGAMMA: 'true',
+      IRISFLOW_EXP_dwellRingOnCursor: 'false',
+      IRISFLOW_EXP_DWELLRINGONCURSOR: 'true',
     });
-    expect(Object.keys(r)).toEqual(['dynamicGamma']);
+    expect(Object.keys(r)).toEqual(['dwellRingOnCursor']);
   });
 
   it('override numérico com valor não-parseável é ignorado', () => {
@@ -143,10 +143,10 @@ describe('loadEnvOverrides', () => {
 
   it('múltiplas env-vars simultâneas — cada uma resolve independentemente', () => {
     const r = loadEnvOverrides({
-      IRISFLOW_EXP_isotropicLandmarks: 'true',
+      IRISFLOW_EXP_polynomialFeatures: 'true',
       IRISFLOW_EXP_expandFactor: '1.8',
     });
-    expect(r).toEqual({ isotropicLandmarks: true, expandFactor: 1.8 });
+    expect(r).toEqual({ polynomialFeatures: true, expandFactor: 1.8 });
   });
 });
 
@@ -157,7 +157,7 @@ describe('EXPERIMENT (snapshot)', () => {
   it('carrega com shape completo (todas as chaves de ExperimentConfig existem)', () => {
     expect(EXPERIMENT).toHaveProperty('expandFactor');
     expect(EXPERIMENT).toHaveProperty('l2csCadenceMs');
-    expect(EXPERIMENT).toHaveProperty('isotropicLandmarks');
-    expect(EXPERIMENT).toHaveProperty('lockCameraExposure');
+    expect(EXPERIMENT).toHaveProperty('polynomialFeatures');
+    expect(EXPERIMENT).toHaveProperty('gazeLostFallback');
   });
 });

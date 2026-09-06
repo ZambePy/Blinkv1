@@ -1,33 +1,20 @@
-// Conversão pixel → grau, e velocidade angular. Base de `P6.2` e `P6.4`.
+// Conversão pixel → grau e velocidade angular, base dos filtros adaptativos.
 //
-// ── Por que isto precisa existir separado ───────────────────────────────────
-//
-// Os dois filtros adaptativos são especificados em GRAUS: α muda em 5°/s e
-// 15°/s; a zona morta é 0,3°. Nenhum dos dois pode ser implementado em pixels,
-// porque o mesmo deslocamento em pixels é um ângulo completamente diferente
-// conforme a tela e a distância:
+// Os filtros são especificados em GRAUS (α muda em 5°/s e 15°/s; a zona morta
+// é 0,3°) porque o mesmo deslocamento em pixels é um ângulo completamente
+// diferente conforme a tela e a distância:
 //
 //     23,6" a 60 cm   →  ~111 px por grau
 //     40"   a 100 cm  →  ~130 px por grau
 //     13"   a 45 cm   →  ~86 px por grau
 //
-// Um limiar fixo em pixels trataria essas três situações como iguais.
-//
-// ── A dependência que o plano registra ──────────────────────────────────────
-//
-// `P6.2` depende de `B2.9` e `B2.10` estarem corrigidos, e o motivo é este
-// módulo: se a geometria da tela estiver errada, α é escolhido a partir de uma
-// velocidade angular errada, e o filtro fica mais suave ou mais responsivo do
-// que deveria — sem nada indicando isso. Os dois bugs já foram corrigidos
-// (Sprint 2), mas a dependência continua real: **este módulo é só tão bom
-// quanto a geometria que recebe**.
-//
-// Por isso ele não tem default para a geometria. Sem os números da tela, a
-// resposta é `null` — nunca um chute.
+// Este módulo é só tão bom quanto a geometria que recebe, e por isso não tem
+// default para ela. Sem os números da tela, a resposta é `null` — nunca um
+// chute.
 
 export interface GeometriaDeTela {
   /** Largura da área útil em PIXELS. Precisa ser a mesma que o mapeamento de
-   *  predição usa (`clientWidth`, não `vw` — ver `B3.32`). */
+   *  predição usa (`clientWidth`, não `vw`). */
   larguraPx: number;
   alturaPx: number;
   /** Largura física da área útil em cm. */
@@ -39,7 +26,7 @@ export interface GeometriaDeTela {
 /**
  * Pixels por grau no centro da tela.
  *
- * ⚠️ É uma aproximação de pequeno ângulo, e ela degrada nas BORDAS. A relação
+ * É uma aproximação de pequeno ângulo, e ela degrada nas BORDAS. A relação
  * exata é `px = d·tan(θ)·densidade`, então a mesma variação angular cobre mais
  * pixels quanto mais longe do centro. Para os limiares destes filtros (0,3° de
  * zona morta, 5–15°/s de velocidade) a diferença é irrelevante; para converter

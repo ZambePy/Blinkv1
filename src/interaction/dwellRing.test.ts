@@ -1,15 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { geometriaDoAnel, ANEL_ESPESSURA_PX, ANEL_FOLGA_PX } from './dwellRing';
-import {
-  dwellMsPorPaciente,
-  DWELL_FAIXA_RECOMENDADA_MS,
-  DWELL_FAIXA_PERMITIDA_MS,
-  DEFAULT_DWELL_CONFIG,
-} from './dwell';
 import { CURSOR_TAMANHOS } from './cursorStyle';
 
 // -----------------------------------------------------------------------------
-// P7.2 — dwell 0,8–1,5 s por paciente + anel de progresso no cursor.
+// Dwell 0,8–1,5 s por paciente + anel de progresso no cursor.
 // -----------------------------------------------------------------------------
 
 describe('a caixa do SVG cabe o traço inteiro', () => {
@@ -118,52 +112,5 @@ describe('o anel começa às 12 h', () => {
     // O ângulo zero do SVG fica às 3 h. Sem `-90` o anel encheria pela
     // direita, e o paciente compara com o relógio de parede.
     expect(geometriaDoAnel(48, 0.5).rotacaoDeg).toBe(-90);
-  });
-});
-
-describe('a faixa de dwell por paciente', () => {
-  it('a faixa recomendada é a do plano: 0,8–1,5 s', () => {
-    expect(DWELL_FAIXA_RECOMENDADA_MS.min).toBe(800);
-    expect(DWELL_FAIXA_RECOMENDADA_MS.max).toBe(1500);
-  });
-
-  it('a faixa PERMITIDA é mais larga, e isso é deliberado', () => {
-    // O preset `slow` do app é 2500 ms. Estreitar a faixa para cumprir o
-    // número do plano retiraria a opção de quem tem fadiga avançada — para
-    // quem 2,5 s é a diferença entre clicar e não clicar. O plano descreve o
-    // que será MEDIDO no Dia 7, não o que é clinicamente admissível.
-    expect(DWELL_FAIXA_PERMITIDA_MS.max).toBeGreaterThanOrEqual(2500);
-  });
-
-  it('valores dentro da faixa do plano passam sem marca', () => {
-    for (const ms of [800, 1000, 1200, 1500]) {
-      const r = dwellMsPorPaciente(ms);
-      expect(r.ms).toBe(ms);
-      expect(r.foraDaFaixaRecomendada).toBe(false);
-      expect(r.ajustado).toBe(false);
-    }
-  });
-
-  it('o preset `slow` é aceito, mas marcado como fora da faixa medida', () => {
-    const r = dwellMsPorPaciente(2500);
-    expect(r.ms).toBe(2500);       // aceito
-    expect(r.ajustado).toBe(false);
-    expect(r.foraDaFaixaRecomendada).toBe(true);  // e sinalizado
-  });
-
-  it('valores absurdos são presos, nunca rejeitados', () => {
-    // Sem dwell o paciente não chega à tela onde consertaria o valor que
-    // quebrou o dwell.
-    expect(dwellMsPorPaciente(1).ms).toBe(DWELL_FAIXA_PERMITIDA_MS.min);
-    expect(dwellMsPorPaciente(999999).ms).toBe(DWELL_FAIXA_PERMITIDA_MS.max);
-    expect(dwellMsPorPaciente(1).ajustado).toBe(true);
-  });
-
-  it('NaN cai no default, não no piso', () => {
-    // Cair no piso daria ao paciente o dwell mais RÁPIDO que existe por causa
-    // de um valor corrompido — cliques acidentais em série.
-    const r = dwellMsPorPaciente(NaN);
-    expect(r.ms).toBe(DEFAULT_DWELL_CONFIG.dwellMs);
-    expect(r.ajustado).toBe(true);
   });
 });

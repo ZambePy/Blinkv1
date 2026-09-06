@@ -6,21 +6,11 @@ export const GAZE_TOKENS = {
 };
 
 /**
- * Distância e DPI de FALLBACK — B3.24.
- *
- * 60 cm é o meio da faixa recomendada; 96 dpi é o default de CSS. São chutes
- * razoáveis para o primeiro render, **antes** de o `SettingsProvider` montar.
- *
- * Não são os números certos para nenhum posto de uso específico, e é por isso
- * que `aplicarGeometriaDoUsuario` existe: o app JÁ conhece
- * `settings.viewingDistanceCm` e `settings.screenDiagonalIn` — usa os dois
- * para posicionar os alvos de calibração — e o design system os ignorava.
- *
- * O efeito de ignorá-los: numa TV de 40″ a 100 cm, `degToPx(5°)` devolve
- * 198 px quando o valor correto passa de 300 px. O aviso de acessibilidade
- * vira falso positivo (ou falso negativo, numa tela pequena e próxima) — e um
- * aviso que mente sobre acessibilidade é pior que nenhum, porque o cuidador
- * aprende a ignorá-lo.
+ * Distância e DPI de FALLBACK para o primeiro render, antes de o
+ * `SettingsProvider` montar. 60 cm é o meio da faixa recomendada; 96 dpi é o
+ * default de CSS. `aplicarGeometriaDoUsuario` substitui os dois pela geometria
+ * real assim que as configurações carregam — numa TV de 40″ a 100 cm o alvo
+ * mínimo correto passa de 300 px, não 198.
  */
 export const FALLBACK_DISTANCE_CM = 60;
 export const FALLBACK_PX_PER_CM = 96 / 2.54;
@@ -36,13 +26,12 @@ export function degToPx(
 }
 
 /**
- * Pixels por centímetro derivados da geometria REAL da tela (B3.24).
+ * Pixels por centímetro derivados da geometria REAL da tela.
  *
- * `screenDiagonalIn` vem do EDID (B2.11) ou do cuidador; a diagonal em pixels
- * vem do viewport. É a mesma conta que `computeCalibrationTargets` usa para
- * posicionar os alvos — ter duas fontes divergentes para "quantos pixels tem
- * um centímetro" é como o design system acabou usando 96 dpi enquanto o
- * pipeline usava o valor medido.
+ * `screenDiagonalIn` vem do EDID ou do cuidador; a diagonal em pixels vem do
+ * viewport. É a mesma conta que `computeCalibrationTargets` usa para
+ * posicionar os alvos — o design system e o pipeline precisam concordar sobre
+ * quantos pixels tem um centímetro.
  */
 export function pxPerCmFromScreen(
   viewportWidthPx: number,
@@ -57,11 +46,9 @@ export function pxPerCmFromScreen(
 }
 
 /**
- * Recalcula as custom properties a partir da geometria do usuário (B3.24).
- *
+ * Recalcula as custom properties a partir da geometria do usuário.
  * Chamada pelo `SettingsProvider` quando `viewingDistanceCm` ou
- * `screenDiagonalIn` mudam. Antes de existir, os tokens eram calculados uma
- * única vez no import do módulo, com 60 cm e 96 dpi fixos, e nunca mais.
+ * `screenDiagonalIn` mudam.
  */
 export function aplicarGeometriaDoUsuario(
   distanceCm: number,
@@ -87,7 +74,7 @@ function injetarTokens(distanceCm: number, pxPerCm: number): void {
   root.style.setProperty('--gaze-target-rec', `${targetRecPx}px`);
   root.style.setProperty('--gaze-spacing-min', `${spacingMinPx}px`);
   root.style.setProperty('--gaze-rest-zone-min', `${restZoneMinPx}px`);
-  // B3.27 — a hit-area do botão lê este valor para não invadir os vizinhos.
+  // A hit-area do botão lê este valor para não invadir os vizinhos.
   root.style.setProperty('--gaze-grid-gap', `${spacingMinPx}px`);
 }
 
@@ -96,19 +83,11 @@ function injetarTokens(distanceCm: number, pxPerCm: number): void {
 // configurações do usuário carregam.
 if (typeof document !== 'undefined') {
   injetarTokens(FALLBACK_DISTANCE_CM, FALLBACK_PX_PER_CM);
-  console.log(
-    `[gazeMetrics] tokens de fallback injetados ` +
-    `(${FALLBACK_DISTANCE_CM} cm, ${FALLBACK_PX_PER_CM.toFixed(1)} px/cm). ` +
-    `Serão substituídos pela geometria do usuário quando as configurações carregarem.`,
-  );
 }
 
 /**
- * Tamanho mínimo de alvo, em px, para a geometria corrente (B3.24).
- *
- * Fonte ÚNICA — `GazeButton` e `GazeGrid` tinham cada um o literal `198`,
- * derivado de 5,0° a 60 cm e 96 dpi. Dois lugares com o mesmo número mágico
- * significam que mudar a geometria corrige metade da UI.
+ * Tamanho mínimo de alvo, em px, para a geometria corrente. Fonte única para
+ * `GazeButton` e `GazeGrid`.
  */
 export function alvoMinimoPx(): number {
   if (typeof document === 'undefined') return Math.round(degToPx(GAZE_TOKENS.targetMinDeg));

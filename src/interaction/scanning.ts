@@ -1,40 +1,21 @@
-// P7.4 — modo de varredura (scanning).
+// Modo de varredura (scanning).
 //
-// ── O que este módulo é ─────────────────────────────────────────────────────
+// Quando o rastreamento de olhar falha, este é o caminho que sobra: os botões
+// são destacados um a um, em ciclo, e uma piscada seleciona o destacado. Não
+// depende de gaze, de calibração, nem de predição — só de a pessoa conseguir
+// fechar os olhos de propósito uma vez. Deve funcionar inclusive em `degraded`.
 //
-// Quando o rastreamento de olhar falha, este é o caminho que sobra. Os botões
-// são destacados um a um, em ciclo, e uma piscada seleciona o que estiver
-// destacado. Não depende de gaze, de calibração, nem de predição: depende de a
-// pessoa conseguir fechar os olhos de propósito uma vez.
+// Por isso o gatilho NÃO pergunta ao engine em que estado ele está; observa
+// apenas "há gaze utilizável neste quadro?". Um gatilho pendurado em
+// `state === 'degraded'` herdaria os modos de falha em que esse estado nunca
+// é alcançado. O fallback de último recurso não pode compartilhar pressupostos
+// com o sistema cuja falha ele existe para cobrir.
 //
-// O plano é explícito sobre o peso disto: *"é o fallback de acessibilidade mais
-// importante do documento: é o que mantém o paciente com alguma via de
-// comunicação quando o rastreamento falha"*. E: *"deve funcionar inclusive em
-// `degraded`"*.
-//
-// Essa última frase determina o formato do gatilho. O scanning NÃO pergunta ao
-// engine em que estado ele está — ele observa apenas "há gaze utilizável neste
-// quadro?". Um gatilho que dependesse de `state === 'degraded'` herdaria todo o
-// caminho que produz esse estado, incluindo os modos de falha em que ele não é
-// alcançado (foi o `B2.3`: com features vazias o app nunca entrava em
-// `degraded`, congelava em silêncio, e todo fallback pendurado nesse estado
-// jamais disparava). O fallback de último recurso não pode compartilhar
-// pressupostos com o sistema cuja falha ele existe para cobrir.
-//
-// ── A saída precisa de histerese, e é aqui que isto quase falha ─────────────
-//
-// Sair do scanning ao primeiro quadro com gaze válido parece óbvio e é a pior
-// escolha possível. Quando o rastreamento está ruim — que é exatamente quando o
-// scanning está ligado — quadros válidos chegam esparsos: um a cada segundo,
-// depois nada.
-//
-// Com saída imediata, cada quadro solto derruba o scanning; os 3 s de gatilho
-// recomeçam; o scanning volta do item 0. O paciente vê o destaque reiniciar sem
-// parar e nunca alcança o botão que quer. O sistema pareceria estar
-// funcionando — o destaque se mexe — enquanto é inutilizável.
-//
-// Por isso a saída exige gaze válido SUSTENTADO, e a entrada e a saída têm
-// limiares diferentes de propósito.
+// A saída precisa de histerese: quando o rastreamento está ruim, quadros
+// válidos chegam esparsos. Com saída imediata, cada quadro solto derrubaria a
+// varredura e ela recomeçaria do item 0 — o destaque se mexe, mas o paciente
+// nunca alcança o botão. Por isso a saída exige gaze válido SUSTENTADO, com
+// limiar diferente do de entrada.
 
 /** Tempo sem gaze utilizável até a varredura começar, em ms. */
 export const SCANNING_ATIVA_APOS_MS = 3000;
@@ -58,29 +39,19 @@ export const SCANNING_PASSO_MS = 1200;
 export const SCANNING_SAIDA_ESTAVEL_MS = 500;
 
 /**
- * Piscada mínima para selecionar, em ms.
- *
- * Mesmo valor e mesmo motivo do `P7.3`: abaixo disto é piscada espontânea. Aqui
- * a guarda importa ainda mais, porque no scanning não há "olhar estável sobre o
- * alvo" para servir de segunda confirmação — a piscada é a única entrada que
- * existe.
+ * Piscada mínima para selecionar, em ms. Mesmo valor e motivo do
+ * `blinkClick`: abaixo disto é piscada espontânea. Aqui a guarda importa ainda
+ * mais, porque não há "olhar estável sobre o alvo" como segunda confirmação.
  */
 export const SCANNING_SELECAO_MIN_MS = 150;
 
 /**
  * Piscada MÁXIMA para selecionar, em ms.
  *
- * Faltava, e a ausência era pior aqui que no `P7.3`. A varredura liga depois
- * de 3 s sem gaze utilizável — e uma das causas mais comuns disso é
- * justamente o paciente estar de olhos fechados, descansando. Sem teto, ele
- * reabre os olhos depois de 10 s e **seleciona o item que estava destacado
- * quando ele os fechou**, dez segundos e vários ciclos atrás.
- *
- * O item escolhido seria, para todos os efeitos, aleatório — e num teclado
- * ocular isso escreve uma letra que ninguém quis. Pior: acontece exatamente
- * na situação de fadiga, que é a condição do público-alvo.
- *
- * Mesmo valor do `BLINK_CLICK_MAX_MS`, e pela mesma razão: acima disso não é
+ * Uma das causas mais comuns de 3 s sem gaze é o paciente descansando de
+ * olhos fechados. Sem teto, ele reabriria os olhos depois de 10 s e
+ * selecionaria o item destacado quando os fechou — vários ciclos atrás, um
+ * item aleatório. Mesmo valor do `BLINK_CLICK_MAX_MS`: acima disso não é
  * piscada, é olho fechado.
  */
 export const SCANNING_SELECAO_MAX_MS = 800;
@@ -100,14 +71,10 @@ export interface EstadoScanning {
   /**
    * Índice destacado no instante em que a piscada COMEÇOU, ou `null`.
    *
-   * Existe porque a piscada dura ~200 ms e o destaque continua avançando
-   * durante ela. Sem congelar o índice na borda de subida, uma piscada que
-   * atravessa a fronteira do passo seleciona o item SEGUINTE — medido: com o
-   * destaque no item 1, uma piscada de 264 ms selecionava o item 2.
-   *
-   * É o erro mais frustrante possível num teclado ocular, porque para o
-   * paciente ele é indistinguível de "o sistema não me obedece": ele olhou o
-   * item certo, piscou no momento certo, e saiu o vizinho.
+   * A piscada dura ~200 ms e o destaque continua avançando durante ela. Sem
+   * congelar o índice na borda de subida, uma piscada que atravessa a
+   * fronteira do passo seleciona o item SEGUINTE — para o paciente,
+   * indistinguível de "o sistema não me obedece".
    */
   indiceNaPiscada: number | null;
   /** Ciclos completos desde a ativação — para o diagnóstico. */
@@ -156,9 +123,8 @@ export function criarEstadoScanning(): EstadoScanning {
 /**
  * Avança a varredura em um quadro. Puro.
  *
- * Não conflita com o `P7.3` (piscada como clique): lá a piscada só vale com um
- * alvo sob o olhar e o olhar estável nele, e no scanning não há olhar. As duas
- * funcionalidades leem a mesma piscada e nunca disputam o mesmo quadro.
+ * Não conflita com a piscada-como-clique: lá a piscada só vale com um alvo
+ * sob o olhar e o olhar estável nele, e no scanning não há olhar.
  */
 export function stepScanning(
   estado: EstadoScanning,

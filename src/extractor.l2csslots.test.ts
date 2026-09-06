@@ -15,18 +15,14 @@ import { L2CS_BLOCK_DIM } from './l2cs/block';
  * onde "as últimas 7" já era a pergunta errada.
  */
 describe('l2csSlotsInSet', () => {
-  it('conjuntos sem bloco angular não têm posição nenhuma', () => {
+  it('conjunto sem bloco angular não tem posição nenhuma', () => {
     expect(l2csSlotsInSet('irisCore')).toEqual([]);
-    expect(l2csSlotsInSet('iris12')).toEqual([]);
-    expect(l2csSlotsInSet('irisCore+pose')).toEqual([]);
-    expect(l2csSlotsInSet('iris12+posecross')).toEqual([]);
   });
 
-  it('iris12+l2cs leva as 7 dims, e elas são as últimas do vetor projetado', () => {
-    const slots = l2csSlotsInSet('iris12+l2cs');
+  it('compact carrega o bloco inteiro, nas posições do vetor completo', () => {
+    const slots = l2csSlotsInSet('compact');
     expect(slots).toHaveLength(L2CS_BLOCK_DIM);
-    // 12 de íris + 7 do bloco = índices 12..18 no vetor projetado.
-    expect(slots).toEqual([12, 13, 14, 15, 16, 17, 18]);
+    expect(slots).toEqual([37, 38, 39, 40, 41, 42, 43]);
   });
 
   it('irisCore+l2cs leva só 2 dims — "as últimas 7" seria a pergunta errada', () => {
@@ -35,17 +31,10 @@ describe('l2csSlotsInSet', () => {
     expect(slots.length).toBeLessThan(L2CS_BLOCK_DIM);
   });
 
-  it('com pose no meio, as posições continuam apontando para o bloco certo', () => {
-    // 'irisCore+l2cs+pose' = [0,1,2,3, 22,23,24, 25,26, 37,38]
-    // O bloco angular são os dois últimos: posições 9 e 10.
-    expect(l2csSlotsInSet('irisCore+l2cs+pose')).toEqual([9, 10]);
-  });
-
   it('o conjunto ATIVO carrega tan(yaw) e tan(pitch) do L2CS nas posições 4 e 5', () => {
-    // Guarda inversa: o pipeline agora liga o L2CS de propósito. Se este teste
+    // Guarda inversa: o pipeline liga o L2CS de propósito. Se este teste
     // voltar a exigir vazio, `ACTIVE_FEATURE_SET` foi revertido para
-    // `'irisCore'` sozinho e `EXPERIMENT.enableL2CS` precisa voltar a `false`
-    // no mesmo passo (senão o worker roda sem chegar ao modelo).
+    // `'irisCore'` sozinho — o que só deve acontecer com `l2cs: 'off'`.
     expect(l2csSlotsInSet(ACTIVE_FEATURE_SET)).toEqual([4, 5]);
   });
 });

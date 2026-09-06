@@ -6,10 +6,9 @@ import {
   measuredCalibrationDistanceSamples, completeCalibration,
 } from './calibration';
 
-// 2.1 — a distância de calibração vinha de UM quadro, lido na janela de preparo
-// antes de qualquer alvo. Ela é a referência de toda a compensação de distância
-// da sessão, então descrever o instante do clique em vez dos 15 s de coleta é
-// uma escolha ruim mesmo quando o usuário fica parado.
+// A distância de calibração é a referência de toda a compensação de distância
+// da sessão: precisa descrever os ~15 s de coleta (mediana dos quadros
+// aceitos), não o instante do clique num único quadro de preparo.
 
 const q = () => ({
   yaw: 0.1, pitch: -0.05, roll: 0.01,

@@ -1,11 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { L2CSHealthMonitor, isGazePlausible } from './block';
 
-// 2.5 — o modo de falha que de fato ocorreu não era detectável.
-//
-// O crop entregava imagem preta (bug de `sourceDimensions`, corrigido) e o
-// modelo devolvia sempre o mesmo ângulo. Na gravação de referência: 1563
-// quadros `valid`, yaw com um único valor distinto, −1,4315 rad.
+// Modo de falha real do L2CS: crop entregando imagem preta e o modelo
+// devolvendo sempre o mesmo ângulo. Na gravação de referência: 1563 quadros
+// `valid`, yaw com um único valor distinto, −1,4315 rad.
 
 const TRAVADO = -1.4315;   // o valor real medido na gravação
 
@@ -21,12 +19,10 @@ describe('isGazePlausible — o que ele pega e o que não pega', () => {
   });
 });
 
-// B2.2 — a API passou de "contar quadros idênticos" para "contar TEMPO com o
-// mesmo valor". O construtor recebe `{ janelaMs }` e `observe` recebe o
-// relógio do frame. Motivo: `observe` roda no rAF (~60 Hz) sobre o valor EM
-// CACHE, não a cada inferência, então um limiar em quadros media a taxa de
-// leitura do cache — não a saúde do worker. Ver `client.b2-2` e o cabeçalho
-// de `L2CSHealthOptions`.
+// A API conta TEMPO com o mesmo valor, não quadros idênticos: o construtor
+// recebe `{ janelaMs }` e `observe` recebe o relógio do frame. `observe` roda
+// no rAF (~60 Hz) sobre o valor EM CACHE, então um limiar em quadros mediria a
+// taxa de leitura do cache — não a saúde do worker. Ver health.janelaDeTempo.
 describe('L2CSHealthMonitor', () => {
   /** Alimenta o monitor a 30 fps por `duracaoMs` e devolve se acusou. */
   const rodar = (m: L2CSHealthMonitor, yaw: number, duracaoMs: number, valid = true) => {
@@ -98,10 +94,9 @@ describe('L2CSHealthMonitor', () => {
     expect(acusou).toBe(true);
   });
 
-  it('uma inferência lenta de ~1 s NÃO acusa (o falso positivo de B2.2)', () => {
-    // Regressão do bug: com o limiar antigo de 60 quadros e a leitura do cache
-    // a 60 Hz, exatamente este cenário disparava o alarme e bloqueava a
-    // calibração pelo resto da sessão.
+  it('uma inferência lenta de ~1 s não acusa', () => {
+    // Com um limiar de 60 quadros e leitura do cache a 60 Hz, este cenário
+    // dispararia o alarme e bloquearia a calibração pelo resto da sessão.
     const m = new L2CSHealthMonitor();
     let acusou = false;
     for (let t = 0; t <= 1200; t += 1000 / 60) {

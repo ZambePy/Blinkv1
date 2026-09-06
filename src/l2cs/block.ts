@@ -1,4 +1,4 @@
-// Bloco de features L2CS (E5 do L2CS-NET.md).
+// Bloco de features L2CS (ver docs/L2CS-NET.md).
 //
 // 7 termos derivados de (yaw, pitch, dProxy) que entram como features
 // adicionais no vetor por olho antes do Ridge.
@@ -10,7 +10,7 @@
 // nessa expansão. Aplicando tan primeiro, o termo de 1ª ordem já é exato e
 // o grau 2 captura resíduo (tela plana, câmera não centrada).
 //
-// ⚠️ CLAMP obrigatório em ±π/4. tan() explode perto de ±π/2; um único frame
+// CLAMP obrigatório em ±π/4. tan() explode perto de ±π/2; um único frame
 // de pose extrema envenena o StandardScaler.fit em cascata — média/desvio
 // vão a infinito e o regressor inteiro degenera. Mesmo padrão do comentário
 // anti-NaN de asin() no extractor.ts.
@@ -51,27 +51,17 @@ export function isGazePlausible(yaw: number, pitch: number): boolean {
 }
 
 /**
- * Confiança mínima da softmax para o gaze entrar no vetor de features (B3.1).
+ * Confiança mínima da softmax (`1 − H/H_max`) para o gaze entrar no vetor de
+ * features.
  *
- * `confidence = 1 − H/H_max`: 0 é distribuição uniforme (incerteza total), 1 é
- * massa num único bin.
+ * Um crop degenerado (preto, congelado) produz distribuição difusa cujo ângulo
+ * decodificado é arbitrário mas pode cair dentro da faixa fisiológica —
+ * `isGazePlausible` não pega isso. A entropia é o único sinal que distingue
+ * "olhando para o centro" de "o modelo não faz ideia".
  *
- * Por que existe: um crop degenerado (preto, congelado) produz distribuição
- * difusa, e a decodificação devolve um ângulo. Com a média circular esse
- * ângulo deixa de ser sistematicamente ~0°, mas continua sendo **arbitrário** —
- * a resultante dos vetores tem norma quase nula e a direção vira ruído.
- * `isGazePlausible` não pega isso, porque o ângulo pode cair perfeitamente
- * dentro da faixa fisiológica.
- *
- * A entropia é o único sinal que distingue "o modelo diz que está olhando para
- * o centro" de "o modelo não faz ideia". Ela já era calculada e descartada —
- * `types.ts` admitia em comentário que ninguém consumia. Ligar o gate é a
- * defesa mais barata do pipeline inteiro.
- *
- * 0,15 é conservador de propósito: fica bem abaixo do regime concentrado
- * (>0,9 num pico) e bem acima do uniforme (~0), então rejeita o crop quebrado
- * sem descartar inferência legítima em condição ruim de luz. O valor definitivo
- * sai do `F8.4` no Dia 7.
+ * 0,15 é conservador: bem abaixo do regime concentrado (>0,9 num pico) e bem
+ * acima do uniforme (~0), então rejeita o crop quebrado sem descartar
+ * inferência legítima em luz ruim. Valor provisório até medição em campo.
  */
 export const L2CS_CONFIDENCE_MIN = 0.15;
 
@@ -89,9 +79,9 @@ export function buildL2CSBlock(
   if (valid && !isGazePlausible(yaw, pitch)) {
     return [0, 0, 0, 0, 0, 0, 0];
   }
-  // B3.1 — gate de confiança. Independente da checagem de plausibilidade
-  // acima: aquela pega o ângulo impossível, esta pega a distribuição sem
-  // informação que produziu um ângulo possível.
+  // Gate de confiança, independente da plausibilidade acima: aquela pega o
+  // ângulo impossível, esta pega a distribuição sem informação que produziu
+  // um ângulo possível.
   if (valid && typeof confidence === 'number' && confidence < L2CS_CONFIDENCE_MIN) {
     return [0, 0, 0, 0, 0, 0, 0];
   }
@@ -133,17 +123,10 @@ export interface L2CSHealthOptions {
   /**
    * Por quanto TEMPO o yaw pode ficar idêntico antes de acusar travamento.
    *
-   * Conta tempo, não quadros observados (B2.2). O limiar antigo era de 60
-   * repetições, com o comentário "a 10 Hz de submissão, 60 são ~6 s" — mas
-   * `observe` roda no rAF (~60 Hz) sobre o valor EM CACHE, não a cada
-   * inferência. O mesmo resultado era observado ~6 vezes antes de ser
-   * substituído, então 60 repetições viravam ~1 s: erro de 6×.
-   *
-   * A consequência era um falso positivo garantido. Uma única inferência de
-   * 1,0–1,5 s (plausível em WASM single-thread com ResNet-50 @448²) disparava
-   * `setL2CSStatus('error')` com a mensagem "SAÍDA TRAVADA — o modelo está
-   * inferindo sobre imagem inútil", que é falsa: o modelo está lento, não
-   * quebrado.
+   * Conta tempo, não quadros: `observe` roda no rAF sobre o valor EM CACHE,
+   * então o mesmo resultado é observado várias vezes entre inferências. Um
+   * limiar em quadros disparava falso positivo com uma única inferência lenta
+   * (1–1,5 s em WASM single-thread).
    */
   janelaMs?: number;
 }
@@ -171,23 +154,18 @@ export class L2CSHealthMonitor {
    */
   observe(yaw: number, valid: boolean, nowMs: number = performance.now()): boolean {
     if (!valid || !Number.isFinite(yaw)) {
-      // Worker aquecendo ou gaze stale: ausência de dado não é travamento.
-      // Contar como travamento acusaria todo boot.
-      this.ultimoYaw = null;
-      this.desdeMs = null;
+      // Worker aquecendo ou gaze stale: ausência de dado não é travamento,
+      // mas também não é sinal de vida — a contagem fica como está. Zerar aqui
+      // deixava o vigia inerte sempre que a inferência era mais lenta que a
+      // tolerância, e fazia um stale isolado parecer "recuperação".
       this.acabouDeRecuperar = false;
       return false;
     }
 
     if (this.ultimoYaw === null || yaw !== this.ultimoYaw) {
-      // O gaze variou — o pipeline está vivo.
-      //
-      // B2.2 — RECUPERAÇÃO AUTOMÁTICA. Antes, `avisou` era latch de mão única
-      // e `reset()` nunca era chamado em produção: nada devolvia o status
-      // para 'ready'. `CalibrationCheck.tsx` bloqueava a calibração pelo resto
-      // da sessão, e a única saída era recarregar a página — algo que o
-      // público-alvo (ELA, uso possivelmente desacompanhado) pode não
-      // conseguir fazer sozinho.
+      // O gaze variou — o pipeline está vivo. A recuperação é automática:
+      // um latch de mão única deixaria a calibração bloqueada pelo resto da
+      // sessão, e o público-alvo pode não conseguir recarregar a página.
       this.acabouDeRecuperar = this.avisou;
       this.avisou = false;
       this.ultimoYaw = yaw;

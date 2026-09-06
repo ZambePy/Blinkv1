@@ -1,19 +1,15 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   clearCalibration, startCalibrationMode, startCollectingPoint, feedRawData,
-  completeCalibration, getEyeReliability, mapGaze,
+  completeCalibration, captureReferenceStateForProfile, mapGaze,
 } from './calibration';
+
+const getEyeReliability = () => captureReferenceStateForProfile().eyeReliability;
 import { RidgeRegressor } from './ridge';
 
-// 3.2 — a fusão binocular era média simples, que supõe os dois olhos
-// igualmente bons. Na gravação de referência eles não são:
-//
-//   só olho esquerdo   134,9 px     média dos dois   140,7 px
-//   só olho direito    164,8 px
-//
-// A média saiu PIOR que o olho bom sozinho. E a razão sinal-ruído bruta da íris
-// é praticamente igual nos dois (30,8 contra 31,3) — não dá para prever qual
-// olho será melhor a partir da física, então a resposta é medir.
+// A fusão binocular pondera os olhos pela confiabilidade medida na calibração,
+// não por média simples: na gravação de referência a média (140,7 px) saiu pior
+// que o olho esquerdo sozinho (134,9 px), e a física não prevê qual olho é melhor.
 
 const q = () => ({
   yaw: 0.1, pitch: -0.05, roll: 0.01,

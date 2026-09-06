@@ -1,16 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import {
   INPUT_SIZE,
-  L2CS_INPUT_SIZES,
   tamanhoDoTensor,
   preprocessFromRGBA,
   createCropContext,
-  eyeRegionInCrop,
 } from './crop';
 import { sanitizeExperiment, L2CS_INPUT_SIZES_ACEITOS } from '../config/experiment';
 
 // -----------------------------------------------------------------------------
-// P5.5a — o L2CS passou a aceitar mais de um tamanho de entrada.
+// O L2CS aceita mais de um tamanho de entrada.
 //
 // O ONNX foi reexportado com eixos espaciais dinâmicos (`['batch', 3, 'height',
 // 'width']`), então o mesmo binário roda 224² e 448². Verificado por inferência
@@ -50,8 +48,8 @@ describe('tamanhoDoTensor — a fonte única de verdade', () => {
 
 describe('tamanhos suportados', () => {
   it('224 e 448 são os declarados, e 448 continua o default', () => {
-    expect(L2CS_INPUT_SIZES).toContain(224);
-    expect(L2CS_INPUT_SIZES).toContain(448);
+    expect(L2CS_INPUT_SIZES_ACEITOS).toContain(224);
+    expect(L2CS_INPUT_SIZES_ACEITOS).toContain(448);
     expect(INPUT_SIZE).toBe(448);
   });
 
@@ -59,7 +57,7 @@ describe('tamanhos suportados', () => {
     // A ResNet-50 reduz por 32. Um tamanho que não seja múltiplo produz mapa
     // final fracionário — funciona por causa do GlobalAveragePool, mas com
     // padding assimétrico que ninguém mediu.
-    for (const s of L2CS_INPUT_SIZES) expect(s % 32).toBe(0);
+    for (const s of L2CS_INPUT_SIZES_ACEITOS) expect(s % 32).toBe(0);
   });
 });
 
@@ -83,7 +81,7 @@ describe('flag l2csInputSize', () => {
     // por 32 (224/32 = 7, 448/32 = 14); um tamanho intermediário padeia
     // assimetricamente e o pooling adaptativo mascara a diferença, então roda
     // sem erro nenhum e mede outra coisa.
-    expect([...L2CS_INPUT_SIZES_ACEITOS]).toEqual([...L2CS_INPUT_SIZES]);
+    expect([...L2CS_INPUT_SIZES_ACEITOS]).toEqual([224, 448]);
     for (const t of L2CS_INPUT_SIZES_ACEITOS) {
       expect(t % 32, `${t} não é múltiplo de 32`).toBe(0);
     }
@@ -113,26 +111,5 @@ describe('createCropContext — o canvas define o tamanho', () => {
 
   it('sem argumento, mantém o default de 448', () => {
     expect(createCropContext().canvas.width).toBe(INPUT_SIZE);
-  });
-});
-
-describe('eyeRegionInCrop respeita o tamanho do crop', () => {
-  function rosto() {
-    const p = new Array(478).fill(null).map(() => ({ x: 0.5, y: 0.5 }));
-    p[33] = { x: 0.40, y: 0.45 }; p[133] = { x: 0.47, y: 0.45 };
-    p[362] = { x: 0.53, y: 0.45 }; p[263] = { x: 0.60, y: 0.45 };
-    p[10] = { x: 0.5, y: 0.2 }; p[152] = { x: 0.5, y: 0.85 };
-    return p;
-  }
-
-  it('a região escala junto com o tamanho do crop', () => {
-    const r448 = eyeRegionInCrop(rosto(), 1280, 720, 1.4, false, 448)!;
-    const r224 = eyeRegionInCrop(rosto(), 1280, 720, 1.4, false, 224)!;
-    // Metade do lado → aproximadamente metade da região, e sempre dentro dos
-    // limites. Um retângulo de coordenadas de 448 aplicado a um crop de 224
-    // leria fora do buffer.
-    expect(r224.x + r224.width).toBeLessThanOrEqual(224);
-    expect(r224.y + r224.height).toBeLessThanOrEqual(224);
-    expect(r224.width / r448.width).toBeCloseTo(0.5, 1);
   });
 });

@@ -1,19 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import { Kalman2D, KALMAN_DEFAULTS } from './kalman2d';
 
-// -----------------------------------------------------------------------------
-// P6.1 — Kalman 2D.
-//
-// O aceite pede duas coisas, e a segunda é a que dá trabalho:
-//
-//   1. Trajetória de velocidade constante + ruído gaussiano de σ conhecido:
-//      variância da saída menor que a da entrada, e atraso de fase previsto.
-//   2. **O trade-off da predição precisa estar VISÍVEL no teste**: predizer 1
-//      quadro reduz o erro em movimento e o AUMENTA em repouso.
-//
-// A segunda existe para impedir que alguém "melhore" uma metade esquecendo a
-// outra. Não há escolha grátis aqui, e o teste é o que registra isso.
-// -----------------------------------------------------------------------------
+// Kalman 2D: em trajetória de velocidade constante com ruído gaussiano, a
+// variância da saída cai e o atraso de fase é o previsto. O trade-off da
+// predição fica visível aqui: predizer 1 quadro reduz o erro em movimento e
+// o aumenta em repouso — não há escolha grátis.
 
 /** PRNG determinístico com distribuição aproximadamente normal (Box-Muller). */
 function ruidoGaussiano(seed: number) {
@@ -188,7 +179,7 @@ describe('guardas', () => {
     expect(k.ready).toBe(true);
   });
 
-  it('dt = 0 não degenera a covariância (lição de B3.5)', () => {
+  it('dt = 0 não degenera a covariância', () => {
     const k = new Kalman2D();
     k.filter(100, 100, DT);
     for (let i = 0; i < 50; i++) k.filter(110, 100, 0);
@@ -233,7 +224,7 @@ describe('guardas', () => {
   });
 });
 
-describe('predict e step — o que o hold on blink (P6.3) usa', () => {
+describe('predict — o que o hold on blink usa', () => {
   it('predict projeta sem consumir medição', () => {
     const k = new Kalman2D({ predictAheadFrames: 0 });
     for (let i = 0; i < 100; i++) k.filter(100 + 300 * i * DT, 300, DT);
@@ -244,26 +235,5 @@ describe('predict e step — o que o hold on blink (P6.3) usa', () => {
     // E a projeção anda no sentido da velocidade.
     expect(p.x).toBeGreaterThan(antes.x);
     expect(p.x - antes.x).toBeCloseTo(antes.vx * 3 * DT, 6);
-  });
-
-  it('step avança no tempo e AUMENTA a incerteza', () => {
-    // A incerteza crescente é o que faz o filtro voltar a aceitar medição
-    // rapidamente quando o olho reabre. Sem isso, o cursor demoraria para
-    // reengatar depois de uma piscada longa.
-    const k = new Kalman2D({ predictAheadFrames: 0 });
-    for (let i = 0; i < 60; i++) k.filter(100 + 300 * i * DT, 300, DT);
-    const posAntes = k.state.x;
-    for (let i = 0; i < 10; i++) k.step(DT);
-    expect(k.state.x).toBeGreaterThan(posAntes);
-
-    // Depois do hold, uma medição distante é absorvida rápido.
-    const salto = k.filter(k.state.x + 200, 300, DT);
-    expect(salto.x - posAntes).toBeGreaterThan(100);
-  });
-
-  it('step antes da inicialização é no-op', () => {
-    const k = new Kalman2D();
-    k.step(DT);
-    expect(k.ready).toBe(false);
   });
 });

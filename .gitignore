@@ -25,15 +25,11 @@ python_ml/.git/
 # Scratch / experimentos externos
 scratch/
 
-# Relatórios de accuracy test auto-gerados na raiz pelo próprio pipeline
-# (não são fixture, são snapshot ephemeral por sessão).
-accuracy-report-*.json
+# Relatórios do teste de precisão gravados na raiz pelo app. Para guardar um,
+# mova para docs/medicoes/historico/ (ver docs/MEDICOES.md).
+/accuracy-report-*.json
 
-# Validação de axis symmetry do L2CS.
-# Fotos de referência (5 poses × ≥1 distância) e o axis_validation_report.json
-# ficam localmente. Mesma lógica do ci-baseline.jsonl: biometria + tamanho não
-# vão pro Git por padrão. Se precisar versionar (auditoria/repro), usar `git
-# add -f frontend/python_scripts/l2cs_validation/<subdir>`.
+# Fotos de referência da validação de eixos do L2CS (biometria, não versionar).
 frontend/python_scripts/l2cs_validation/
 
 # Gravações de tela (referência visual/QA — pesadas, não versionadas)
@@ -55,17 +51,3 @@ frontend/python_scripts/l2cs_validation/
 *.njsproj
 *.sln
 *.sw?
-
-# Documentos de auditoria e planejamento (locais, não versionados por decisão
-# do autor). Os IDs citados em comentários do código (C-xx, F-FE-xx, Q-xx,
-# Exp-n) vivem nestes arquivos — mantenha-os no disco ao trabalhar no pipeline.
-ARCHITECTURE.md
-AUDIT.md
-AUDIT-FRONTEND.md
-BENCHMARKS.md
-DECISIONS.md
-PIPELINE.md
-README-PROPOSED.md
-RESEARCH.md
-ROADMAP.md
-SPRINTS.md

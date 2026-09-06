@@ -27,26 +27,20 @@ function rosto(aberturaOlho: number): { x: number; y: number; z: number }[] {
   return p;
 }
 
-// B2.6 — os valores abaixo estão na escala ISOTRÓPICA do EAR.
-//
-// Antes de B2.6 o EAR chegava ao detector inflado por W/H (1,78× em 1080p),
-// porque o MediaPipe normaliza x pela largura e y pela altura. A gravação de
-// referência media 0,551 anisotrópico onde a escala isotrópica dá 0,314.
-// Agora `extractEyeFeatures` corrige a anisotropia e os limiares do
-// `BlinkDetector` foram reescalados junto (EAR_THR_MIN/MAX = 0,12/0,28).
+// Os valores abaixo estão na escala ISOTRÓPICA do EAR: `extractEyeFeatures`
+// corrige a anisotropia do MediaPipe (W/H, 1,78× em 1080p) e os limiares do
+// `BlinkDetector` estão nessa escala (EAR_THR_MIN/MAX = 0,12/0,28).
 //
 // A largura do olho sintético é 0,10; em 16:9 a correção multiplica por
 // H/W = 0,5625. Logo EAR_visto = (altura/0,10) × 0,5625.
 //
-// Os dois repousos precisam ficar ACIMA de `EAR_THR_MAX` (0,28), senão o
-// histórico nunca arranca: todo quadro vira piscada e o limiar fica preso no
-// default. Esse é o PONTO CEGO 2, testado explicitamente mais abaixo — aqui
-// ele seria só ruído que impediria medir o que se quer medir.
+// Os dois repousos ficam ACIMA de `EAR_THR_MAX` (0,28) para isolar o que se
+// quer medir aqui; repouso baixo é testado explicitamente mais abaixo.
 const REPOUSO_ALTO  = 0.0711;    // → EAR ≈ 0,40  (olho bem aberto)
 const REPOUSO_MEDIO = 0.0551;    // → EAR ≈ 0,31  (o repouso medido na gravação)
 const TESTE         = 0.0462;    // → EAR ≈ 0,26  — entre os dois limiares
 
-describe('BlinkDetector — o limiar adaptativo e seus dois pontos cegos', () => {
+describe('BlinkDetector — o limiar adaptativo', () => {
   const EAR = (altura: number) => altura / 0.10;
 
   it('o mesmo EAR muda de veredito conforme a história anterior', () => {
@@ -65,15 +59,9 @@ describe('BlinkDetector — o limiar adaptativo e seus dois pontos cegos', () =>
     expect(medio.update(0.26)).toBe(false);
   });
 
-  it('B2.6 — com EAR de repouso real o limiar ADAPTA em vez de travar no clamp', () => {
-    // ATÉ B2.6 este teste se chamava "PONTO CEGO 1" e afirmava o contrário:
-    // que com repouso 0,551 o limiar ficava SEMPRE preso em thrMax=0,22 e a
-    // adaptação nunca ocorria. Era o bug — o EAR estava inflado 1,78× e os
-    // limiares tinham sido calibrados para a escala isotrópica.
-    //
-    // Corrigida a escala (repouso ~0,31) e reescalados os limiares
-    // (teto 0,28), o limiar desejado 0,8 × 0,31 = 0,248 cabe na faixa e a
-    // adaptação passa a acontecer de fato.
+  it('com EAR de repouso real o limiar adapta em vez de travar no clamp', () => {
+    // Com repouso isotrópico ~0,31 e teto 0,28, o limiar desejado
+    // 0,8 × 0,31 = 0,248 cabe na faixa e a adaptação acontece de fato.
     const d = new BlinkDetector();
     for (let i = 0; i < 40; i++) d.update(0.31);
     // 0,26 é 84% do repouso: não é piscada.
@@ -83,24 +71,11 @@ describe('BlinkDetector — o limiar adaptativo e seus dois pontos cegos', () =>
     expect(d.update(0.23)).toBe(true);
   });
 
-  it('PONTO CEGO 2 — CORRIGIDO em P5.4: repouso baixo não trava mais', () => {
-    // ⚠️ ESTE TESTE FOI INVERTIDO, e o motivo importa.
-    //
-    // A versão anterior AFIRMAVA o buraco como comportamento esperado:
-    //
-    //     for (let i = 0; i < 200; i++) expect(d.update(0.22)).toBe(true);
-    //     expect(d.nonBlinkCount).toBe(0);
-    //
-    // Ou seja: 200 quadros seguidos de piscada e histórico zerado eram o
-    // resultado que a suíte protegia. O próprio comentário registrava que era
-    // "um ponto cego real" e que atingia justamente o usuário com ptose — e o
-    // público-alvo tem ELA. Um defeito conhecido, descrito, e verde.
-    //
-    // `P5.4` corrigiu na causa: o bootstrap passou a usar
-    // `EAR_CLOSED_ABSOLUTE` (0,18) em vez de `thrMax`, mais uma guarda que
-    // adota o valor observado quando nem o limiar absoluto arranca. O detector
-    // agora aprende o repouso de quem tem abertura reduzida em vez de declarar
-    // que essa pessoa pisca o tempo todo.
+  it('repouso baixo (abaixo de thrMax) não trava o detector', () => {
+    // O bootstrap usa `EAR_CLOSED_ABSOLUTE` (0,18) em vez de `thrMax`, mais
+    // uma guarda que adota o valor observado quando nem o limiar absoluto
+    // arranca. Assim o detector aprende o repouso de quem tem abertura
+    // reduzida (ptose, comum em ELA) em vez de declarar piscada contínua.
     const d = new BlinkDetector();
     const vereditos: boolean[] = [];
     for (let i = 0; i < 200; i++) vereditos.push(d.update(0.22));
@@ -113,13 +88,11 @@ describe('BlinkDetector — o limiar adaptativo e seus dois pontos cegos', () =>
 describe('extractFeatures — pureza', () => {
   beforeEach(() => { resetEarHistory(); });
 
-  // B1.1: `extractFeatures` passou a LANÇAR quando `l2csGaze` é `null`, porque
-  // sem o bloco angular o vetor sai com 37 dims e o conjunto ativo exige 39 —
-  // a corrupção silenciosa que custava a calibração do paciente no meio da
-  // sessão. Estes testes não têm nada a ver com L2CS: passavam `null` por
-  // acidente. Passam agora um gaze INVÁLIDO, que é o caminho de degradação
-  // graciosa documentado (§E4): o bloco é anexado zerado, o comprimento fica
-  // correto, e o veredito de piscada — o que estes testes medem — não muda.
+  // `extractFeatures` LANÇA quando `l2csGaze` é `null` (sem o bloco angular o
+  // vetor sai com 37 dims e o conjunto ativo exige 39). Estes testes não têm
+  // nada a ver com L2CS, então passam um gaze INVÁLIDO — o caminho de
+  // degradação graciosa: bloco anexado zerado, comprimento correto, e o
+  // veredito de piscada não muda.
   const GAZE_INVALIDO = { yaw: 0, pitch: 0, valid: false } as const;
 
   it('aceita um detector injetado, e dois detectores não se contaminam', () => {

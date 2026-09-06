@@ -2,12 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { BlinkHold, BLINK_HOLD_MAX_MS } from './blinkHold';
 import { Kalman2D } from './kalman2d';
 
-// -----------------------------------------------------------------------------
-// P6.3 — hold on blink.
-//
-// Aceite: piscada de 200 ms com cursor congelado e dwell preservado; olho
-// fechado por 3 s com o hold expirando em 2 s e o sistema entrando em fallback.
-// -----------------------------------------------------------------------------
+// Hold durante a piscada: 200 ms com o cursor congelado na predição do Kalman
+// e o dwell preservado; olho fechado por mais de 2 s expira o hold e entra em
+// fallback.
 
 const DT = 1 / 30;
 
@@ -118,7 +115,7 @@ describe('olho fechado por 3 s', () => {
   });
 });
 
-describe('a distinção que B2.5 deixou pendente', () => {
+describe('piscada e perda de rosto são casos distintos', () => {
   it('durante o hold o dwell é preservado; depois do teto, não', () => {
     // O dwell precisa distinguir "piscada" de "perdi o rosto". Durante o hold
     // a posição é confiável (vem do modelo), então o progresso continua.

@@ -1,17 +1,10 @@
-// P7.3 — piscada como clique.
+// Piscada como clique.
 //
-// ── Por que este módulo é o mais perigoso do sprint ─────────────────────────
-//
-// Piscar é **involuntário**. Uma pessoa pisca 15 a 20 vezes por minuto sem
-// decidir nada, e o público-alvo tem ELA — onde a piscada pode ser um dos
-// poucos movimentos voluntários restantes, mas continua acontecendo sozinha o
-// tempo todo.
-//
-// Um clique acidental num teclado ocular escreve uma letra errada. Num botão de
-// emergência, chama socorro. A especificação do plano é explícita sobre isso:
-// *"para ELA, um clique acidental num botão de emergência é um evento sério"*.
-//
-// Por isso o módulo é construído em torno das GUARDAS, não do gatilho:
+// Piscar é involuntário: 15 a 20 vezes por minuto sem decidir nada, e no
+// público-alvo (ELA) a piscada pode ser um dos poucos movimentos voluntários
+// restantes — mas continua acontecendo sozinha. Um clique acidental num
+// teclado ocular escreve uma letra errada; num botão de emergência, chama
+// socorro. Por isso o módulo é construído em torno das GUARDAS, não do gatilho:
 //
 //   1. **Desligado por default.** A flag `blinkClick` nasce `false`. Nenhum
 //      paciente ganha isto sem alguém decidir que ele quer.
@@ -45,10 +38,11 @@ export const BLINK_CLICK_ESTABILIDADE_MS = 300;
 export const BLINK_CLICK_REFRATARIO_MS = 1000;
 
 export interface EntradaBlinkClick {
-  /** O detector de piscada acusou este quadro. Vem do `BlinkDetector`, que já
-   *  tem o limiar adaptativo por pessoa (`P5.4`) — duplicar o critério aqui
-   *  daria duas respostas para a mesma pergunta. */
-  piscando: boolean;
+  /** O detector de piscada acusou este quadro. `null` = sem informação (rosto
+   *  perdido, features vazias): encerra o episódio sem clicar, porque olhos
+   *  fechados costumam derrubar a detecção do rosto e a "piscada" não pode
+   *  terminar num clique com o olho ainda fechado. */
+  piscando: boolean | null;
   nowMs: number;
   /** Alvo sob o cursor, ou `null`. Identidade estável (o próprio nó). */
   alvo: unknown | null;
@@ -125,6 +119,13 @@ export function stepBlinkClick(
 
   const novo: EstadoBlinkClick = { ...estado };
 
+  if (entrada.piscando === null) {
+    novo.piscandoDesde = null;
+    novo.alvoEstavel = null;
+    novo.alvoEstavelDesde = null;
+    return { estado: novo, clicou: null, motivoRejeicao: null };
+  }
+
   // ── Estabilidade do alvo ────────────────────────────────────────────────
   //
   // Rastreada SEMPRE, inclusive durante a piscada. Se zerasse ao piscar, a
@@ -137,15 +138,10 @@ export function stepBlinkClick(
     novo.alvoEstavelDesde = entrada.nowMs;
   } else if (estado.piscandoDesde === null && !entrada.piscando) {
     // Perdeu o alvo FORA de uma piscada: zera. Durante a piscada, preserva.
-    //
-    // ⚠️ A condição precisa olhar `entrada.piscando`, não só
-    // `estado.piscandoDesde`. No PRIMEIRO quadro da piscada o estado ainda não
-    // registrou o episódio (ele é marcado mais abaixo nesta mesma função),
-    // então checar só o estado limpava a âncora justo no quadro em que o alvo
-    // some — e nenhuma piscada jamais passava pela guarda de estabilidade.
-    //
-    // A guarda mataria a funcionalidade inteira em vez de protegê-la, e o
-    // sintoma seria "piscada como clique não funciona", sem pista de por quê.
+    // A condição precisa olhar `entrada.piscando`, não só `estado.piscandoDesde`:
+    // no PRIMEIRO quadro da piscada o estado ainda não registrou o episódio
+    // (é marcado mais abaixo), e checar só o estado limpava a âncora justo no
+    // quadro em que o alvo some — nenhuma piscada passaria pela estabilidade.
     novo.alvoEstavel = null;
     novo.alvoEstavelDesde = null;
   }

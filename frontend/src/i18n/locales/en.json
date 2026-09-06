@@ -1,47 +1,14 @@
 {
   "common": {
-    "back": "Back",
     "cancel": "Cancel",
-    "confirm": "Confirm",
-    "save": "Save",
-    "loading": "Loading…",
-    "close": "Close",
-    "menu": "Menu"
-  },
-  "menu": {
-    "tabs": {
-      "communication": "Communication",
-      "care": "Care",
-      "leisure": "Leisure",
-      "system": "System"
-    },
-    "items": {
-      "emergency": "Medical\nEmergency",
-      "pictograms": "Pictograms\n(AAC)",
-      "phrases": "Quick\nPhrases",
-      "keyboard": "Virtual\nKeyboard",
-      "chatbot": "AI\nAssistant",
-      "options": "My\nOptions",
-      "caregiver": "Caregiver\nDashboard",
-      "meditation": "Guided\nMeditation",
-      "iamok": "Alert:\nI'm OK",
-      "games": "Mini Games",
-      "drawing": "Free\nDrawing",
-      "gallery": "Photo\nGallery",
-      "news": "Daily\nNews",
-      "settings": "General\nSettings",
-      "virtualMouse": "Virtual\nMouse (PC)"
-    },
-    "openItem": "Open {{item}}",
-    "skipToContent": "Skip to main content",
-    "tabsAriaLabel": "Menu categories"
+    "yes": "Yes",
+    "no": "No"
   },
   "settings": {
     "title": "Settings",
     "auth": {
       "title": "Caregiver Access",
       "hint": "Enter the PIN to access system settings.",
-      "pinLabel": "Caregiver PIN",
       "pinError": "Incorrect PIN. Please check with the responsible caregiver.",
       "submit": "Enter"
     },
@@ -49,12 +16,14 @@
       "title": "Dwell Timer",
       "slow": "Slow",
       "normal": "Normal",
-      "fast": "Fast"
+      "fast": "Fast",
+      "description": "How long the gaze must rest on a button to activate it. Start with Normal; increase it if there are accidental clicks."
     },
     "sound": {
       "title": "System Audio",
-      "on": "Sound On",
-      "off": "Sound Off"
+      "on": "Sound on",
+      "off": "Sound off",
+      "description": "Confirmation sounds, emergency alarm and synthesized voice."
     },
     "voice": {
       "title": "Custom Voice Cloning",
@@ -62,33 +31,307 @@
       "upload": "Upload Audio (.wav)",
       "uploading": "Uploading audio…",
       "processing": "Processing…",
-      "ready": "✓ Custom voice enabled",
-      "lgpd": "GDPR/LGPD: Voice is sensitive biometric data. The model will be stored exclusively for local assistive use by the patient."
+      "ready": "Custom voice enabled",
+      "lgpd": "GDPR/LGPD: Voice is sensitive biometric data. The model will be stored exclusively for local assistive use by the patient.",
+      "cardTitle": "Patient voice",
+      "noProfile": "Select a profile before cloning the voice.",
+      "apiError": "Error {{status}} while processing the audio.",
+      "networkError": "Could not upload the audio. Check the connection to the server.",
+      "active": "Custom voice in use"
     },
     "backup": {
       "title": "Settings Backup",
-      "export": "Export Backup (JSON)"
+      "export": "Export Backup (JSON)",
+      "description": "Saves every setting on this page to a file you can restore on another computer.",
+      "done": "Backup exported."
     },
-    "logout": "Sign out",
-    "returnToMenu": "Back to Menu",
+    "dashboardLink": {
+      "button": "Open caregiver dashboard"
+    },
     "language": {
       "title": "Language",
       "pt-BR": "Português (Brasil)",
       "en": "English"
+    },
+    "subtitle": "Tracking, display and patient follow-up settings.",
+    "nav": {
+      "dashboard": "Caregiver dashboard",
+      "guide": "Guide",
+      "sections": "Sections on this page"
+    },
+    "tracking": {
+      "title": "Tracking",
+      "eye": {
+        "title": "Dominant eye",
+        "description": "If one eye has more trouble moving, prioritize the other.",
+        "both": "Both",
+        "left": "Left",
+        "right": "Right"
+      },
+      "smoothing": {
+        "title": "Cursor smoothing",
+        "description": "Applies immediately. Stable removes tremor (reading); Responsive follows the gaze faster (keyboard and games).",
+        "stable": "Stable",
+        "stableSub": "less tremor",
+        "balanced": "Balanced",
+        "balancedSub": "default",
+        "responsive": "Responsive",
+        "responsiveSub": "less lag",
+        "kalmanNote": "These levels only apply to the One Euro filter. A comparison filter is active in this session, so the change is ignored."
+      },
+      "advanced": {
+        "title": "Filter and cursor",
+        "description": "Tracking engine options. They only take effect after the app is reloaded."
+      },
+      "filter": {
+        "label": "Motion filter",
+        "hint": "One Euro is the production filter. Kalman and Kalman + EMA exist for comparison in measurement sessions.",
+        "default": "default",
+        "compare": "comparison"
+      },
+      "cursorSize": {
+        "label": "Cursor size",
+        "hint": "Diameter of the dot that follows the gaze."
+      },
+      "ring": {
+        "title": "Progress ring on the cursor",
+        "description": "Draws the dwell progress around the cursor itself, in addition to the button."
+      },
+      "blink": {
+        "title": "Blink to click",
+        "description": "A long blink confirms the button under the gaze. Off by default: blinking is involuntary."
+      },
+      "scanning": {
+        "title": "Automatic scanning",
+        "description": "After a few seconds without gaze, buttons are highlighted one by one for selection."
+      },
+      "lost": {
+        "title": "Warn when gaze is lost",
+        "description": "Holds the cursor for 2 seconds, then asks to reposition the face."
+      },
+      "pending": {
+        "title": "Changes waiting for reload",
+        "body": "The options above were saved, but the tracker only reads them at startup. The saved calibration is kept.",
+        "apply": "Apply and reload"
+      }
+    },
+    "display": {
+      "title": "Display",
+      "theme": {
+        "title": "Theme",
+        "light": "Light",
+        "dark": "Dark",
+        "hint": "The dark theme is easier on the eyes on large screens and reduces glare-induced blinking."
+      },
+      "monitorBrightness": {
+        "label": "Monitor brightness (whole system)",
+        "hint": "Dims the entire monitor. Depends on driver support."
+      },
+      "comfort": {
+        "title": "Visual comfort",
+        "description": "Lower the brightness and enable the amber filter if the patient blinks a lot or complains about glare.",
+        "uiBrightness": "Interface brightness",
+        "darkest": "darkest",
+        "normal": "normal",
+        "amber": "Amber filter",
+        "amberHint": "Reduces the blue component of light. Relieves light sensitivity."
+      },
+      "geometry": {
+        "title": "Screen geometry",
+        "description": "Used to compute the error in degrees and the position of the calibration points. Measure with a tape.",
+        "diagonal": "Screen diagonal (inches)",
+        "diagonalHint": "Corner to corner of the visible area.",
+        "distance": "Eye-to-screen distance (cm)",
+        "distanceHint": "In the usual position of use. 50 to 70 cm works best.",
+        "defaultWarning": "Default values in use. If the screen is not 23.6 inches at 60 cm, the error in degrees from the accuracy test will be wrong.",
+        "source": {
+          "default": "default",
+          "auto": "read from system",
+          "manual": "measured by hand"
+        }
+      },
+      "fov": {
+        "title": "Camera field of view",
+        "calibrated": "Calibrated: {{fov}}°. The distance meter in the setup screen is active.",
+        "notCalibrated": "Not calibrated: the app cannot estimate the distance on its own. Measure the distance from the face to the camera, enter it above, seat the patient in the usual position and click below.",
+        "button": "Calibrate field of view",
+        "clear": "Clear",
+        "noFace": "Face not detected. Sit facing the camera and try again.",
+        "failed": "Could not compute the field of view. Check the distance entered.",
+        "done": "Field of view calibrated: {{fov}}°."
+      }
+    },
+    "calibration": {
+      "title": "Calibration",
+      "state": {
+        "title": "Calibration status",
+        "description": "The gaze model in use in this session.",
+        "calibrated": "Calibrated",
+        "notCalibrated": "Not calibrated",
+        "profile": "Active profile",
+        "distance": "Calibrated distance"
+      },
+      "optical": {
+        "noGlasses": "No glasses",
+        "glasses": "Glasses",
+        "progressive": "Progressive glasses",
+        "contacts": "Contact lenses",
+        "unknown": "Not set"
+      },
+      "recalibrate": "Recalibrate",
+      "recalibrateHint": "Opens the setup and calibration screen. The current calibration stays valid until the new one finishes.",
+      "accuracy": {
+        "title": "Accuracy test",
+        "description": "Shows 13 points and measures the distance between the gaze and each one. Fill in the condition first; it becomes part of the report.",
+        "needCalibration": "Calibrate first to run the accuracy test.",
+        "noSamples": "Test without samples ({{missing}} of {{total}} points). Check the tracking and repeat.",
+        "result": "Accuracy: {{px}} px on average ({{deg}}°) — {{score}}",
+        "lighting": "Lighting",
+        "lightingGood": "Good",
+        "lightingPoor": "Poor",
+        "head": "Head",
+        "headStill": "Still",
+        "headFree": "Free",
+        "glasses": "Glasses",
+        "session": "Session (min)",
+        "sessionAuto": "Automatic",
+        "running": "Running…",
+        "run": "Test accuracy",
+        "last": "Last result",
+        "meanDeg": "Mean error",
+        "meanPx": "Mean error (px)",
+        "medianPx": "Median",
+        "p90Px": "P90",
+        "jitter": "Jitter",
+        "points": "Points measured"
+      }
+    },
+    "caregiver": {
+      "title": "Caregiver",
+      "reminders": {
+        "title": "Reminders and routine",
+        "description": "Shown to the patient at the scheduled time.",
+        "missing": "Fill in the activity and the time.",
+        "added": "Reminder added.",
+        "what": "Activity",
+        "placeholder": "e.g. drink water, physiotherapy",
+        "when": "Time",
+        "add": "Add",
+        "scheduled": "Scheduled ({{count}})",
+        "empty": "No reminders set.",
+        "remove": "Delete reminder {{title}}",
+        "removed": "Reminder removed."
+      },
+      "links": {
+        "title": "Dashboard and guide",
+        "description": "Daily routine, symptom diary and the setup guide.",
+        "guide": "Open guide"
+      },
+      "emergency": {
+        "title": "Emergency",
+        "body": "The red button sounds an alarm on this computer, speaks out loud and, if a server is configured, sends a notice. It does not call anyone: keep a caregiver within earshot."
+      }
+    },
+    "data": {
+      "title": "Data",
+      "consentOn": "Consent recorded.",
+      "consentOff": "Consent removed. Local clinical data was deleted.",
+      "clearConfirm": "Confirm permanent deletion",
+      "cleared": "Local clinical data deleted.",
+      "exported": "Clinical report exported.",
+      "clinical": {
+        "title": "Clinical history",
+        "description": "Accuracy over time, most used phrases and activity hours.",
+        "lgpdTitle": "Data protection (GDPR/LGPD)",
+        "lgpdBody": "Usage data, calibrations and phrases stay on this device only, for clinical follow-up. Nothing is sent to external servers.",
+        "consent": "Allow local logging of the patient's routine and calibration",
+        "locked": "Enable the authorization above to see the history.",
+        "calibrations": "Accuracy tests ({{count}})",
+        "noCalibrations": "No accuracy test recorded.",
+        "high": "high",
+        "good": "good",
+        "trendHint": "A mean error that rises over the weeks may indicate eye fatigue, a change in posture or disease progression. Recalibrate and check light and distance.",
+        "phrases": "Most used phrases",
+        "noPhrases": "No phrases recorded.",
+        "activity": "Activity by period",
+        "noActivity": "No activity data.",
+        "periods": {
+          "night": "Night (0–6h)",
+          "morning": "Morning (6–12h)",
+          "afternoon": "Afternoon (12–18h)",
+          "evening": "Evening (18–24h)"
+        },
+        "utterances": "{{count}} utterances",
+        "export": "Export report (JSON)",
+        "clear": "Delete clinical data"
+      }
+    },
+    "diagnostics": {
+      "title": "Diagnostics",
+      "live": {
+        "title": "Live readings",
+        "description": "Updated twice a second. A dash means it has not been measured yet.",
+        "fps": "Frames per second",
+        "camera": "Camera resolution",
+        "face": "Face detected",
+        "brightness": "Face brightness",
+        "contrast": "Contrast",
+        "model": "Gaze model",
+        "modelRate": "Model rate",
+        "filter": "Filter in use",
+        "samples": "Calibration samples",
+        "loopErrors": "Consecutive errors"
+      },
+      "state": {
+        "idle": "Stopped",
+        "loading": "Starting",
+        "tracking": "Tracking",
+        "calibrating": "Calibrating",
+        "no_face": "No face",
+        "degraded": "Degraded",
+        "uncalibrated": "Not calibrated",
+        "error": "Error"
+      },
+      "model": {
+        "loading": "loading",
+        "ready": "ready",
+        "error": "error",
+        "disabled": "off"
+      },
+      "recorder": {
+        "title": "Session recorder",
+        "description": "Records tracking data as text (no video) for analysis. Use it when support asks.",
+        "recording": "Recording",
+        "idle": "Stopped",
+        "dropped": "{{count}} dropped",
+        "stop": "Stop recording",
+        "start": "Start recording",
+        "export": "Export (.jsonl)",
+        "discard": "Discard",
+        "stopped": "Recording stopped with {{frames}} frames.",
+        "started": "Recording started.",
+        "nothing": "Nothing to export. Start a recording first.",
+        "exported": "Exported {{frames}} frames.",
+        "discarded": "Recording discarded."
+      },
+      "pinNote": "The caregiver PIN comes from the VITE_CAREGIVER_PIN variable (development value when unset). It must be replaced by server authentication before production use."
     }
   },
   "emergency": {
     "title": "MEDICAL EMERGENCY",
-    "alertSent": "ALERT SENT!",
-    "waiting": "Signal for {{label}} triggered. Please wait.",
-    "cancelAndReturn": "Cancel Alert and Return",
-    "chooseType": "Select the type of emergency",
+    "choose": "What do you need?",
+    "localAlarm": "Alarm on, on this device",
+    "localAlarmDetail": "Sound and screen calling anyone nearby, because of: {{label}}. This device does not send messages by itself.",
+    "escalated": "Louder alarm",
+    "escalatedDetail": "Nobody turned the alarm off. The sound will keep going until someone cancels it.",
+    "cancelAlarm": "Cancel alarm",
+    "spoken": "Attention, I need help: {{label}}",
+    "spokenEscalated": "Attention, I need help now.",
     "items": {
       "pain": "SEVERE PAIN",
       "breath": "SHORTNESS OF BREATH",
       "cold": "COLD / FEVER",
       "other": "OTHER EMERGENCY"
-    },
-    "triggerAria": "Trigger emergency alert: {{label}}"
+    }
   }
 }

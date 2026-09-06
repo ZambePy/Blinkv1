@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { expandPolynomialFeatures, expandedDimension } from './polynomial';
+import { expandPolynomialFeatures } from './polynomial';
 
 describe('expandPolynomialFeatures', () => {
   it('grau 2 sobre d=1: devolve [x, x²]', () => {
@@ -37,11 +37,4 @@ describe('expandPolynomialFeatures', () => {
     expect(Number.isNaN(out[0])).toBe(true);
     expect(out[1]).toBe(2);
   });
-});
-
-describe('expandedDimension', () => {
-  it('d=0 → 0', () => expect(expandedDimension(0)).toBe(0));
-  it('d=1 → 2', () => expect(expandedDimension(1)).toBe(2));
-  it('d=8 → 44', () => expect(expandedDimension(8)).toBe(44));
-  it('d=12 → 90', () => expect(expandedDimension(12)).toBe(90));
 });

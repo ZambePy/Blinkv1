@@ -74,13 +74,4 @@ export class StandardScaler {
     this.stds = stds;
     this.isFitted = true;
   }
-
-  /** Reconstrói um StandardScaler a partir de um snapshot serializável
-   *  `{ mean, std }` produzido pelo calibration worker. Pronto para
-   *  `transform` / `transformSingle` na main thread. */
-  static fromSerializable(snapshot: { mean: number[]; std: number[] }): StandardScaler {
-    const s = new StandardScaler();
-    s.setParams(snapshot.mean, snapshot.std);
-    return s;
-  }
 }

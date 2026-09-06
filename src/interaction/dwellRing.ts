@@ -1,32 +1,14 @@
-// P7.2 — anel de progresso ao redor do CURSOR.
+// Anel de progresso ao redor do CURSOR.
 //
-// ── Por que no cursor e não só no botão ─────────────────────────────────────
+// O realce de progresso só no alvo falha em alvos pequenos e vizinhos (num
+// teclado ocular o botão fica debaixo do próprio cursor) e quando não há alvo
+// nenhum. O anel no cursor acompanha o olhar, então está sempre na fóvea; um
+// indicador fora dela exige um sacádico que cancela o próprio dwell.
 //
-// O realce de progresso hoje existe só no alvo (`--gaze-dwell-progress` no nó
-// sob o olhar). Isso funciona quando o alvo é grande e o olhar está no meio
-// dele. Falha em dois casos que são a rotina de quem usa isto:
-//
-//   - **Alvos pequenos e vizinhos.** Num teclado ocular, o botão sob o olhar
-//     tem ~40 px. O progresso desenhado nele fica debaixo do próprio cursor.
-//   - **Nenhum alvo.** Olhando para o vazio não há onde desenhar, então o
-//     paciente não tem retorno de que o sistema está vivo — que é justamente
-//     quando ele mais precisa saber.
-//
-// O anel no cursor resolve os dois porque ele acompanha o olhar: está sempre no
-// centro do campo visual atento, que é onde a fóvea está. Um indicador de
-// progresso fora dele exige um sacádico para ser lido — e o sacádico cancela o
-// próprio dwell que se queria acompanhar.
-//
-// ── A armadilha geométrica do SVG ───────────────────────────────────────────
-//
-// Um traço de espessura `w` num círculo de raio `r` ocupa de `r - w/2` a
-// `r + w/2`. Dimensionar o `viewBox` como `2r` — que é a conta intuitiva —
-// corta metade da espessura nas quatro bordas.
-//
-// E o corte não é uniforme: aparece como quatro achatados nos pontos cardeais,
-// que se leem como "o anel está tremendo". Num indicador cuja única função é
-// dizer "o sistema está contando", parecer instável é a falha exata que ele
-// veio evitar. Por isso a caixa é calculada aqui e testada.
+// Armadilha do SVG: um traço de espessura `w` num círculo de raio `r` ocupa
+// de `r - w/2` a `r + w/2`. Dimensionar o `viewBox` como `2r` corta metade da
+// espessura nos pontos cardeais, e o anel parece tremer. Por isso a caixa é
+// calculada aqui e testada.
 
 /** Espessura do traço do anel, em px. */
 export const ANEL_ESPESSURA_PX = 4;

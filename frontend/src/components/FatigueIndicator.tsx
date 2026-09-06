@@ -101,42 +101,12 @@ export const FatigueIndicator: React.FC = () => {
       role="status"
       aria-live="polite"
       data-testid="fatigue-indicator"
-      style={{
-        position: 'fixed',
-        // O DriftIndicator vive em top: 5.5rem. Se ambos aparecerem (raro —
-        // fadiga e drift são causas independentes), este fica logo abaixo.
-        top: '9rem',
-        left: '50%',
-        transform: 'translateX(-50%)',
-        zIndex: 99960,
-      }}
+      className="fatigue-indicator"
     >
-      <GazeButton
-        onClick={() => navigate('/rest')}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: '0.75rem',
-          // Verde suave — sugestão de pausa, não alerta. Diferencia do azul
-          // do DriftIndicator (recalibração) e do âmbar do degraded (falha
-          // de rastreamento). Regra 4: aparência de urgência exige número
-          // que justifique — fadiga é conforto, não crise.
-          background: '#d1fae5',
-          border: '2px solid #34d399',
-          borderRadius: '2rem',
-          color: '#065f46',
-          padding: '0.5rem 1.25rem',
-          boxShadow: '0 8px 15px -3px rgba(52, 211, 153, 0.20)',
-          cursor: 'pointer',
-          height: 'auto',
-          width: 'auto',
-        }}
-        noWarn
-      >
-        <Coffee size={18} color="#059669" />
-        <span style={{ fontSize: '1rem', fontWeight: 700 }}>
-          Uma pausa? Modo Descanso disponível
-        </span>
+      {/* Verde suave: sugestão de pausa, não alerta. Diferencia do azul da
+          recalibração e do âmbar do rastreamento degradado. */}
+      <GazeButton onClick={() => navigate('/rest')} variant="secondary" icon={<Coffee />} noWarn>
+        <span className="gaze-button__label">Uma pausa? Modo Descanso disponível</span>
       </GazeButton>
     </div>
   );

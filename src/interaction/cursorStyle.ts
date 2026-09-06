@@ -1,38 +1,20 @@
-// P7.1 — cursor de alto contraste com tamanho ajustável.
+// Cursor de alto contraste com tamanho ajustável.
 //
-// ── Por que isto é um módulo puro e não CSS ─────────────────────────────────
+// É um módulo puro, e não CSS, porque duas coisas aqui são aritmética e
+// quebram em silêncio:
 //
-// Duas coisas aqui são aritmética, não estilo, e as duas quebram em silêncio:
+//   1. O offset de centralização. Um `translate(x - 24, y - 24)` com o `24`
+//      escrito à mão funciona enquanto o tamanho for fixo; com tamanho
+//      ajustável, um cursor de 96 px passa a ser desenhado deslocado — e isso
+//      não parece bug de layout, parece erro de calibração (viés constante que
+//      o paciente compensa e a calibração online aprende).
+//   2. O contraste. Um vermelho translúcido some sobre o botão de emergência,
+//      que é vermelho, e fica pálido sobre fundo claro.
 //
-//   1. **O offset de centralização.** Hoje o `GazeContext` desenha o cursor com
-//      `translate3d(sample.x - 24, sample.y - 24)` e um `width:48px` no CSS. O
-//      `24` é `48/2` escrito à mão, em outro arquivo. Enquanto o tamanho for
-//      fixo, funciona. No instante em que ele vira ajustável — que é o pedido
-//      desta tarefa — um cursor de 96 px passa a ser desenhado 24 px acima e à
-//      esquerda de onde a pessoa está olhando.
-//
-//      E esse erro NÃO se parece com um bug de layout. Ele se parece com erro
-//      de calibração: um viés constante, na mesma direção, que piora conforme o
-//      cursor cresce. O paciente compensa olhando torto, a calibração online
-//      aprende o viés compensado, e o problema fica pior. Por isso o offset é
-//      derivado aqui e testado.
-//
-//   2. **O contraste.** "Alto contraste" não é uma cor bonita; é uma razão de
-//      luminância que se pode calcular. O cursor atual é
-//      `rgba(239,68,68,0.6)` — vermelho translúcido. Sobre o botão de
-//      emergência, que é vermelho, ele desaparece. Sobre um fundo claro, os 60%
-//      de opacidade o deixam pálido.
-//
-// ── A estratégia: anel duplo ────────────────────────────────────────────────
-//
-// Nenhuma cor única é visível sobre todos os fundos. A saída é desenhar DUAS
-// bordas concêntricas de luminâncias opostas: uma quase preta e uma quase
-// branca. Qualquer que seja o fundo, uma das duas contrasta com ele — é a mesma
-// técnica dos cursores do sistema operacional e das miras de jogos.
-//
-// O preenchimento continua colorido (estado do dwell), mas ele deixou de ser o
-// que torna o cursor visível. Isso é o que permite baixar a opacidade do
-// preenchimento sem perder o cursor de vista.
+// Estratégia: anel duplo. DUAS bordas concêntricas de luminâncias opostas
+// (quase preta e quase branca) — qualquer que seja o fundo, uma das duas
+// contrasta com ele. O preenchimento continua colorido (estado do dwell), mas
+// deixou de ser o que torna o cursor visível.
 
 /** Razão de contraste WCAG entre duas cores opacas (1 a 21). */
 export function contrasteWCAG(a: RGB, b: RGB): number {
@@ -149,7 +131,7 @@ export function estiloDoCursor(entrada: EntradaEstiloCursor): EstiloDeCursor {
       preenchimento = 'rgba(234,179,8,0.55)';
       break;
     case 'segurando':
-      // Posição congelada do `P7.5`: cinza neutro. Não é um estado de erro (o
+      // Posição congelada pelo fallback de gaze perdido: cinza neutro. Não é um estado de erro (o
       // rastreamento pode voltar em 200 ms), mas também não pode parecer o
       // cursor ativo — senão o paciente continua tentando mirar com ele.
       preenchimento = 'rgba(148,163,184,0.45)';

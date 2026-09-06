@@ -1,10 +1,7 @@
-// Instrumentação de latência por estágio do pipeline (tarefa T0.1 → T0.5 no
-// plano de sprints em `tasks.md`).
+// Instrumentação de latência por estágio do pipeline.
 //
-// Racional: sem medir latência por estágio o conflito C8 do plano é indecidível
-// e o Dia 7 não consegue atribuir latência a estágio. O módulo é PURO —
-// recebe uma função `now()` no construtor (default `performance.now`) para ser
-// testável no vitest sem monkey-patching global.
+// O módulo é puro: recebe uma função `now()` no construtor (default
+// `performance.now`) para ser testável sem monkey-patching global.
 //
 // Uso típico no engine:
 //   stageTimer.begin('mediapipe');
@@ -165,15 +162,10 @@ export class StageTimer {
     return out;
   }
 
-  /** Descarta janela e contadores de todos os estágios. Útil no `start()` do
-   *  engine para não misturar sessões (relacionado a `B1.7` do plano). */
+  /** Descarta janela e contadores de todos os estágios. O engine chama no
+   *  `start()` para não misturar sessões. */
   reset(): void {
     this.stages.clear();
-  }
-
-  /** Lista os nomes de estágios registrados (para testes/depuração). */
-  stageNames(): string[] {
-    return Array.from(this.stages.keys());
   }
 
   private getOrCreate(stage: string): StageState {
@@ -202,7 +194,7 @@ export class StageTimer {
   }
 }
 
-/** Nomes canônicos dos estágios instrumentados hoje no engine.
+/** Nomes canônicos dos estágios instrumentados no engine.
  *  Consumidores devem preferir estes literais para não divergirem por typo. */
 export const STAGE = {
   mediapipe: 'mediapipe',
@@ -212,23 +204,5 @@ export const STAGE = {
   quality: 'quality',
   predict: 'predict',
   filter: 'filter',
-  emit: 'emit',
   loopTotal: 'loop.total',
-  // ── Sprint 4 ──────────────────────────────────────────────────────────────
-  // Só ganham amostra com as flags correspondentes ligadas. A ausência da
-  // chave no snapshot é informação: significa que o estágio não rodou nenhuma
-  // vez na sessão, e não que ele custou zero.
-  /** Captura no thread principal (`P4.1`/`P4.2`). O aceite de `P4.2` é este
-   *  número cair para ~0 quando a captura vai para o worker. */
-  capture: 'capture',
-  /** CLAHE + gama sobre o RGBA, antes da normalização (`P4.5`/`P4.6`). */
-  preprocess: 'preprocess',
-  /** Decisão do cache de ROI (`P4.8`). Deve ser desprezível; se aparecer no
-   *  p95, a decisão está custando mais que o crop que ela evita. */
-  roiDecide: 'roi.decide',
-  /** Head pose por PnP (`P5.2`). Custo medido: 0,175 ms p50. Roda a 1 Hz
-   *  quando é só comparação; por quadro quando é a fonte. */
-  pnp: 'pose.pnp',
 } as const;
-
-export type StageName = typeof STAGE[keyof typeof STAGE];

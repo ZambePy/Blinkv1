@@ -18,7 +18,7 @@
 let loopErrorCount = 0;
 
 /**
- * Frames que terminaram em exceção SEGUIDOS, sem nenhum sucesso no meio (B2.4).
+ * Frames que terminaram em exceção SEGUIDOS, sem nenhum sucesso no meio.
  *
  * A distinção importa: 100 erros espalhados ao longo de uma hora são ruído
  * tolerável (um subscriber React que lançou aqui e ali); 100 erros seguidos
@@ -71,7 +71,7 @@ export interface LoopBodyResult {
   /** O corpo lançou neste frame. */
   errored: boolean;
   /**
-   * A falha é persistente e o chamador deve agir (B2.4): transicionar para
+   * A falha é persistente e o chamador deve agir: transicionar para
    * estado de erro visível e tentar reinicializar o `FaceLandmarker`.
    *
    * `true` UMA vez por surto — não em todo frame subsequente.
@@ -91,7 +91,7 @@ export function runLoopBody(body: () => void, schedule: () => void): LoopBodyRes
   let fatal = false;
   try {
     body();
-    // B2.4 — sucesso encerra o surto. O total continua contando, para o
+    // Sucesso encerra o surto. O total continua contando, para o
     // diagnóstico saber que houve turbulência.
     consecutiveLoopErrors = 0;
     fatalSignaled = false;
@@ -99,7 +99,7 @@ export function runLoopBody(body: () => void, schedule: () => void): LoopBodyRes
     errored = true;
     loopErrorCount++;
     consecutiveLoopErrors++;
-    // B2.4 — sinaliza UMA vez por surto. Sem o latch, o engine tentaria
+    // Sinaliza UMA vez por surto. Sem o latch, o engine tentaria
     // reinicializar o FaceLandmarker a cada frame, o que é pior que o
     // problema original.
     if (consecutiveLoopErrors >= LOOP_ERROR_FATAL_THRESHOLD && !fatalSignaled) {

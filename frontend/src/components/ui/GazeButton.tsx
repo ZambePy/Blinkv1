@@ -1,29 +1,61 @@
 import React, { useRef, useEffect } from 'react';
 import { alvoMinimoPx } from '../../design/gazeMetrics';
 
-interface GazeButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  children: React.ReactNode;
+export type GazeButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
+export type GazeButtonSize = 'lg' | 'xl';
+
+export interface GazeButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  children?: React.ReactNode;
+  /** Aparência. `secondary` (padrão) é a superfície neutra com borda. */
+  variant?: GazeButtonVariant;
+  /**
+   * Tamanho mínimo do alvo: `lg` = 160×120 px, `xl` = 200×160 px.
+   * Sem `size`, o botão dimensiona pelo conteúdo ou por `width`/`height`.
+   */
+  size?: GazeButtonSize;
+  /** Ícone (lucide-react). Renderizado com 40 px (48 px em `xl`). */
+  icon?: React.ReactNode;
+  /** Rótulo textual. Alternativa a `children`; quebras de linha são respeitadas. */
+  label?: React.ReactNode;
+  /** Ícone acima do rótulo (cards de menu). */
+  stacked?: boolean;
+  /** Tempo de dwell específico deste alvo, em ms (vira `data-dwell-ms`). */
+  dwellMs?: number;
   width?: number;
   height?: number;
+  /** Botão de emergência: vermelho, acionável mesmo durante a calibração. */
   emergency?: boolean;
   /**
-   * Alvo de RECUPERAÇÃO (B1.9).
-   *
-   * Marca o botão como acionável mesmo com o rastreamento em `degraded`, onde
-   * o dispatcher bloqueia todo alvo comum. Existe para o botão "Recalibre
-   * aqui": ele só aparece em `degraded` e, sem esta marcação, era inalcançável
-   * pelo olhar — o paciente via a saída anunciada e não conseguia usá-la.
-   *
-   * Use APENAS em controles que consertam o próprio rastreamento. O dwell é
-   * mais longo nesses alvos (2,5× em degradado) porque um acionamento
-   * acidental custa uma recalibração inteira.
+   * Alvo de recuperação: acionável mesmo com o rastreamento degradado, onde
+   * o dispatcher bloqueia todo alvo comum. Use apenas em controles que
+   * consertam o próprio rastreamento (ex.: "Recalibrar"). O dwell é mais
+   * longo nesses alvos porque um acionamento acidental custa uma
+   * recalibração inteira.
    */
   recovery?: boolean;
+  /** Silencia o aviso de desenvolvimento sobre alvo abaixo do mínimo. */
   noWarn?: boolean;
 }
 
+/**
+ * Alvo canônico de interação por olhar.
+ *
+ * Estrutura interna (consumida pelo CSS em index.css):
+ *  - `.gaze-button-hit-area`: zona de acerto ampliada (metade do gap vizinho)
+ *  - `.gaze-button-content`: ícone + rótulo
+ *  - `.gaze-button-progress-ring`: anel de dwell, lê `--gaze-dwell-progress`
+ *
+ * O GazeContext aplica `.gaze-hover` e a variável de progresso diretamente no
+ * elemento; nada aqui depende de estado React para o feedback do dwell.
+ */
 export const GazeButton: React.FC<GazeButtonProps> = ({
   children,
+  variant = 'secondary',
+  size,
+  icon,
+  label,
+  stacked = false,
+  dwellMs,
   width,
   height,
   emergency = false,
@@ -32,12 +64,10 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
   disabled,
   style,
   className = '',
+  type = 'button',
   ...props
 }) => {
   const buttonRef = useRef<HTMLButtonElement>(null);
-  // B3.24 — fonte única. Antes era o literal `198` aqui E em `GazeGrid`,
-  // derivado de 5,0° a 60 cm com 96 dpi hardcoded — números que o app conhece
-  // de verdade em `settings` e que o design system ignorava.
   const minPx = alvoMinimoPx();
 
   useEffect(() => {
@@ -50,16 +80,31 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
         );
       }
     }
-  }, [width, height, noWarn]);
+  }, [width, height, noWarn, minPx]);
 
+  const classes = [
+    'gaze-button',
+    `gaze-button--${variant}`,
+    size ? `gaze-button--${size}` : '',
+    stacked ? 'gaze-button--stacked' : '',
+    emergency ? 'emergency' : '',
+    className,
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  // `data-dwell-ms` passado direto pela página continua valendo: o spread de
+  // `props` vem depois e sobrescreve.
   return (
     <button
       ref={buttonRef}
+      type={type}
       disabled={disabled}
       data-emergency={emergency ? 'true' : undefined}
       data-recovery={recovery ? 'true' : undefined}
       data-no-dwell={disabled ? 'true' : undefined}
-      className={`gaze-button ${emergency ? 'emergency' : ''} ${className}`}
+      data-dwell-ms={dwellMs}
+      className={classes}
       style={{
         width: width ? `${width}px` : undefined,
         height: height ? `${height}px` : undefined,
@@ -67,9 +112,17 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
       }}
       {...props}
     >
-      <span className="gaze-button-hit-area" />
-      <span className="gaze-button-content">{children}</span>
-      <span className="gaze-button-progress-ring" />
+      <span className="gaze-button-hit-area" aria-hidden="true" />
+      <span className="gaze-button-content">
+        {icon && (
+          <span className="gaze-button__icon" aria-hidden="true">
+            {icon}
+          </span>
+        )}
+        {label !== undefined && <span className="gaze-button__label">{label}</span>}
+        {children}
+      </span>
+      <span className="gaze-button-progress-ring" aria-hidden="true" />
     </button>
   );
 };

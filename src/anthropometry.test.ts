@@ -3,40 +3,19 @@ import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   CANTHAL_DISTANCE_CM,
-  INTERPUPILLARY_DISTANCE_CM,
   LM_CANTO_EXTERNO_ESQUERDO,
   LM_CANTO_EXTERNO_DIREITO,
   LM_IRIS_ESQUERDA,
   LM_IRIS_DIREITA,
-  distanciaPorTriangulacao,
   fovHorizontalDeg,
 } from './anthropometry';
 
-// -----------------------------------------------------------------------------
-// P5.3 — uma constante antropométrica, um lugar.
-//
-// ── O bug que isto previne já custou caro ───────────────────────────────────
-//
-// `translationCompensation.ts` registra: a primeira versão usava **6,3 cm** (a
-// distância INTERPUPILAR) contra uma medida CANTAL — 43% de erro de escala em
-// toda a correção de translação. As duas constantes são parecidas, medem coisas
-// diferentes, e nada no tipo `number` impede trocar uma pela outra.
-//
-// A defesa não é escolher "a constante certa": é amarrar cada uma ao LANDMARK
-// que a produz. Quem mede entre os landmarks 33↔263 tem que usar a cantal;
-// quem mede entre 468↔473 (centros de íris) tem que usar a interpupilar. O
-// módulo expõe as duas com os índices ao lado, para que a escolha errada fique
-// visível na chamada.
-// -----------------------------------------------------------------------------
+// Uma constante antropométrica, um lugar. Interpupilar (6,3 cm, landmarks
+// 468↔473) e cantal (9,0 cm, landmarks 33↔263) são parecidas mas medem coisas
+// diferentes — trocar uma pela outra já custou 43% de erro de escala na
+// compensação de translação. Cada constante fica amarrada ao landmark que a produz.
 
 describe('as constantes e seus landmarks', () => {
-  it('cantal e interpupilar são distintas e não se confundem', () => {
-    expect(CANTHAL_DISTANCE_CM).toBe(9.0);
-    expect(INTERPUPILLARY_DISTANCE_CM).toBe(6.3);
-    // A razão entre elas É o erro de 43% que o repositório já pagou.
-    expect(CANTHAL_DISTANCE_CM / INTERPUPILLARY_DISTANCE_CM).toBeCloseTo(1.43, 2);
-  });
-
   it('cada constante vem com o par de landmarks que a mede', () => {
     // Cantos EXTERNOS dos olhos — o que `engine.ts` usa para `latestIodPx`.
     expect(LM_CANTO_EXTERNO_ESQUERDO).toBe(33);
@@ -47,59 +26,12 @@ describe('as constantes e seus landmarks', () => {
   });
 });
 
-describe('triangulação — distância a partir do tamanho aparente', () => {
-  it('recupera a distância de um setup com FOV e IOD conhecidos', () => {
-    // Setup construído para ter resposta analítica: FOV 60°, vídeo 1280 px.
-    // A meia-largura do frame a 60 cm é 60·tan(30°) = 34,64 cm, então o frame
-    // inteiro cobre 69,28 cm. Um rosto com 9 cm cantais ocupa
-    // 9/69,28 × 1280 = 166,3 px.
-    const fov = 60, W = 1280, dist = 60;
-    const larguraFrameCm = 2 * dist * Math.tan((fov / 2) * Math.PI / 180);
-    const iodPx = (CANTHAL_DISTANCE_CM / larguraFrameCm) * W;
-    expect(iodPx).toBeCloseTo(166.3, 1);
-    expect(distanciaPorTriangulacao(iodPx, W, fov)).toBeCloseTo(dist, 6);
-  });
-
-  it('rosto maior no frame = mais perto, e vice-versa', () => {
-    const perto = distanciaPorTriangulacao(300, 1280, 60)!;
-    const longe = distanciaPorTriangulacao(100, 1280, 60)!;
-    expect(perto).toBeLessThan(longe);
-    // Relação inversa exata: o dobro de pixels, metade da distância.
-    expect(distanciaPorTriangulacao(200, 1280, 60)! / perto).toBeCloseTo(1.5, 6);
-  });
-
-  it('entrada degenerada devolve null em vez de Infinity', () => {
-    expect(distanciaPorTriangulacao(0, 1280, 60)).toBeNull();
-    expect(distanciaPorTriangulacao(100, 0, 60)).toBeNull();
-    expect(distanciaPorTriangulacao(100, 1280, 0)).toBeNull();
-    expect(distanciaPorTriangulacao(NaN, 1280, 60)).toBeNull();
-  });
-
-  it('aceita a constante interpupilar quando a medida vem das íris', () => {
-    // Mesma geometria, medida entre centros de íris: como a distância física é
-    // menor, o mesmo rosto ocupa menos pixels. Passar a constante errada aqui
-    // daria 43% de erro — é exatamente o parâmetro explícito que evita isso.
-    const fov = 60, W = 1280, dist = 60;
-    const larguraFrameCm = 2 * dist * Math.tan((fov / 2) * Math.PI / 180);
-    const ipdPx = (INTERPUPILLARY_DISTANCE_CM / larguraFrameCm) * W;
-    expect(distanciaPorTriangulacao(ipdPx, W, fov, INTERPUPILLARY_DISTANCE_CM)).toBeCloseTo(dist, 6);
-    // E com a constante errada, o erro aparece:
-    expect(distanciaPorTriangulacao(ipdPx, W, fov, CANTHAL_DISTANCE_CM)!).toBeCloseTo(dist * 1.43, 0);
-  });
-});
-
 describe('fovHorizontalDeg — o inverso da triangulação', () => {
   it('recupera o FOV a partir de uma distância medida com fita métrica', () => {
     const fov = 72, W = 1920, dist = 55;
     const larguraFrameCm = 2 * dist * Math.tan((fov / 2) * Math.PI / 180);
     const iodPx = (CANTHAL_DISTANCE_CM / larguraFrameCm) * W;
     expect(fovHorizontalDeg(iodPx, W, dist)).toBeCloseTo(fov, 6);
-  });
-
-  it('ida e volta: FOV → distância → FOV', () => {
-    const iodPx = 190, W = 1920, dist = 62;
-    const fov = fovHorizontalDeg(iodPx, W, dist)!;
-    expect(distanciaPorTriangulacao(iodPx, W, fov)).toBeCloseTo(dist, 6);
   });
 
   it('entrada degenerada devolve null', () => {
@@ -142,17 +74,12 @@ describe('nenhum literal antropométrico solto no código de produção', () => 
         // desejável — foi assim que o bug de 43% ficou documentado.
         const semComentario = linha.replace(/\/\/.*$/, '').replace(/\/\*.*?\*\//g, '');
         const conteudo = semComentario.trim();
-        // `*` pega as linhas de continuação do JSDoc; `/*` pega a de ABERTURA,
-        // que a primeira versão deixava passar. Foi por ali que `P6.3` — um ID
-        // de tarefa numa `/** ... */` de uma linha — entrou como infrator.
+        // `*` pega as linhas de continuação do JSDoc; `/*` pega a de abertura
+        // (inclusive `/** ... */` de uma linha).
         if (conteudo.startsWith('*') || conteudo.startsWith('/*')) return;
         // `9.0` ou `6.3` como VALOR, não como parte de outro número
-        // (0.9, 19.0, 6.35 não contam) e não como sufixo de um IDENTIFICADOR:
-        // `P6.3`, `B2.5` e `C6.3` são IDs de tarefa do plano, e eles aparecem
-        // no código o tempo todo. Sem a letra na lookbehind, todo ID que
-        // termine em `6.3` ou `9.0` vira falso positivo — e um teste de
-        // convenção que acusa o inocente é desligado pela equipe, que é o
-        // único jeito de ele parar de proteger o que veio proteger.
+        // (0.9, 19.0, 6.35 não contam) e não como sufixo de um identificador
+        // (a letra na lookbehind evita falsos positivos como `X6.3`).
         if (/(?<![\d.A-Za-z])(9\.0|6\.3)(?![\d])/.test(semComentario)) {
           infratores.push(`${arquivo.replace(raiz, 'src')}:${i + 1}: ${linha.trim()}`);
         }

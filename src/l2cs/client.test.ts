@@ -4,8 +4,9 @@ import { createL2CSClient } from './client';
 describe('createL2CSClient', () => {
   it('cria instância sem tocar no Worker antes de start()', () => {
     const client = createL2CSClient();
-    expect(client.isReady()).toBe(false);
     expect(client.getMeta()).toBeNull();
+    expect(client.getExecutionProvider()).toBeNull();
+    expect(client.canSubmit(0)).toBe(false);
     // getLatestGaze antes de qualquer resultado deve devolver invalid
     const g = client.getLatestGaze(0);
     expect(g.valid).toBe(false);

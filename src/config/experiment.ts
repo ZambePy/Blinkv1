@@ -1,480 +1,105 @@
-// Parâmetros de experimento ajustáveis SEM rebuild.
+// Configuração do pipeline ajustável sem rebuild.
 //
-// Lidos de localStorage com fallback para o default de produção. Existem para
-// permitir varredura A/B durante as sessões de medição sem recompilar.
-// Em produção, nenhuma chave está setada → todos os defaults valem.
+// Lida do localStorage (ou de variáveis de ambiente no Node) com fallback para
+// o default de produção. Serve para as sessões de medição trocarem uma
+// condição por vez sem recompilar. Em produção nenhuma chave está setada.
 //
-// Console:  __irisflowExp.set('expandFactor', 1.6)   → recarrega a página
-//           __irisflowExp.reset()                     → volta aos defaults
-//           __irisflowExp.dump()                      → estado atual (vai no relatório)
+// Console:  __irisflowExp.set('filterMode', 'kalman')  → recarregue a página
+//           __irisflowExp.reset()                       → volta aos defaults
+//           __irisflowExp.dump()                        → estado atual (vai no relatório)
+//
+// A configuração é lida UMA vez, no boot. Trocar no meio da sessão mudaria o
+// vetor de features ou o filtro sob um modelo já treinado.
 
 export interface ExperimentConfig {
-  /** Fator de expansão da bbox facial antes do resize 448². Ver §E3. */
+  /** Fator de expansão da bbox facial antes do recorte quadrado do L2CS. */
   expandFactor: number;
-  /** Cadência de submissão ao worker L2CS, em ms. */
+  /** Cadência mínima entre submissões ao worker L2CS, em ms. */
   l2csCadenceMs: number;
-  /** Aplica o mapa RBF de correção derivado do teste de precisão.
-   *  DEFAULT false — ligar só para comparação explícita. */
-  applyGazeCorrection: boolean;
-  /** Log de distância ao fecho convexo (caro: O(n·d) por frame). */
-  enableDistanceLog: boolean;
+  /** Lado do recorte entregue ao L2CS (o ONNX aceita 224 e 448). */
+  l2csInputSize: 224 | 448;
   /**
-   * Correção de anisotropia de aspect ratio.
-   * O MediaPipe normaliza x pela largura e y pela altura. Em 1920×1080 as
-   * escalas diferem por 1.78×. Distâncias euclidianas misturando as duas
-   * ficam distorcidas — `interEyeDistRaw` e o vetor inteiro ficam enviesados
-   * quando a cabeça inclina, porque o vetor inter-ocular gira nesse espaço
-   * anisotropico e muda de comprimento mesmo com distância física constante.
-   *
-   * Correção: multiplicar x (e z) por videoWidth/videoHeight antes de
-   * qualquer cálculo de distância. Isso invalida perfis antigos (RECORDING_FORMAT_VERSION).
-   * DEFAULT false — ligar só após medição confirmar melhora do 1°/111px.
+   * Onde o L2CS roda.
+   *  - `auto`   tenta WebGPU e cai para WASM se a GPU não estiver disponível.
+   *             O provider efetivo fica em `EngineDiagnostics.l2cs.executionProvider`
+   *             e no relatório de precisão.
+   *  - `webgpu` / `wasm`  forçam um provider (para medição). Sem fallback.
+   *  - `off`    não inicia o worker; o modelo usa só as 4 features de íris.
    */
-  isotropicLandmarks: boolean;
-  /**
-   * Travar exposição da câmera após aquecimento de 2s.
-   * Solicita `exposureMode/focusMode/whiteBalanceMode = 'manual'` via
-   * ImageCapture API quando o driver suportar. Reduz variação de brilho
-   * do crop (entrada direta do L2CS) e estabiliza o reflexo especular em
-   * óculos ao longo de sessocões longas.
-   * DEFAULT false — nem toda webcam exposes essas capabilities.
-   */
-  lockCameraExposure: boolean;
-  /**
-   * Compensação geométrica de pose na saída (`src/poseCompensation.ts`).
-   *
-   * Desloca a predição por `d · tan(Δ)` contra a pose média da calibração. Não
-   * há coeficiente ajustado: o ganho vem da geometria, então não há o que
-   * memorizar — dar a pose ao Ridge como feature falhava por memorização.
-   *
-   * DEFAULT true — sem pose comp o erro explode quando a pose de teste
-   * diverge da calibração; drift monotônico de pitch durante calibração
-   * (visto em gravações reais) contamina os dados de treino.
-   */
-  geometricPoseCompensation: boolean;
-  /**
-   * Compensação de TRANSLAÇÃO lateral da cabeça
-   * (`src/translationCompensation.ts`).
-   *
-   * Independente da compensação geométrica: aquela corrige a cabeça girando,
-   * esta a cabeça deslizando. A correção é 1:1 em centímetros e não depende
-   * do FOV — ele cancela na álgebra, ver o módulo.
-   *
-   * DEFAULT false. Não por medir pior, mas por não haver o que medir: na
-   * gravação de referência o rosto translada 0,25 cm durante o teste inteiro,
-   * ou ~9 px de tela contra 144,6 px de erro.
-   */
-  lateralTranslationCompensation: boolean;
-  /**
-   * Liga o caminho do L2CS-Net (worker ONNX + crop 448²).
-   *
-   * O crop tinha um bug (`sourceDimensions`, corrigido) que fazia a inferência
-   * rodar sobre imagem preta. Ligar esta flag com `--feature-set` incluindo o
-   * bloco angular é como o L2CS ganha caminho até o modelo.
-   */
-  enableL2CS: boolean;
-  /**
-   * Expansão polinomial de grau 2 nas features antes do StandardScaler.
-   *
-   * 77% do erro em baseline é não-linear (affine.explainedFraction=0.226).
-   * Ridge linear satura. Grau 2 sobre 8 dims → 44 features, ainda seguro contra
-   * overfitting com ~270 amostras + CV LOO do Ridge escolhendo λ.
-   *
-   * DEFAULT true — mudança do comportamento linear puro para curvatura.
-   */
+  l2cs: 'auto' | 'webgpu' | 'wasm' | 'off';
+  /** Expansão polinomial de grau 2 das features antes do StandardScaler. */
   polynomialFeatures: boolean;
-  /**
-   * Treino da calibração via Web Worker.
-   *
-   * ⚠️ **NÃO ESTÁ LIGADO AO PIPELINE (B3.10).**
-   *
-   * O comentário anterior afirmava "elimina o freeze de UI de 1-3s durante
-   * `completeCalibration()`". Isso nunca aconteceu: `createCalibrationClient`
-   * só é chamado em teste, e `completeCalibration` treina de forma síncrona na
-   * main thread independentemente do valor desta flag.
-   *
-   * Documentação que descreve comportamento inexistente é pior que ausência de
-   * documentação, porque induz decisão errada — alguém lendo isto concluiria
-   * que o freeze já foi resolvido.
-   *
-   * O que B3.10 fez: corrigiu o worker para que, QUANDO for ligado, ele treine
-   * certo (a configuração estática do `RidgeRegressor` agora atravessa a
-   * fronteira — antes `axisScale` valia o default lá dentro, subponderando o
-   * eixo X em 3,16×). Ligar o caminho de fato é trabalho de sprint de
-   * pipeline, com medição, não de correção de bug P2.
-   *
-   * DEFAULT true — preservado para não mudar nada; a flag simplesmente não é
-   * consultada por ninguém em produção hoje.
-   */
-  calibrationWorker: boolean;
-
-  // ── Sprint 4 — etapas 1 e 2 do pipeline (captura e pré-processamento) ──────
-  //
-  // Todas nascem `false`: o default é o comportamento de hoje, e quem troca é
-  // o Sprint 8, com medição. Ligar qualquer uma delas sem o dado de `F8.4` é
-  // trocar latência conhecida por precisão hipotética.
-
-  /**
-   * Ring buffer de captura com descarte do frame mais ANTIGO (`P4.1`).
-   *
-   * Sem isto o engine lê o vídeo por polling no rAF (`lastVideoTime !==
-   * currentTime`), que não tem fila e portanto não tem política de descarte —
-   * o atraso do consumidor simplesmente vira frame perdido sem contabilidade.
-   * Com a flag, os descartes passam a ser contados e expostos em
-   * `EngineDiagnostics.capture`.
-   *
-   * DEFAULT false — só rende de fato junto com `captureWorker`, que é quem
-   * cria o produtor separado do consumidor.
-   */
-  captureRingBuffer: boolean;
-
-  /**
-   * Captura em worker dedicado via `MediaStreamTrackProcessor` (`P4.2`).
-   *
-   * ⚠️ NÃO é solução de latência. O gargalo é o L2CS (300+ ms), não a captura
-   * (~1–2 ms). Isto reduz jitter de agendamento e libera o thread principal.
-   * A casca do worker (`src/capture/capture.worker.ts`) nunca rodou em
-   * navegador — a verificação é do Dia 7.
-   *
-   * DEFAULT false.
-   */
-  captureWorker: boolean;
-
-  /**
-   * CLAHE na região dos olhos antes da normalização (`P4.5`).
-   *
-   * Custo MEDIDO: 0,67 ms na região ocular, 5,93 ms no crop 448² inteiro —
-   * contra a estimativa de ~1 ms da especificação. Ver o ADR de `P4.4` em
-   * `docs/DECISOES_PIPELINE.md`, incluindo o conflito registrado sobre
-   * equalizar só um retângulo do que o L2CS enxerga inteiro.
-   *
-   * DEFAULT false.
-   */
-  claheEyeRegion: boolean;
-
-  /**
-   * Correção de gama derivada do histograma, com histerese (`P4.6`).
-   *
-   * Custo MEDIDO: 2,67 ms por frame sobre 448².
-   *
-   * DEFAULT false.
-   */
-  dynamicGamma: boolean;
-
-  /**
-   * Cadeia de filtragem temporal (`P7.6` / etapa 6).
-   *
-   * `'oneEuro'` (default) é o que roda hoje e é o baseline do `F8.5`.
-   * `'kalman'` tem modelo de movimento e pode antecipar. `'kalmanEma'`
-   * acrescenta o EMA adaptativo com zona morta.
-   *
-   * ⚠️ `'kalmanEma'` exige geometria de tela — o α adaptativo e a zona morta
-   * trabalham em GRAUS. Sem ela a cadeia degrada para `'kalman'` puro e
-   * ANUNCIA no console: uma cadeia que vira outra em silêncio faria o `F8.5`
-   * comparar duas coisas achando que comparou três.
-   *
-   * DEFAULT `'oneEuro'`. Quem escolhe é o benchmark, não este sprint.
-   */
+  /** Compensação geométrica de pose (d·tan Δ) na saída e nos alvos de treino. */
+  geometricPoseCompensation: boolean;
+  /** Compensação de translação lateral da cabeça. */
+  lateralTranslationCompensation: boolean;
+  /** Filtro temporal. `oneEuro` é o de produção; os outros existem para o benchmark. */
   filterMode: 'oneEuro' | 'kalman' | 'kalmanEma';
-
-  // ── Sprint 7 — pós-processamento e interface ──────────────────────────────
-
-  /**
-   * Diâmetro do cursor de gaze, em px (`P7.1`).
-   *
-   * DEFAULT `48` — o tamanho de hoje. Presa à faixa 24–128 em
-   * `cursorStyle.limitarTamanho`; um valor fora dela é ajustado, nunca
-   * rejeitado, porque sem cursor o paciente não chega à tela onde consertaria
-   * o valor que quebrou o cursor.
-   */
+  /** Diâmetro do cursor de gaze, em px. */
   cursorSizePx: number;
-
-  /**
-   * Anel de progresso do dwell desenhado ao redor do CURSOR (`P7.2`).
-   *
-   * DEFAULT `false`: hoje o progresso aparece só no alvo. O anel no cursor
-   * resolve alvos pequenos e o caso "nenhum alvo sob o olhar", mas é pixel novo
-   * no caminho quente — liga depois de medir o custo de composição.
-   */
+  /** Anel de progresso do dwell desenhado ao redor do cursor. */
   dwellRingOnCursor: boolean;
-
-  /**
-   * Piscada como clique (`P7.3`).
-   *
-   * DEFAULT `false`, e este é o default mais deliberado do arquivo. Piscar é
-   * involuntário; um falso positivo escreve uma letra errada no melhor caso.
-   * Ninguém ganha isto sem alguém decidir que quer — é a "chave para desativar
-   * por paciente" que o plano exige, com o sinal invertido.
-   */
+  /** Piscada longa como clique. Desligado por default: piscar é involuntário. */
   blinkClick: boolean;
-
-  /**
-   * Modo de varredura após 3 s sem gaze (`P7.4`).
-   *
-   * DEFAULT `false` porque é comportamento novo na tela, não porque seja
-   * opcional: é o fallback de acessibilidade mais importante do plano. Sai de
-   * `false` assim que o `F8.x` confirmar que o gatilho não dispara em uso
-   * normal — um scanning que liga sozinho no meio de uma sessão boa é pior que
-   * nenhum.
-   */
+  /** Varredura automática após alguns segundos sem gaze. */
   scanningMode: boolean;
-
-  /**
-   * Fallback de gaze perdido: segura 2 s, depois some e avisa (`P7.5`).
-   *
-   * DEFAULT `false` mantém o comportamento atual — cursor congelado a 35% de
-   * opacidade, para sempre, sem mensagem.
-   */
+  /** Ao perder o gaze: segura 2 s, depois esconde o cursor e avisa. */
   gazeLostFallback: boolean;
-
-  /**
-   * Conjunto de features ativo (`P6.5` / conflito C6).
-   *
-   * Era uma constante de módulo em `extractor.ts`, o que tornava o `spec11`
-   * inalcançável: ele existia como tipo e como projeção, mas nenhum caminho
-   * podia selecioná-lo — e selecionar é exatamente o que `F8.4` precisa fazer
-   * para medi-lo.
-   *
-   * ⚠️ Trocar este valor INVALIDA perfis salvos, e isso é desejado: o conjunto
-   * entra em `buildContextKey` via `FEATURE_VECTOR_ID`, então um perfil
-   * treinado com `irisCore+l2cs` é recusado ao carregar sob `spec11`. Sem
-   * isso, o modelo receberia 11 dimensões onde foi treinado com 6, e as
-   * predições sairiam plausíveis e erradas.
-   *
-   * DEFAULT `'irisCore+l2cs'` — o conjunto medido como melhor no repositório.
-   * O `spec11` é candidato a MEDIR: a evidência registrada é contra ampliar o
-   * vetor (322 px contra 140 px).
-   */
-  featureSet: 'irisCore+l2cs' | 'iris12+l2cs' | 'spec11';
-
-  /**
-   * Execution provider do L2CS (`P5.5`, passo 2).
-   *
-   * `'wasm'` (default) é o caminho de hoje: bundle wasm-only, SIMD,
-   * `numThreads = 1`. **Medido em navegador: 2319 ms por inferência em 448²,
-   * 728 ms em 224²** — contra uma tolerância de staleness de 400 ms, o que
-   * significa 100% de leituras obsoletas e bloco angular zerado em todo quadro.
-   *
-   * `'webgpu'` usa o bundle "all" com JSEP. **MEDIDO: 50 ms em 448², 32 ms em
-   * 224², com staleness de 0%.** É 46× mais rápido que o WASM, e é o que faz o
-   * bloco angular deixar de ser zerado — com `'wasm'`, o modelo roda com 4 das
-   * 6 dimensões do vetor.
-   *
-   * O default continua `'wasm'` porque WebGPU depende de GPU e driver do posto,
-   * e um default que falha na máquina do paciente é pior que um default lento.
-   * A troca para `'webgpu'` como padrão é decisão de `F8.4`, junto com a
-   * verificação de disponibilidade no hardware de destino.
-   *
-   * ⚠️ O worker registra o provider EFETIVAMENTE ativo, não o pedido. Um
-   * fallback silencioso de `'webgpu'` para `'wasm'` faria a medição comparar
-   * wasm contra wasm e o resultado seria lido como "a GPU não ajudou" — a
-   * conclusão exatamente invertida. Ver `EngineDiagnostics.l2cs.executionProvider`.
-   */
-  l2csExecutionProvider: 'wasm' | 'webgpu';
-
-  /**
-   * Referência neutra DINÂMICA (`P5.8`).
-   *
-   * Quando ligada, a pose de referência da compensação passa a acompanhar
-   * mudanças sustentadas de postura, via média móvel de 60 s com detecção de
-   * deriva. Quando desligada (default), a referência é a da calibração e nunca
-   * muda — o comportamento de hoje.
-   *
-   * ⚠️ Mexer na referência é mexer no que dá sentido a toda a compensação. As
-   * três guardas estão em `ReferenciaNeutra`: nunca durante a calibração (a
-   * referência dela é o ponto contra o qual o Ridge minimizou o erro — `B1.3`),
-   * nunca durante deriva rápida, e toda troca é registrada com timestamp e
-   * delta. Sem esse registro seria impossível explicar, no Dia 7, por que o
-   * erro mudou no meio da sessão.
-   *
-   * DEFAULT false.
-   */
-  dynamicNeutralReference: boolean;
-
-  /**
-   * Modo de compensação de pose (`P5.7`).
-   *
-   * `'geometric'` (default) é o que existe hoje: desloca a PREDIÇÃO em pixels
-   * por `d · tan(Δ)`, depois do Ridge. `'additive'` corrige o ÂNGULO antes de
-   * entrar no Ridge, por `gaze + (head − ref)`.
-   *
-   * ⚠️ `'both'` NÃO soma os efeitos. As duas descrevem o mesmo fenômeno físico
-   * em espaços diferentes; aplicar as duas compensaria a rotação da cabeça
-   * duas vezes, e o erro resultante teria o sinal contrário — o cursor passaria
-   * do alvo em vez de ficar aquém. `'both'` existe para MEDIR as duas em
-   * paralelo: a geométrica atua e a aditiva alimenta o diagnóstico.
-   */
-  poseCompensationMode: 'geometric' | 'additive' | 'both';
-
-  /**
-   * Fonte da head pose (`P5.2`).
-   *
-   * `'matrix'` (default) usa a `facialTransformationMatrix` do MediaPipe,
-   * ajustada sobre os 478 landmarks. `'pnp'` usa `solvePnP` sobre 6 pontos.
-   *
-   * ⚠️ O PnP NÃO substitui a matriz — entra como alternativa a ser MEDIDA no
-   * Dia 7. A matriz é mais robusta a oclusão parcial: perder a boca atrás de
-   * uma máscara ou de um suporte de cabeça degrada a matriz um pouco e derruba
-   * um PnP de 6 pontos inteiro (33% dos pontos somem de uma vez).
-   *
-   * O valor do PnP é ser AUDITÁVEL: a matriz é caixa-preta e não há como
-   * conferir de onde vem o yaw. Com os dois, uma discordância grande vira
-   * informação — e ela é publicada em `EngineDiagnostics.pose.deltaPnpDeg`
-   * mesmo com a flag em `'matrix'`, para o Dia 7 ter a série pronta.
-   */
-  headPoseSource: 'matrix' | 'pnp';
-
-  /**
-   * Lado do crop entregue ao L2CS, em pixels (`P5.5a`).
-   *
-   * O ONNX foi reexportado com eixos espaciais dinâmicos, então o MESMO binário
-   * roda 224² e 448². Verificado por inferência real: os 110 tensores de peso
-   * são byte-idênticos aos do modelo anterior (reexport, não retreino), e a
-   * saída em 448² é bit-idêntica à de antes.
-   *
-   * O que muda entre os dois:
-   *
-   *   448 (default)  tamanho do export original (resolução de treino NÃO registrada)
-   *   224            latência 21,4 ms · 3,66× mais rápido, 4× menos MACs
-   *
-   * ⚠️ **DEFAULT 448 de propósito.** A rede foi treinada em 448; rodar em 224
-   * é deslocamento de distribuição, e o efeito na acurácia é desconhecido até
-   * `F8.4` medir com humano. Trocar o default sem esse dado seria comprar
-   * latência com precisão sem saber o preço.
-   *
-   * Antes desta flag existir, o tamanho estava fixo em dois lugares
-   * independentes (`INPUT_SIZE` em `crop.ts` e `inputSize` no `meta.json`) —
-   * agora o worker deduz o lado do próprio tensor e não há o que divergir.
-   */
-  l2csInputSize: number;
-
-  /**
-   * Reuso do crop facial quando a cabeça não mexeu (`P4.8`).
-   *
-   * A economia prometida pelo plano (40%) NÃO foi verificada e é
-   * provavelmente muito menor: o crop custa ~1–2 ms contra 300+ ms do L2CS.
-   * Quem responde é `T0.5` com a flag ligada e desligada.
-   *
-   * DEFAULT false.
-   */
-  dynamicRoiCache: boolean;
 }
 
-/** Exportado para a auditoria de fiação (`flagsLigadas.test.ts`) poder
- *  enumerar as chaves sem uma segunda lista que sairia de sincronia. */
 export const DEFAULTS: ExperimentConfig = {
   expandFactor: 1.4,
   l2csCadenceMs: 100,
-  applyGazeCorrection: false,
-  enableDistanceLog: false,
-  isotropicLandmarks: false,  // desligado até medição confirmar melhora
-  lockCameraExposure: false,  // desligado por compatibilidade de hardware
-  geometricPoseCompensation: true, // habilitado por default; SEM pose comp o erro explode (361px vs 150px) quando pose de teste diverge da calibração. Y offset +165 tem outra causa.
-  lateralTranslationCompensation: false, // desligado: efeito abaixo do ruído na base atual
-  // LIGADO em conjunto com `ACTIVE_FEATURE_SET = 'irisCore+l2cs'`. Antes deste
-  // par a flag ficava true sozinha e o bloco angular era projetado para fora do
-  // vetor — 91 MB de ONNX, `getImageData` de 448² e um worker por quadro sem
-  // efeito no modelo. Agora as duas dims mais informativas do L2CS (tan yaw,
-  // tan pitch) entram como features [4] e [5] do vetor de 6 dims. Os bugs
-  // históricos (crop preto de `sourceDimensions`, yaw travado) já foram
-  // corrigidos e há `L2CSHealthMonitor` vigiando saída constante.
-  enableL2CS: true,
-  polynomialFeatures: true,
-  calibrationWorker: true,
-  // Sprint 4 — todas desligadas: o default é o comportamento atual, e quem
-  // troca é o Sprint 8 com medição (ADR P4.4 em docs/DECISOES_PIPELINE.md).
-  captureRingBuffer: false,
-  captureWorker: false,
-  claheEyeRegion: false,
-  dynamicGamma: false,
-  dynamicRoiCache: false,
-  // P5.5a — 448 é o tamanho de TREINO da rede e o comportamento atual. 224
-  // roda 3,66× mais rápido no mesmo binário, mas quem autoriza a troca é a
-  // medição de acurácia do `F8.4`, não o ganho de latência sozinho.
   l2csInputSize: 448,
-  // P5.2 — a matriz continua sendo a fonte; o PnP é candidato medido.
-  headPoseSource: 'matrix',
-  // P5.7 — a geométrica é o comportamento atual; a aditiva é candidata medida.
-  poseCompensationMode: 'geometric',
-  // P5.8 — a referência da calibração continua sendo a única, por default.
-  dynamicNeutralReference: false,
-  // P5.5 — wasm é o caminho medido; webgpu é o que falta medir.
-  l2csExecutionProvider: 'wasm',
-  // P6.5 — o conjunto medido como melhor. `spec11` é candidato a medir.
-  featureSet: 'irisCore+l2cs',
-  // P7.6 — o filtro atual. As alternativas do Sprint 6 existem e são
-  // selecionáveis; quem decide é o `F8.5`.
+  l2cs: 'auto',
+  polynomialFeatures: true,
+  geometricPoseCompensation: true,
+  lateralTranslationCompensation: false,
   filterMode: 'oneEuro',
-  // P7.1 — o tamanho de hoje. Tornar ajustável não é trocar o default.
   cursorSizePx: 48,
-  // P7.2 — o progresso continua só no alvo até o custo de composição ser medido.
   dwellRingOnCursor: false,
-  // P7.3 — desligado. Ver a nota no campo: é a guarda, não um default tímido.
   blinkClick: false,
-  // P7.4 — desligado até o gatilho ser medido em sessão boa.
   scanningMode: false,
-  // P7.5 — o cursor fantasma de hoje continua sendo o comportamento default.
-  gazeLostFallback: false,
+  gazeLostFallback: true,
 };
+
+export const VALORES_ACEITOS = {
+  l2cs: ['auto', 'webgpu', 'wasm', 'off'],
+  filterMode: ['oneEuro', 'kalman', 'kalmanEma'],
+} as const;
+
+export const L2CS_INPUT_SIZES_ACEITOS = [224, 448] as const;
+
+export const EXPERIMENT_RANGES = {
+  cursorSizePx: { min: 24, max: 128 },
+  expandFactor: { min: 1.0, max: 3.0 },
+  l2csCadenceMs: { min: 33, max: 2000 },
+} as const;
 
 const STORAGE_KEY = 'irisflow.experiment';
 
-// Override por env-var no ambiente Node.
-//
-// Convenção: `IRISFLOW_EXP_<key>=<value>`. Booleans como "true"/"false" (ou
-// "1"/"0"); números como decimais. Chaves desconhecidas são ignoradas em
-// silêncio para não travar rodadas com typo em CLI.
-//
-// Ambiente do consumidor: Node passa `process.env`; browser passa `{}`
-// (localStorage é a via de override lá). Tipagem explícita sem depender de
-// @types/node — o frontend tsconfig NÃO inclui esse pacote, então referenciar
-// `NodeJS.ProcessEnv` aqui quebra `npm run build` do frontend.
 type EnvLike = Record<string, string | undefined>;
 
-// Guard defensivo: em Node há `process`; em browser não. Fazemos cast via
-// `globalThis` para escapar da falta de @types/node no ambiente do frontend.
 function getProcessEnvOrEmpty(): EnvLike {
   const proc = (globalThis as { process?: { env?: EnvLike } }).process;
   return proc?.env ?? {};
 }
 
-// Exportado para permitir teste unitário sem `vi.resetModules()` (o snapshot
-// `EXPERIMENT` é resolvido em module-load, então testar variação de env exige
-// reimport do módulo; testar essa função pura tem o mesmo alcance sem o custo
-// de pool que o resetModules impõe sobre outros testes concorrentes).
-/**
- * Índice de chaves em MAIÚSCULAS → chave real do config.
- *
- * Existe por causa do Windows: lá os nomes de variável de ambiente são
- * case-insensitive, e o Node devolve a forma canônica em maiúsculas ao
- * enumerar `process.env`. Medido na máquina do projeto:
- *
- *     process.env.IRISFLOW_EXP_dynamicGamma  →  "true"     (acesso direto: ok)
- *     Object.keys(process.env)               →  ["IRISFLOW_EXP_DYNAMICGAMMA"]
- *
- * Sem este índice, a comparação era `'DYNAMICGAMMA' in DEFAULTS`, que é falso —
- * e **nenhuma** flag de chave camelCase, ou seja nenhuma flag, podia ser ligada
- * por env-var no Windows. Em silêncio.
- */
+// No Windows os nomes de variável de ambiente chegam em maiúsculas, então a
+// busca é case-insensitive.
 const CHAVES_POR_MAIUSCULA: ReadonlyMap<string, keyof ExperimentConfig> = new Map(
   Object.keys(DEFAULTS).map((k) => [k.toUpperCase(), k as keyof ExperimentConfig]),
 );
 
+/** Overrides `IRISFLOW_EXP_<chave>=<valor>` vindos do ambiente (Node). */
 export function loadEnvOverrides(env: EnvLike = getProcessEnvOrEmpty()): Partial<ExperimentConfig> {
   if (!env) return {};
   const overrides: Partial<ExperimentConfig> = {};
   const prefix = 'IRISFLOW_EXP_';
   for (const [envKey, rawValue] of Object.entries(env)) {
     if (!envKey.startsWith(prefix) || rawValue === undefined) continue;
-    // Case-insensitive, porque o ambiente que nos entrega a chave também é.
     const key = CHAVES_POR_MAIUSCULA.get(envKey.slice(prefix.length).toUpperCase());
     if (!key) {
-      // O silêncio de antes era a outra metade do bug. Quem escreve
-      // `IRISFLOW_EXP_` na frente de alguma coisa está tentando ligar uma
-      // flag; um typo aí custava uma rodada de medição inteira sem sintoma —
-      // e no protocolo de ablação de `F8.4` isso vira conclusão invertida, não
-      // só tempo perdido. Variáveis SEM o prefixo continuam ignoradas caladas,
-      // que é o certo: `PATH` não é typo de flag nenhuma.
       console.warn(
         `[exp] '${envKey}' tem o prefixo ${prefix} mas não corresponde a nenhuma flag — ignorada. ` +
         `Flags válidas: ${Object.keys(DEFAULTS).join(', ')}.`,
@@ -489,10 +114,6 @@ export function loadEnvOverrides(env: EnvLike = getProcessEnvOrEmpty()): Partial
       const n = Number(rawValue);
       if (!Number.isNaN(n)) (overrides as Record<string, unknown>)[key] = n;
     } else if (typeof defaultValue === 'string') {
-      // P5.2 — flags de string também precisam ser alcançáveis por env-var.
-      // Sem isto, `headPoseSource` só poderia ser trocada por localStorage, e
-      // a ablação de `F8.4` roda em linha de comando. A validação contra a
-      // lista fechada acontece em `sanitizeExperiment`; aqui só coletamos.
       (overrides as Record<string, unknown>)[key] = rawValue;
     }
   }
@@ -500,99 +121,9 @@ export function loadEnvOverrides(env: EnvLike = getProcessEnvOrEmpty()): Partial
 }
 
 /**
- * Faixa aceitável de cada flag NUMÉRICA (B3.13).
- *
- * Existe porque `{...DEFAULTS, ...JSON.parse(raw) as Partial<ExperimentConfig>}`
- * é uma AFIRMAÇÃO de tipo, não uma verificação: o que estivesse no
- * localStorage entrava intacto. Dois casos alcançáveis pelo console que o
- * próprio módulo documenta:
- *
- *   `{"l2csCadenceMs": 0}`   → o throttle some. Crop 448² + `getImageData` +
- *                              `postMessage` a cada frame, ~5 ms/frame
- *                              queimados produzindo tensores descartados.
- *   `{"expandFactor": "x"}`  → `NaN` no crop, e `console.warn` uma vez por
- *                              frame, para sempre.
- */
-/** Valores aceitos por flag de string (P5.2). Lista fechada: um valor
- *  desconhecido escolheria um caminho de pose em silêncio. */
-/**
- * Flags que reconhecidamente NÃO são lidas por código de produção.
- *
- * Existe para que "flag órfã" seja um fato declarado e revisável, e não algo
- * que só se descobre lendo o código — ou, pior, no meio de uma sessão de
- * medição, quando ligar a condição não muda nada e o relatório registra a
- * condição como se tivesse mudado.
- *
- * `flagsLigadas.test.ts` exige que toda flag esteja lida em produção OU
- * listada aqui com motivo. Tirar uma daqui é tão obrigatório quanto ligá-la:
- * a lista é dívida, não permissão.
- */
-export const FLAGS_NAO_LIGADAS: Readonly<Record<string, string>> = {
-  calibrationWorker:
-    'O caminho é morto: `createCalibrationClient` só é chamado em teste. O '
-    + '`B3.10` corrigiu o worker para treinar CERTO quando for ligado (a '
-    + 'configuração estática do RidgeRegressor não atravessava a fronteira, '
-    + 'subponderando o eixo X em 3,16×), mas ligar o caminho é trabalho de '
-    + 'sprint de pipeline com medição. Consequência hoje: o treino roda na '
-    + 'thread principal e congela a UI por 1–3 s a cada calibração — e o '
-    + 'protocolo do `F8.1` pede recalibração entre as 3 repetições de cada '
-    + 'condição, então esse custo entra no tempo de sessão que o relatório '
-    + 'registra. `src/calibration/trainCore.ts` já existe justamente para '
-    + 'tornar essa ligação possível sem duplicar a lógica de treino.',
-};
-
-/**
- * Tamanhos de entrada aceitos pelo L2CS (`P5.5a`).
- *
- * Lista FECHADA, não faixa. A faixa `{min:224, max:448}` aceitava qualquer
- * inteiro no meio — e o backbone é uma ResNet-50, que reduz por 32: só
- * múltiplos de 32 produzem mapas limpos (224/32 = 7, 448/32 = 14). Um valor
- * como 300 padeia assimetricamente, e o pooling adaptativo do PyTorch mascara
- * a diferença: roda sem erro, com aparência perfeitamente normal.
- *
- * O risco concreto no Dia 7 é um dedo trocado: `244` em vez de `224` cai
- * dentro da faixa antiga, não é múltiplo de 32, e seria aceito em silêncio —
- * a condição C8 mediria uma terceira coisa que ninguém pediu.
- */
-export const L2CS_INPUT_SIZES_ACEITOS = [224, 448] as const;
-
-export const VALORES_ACEITOS = {
-  headPoseSource: ['matrix', 'pnp'],
-  poseCompensationMode: ['geometric', 'additive', 'both'],
-  l2csExecutionProvider: ['wasm', 'webgpu'],
-  featureSet: ['irisCore+l2cs', 'iris12+l2cs', 'spec11'],
-  filterMode: ['oneEuro', 'kalman', 'kalmanEma'],
-} as const;
-
-export const EXPERIMENT_RANGES = {
-  /** `P7.1` — abaixo de 24 px o cursor some no jitter; acima de 128 cobre o
-   *  alvo que deveria apontar. */
-  cursorSizePx: { min: 24, max: 128 },
-  /** Abaixo de 1,0 o crop corta o próprio rosto; acima de 3 é quase só fundo. */
-  expandFactor: { min: 1.0, max: 3.0 },
-  /** 33 ms ≈ 1 submissão por frame a 30 fps — o teto do que faz sentido.
-   *  2000 ms é o piso de utilidade: acima disso o gaze chega velho demais. */
-  l2csCadenceMs: { min: 33, max: 2000 },
-  /**
-   * Lado do crop do L2CS (P5.5a). A faixa é fechada nos dois tamanhos
-   * VALIDADOS no grafo — 224 e 448.
-   *
-   * Não é uma faixa contínua de verdade: valores intermediários passariam pela
-   * validação de faixa mas nem todos são múltiplos de 32 (o fator de redução da
-   * ResNet-50). O `sanitize` genérico só sabe checar min/max; a checagem de
-   * múltiplo de 32 vive em `L2CS_INPUT_SIZES` e no teste que a cobre. Quem
-   * quiser varrer tamanhos intermediários precisa validar o grafo antes.
-   */
-} as const;
-
-/**
- * Valida e normaliza uma configuração parcial contra `DEFAULTS` (B3.13).
- *
- * Regras: tipo errado, não-finito ou fora da faixa cai no default, **com
- * aviso**. Silenciar seria trocar um bug barulhento por um silencioso — quem
- * configurou algo pelo console precisa saber que foi ignorado.
- *
- * Um valor inválido nunca contamina os outros: cada chave é avaliada sozinha.
+ * Valida uma configuração parcial contra `DEFAULTS`. Tipo errado, valor
+ * não-finito, fora da faixa ou fora da lista fechada cai no default, com
+ * aviso. Cada chave é avaliada sozinha: um valor inválido não contamina os outros.
  */
 export function sanitizeExperiment(bruto: unknown): ExperimentConfig {
   const out: ExperimentConfig = { ...DEFAULTS };
@@ -615,9 +146,6 @@ export function sanitizeExperiment(bruto: unknown): ExperimentConfig {
       continue;
     }
 
-    // P5.2 — a única flag de STRING hoje. O `sanitize` genérico valida
-    // booleano e número; para string a validação é por lista fechada, porque
-    // um valor desconhecido aqui escolheria silenciosamente um caminho de pose.
     if (typeof padrao === 'string') {
       const aceitos = VALORES_ACEITOS[chave as keyof typeof VALORES_ACEITOS];
       if (aceitos && typeof v === 'string' && (aceitos as readonly string[]).includes(v)) {
@@ -633,16 +161,13 @@ export function sanitizeExperiment(bruto: unknown): ExperimentConfig {
         console.warn(`[exp] '${k}' esperava número finito, recebeu ${JSON.stringify(v)} — usando o default (${padrao}).`);
         continue;
       }
-      // Lista fechada tem precedência sobre faixa: uma faixa aceitaria 244
-      // entre 224 e 448, e a ResNet-50 reduz por 32 — ver
-      // `L2CS_INPUT_SIZES_ACEITOS`.
       if (chave === 'l2csInputSize') {
+        // Lista fechada, não faixa: a ResNet-50 reduz por 32, e um valor como
+        // 244 rodaria sem erro medindo outra coisa.
         if (!(L2CS_INPUT_SIZES_ACEITOS as readonly number[]).includes(v)) {
           console.warn(
-            `[exp] 'l2csInputSize' = ${v} não é um tamanho aceito `
-            + `(${L2CS_INPUT_SIZES_ACEITOS.join(', ')}) — usando o default (${padrao}). `
-            + 'Só múltiplos de 32 produzem mapas limpos na ResNet-50; outros valores '
-            + 'rodam sem erro e medem outra coisa.',
+            `[exp] 'l2csInputSize' = ${v} não é um tamanho aceito ` +
+            `(${L2CS_INPUT_SIZES_ACEITOS.join(', ')}) — usando o default (${padrao}).`,
           );
           continue;
         }
@@ -651,9 +176,7 @@ export function sanitizeExperiment(bruto: unknown): ExperimentConfig {
       }
       const faixa = EXPERIMENT_RANGES[chave as keyof typeof EXPERIMENT_RANGES];
       if (faixa && (v < faixa.min || v > faixa.max)) {
-        console.warn(
-          `[exp] '${k}' = ${v} fora da faixa [${faixa.min}, ${faixa.max}] — usando o default (${padrao}).`,
-        );
+        console.warn(`[exp] '${k}' = ${v} fora da faixa [${faixa.min}, ${faixa.max}] — usando o default (${padrao}).`);
         continue;
       }
       (out as unknown as Record<string, unknown>)[chave] = v;
@@ -668,7 +191,6 @@ function load(): ExperimentConfig {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return sanitizeExperiment(envOverrides);
-    // B3.13 — o conteúdo do localStorage passa por validação antes de entrar.
     const doDisco = JSON.parse(raw) as unknown;
     return sanitizeExperiment({
       ...(doDisco && typeof doDisco === 'object' && !Array.isArray(doDisco) ? doDisco : {}),
@@ -679,14 +201,8 @@ function load(): ExperimentConfig {
   }
 }
 
-/**
- * Como `load()`, mas SEM os overrides de ambiente (B3.13).
- *
- * Usado por `set()`. A versão anterior persistia o resultado de `load()`, que
- * já inclui os `envOverrides` — então uma variável de ambiente usada uma vez
- * numa sessão de teste ficava **gravada no localStorage** e continuava valendo
- * nas sessões seguintes, sem nada indicando de onde tinha vindo.
- */
+// Como `load()`, mas sem os overrides de ambiente — é o que `set()` persiste,
+// para uma variável de ambiente usada uma vez não ficar gravada no disco.
 function loadSemEnv(): ExperimentConfig {
   if (typeof localStorage === 'undefined') return { ...DEFAULTS };
   try {
@@ -698,8 +214,6 @@ function loadSemEnv(): ExperimentConfig {
   }
 }
 
-// Snapshot único no boot — mudar no meio da sessão invalidaria a calibração
-// já treinada (o vetor de features mudaria sob o modelo).
 export const EXPERIMENT: ExperimentConfig = load();
 
 export function experimentSnapshot(): ExperimentConfig {
@@ -710,16 +224,7 @@ if (typeof window !== 'undefined') {
   (window as unknown as Record<string, unknown>).__irisflowExp = {
     dump: () => ({ ...EXPERIMENT }),
     defaults: () => ({ ...DEFAULTS }),
-    set(key: keyof ExperimentConfig, value: number | boolean) {
-      // B3.13 — parte de `loadSemEnv()`, não de `load()`.
-      //
-      // `load()` já mescla os overrides de ambiente, então gravar o resultado
-      // dele PERSISTIA uma env-var no localStorage: usada uma vez numa sessão
-      // de teste, continuava valendo em todas as seguintes, sem nada indicando
-      // a procedência.
-      //
-      // E o resultado passa por `sanitizeExperiment` antes de ir para o disco,
-      // para que um valor absurdo digitado no console não sobreviva ao reload.
+    set(key: keyof ExperimentConfig, value: number | boolean | string) {
       const next = sanitizeExperiment({ ...loadSemEnv(), [key]: value });
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
       console.warn('[exp] gravado. RECARREGUE a página para aplicar.', next);

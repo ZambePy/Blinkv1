@@ -11,40 +11,21 @@ const MODEL_PATH = path.resolve(__dirname, '../public/models/l2cs/l2cs_gaze360.o
 const META_PATH = path.resolve(__dirname, '../public/models/l2cs/l2cs.meta.json');
 const DEFAULT_PHOTO_DIR = path.resolve(__dirname, '../python_scripts/l2cs_validation');
 
-// ─── O QUE ESTE SCRIPT MEDE, E O QUE NÃO MEDE (B3.29) ───────────────────────
+// O que este script mede, e o que não mede.
 //
-// O cabeçalho anterior dizia: "⚠️ CANONICAL: as constantes e a fórmula de
-// normalização abaixo DEVEM bater com src/l2cs/crop.ts". A NORMALIZAÇÃO bate
-// (ImageNet, NCHW, RGB, /255 antes de (x−mean)/std — auditado em P4.7). A
-// GEOMETRIA DO CROP não bate, e nunca bateu:
+// A NORMALIZAÇÃO bate com `src/l2cs/crop.ts` (ImageNet, NCHW, RGB, /255 antes
+// de (x−mean)/std). A GEOMETRIA DO CROP não bate: aqui é um quadrado central de
+// `min(w,h)·0.6`; `crop.ts` usa a bbox dos 478 landmarks × EXPAND_FACTOR. Onde
+// o rosto não está centrado — o caso comum — o modelo vê regiões diferentes.
 //
-//   este script:  quadrado de `min(w,h)·0.6` no CENTRO GEOMÉTRICO DA FOTO
-//   crop.ts:      quadrado da BBOX DOS 478 LANDMARKS × EXPAND_FACTOR (1.4)
-//
-// São regiões diferentes da imagem. Onde o rosto não está exatamente no centro
-// do enquadramento — o caso comum, já que a câmera fica abaixo ou acima do
-// monitor — o modelo vê coisas distintas nos dois caminhos.
-//
-// CONSEQUÊNCIA: as magnitudes que este script produz (±25° no relatório de
-// eixos) **não são transferíveis** para o runtime, e o `EXPAND_FACTOR = 1.4`
-// continua sem validação empírica. O que o script mede de forma confiável é o
-// SINAL de cada eixo — se yaw positivo é direita ou esquerda —, porque o sinal
-// não depende de qual recorte quadrado do rosto entrou.
-//
-// Use `--bbox x,y,side` para reproduzir a geometria de `crop.ts` quando a
-// posição do rosto for conhecida; sem isso, o recorte central é usado e o
-// script avisa.
-//
-// (Nota factual: a análise que originou esta tarefa afirmava que o
-// `resize(448,448,{fit:'fill'})` distorcia o aspect ratio. Isso está
-// incorreto — o `extract` acima já é quadrado (`side × side`), então o resize
-// de quadrado para quadrado não distorce nada. O defeito real é apenas a
-// REGIÃO recortada.)
+// Logo: o SINAL de cada eixo (yaw positivo = direita?) é confiável, porque não
+// depende do recorte; as MAGNITUDES não são transferíveis para o runtime. Use
+// `--bbox x,y,side` para reproduzir a geometria de `crop.ts` quando a posição
+// do rosto for conhecida.
 /**
- * Lado default do crop. O ONNX foi reexportado com eixos espaciais dinâmicos
- * (P5.5a), então o mesmo binário roda 224² e 448² — use `--size` para escolher.
- * Os sinais gravados no `meta.json` foram medidos em 448²; validar em 224²
- * exige rodar este script com `--size 224`.
+ * Lado default do crop. O ONNX tem eixos espaciais dinâmicos, então o mesmo
+ * binário roda 224² e 448² — use `--size` para escolher. Os sinais gravados no
+ * `meta.json` foram medidos em 448²; validar em 224² exige `--size 224`.
  */
 const INPUT_SIZE = 448;
 
@@ -78,9 +59,6 @@ function parseArgs(argv) {
     if (a === '--dir') args.dirs = [argv[++i]];
     else if (a === '--dirs') args.dirs = argv[++i].split(',').map((s) => s.trim());
     else if (a === '--size') {
-      // P5.5a — o ONNX passou a aceitar eixos espaciais dinâmicos, então o
-      // mesmo binário valida 224² e 448². Os sinais de yaw/pitch foram medidos
-      // em 448²; revalidar em 224 é pré-requisito para confiar neles lá.
       const n = Number(argv[++i]);
       if (!Number.isFinite(n) || n <= 0 || n % 32 !== 0) {
         throw new Error('--size espera um múltiplo de 32 (a ResNet-50 reduz por 32). Ex.: 224 ou 448.');
@@ -88,9 +66,8 @@ function parseArgs(argv) {
       args.size = n;
     }
     else if (a === '--bbox') {
-      // B3.29 — reproduz a geometria de `crop.ts` quando a posição do rosto é
-      // conhecida. Formato: `x,y,side` em pixels da foto original, já com o
-      // EXPAND_FACTOR aplicado (é o que `computeSquareBBox` devolve).
+      // Reproduz a geometria de `crop.ts`. Formato: `x,y,side` em pixels da
+      // foto original, já com o EXPAND_FACTOR aplicado.
       const partes = String(argv[++i]).split(',').map((s) => Number(s.trim()));
       if (partes.length !== 3 || partes.some((n) => !Number.isFinite(n) || n < 0)) {
         throw new Error('--bbox espera três números não-negativos: x,y,side');
@@ -112,9 +89,9 @@ Uso:
   node frontend/scripts/l2cs_axis_validation.mjs --dir <path>
   node frontend/scripts/l2cs_axis_validation.mjs --dirs <p1>,<p2>[,<p3>...]
   node frontend/scripts/l2cs_axis_validation.mjs --bbox <x>,<y>,<side>
-  node frontend/scripts/l2cs_axis_validation.mjs --size 224        (P5.5a)
+  node frontend/scripts/l2cs_axis_validation.mjs --size 224
 
-⚠️ TAMANHO DE ENTRADA (P5.5a)
+TAMANHO DE ENTRADA
   O ONNX foi reexportado com eixos espaciais dinâmicos, então o mesmo binário
   roda 224² e 448². O default aqui é 448 — a resolução em que a rede foi
   TREINADA e em que os sinais gravados no meta.json foram medidos.
@@ -122,7 +99,7 @@ Uso:
   Os sinais NÃO foram revalidados em 224². Rodar com --size 224 antes de
   confiar em yaw/pitch naquele tamanho é pré-requisito, não formalidade.
 
-⚠️ GEOMETRIA DO RECORTE (B3.29)
+GEOMETRIA DO RECORTE
   Sem --bbox, o script recorta um quadrado no CENTRO da foto. Isso NÃO é o que
   o runtime faz: crop.ts recorta a bbox dos 478 landmarks expandida por
   EXPAND_FACTOR (1.4). Os SINAIS medidos continuam válidos — não dependem do
@@ -144,7 +121,7 @@ Total: 10 fotos. O script valida sinais + simetria + consistência entre distân
 let sharp; // populado no main()
 
 /**
- * Recorte quadrado a usar (B3.29).
+ * Recorte quadrado a usar.
  *
  * Com `bbox` (de `--bbox x,y,side`) reproduz a geometria de `crop.ts`: um
  * quadrado da bbox dos landmarks já expandida por `EXPAND_FACTOR`. Sem ela,

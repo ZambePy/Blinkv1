@@ -6,7 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import type { VeredictoDeriva } from '@tracker/calibration';
 
 /**
- * 1.1-UI — a deriva de pose entre alvos já era medida e já disparava um
+ * A deriva de pose entre alvos já era medida e já disparava um
  * `console.warn`, mas `grep poseDrift frontend/src/` não achava NADA: nenhuma
  * tela lia. A sessão do relatório `accuracy-report-1788225161304` calibrou com
  * 238 px-equivalentes de deriva (4× o limiar) e seguiu direto para o teste de
@@ -37,6 +37,7 @@ vi.mock('../../context/GazeContext', () => ({
   useGaze: () => ({
     l2csStatus: 'ready',
     getSessionUptimeMs: () => 1000,
+    getDiagnostics: () => null,
     recording: { isActive: () => false, start: vi.fn(), stop: vi.fn() },
     calibration: {
       startCalibrationMode: vi.fn(),
@@ -73,7 +74,7 @@ function calibrar() {
   }
 }
 
-describe('CalibrationCheck — aviso de deriva de pose (1.1-UI)', () => {
+describe('CalibrationCheck — aviso de deriva de pose', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     getPoseDriftVerdict.mockReturnValue(veredito);

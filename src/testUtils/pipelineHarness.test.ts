@@ -3,22 +3,12 @@ import { runHarness, compareToBaseline, DEFAULT_TOLERANCES, type HarnessResult }
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 
-// -----------------------------------------------------------------------------
-// O harness é O JUIZ das tarefas até o Dia 7. Este teste garante 3 coisas:
-//
-//   1. Ele roda sem lançar sobre a suíte padrão (smoke test).
-//   2. É determinístico — mesma semente ⇒ mesmo resultado bit a bit.
-//   3. Quando existe `docs/baseline_a28bdb0.json` (produzido por T0.4),
-//      o resultado corrente não regride nenhuma métrica além da tolerância.
-//
-// O ponto 3 é o gate de mérito: qualquer PR que piorar erro/jitter/rejeições
-// numa das 6 trajetórias sintéticas faz este teste falhar. Sem baseline
-// versionado, o teste ignora o gate (não falha) — porque falhar por ausência
-// de baseline transformaria o `T0.4` em pré-condição de CI, o que só faz
-// sentido depois do baseline ser gerado uma vez.
-// -----------------------------------------------------------------------------
+// O harness sintético é o gate de mérito do pipeline: roda sem lançar, é
+// determinístico (mesma semente ⇒ mesmo resultado) e, quando existe o baseline
+// versionado ao lado do harness, nenhuma métrica pode regredir além da tolerância. Sem
+// baseline o gate é ignorado (não falha).
 
-const BASELINE_PATH = join(__dirname, '..', '..', 'docs', 'baseline_a28bdb0.json');
+const BASELINE_PATH = join(__dirname, 'harness-baseline.json');
 
 describe('pipelineHarness — smoke e determinismo', () => {
   it('roda as 6 trajetórias com semente default sem lançar', () => {
@@ -93,14 +83,12 @@ describe('pipelineHarness — smoke e determinismo', () => {
 });
 
 describe('pipelineHarness — regressão contra baseline', () => {
-  it('não regride contra docs/baseline_a28bdb0.json (quando disponível)', () => {
+  it('não regride contra harness-baseline.json (quando disponível)', () => {
     if (!existsSync(BASELINE_PATH)) {
-      // Documentado no cabeçalho: sem baseline, este teste é NO-OP. A
-      // primeira execução de T0.4 grava o arquivo e a partir daí este teste
-      // vira gate real.
+      // Sem baseline este teste é no-op; `writeBaseline.test.ts` grava o arquivo.
       console.warn(
         `[pipelineHarness.test] baseline não encontrado em ${BASELINE_PATH}; ` +
-        `pulando gate de regressão. Rode T0.4 para congelar o baseline.`,
+        `pulando gate de regressão. Rode writeBaseline.test.ts com IRISFLOW_WRITE_BASELINE=1.`,
       );
       return;
     }

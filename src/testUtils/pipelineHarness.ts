@@ -1,4 +1,4 @@
-// Harness de regressão determinístico — tarefa T0.3 do plano em `tasks.md`.
+// Harness de regressão determinístico.
 //
 // O que ele faz e o que ele NÃO faz.
 //
@@ -12,11 +12,9 @@
 //   NÃO FAZ: rodar MediaPipe FaceLandmarker, L2CS worker/ONNX, `getImageData`,
 //        `qualityAnalyzer`, `poseCompensation`, `distanceCompensation`, nem o
 //        engine.ts propriamente dito. Esses módulos exigem browser/WASM/GPU e
-//        não têm como rodar em vitest+node. A instrumentação de latência de
-//        `T0.5` (`stageTimer`) mede esses estágios em runtime real; aqui
-//        medimos apenas `predict` e `filter` — o restante seria número
-//        fabricado, o que é exatamente o padrão de defeito que o plano lista
-//        como origem da maior parte dos bugs.
+//        não têm como rodar em vitest+node. O `stageTimer` mede esses
+//        estágios em runtime real; aqui medimos apenas `predict` e `filter`
+//        — o restante seria número fabricado.
 //
 // Trajetórias implementadas (semente fixa → sequência fixa):
 //   1. static-fixation           9 alvos × 150 frames de fixação estática.
@@ -32,7 +30,7 @@
 //                                da simulação ao longo da trajetória.
 //
 // Uso pretendido: o teste `pipelineHarness.test.ts` executa `runHarness()` com
-// semente 12345 e compara com `docs/baseline_a28bdb0.json` (tarefa T0.4).
+// semente 12345 e compara com `harness-baseline.json`.
 // Regressão significa: qualquer métrica pior que a tolerância declarada faz
 // o teste falhar.
 
@@ -41,6 +39,7 @@ import { RidgeRegressor } from '../ridge';
 import { FilterChain, type FilterMode } from '../filters/filterChain';
 import type { GeometriaDeTela } from '../filters/angularVelocity';
 import { EXPERIMENT } from '../config/experiment';
+import { ACTIVE_FEATURE_SET } from '../extractor';
 import { StageTimer, STAGE } from '../telemetry/stageTimer';
 import {
   GazeSimSession,
@@ -64,17 +63,9 @@ export interface HarnessOptions {
   /** Configuração de simulação. Padrão herda de `SIM_DEFAULTS`. */
   sim?: Partial<SimOptions>;
   /**
-   * Cadeia de filtragem (`P7.6`).
-   *
-   * O harness instanciava `OneEuroFilter2D` diretamente, o que tornava o
-   * aceite do `P7.6` — "o harness roda com `filterMode: 'kalmanEma'`" —
-   * literalmente impossível de satisfazer: não havia caminho que trocasse o
-   * filtro. Mesma classe de problema do `spec11` no `P6.5` e do `filterMode`
-   * ausente no Sprint 6: uma alternativa que não se consegue selecionar não é
-   * alternativa.
-   *
-   * Omitido, segue `EXPERIMENT.filterMode` (default `'oneEuro'`), então o
-   * baseline gravado continua reproduzível sem passar nada.
+   * Cadeia de filtragem. Omitido, segue `EXPERIMENT.filterMode` (default
+   * `'oneEuro'`), então o baseline gravado continua reproduzível sem passar
+   * nada.
    */
   filterMode?: FilterMode;
   /**
@@ -86,8 +77,7 @@ export interface HarnessOptions {
    * horizonte (0 quadros: 34,82 px; 1: 36,50 px; 2: 38,66 px).
    *
    * No pipeline real há 2–3 quadros de atraso para cancelar, e é lá que a
-   * predição pode pagar. O `F8.5` precisa varrer o horizonte para achar o
-   * ponto; sem este campo ele varreria um parâmetro que não pode mudar.
+   * predição pode pagar; este campo existe para varrer o horizonte.
    */
   kalman?: { predictAheadFrames?: number; processVariance?: number; measurementVariance?: number };
 }
@@ -260,9 +250,9 @@ export function runHarness(opts: HarnessOptions = {}): HarnessResult {
   // escolher α em GRAUS; sem ela a cadeia degradaria para `kalman` puro e o
   // harness estaria medindo outra coisa do que diz medir.
   //
-  // 52,25 cm de largura e 60 cm de distância são os mesmos números do
-  // `docs/DECISOES_PIPELINE.md` (monitor de 24" 16:9 na distância nominal de
-  // uso). São premissas da SIMULAÇÃO, não medições: o harness não tem tela
+  // 52,25 cm de largura e 60 cm de distância são o posto de referência do
+  // projeto (monitor de 23,6" 16:9 na distância nominal de uso; ver
+  // docs/MEDICOES.md). São premissas da SIMULAÇÃO, não medições: o harness não tem tela
   // física. Números diferentes mudam apenas o α do EMA, não as trajetórias.
   const geometria = {
     larguraPx: screenW,
@@ -272,14 +262,10 @@ export function runHarness(opts: HarnessOptions = {}): HarnessResult {
   };
 
   // Zera flags estáticas do RidgeRegressor para o harness rodar independente
-  // de estado herdado de qualquer teste anterior no mesmo processo. Sem isso,
-  // a suíte é sensível à ordem — que é exatamente o padrão que a análise
-  // I.3 do plano lista como "estado global de módulo".
+  // de estado herdado de qualquer teste anterior no mesmo processo.
   const savedOverride = RidgeRegressor.lambdaOverride;
-  const savedAxisScale = RidgeRegressor.axisScale;
   const savedBalance = RidgeRegressor.balanceTargets;
   RidgeRegressor.lambdaOverride = null;
-  RidgeRegressor.axisScale = { x: screenW, y: screenH };
   RidgeRegressor.balanceTargets = false;
 
   try {
@@ -364,11 +350,10 @@ export function runHarness(opts: HarnessOptions = {}): HarnessResult {
         ...opts.sim,
       },
       filterMode,
-      featureSet: EXPERIMENT.featureSet,
+      featureSet: ACTIVE_FEATURE_SET,
     };
   } finally {
     RidgeRegressor.lambdaOverride = savedOverride;
-    RidgeRegressor.axisScale = savedAxisScale;
     RidgeRegressor.balanceTargets = savedBalance;
   }
 }

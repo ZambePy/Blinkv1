@@ -1,19 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
-  mapGaze, isCalibrated, clearCalibration,
-  getCalibrationInvalidation, clearCalibrationInvalidation, onCalibrationInvalidated,
+  mapGaze, isCalibrated, clearCalibration, onCalibrationInvalidated,
   startCalibrationMode, startCollectingPoint, feedRawData, completeCalibration,
+  type CalibrationInvalidated,
 } from './calibration';
 import { EXPERIMENT } from './config/experiment';
 
-// 0.2 — dimensão incompatível deve DESCARTAR a calibração e avisar, em vez de
-// devolver null a 30 Hz para sempre.
-//
-// O cenário real: um perfil salvo antes da redução de 44 para 12 dims era
-// considerado compatível por `buildContextKey` (que não codificava o pipeline),
-// carregado, e só falhava dentro de `predictRidge`. O engine ia para `degraded`,
-// o cursor caía no fallback do nariz, e nada dizia ao usuário que a saída era
-// recalibrar.
+// Dimensão de features incompatível com o modelo deve DESCARTAR a calibração
+// e avisar (evento de invalidação), em vez de devolver null a 30 Hz para
+// sempre com o cursor preso no fallback do nariz.
 
 /** PRNG determinístico — o ruído intra-alvo precisa existir (a penalidade Σ_W
  *  do Ridge é construída sobre ele) e precisa ser reprodutível. */
@@ -65,7 +60,6 @@ function calibrarCom(dims: number): void {
 describe('mapGaze — dimensão incompatível', () => {
   beforeEach(() => {
     clearCalibration();
-    clearCalibrationInvalidation();
     // Desliga expansão polinomial — estes testes verificam detecção de
     // dimensão incompatível com pipeline linear (8 dims). Com polynomialFeatures=true
     // o treino com 9 alvos × 44 features ultrapassa o timeout de 5 s do teste.
@@ -82,8 +76,11 @@ describe('mapGaze — dimensão incompatível', () => {
     expect(isCalibrated()).toBe(true);
     const v = Array.from({ length: 8 }, (_, d) => Math.sin(d * 1.7 + 0.3) * 0.3 + Math.cos(d * 2.3 + 1.1) * 0.4);
     const w = Array.from({ length: 8 }, (_, d) => Math.cos(d * 1.3 + 0.7) * 0.3 + Math.sin(d * 1.9 + 0.2) * 0.4);
+    const invalidacoes: CalibrationInvalidated[] = [];
+    const off = onCalibrationInvalidated((e) => invalidacoes.push(e));
     expect(mapGaze(v, w)).not.toBeNull();
-    expect(getCalibrationInvalidation()).toBeNull();
+    off();
+    expect(invalidacoes).toEqual([]);
   });
 
   it('vetor com dimensão errada descarta a calibração', () => {
@@ -99,10 +96,13 @@ describe('mapGaze — dimensão incompatível', () => {
 
   it('registra o motivo, para a UI poder pedir recalibração', () => {
     calibrarCom(8);
+    const invalidacoes: CalibrationInvalidated[] = [];
+    const off = onCalibrationInvalidated((e) => invalidacoes.push(e));
     const errado = Array.from({ length: 12 }, () => 0.1);
     mapGaze(errado, errado.slice());
+    off();
 
-    const inv = getCalibrationInvalidation();
+    const inv = invalidacoes[0] ?? null;
     expect(inv).not.toBeNull();
     expect(inv!.reason).toBe('feature_dim_mismatch');
     expect(inv!.detail).toMatch(/dimens/i);
@@ -127,14 +127,11 @@ describe('mapGaze — dimensão incompatível', () => {
   });
 });
 
-// 0.2 — falha silenciosa que o teste acima expôs por acidente.
-//
 // `trainRidgeModel` não lança com perfil vazio: devolve um modelo com
-// `numFeatures: 0`. Sem preflight, `completeCalibration` reportava `ok: true`,
-// a UI exibia "Calibração Concluída", e só o primeiro `mapGaze` revelava o
-// problema — estourando com "modelo treinado com 0 features".
+// `numFeatures: 0`. O preflight de `completeCalibration` precisa recusar isso
+// antes de reportar `ok: true`.
 describe('completeCalibration — preflight de amostras', () => {
-  beforeEach(() => { clearCalibration(); clearCalibrationInvalidation(); });
+  beforeEach(() => { clearCalibration(); });
   afterEach(() => { vi.restoreAllMocks(); });
 
   it('perfil vazio NÃO reporta sucesso', () => {

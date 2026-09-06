@@ -38,7 +38,7 @@
 //  4. **Ruído de landmark por frame** — calibrado para reproduzir o jitter RMS
 //     de ~50 px que o relatório real mediu.
 //
-// ⚠️ LIMITE HONESTO: os itens 2 e 3 são MODELOS, não medidas. A curva de
+// LIMITE HONESTO: os itens 2 e 3 são MODELOS, não medidas. A curva de
 // hipometria vem de dois pontos de uma única sessão. Números absolutos deste
 // simulador não são previsões de campo — ele serve para comparar variantes do
 // pipeline sob condições idênticas e para travar regressões por região.

@@ -160,7 +160,6 @@ describe('StageTimer — invariantes de vida', () => {
     expect(STAGE.quality).toBe('quality');
     expect(STAGE.predict).toBe('predict');
     expect(STAGE.filter).toBe('filter');
-    expect(STAGE.emit).toBe('emit');
     expect(STAGE.loopTotal).toBe('loop.total');
   });
 });

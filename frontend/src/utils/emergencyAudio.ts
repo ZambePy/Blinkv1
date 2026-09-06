@@ -1,26 +1,10 @@
-// Feedback sonoro da emergência — B2.13.
+// Feedback sonoro da emergência.
 //
-// ## O bug
-//
-// `EmergencyContext` criava `new AudioCtx()` a cada tick da contagem
-// regressiva (5 por acionamento) mais um por cancelamento, e **nunca** chamava
-// `ctx.close()`.
-//
-// O Chromium limita ~50 AudioContexts por documento. Após ~8 acionamentos numa
-// sessão, `new AudioCtx()` passa a LANÇAR — dentro de um `try {} catch {}`
-// silencioso. O feedback sonoro da emergência some pelo resto da sessão sem
-// nenhum sinal.
-//
-// Isso importa mais que a maioria dos vazamentos: o bipe é o canal que avisa o
-// cuidador de que o paciente acionou a emergência. Ele falhar em silêncio, e
-// justamente depois de vários acionamentos (ou seja, num dia ruim), é o pior
-// momento possível.
-//
-// ## A correção
-//
-// Um único `AudioContext` de módulo, criado sob demanda e reutilizado. Os
-// osciladores continuam sendo criados por bipe — são nós baratos e
-// descartáveis, e é o `AudioContext` que é escasso.
+// Um único `AudioContext` de módulo, criado sob demanda e reutilizado. O
+// Chromium limita ~50 contextos por documento: criar um por bipe fazia
+// `new AudioContext()` passar a lançar depois de alguns acionamentos e o som
+// da emergência sumir em silêncio pelo resto da sessão. Os osciladores
+// continuam sendo criados por bipe — são baratos; o contexto é que é escasso.
 
 let ctxCompartilhado: AudioContext | null = null;
 
@@ -61,12 +45,7 @@ export function getSharedAudioContext(): AudioContext | null {
  * @param duracaoSec duração
  * @param volume    ganho inicial (o envelope decai exponencialmente)
  */
-export function playTone(
-  freq: number,
-  atrasoSec = 0,
-  duracaoSec = 0.1,
-  volume = 0.2,
-): void {
+export function playTone(freq: number, atrasoSec = 0, duracaoSec = 0.1, volume = 0.2): void {
   const ctx = getSharedAudioContext();
   if (!ctx) return;
   try {
@@ -87,7 +66,12 @@ export function playTone(
     // grafo do contexto — que agora vive pela sessão inteira, e não mais por
     // um bipe.
     osc.onended = () => {
-      try { osc.disconnect(); gain.disconnect(); } catch { /* já desconectado */ }
+      try {
+        osc.disconnect();
+        gain.disconnect();
+      } catch {
+        /* já desconectado */
+      }
     };
   } catch {
     // Idem: som é feedback, não pode quebrar o acionamento da emergência.
@@ -105,6 +89,24 @@ export function playCancelSound(): void {
   playTone(300, 0.12, 0.1, 0.15);
 }
 
+/** Bipe duplo ascendente de confirmação (alerta enviado, ação concluída). */
+export function playConfirmSound(): void {
+  playTone(520, 0, 0.1, 0.15);
+  playTone(780, 0.12, 0.14, 0.15);
+}
+
+/**
+ * Sirene curta de alarme: dois tons alternados, `ciclos` vezes. Usada pela
+ * tela de escalonamento da emergência; reutiliza o mesmo contexto.
+ */
+export function playAlarmSound(ciclos = 3): void {
+  for (let i = 0; i < ciclos; i++) {
+    const t = i * 0.5;
+    playTone(880, t, 0.22, 0.25);
+    playTone(660, t + 0.25, 0.22, 0.25);
+  }
+}
+
 /**
  * Fecha o contexto compartilhado.
  *
@@ -114,7 +116,11 @@ export function playCancelSound(): void {
  */
 export function disposeSharedAudioContext(): void {
   if (ctxCompartilhado) {
-    try { void ctxCompartilhado.close(); } catch { /* já fechado */ }
+    try {
+      void ctxCompartilhado.close();
+    } catch {
+      /* já fechado */
+    }
   }
   ctxCompartilhado = null;
 }

@@ -1,40 +1,19 @@
-// Resolução das DUAS distâncias de uma sessão de calibração (B1.4).
+// Resolução das DUAS distâncias de uma sessão de calibração.
 //
-// Existe para que a distinção entre "distância até a câmera" e "distância até
-// a tela" tenha um único lugar responsável, em vez de ser refeita — e errada —
-// em cada chamador.
+// "Distância até a câmera" e "distância até a tela" são grandezas diferentes:
+// o setup recomendado é câmera perto / tela longe, e com FOV 90° a câmera
+// ideal fica a ~22 cm enquanto a tela fica a 60 cm. Um `??` que deixava a
+// medida de câmera assumir o lugar da distância de tela (só quando o FOV
+// estava calibrado, daí o sintoma intermitente) tinha três efeitos:
 //
-// ## O bug que este módulo fecha
-//
-// `CalibrationCheck.tsx` fazia:
-//
-//   const estimatedDistanceCm = calibration.getCurrentCameraDistanceCm?.() ?? null;
-//   const distCm = estimatedDistanceCm ?? settings.viewingDistanceCm;
-//   calibration.setCalibrationDistancesCm?.(estimatedDistanceCm, distCm);
-//
-// `getCurrentCameraDistanceCm()` é `estimateDistanceCm(iodPx, videoWidth, fov)`
-// — distância até a CÂMERA. O `??` fazia essa medida assumir o lugar da
-// distância até a TELA sempre que existisse, o que só acontece quando
-// `cameraHorizontalFovDeg` está calibrado. Daí o sintoma ser intermitente
-// entre postos de uso: onde ninguém calibrou o FOV, o bug não aparece.
-//
-// ## Por que são grandezas diferentes
-//
-// O setup recomendado no README é câmera perto / tela longe — "posicionamento
-// da câmera independente do monitor permite aproximar a câmera sem aproximar a
-// tela". Com FOV 90°, `idealDistanceCm` dá ~22,5 cm para a câmera enquanto a
-// tela fica a 60 cm. São 2,7× de diferença.
-//
-// ## Os três efeitos de confundi-las
-//
-//  (a) A grade de calibração encolhe. Os alvos são posicionados por orçamento
-//      de excentricidade angular: `budgetCm = d·tan(16°)`. Com d=60 os alvos
-//      ficam em 17%/83%; com d=25 a fração cai para 0,137, é clampada pelo
-//      piso 0,22, e os alvos vão para 28%/72%. O Ridge treina só nos 44%
-//      centrais e os pontos de validação em 25/75 viram extrapolação.
-//  (b) A compensação de distância fica com o denominador errado — 0,76 onde o
-//      correto é 0,90, ~90 px de deslocamento num viewport de 1920.
+//  (a) A grade de calibração encolhe: os alvos saem do orçamento
+//      `budgetCm = d·tan(16°)`, e com d=25 vão para 28%/72% em vez de 17%/83%.
+//      O Ridge treina só nos 44% centrais e a validação vira extrapolação.
+//  (b) A compensação de distância fica com o denominador errado (~90 px num
+//      viewport de 1920).
 //  (c) O erro angular do relatório mente por ~2,4×.
+//
+// Este módulo é o único lugar responsável por essa distinção.
 
 import { DEFAULT_VIEWING_DISTANCE_CM } from './calibration';
 

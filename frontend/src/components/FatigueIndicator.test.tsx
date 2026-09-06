@@ -33,7 +33,7 @@ vi.mock('../context/GazeContext', () => ({
 vi.mock('./ui/GazeButton', () => ({
   GazeButton: ({ children, onClick, style, ...rest }: React.PropsWithChildren<{ onClick?: () => void; style?: React.CSSProperties; [k: string]: unknown }>) => {
     // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { noWarn, emergency, width, height, ...domRest } = rest as Record<string, unknown>;
+    const { noWarn, emergency, width, height, variant, size, icon, label, stacked, dwellMs, ...domRest } = rest as Record<string, unknown>;
     return (
       <button type="button" onClick={onClick} style={style} {...(domRest as React.ButtonHTMLAttributes<HTMLButtonElement>)}>
         {children}

@@ -1,31 +1,25 @@
 import { describe, it, expect } from 'vitest';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { DEFAULTS, FLAGS_NAO_LIGADAS } from './experiment';
+import { DEFAULTS } from './experiment';
 
 // -----------------------------------------------------------------------------
 // Auditoria de fiação — toda flag tem que ser LIDA por código de produção.
 //
 // ── Por que este teste existe ───────────────────────────────────────────────
 //
-// Este repositório produziu quatro vezes o mesmo defeito, em quatro sprints
-// diferentes:
-//
-//   `spec11`      (P6.5)  — existia como tipo e projeção; `ACTIVE_FEATURE_SET`
-//                           era constante de módulo, nada podia selecioná-lo.
-//   `filterMode`  (S6)    — os filtros existiam, testados; a flag não existia.
-//   harness       (P7.6)  — a flag existia; `runHarness` instanciava
-//                           `OneEuroFilter2D` direto.
-//   engine        (P7.6)  — o harness selecionava; o ENGINE não.
-//
-// Em todos, os testes unitários passavam e o módulo estava correto. O que
-// faltava era o fio. E o custo não é estético: cada um deles bloqueava uma
-// condição de medição do Sprint 8 — o dia que exige um humano na cadeira.
-// Descobrir no Dia 7 que uma condição não pode ser ligada custa a sessão.
+// Este repositório produziu o mesmo defeito várias vezes: um módulo existia,
+// testado e correto, e a flag que deveria selecioná-lo ou não existia, ou era
+// lida só pelo harness de medição, ou era lida pelo harness e não pelo engine.
+// Em todos os casos os testes unitários passavam. O que faltava era o fio.
 //
 // Uma flag que ninguém lê é pior que uma flag ausente: ela aparece na
 // configuração, o operador a liga, o relatório registra a condição, e nada
-// muda. O resultado sai plausível e errado.
+// muda. O resultado sai plausível e errado — e descobrir isso numa sessão de
+// medição com um humano na cadeira custa a sessão.
+//
+// Não há lista de exceções aqui de propósito: uma flag que não é lida sai de
+// `DEFAULTS`, não entra numa lista de "ainda não ligadas".
 // -----------------------------------------------------------------------------
 
 function arquivosDeProducao(raiz: string): string[] {
@@ -51,16 +45,15 @@ function arquivosDeProducao(raiz: string): string[] {
  * Onde uma flag pode ser lida.
  *
  * `testUtils/` está FORA de propósito: o harness é instrumento de medição, não
- * produto. Foi exatamente essa a lacuna do `P7.6` — o `filterMode` era lido lá
- * e em nenhum outro lugar, então o harness media três cadeias enquanto o app
- * só sabia rodar uma.
+ * produto. Já aconteceu de `filterMode` ser lido lá e em nenhum outro lugar —
+ * o harness media três cadeias enquanto o app só sabia rodar uma.
  */
 function fontesDeProducao(): string[] {
   const raiz = process.cwd();
   return [
     ...arquivosDeProducao(join(raiz, 'src')),
     ...arquivosDeProducao(join(raiz, 'frontend', 'src')),
-  ].filter((p) => !p.includes(`${'testUtils'}`) && !p.endsWith(join('config', 'experiment.ts')));
+  ].filter((p) => !p.includes('testUtils') && !p.endsWith(join('config', 'experiment.ts')));
 }
 
 describe('toda flag de experimento é lida por código de produção', () => {
@@ -69,30 +62,18 @@ describe('toda flag de experimento é lida por código de produção', () => {
 
   for (const chave of Object.keys(DEFAULTS)) {
     it(`\`${chave}\` chega ao produto`, () => {
+      const padrao = new RegExp(`EXPERIMENT\\.${chave}\\b`);
       const leitores = conteudos
-        .filter(({ txt }) => txt.includes(`EXPERIMENT.${chave}`))
+        .filter(({ txt }) => padrao.test(txt))
         .map(({ f }) => f.replace(process.cwd(), '').replace(/\\/g, '/'));
-
-      // Órfã DECLARADA: o status é um fato registrado com motivo, não uma
-      // omissão descoberta lendo o código — ou, pior, no meio de uma sessão de
-      // medição. A lista é dívida, não permissão: quem tira dali tem que ligar.
-      if (chave in FLAGS_NAO_LIGADAS) {
-        expect(
-          leitores,
-          `\`${chave}\` está em FLAGS_NAO_LIGADAS mas JÁ é lida em produção. `
-          + 'Remova a entrada da lista — uma dívida quitada que continua listada '
-          + 'esconde as que ainda não foram.',
-        ).toEqual([]);
-        expect(FLAGS_NAO_LIGADAS[chave].length).toBeGreaterThan(80);
-        return;
-      }
 
       expect(
         leitores,
         `A flag \`${chave}\` não é lida por nenhum arquivo de produção. `
         + 'Ou o módulo dela nunca foi ligado, ou a flag ficou órfã depois de uma '
         + 'refatoração. Nos dois casos, ligá-la numa sessão de medição não muda '
-        + 'nada — e o relatório registra a condição como se tivesse mudado.',
+        + 'nada — e o relatório registra a condição como se tivesse mudado. '
+        + 'Ligue a flag ou remova-a de DEFAULTS.',
       ).not.toEqual([]);
     });
   }
@@ -100,31 +81,30 @@ describe('toda flag de experimento é lida por código de produção', () => {
 
 describe('a cadeia de filtragem chega ao engine, não só ao harness', () => {
   it('`engine.ts` importa e usa `FilterChain`', () => {
-    // O `F8.5` mede sete métricas. A 7 (estabilidade do dwell: taxa de
-    // conclusão, abortos, cliques no alvo errado) e metade da 2 (atraso
-    // end-to-end captura → render) só existem com o app rodando. Enquanto o
-    // engine instanciava `OneEuroFilter2D` direto, essas métricas não podiam
-    // ser medidas para `kalman` nem para `kalmanEma`.
+    // Estabilidade do dwell (taxa de conclusão, abortos, cliques no alvo
+    // errado) e atraso end-to-end captura → render só existem com o app
+    // rodando. Enquanto o engine instanciava `OneEuroFilter2D` direto, essas
+    // métricas não podiam ser medidas para `kalman` nem para `kalmanEma`.
     const engine = readFileSync(join(process.cwd(), 'src', 'tracker', 'engine.ts'), 'utf-8');
     expect(engine).toContain('FilterChain');
     expect(engine).toContain('EXPERIMENT.filterMode');
   });
 
   it('o diagnóstico expõe o modo EFETIVO, não só o pedido', () => {
-    // `kalmanEma` sem geometria de tela degrada para `kalman`. Uma sessão do
-    // Dia 7 rodando degradada, com o relatório dizendo "kalmanEma", viraria
-    // uma conclusão sobre uma cadeia que nunca rodou.
+    // `kalmanEma` sem geometria de tela degrada para `kalman`. Uma sessão
+    // rodando degradada, com o relatório dizendo "kalmanEma", viraria uma
+    // conclusão sobre uma cadeia que nunca rodou.
     const engine = readFileSync(join(process.cwd(), 'src', 'tracker', 'engine.ts'), 'utf-8');
     expect(engine).toMatch(/efetivo:/);
     expect(engine).toMatch(/degradado:/);
   });
 });
 
-describe('o recorder grava o que o F8.5 precisa reproduzir', () => {
+describe('o recorder grava o que a reprodução offline precisa', () => {
   it('`preFilter` existe no schema', () => {
-    // O método declarado do `F8.5` é: "gravar as amostras pré-filtro uma única
-    // vez e reproduzir o mesmo JSONL pelos três filtros offline". Só
-    // `predicted` era gravado, e ele é PÓS-filtro.
+    // O método é gravar as amostras pré-filtro uma única vez e reproduzir o
+    // mesmo JSONL pelos três filtros offline. Só `predicted` era gravado, e
+    // ele é PÓS-filtro.
     const tipos = readFileSync(join(process.cwd(), 'src', 'telemetry', 'types.ts'), 'utf-8');
     expect(tipos).toContain('preFilter?:');
   });

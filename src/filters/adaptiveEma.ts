@@ -1,25 +1,18 @@
-// P6.2 — EMA adaptativo com α escolhido pela velocidade ANGULAR.
-// P6.4 — zona morta, no mesmo módulo por compartilhar a conversão angular.
-//
-// ── A ideia ─────────────────────────────────────────────────────────────────
+// EMA adaptativo com α escolhido pela velocidade ANGULAR, mais zona morta (no
+// mesmo módulo por compartilhar a conversão angular).
 //
 // Um EMA de α fixo obriga a escolher entre suave e responsivo. Adaptar α pela
 // velocidade dá as duas coisas: em fixação (< 5°/s) α = 0,08 e o cursor fica
 // firme; numa sacada (> 15°/s) α = 0,35 e ele acompanha.
 //
-// ── Por que em graus, e não em pixels ───────────────────────────────────────
+// Em graus, e não em pixels: o mesmo deslocamento em pixels é um ângulo
+// diferente em cada setup (111 px/grau numa 23,6" a 60 cm, 130 numa 40" a
+// 100 cm). Limiar em pixels deixaria o filtro mais ou menos responsivo
+// conforme o monitor.
 //
-// O mesmo deslocamento em pixels é um ângulo diferente em cada setup: 111 px
-// por grau numa 23,6" a 60 cm, 130 numa 40" a 100 cm. Limiar em pixels trataria
-// os dois como iguais, e o filtro sairia mais responsivo ou mais suave conforme
-// o monitor. É a mesma classe de erro de `B3.21` (blur com referência absoluta
-// calibrada para 640×480) e de `B3.24` (design system com 60 cm hardcoded).
-//
-// ── O que acontece sem geometria ────────────────────────────────────────────
-//
-// `null`. Não há default razoável: assumir 111 px/grau é assumir uma tela
-// específica a uma distância específica. Quando a geometria não está
-// disponível, o chamador usa α fixo e sabe que está fazendo isso.
+// Sem geometria a velocidade é `null`: não há default razoável, porque assumir
+// 111 px/grau é assumir uma tela e uma distância específicas. Nesse caso o
+// chamador usa α fixo e sabe que está fazendo isso.
 
 import {
   velocidadeAngularDegPorSeg,
@@ -39,10 +32,8 @@ export const ALPHA_RAPIDO = 0.35;
 /**
  * α para uma velocidade angular, com interpolação monotônica entre os limites.
  *
- * A interpolação é LINEAR na velocidade. Considerei suavizar com uma sigmoide,
- * mas linear tem uma propriedade que importa mais aqui: é auditável. Com uma
- * curva, explicar por que o cursor ficou mais firme numa velocidade específica
- * exigiria reproduzir a curva de cabeça.
+ * Interpolação LINEAR na velocidade, de propósito: é auditável de cabeça, o
+ * que uma sigmoide não seria.
  */
 export function alphaPorVelocidade(
   velocidadeDegPorSeg: number,
@@ -61,14 +52,14 @@ export interface AdaptiveEmaOptions {
   geometria: GeometriaDeTela;
   alphaLento?: number;
   alphaRapido?: number;
-  /** Zona morta em graus (`P6.4`). `0` desliga. */
+  /** Zona morta em graus. `0` desliga. */
   deadZoneDeg?: number;
   /** Janela da zona morta, em ms: o movimento precisa ficar abaixo do limiar
    *  por este tempo para o cursor ser considerado parado. */
   deadZoneJanelaMs?: number;
 }
 
-/** Movimento menor que isto, sustentado, é microtremor (`P6.4`). */
+/** Movimento menor que isto, sustentado, é microtremor. */
 export const DEAD_ZONE_DEG = 0.3;
 /** Janela da zona morta, em ms. */
 export const DEAD_ZONE_JANELA_MS = 200;
@@ -81,7 +72,7 @@ export interface ResultadoEma {
   alpha: number;
   /** Velocidade angular estimada, em °/s. `null` sem quadro anterior. */
   velocidadeDegPorSeg: number | null;
-  /** O quadro caiu na zona morta e a saída foi congelada (`P6.4`). */
+  /** O quadro caiu na zona morta e a saída foi congelada. */
   naZonaMorta: boolean;
 }
 
@@ -140,9 +131,7 @@ export class AdaptiveEma {
       this.mxAnterior, this.myAnterior, mx, my, dtSec, this.geo,
     );
 
-    // ── P6.4 — zona morta ──────────────────────────────────────────────────
-    //
-    // A distância é medida contra a ÂNCORA, não contra o quadro anterior. Se
+    // Zona morta. A distância é medida contra a ÂNCORA, não contra o quadro anterior. Se
     // fosse contra o anterior, uma deriva lenta e constante passaria: cada
     // passo cabe na zona morta, e o cursor escorregaria sem nunca "se mover".
     const desvioGraus = pixelsParaGraus(

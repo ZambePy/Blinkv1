@@ -14,8 +14,7 @@
     "test": "vitest run",
     "electron:compile": "node electron/build.mjs",
     "electron:dev": "node electron/dev.mjs",
-    "electron:build": "npm run build && node electron/build.mjs && node electron/package-app.mjs",
-    "doctor": "npx react-doctor@latest"
+    "electron:build": "npm run build && node electron/build.mjs && node electron/package-app.mjs"
   },
   "devDependencies": {
     "@types/node": "^24.0.0",

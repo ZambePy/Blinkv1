@@ -2,11 +2,9 @@ import { describe, it, expect } from 'vitest';
 import { checkValidationOverlap } from './accuracy';
 import { computeCalibrationTargets, MAX_ECCENTRICITY_DEG, DEFAULT_SCREEN_DIAGONAL_IN, DEFAULT_VIEWING_DISTANCE_CM } from './calibration';
 
-// 0.3 — a grade 25/50/75 nunca mediu extrapolação.
-//
-// O comentário do bloco afirmava "INTERPOLAÇÃO em Y e EXTRAPOLAÇÃO em X". Está
-// errado nos dois: 25/75 cabe dentro de 17/83 tanto quanto dentro de 5/95.
-// A consequência é que a borda — onde a UI põe botões — nunca foi medida.
+// A grade interior 25/50/75 é interpolação nos dois eixos (cabe dentro do
+// fecho de calibração); só o anel de borda em 5%/95% mede extrapolação de
+// verdade — onde a UI põe botões.
 const GEOM = {
   screenWidthPx: 1920, screenHeightPx: 1080,
   screenDiagonalIn: DEFAULT_SCREEN_DIAGONAL_IN,

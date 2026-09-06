@@ -13,7 +13,7 @@ interface Settings {
   voiceProfileId?: string;
   eyeDominance: 'left' | 'right' | 'both';
   theme: Theme;
-  // Conforto visual (Camada 2 do plano de brilho/cores).
+  // Conforto visual.
   // brightnessLevel: 0.4 (mínimo utilizável) — 1.0 (sem escurecimento).
   // Aplicado como CSS `filter: brightness()` no <html>, escurece TUDO em
   // software sem depender do brilho do monitor (útil quando o cuidador
@@ -23,7 +23,7 @@ interface Settings {
   // fotofobia se aliviam bloqueando a componente azul do espectro.
   // Implementado via overlay fixo em html.amber-filter::after.
   amberFilter: boolean;
-  // Brilho real do monitor (0-100). Camada 3: só usado quando o Electron
+  // Brilho real do monitor (0-100). Só usado quando o Electron
   // IPC `window.electronBrightness` está disponível (Windows via WMI).
   // Persiste entre sessões e re-aplica no boot.
   monitorBrightness: number | null;
@@ -117,22 +117,14 @@ function applyVisualComfort(s: Pick<Settings, 'theme' | 'brightnessLevel' | 'amb
   html.style.filter = b < 1 ? `brightness(${b.toFixed(2)})` : '';
 }
 
-/** Versão do schema de `Settings` gravado no localStorage (B3.22). */
+/** Versão do schema de `Settings` gravado no localStorage. */
 const SETTINGS_SCHEMA_VERSION = 1;
 const SETTINGS_KEY = 'irisflow_settings';
 
 /**
- * Lê as configurações do disco sem nunca lançar (B3.22).
- *
- * O código anterior fazia `JSON.parse(raw)` direto no inicializador do
- * `useState`, **sem `try/catch`**. Um localStorage truncado — que acontece
- * quando os 5 perfis de calibração estouram a quota de 5 MB do navegador —
- * derrubava o `SettingsProvider` inteiro no boot, e com ele a árvore React
- * inteira. Tela branca, sem recuperação possível para o cuidador.
- *
- * Também não havia campo de versão: uma mudança futura no formato entraria
- * silenciosamente misturada aos defaults, com metade dos campos de um schema e
- * metade de outro.
+ * Lê as configurações do disco sem nunca lançar. Um localStorage truncado
+ * (acontece quando os perfis de calibração estouram a quota) não pode derrubar
+ * o `SettingsProvider` no boot — seria tela branca sem recuperação.
  */
 function lerSettingsDoDisco(): Partial<Settings> | null {
   try {
@@ -159,7 +151,7 @@ function lerSettingsDoDisco(): Partial<Settings> | null {
   }
 }
 
-/** Grava sem nunca lançar. Quota estourada não pode derrubar a UI (B3.22). */
+/** Grava sem nunca lançar. Quota estourada não pode derrubar a UI. */
 function gravarSettingsNoDisco(s: Settings): void {
   try {
     localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, schemaVersion: SETTINGS_SCHEMA_VERSION }));
@@ -197,13 +189,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
       };
     }).irisflowSystem;
     if (!sys?.getMonitorSizes) return;   // browser puro / build web: sem IPC
-    // Item 6 — só lê o sistema depois do consentimento explícito.
+    // Só lê o sistema depois do consentimento explícito.
     if (settings.systemAccessGranted !== true) return;
     let cancelled = false;
-    // Item 2 — lê tamanho físico E info do display juntos. A segunda serve
-    // para escolher QUAL painel corresponde ao monitor em uso: com dois
-    // monitores, "o maior" era chute, e escolher errado leva a diagonal errada
-    // direto para o orçamento de excentricidade da calibração.
+    // Lê tamanho físico E info do display juntos: a segunda serve para
+    // escolher QUAL painel corresponde ao monitor em uso quando há mais de um.
     void Promise.all([
       sys.getMonitorSizes(),
       sys.getDisplayInfo?.() ?? Promise.resolve(null),
@@ -257,7 +247,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     applyVisualComfort(settings);
   }, [settings.theme, settings.brightnessLevel, settings.amberFilter]);
 
-  // Camada 3 — brilho real do monitor via IPC do Electron.
+  // Brilho real do monitor via IPC do Electron.
   // Reaplica no boot se houve valor salvo (o monitor volta pra 100%
   // quando a máquina reinicia; nós restauramos a preferência).
   useEffect(() => {
@@ -272,19 +262,9 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, [settings.monitorBrightness]);
 
-  /**
-   * B3.22 — updater FUNCIONAL, não closure sobre `settings`.
-   *
-   * A versão anterior era `const next = { ...settings, ...partial }`, onde
-   * `settings` vinha do render corrente. Duas chamadas no mesmo handler —
-   * `updateSettings({a})` seguido de `updateSettings({b})` — partiam ambas do
-   * MESMO valor: a segunda sobrescrevia a primeira, e a perda ia inclusive
-   * para o localStorage. O cuidador mudava duas configurações e uma sumia,
-   * sem nada indicando qual.
-   *
-   * `useCallback` com deps vazias porque o updater funcional não fecha sobre
-   * nada — o que também mantém a identidade estável para o `useMemo` abaixo.
-   */
+  // Updater FUNCIONAL, não closure sobre `settings`: duas chamadas no mesmo
+  // handler partiriam do mesmo valor e a segunda sobrescreveria a primeira
+  // (inclusive no localStorage). Deps vazias mantêm a identidade estável.
   const updateSettings = useCallback((partial: Partial<Settings>) => {
     setSettings((anterior) => {
       const next = { ...anterior, ...partial };
@@ -293,42 +273,20 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
     });
   }, []);
 
-  // B3.24 — a geometria do usuário alimenta o design system.
-  //
-  // `degToPx` usava 60 cm e 96 dpi HARDCODED, e os tokens CSS eram calculados
-  // uma única vez no import do módulo. O app já conhece
-  // `viewingDistanceCm` e `screenDiagonalIn` — usa os dois para posicionar os
-  // alvos de calibração — e o design system os ignorava.
-  //
-  // Numa TV de 40″ a 100 cm, `degToPx(5°)` devolvia 198 px quando o correto
-  // passa de 300: o aviso de acessibilidade virava falso positivo. Um aviso
-  // que mente sobre acessibilidade é pior que nenhum, porque o cuidador
-  // aprende a ignorá-lo.
+  // A geometria do usuário alimenta o design system (tokens CSS de tamanho
+  // mínimo de alvo) e o pipeline. Propagar aqui, e não só ao calibrar, é o que
+  // faz uma correção da diagonal valer na hora: `screenPxPerCm()` está no
+  // caminho quente da compensação de pose.
   useEffect(() => {
     aplicarGeometriaDoUsuario(settings.viewingDistanceCm, settings.screenDiagonalIn);
-
-    // E a MESMA geometria vai para o pipeline.
-    //
-    // Ela chegava só em `startCalibrationMode`, como valor local que morria na
-    // função. `screenDistancePx()` e `screenPxPerCm()` — que estão no caminho
-    // quente de todo `mapGaze`, porque `geometricPoseCompensation` é `true`
-    // por default — liam os defaults de 23,6"/60 cm. Numa tela de 27" o
-    // `pxPerCm` saía 1,14× grande demais e a compensação de pose era
-    // super-aplicada em ~14%.
-    //
-    // Propagar aqui, e não só ao calibrar, é o que faz o cuidador corrigir a
-    // diagonal e a correção valer na hora — sem exigir recalibração.
     setSessionGeometry({
       viewingDistanceCm: settings.viewingDistanceCm,
       screenDiagonalIn: settings.screenDiagonalIn,
     });
   }, [settings.viewingDistanceCm, settings.screenDiagonalIn]);
 
-  // B3.22 — `useMemo` no value do provider.
-  //
-  // Sem ele, um objeto novo era criado a cada render do provider e TODOS os
-  // consumidores de `useSettings` re-renderizavam junto — mesmo quando nenhuma
-  // configuração tinha mudado.
+  // Sem o `useMemo`, todo render do provider re-renderizaria todos os
+  // consumidores de `useSettings`, mesmo sem nenhuma configuração mudar.
   const value = useMemo(() => ({ settings, updateSettings }), [settings, updateSettings]);
 
   return (

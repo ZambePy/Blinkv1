@@ -6,22 +6,10 @@ import {
   disposeSharedAudioContext,
 } from './emergencyAudio';
 
-// -----------------------------------------------------------------------------
-// B2.13 — `AudioContext` vazando na emergência: o alarme sonoro morre no meio
-//         da sessão.
-//
-// `EmergencyContext` fazia `new AudioCtx()` a cada tick da contagem regressiva
-// (5 por acionamento) mais um por cancelamento, e **nunca** chamava
-// `ctx.close()`.
-//
-// O Chromium limita ~50 AudioContexts por documento. Após ~8 acionamentos numa
-// sessão, `new AudioCtx()` passa a LANÇAR — dentro de um `try {} catch {}`
-// silencioso. **O feedback sonoro da emergência some pelo resto da sessão sem
-// nenhum sinal**, justamente o canal que avisa o cuidador.
-//
-// O agravante é o timing: a falha aparece depois de VÁRIOS acionamentos, ou
-// seja, num dia em que o paciente já está precisando de ajuda com frequência.
-// -----------------------------------------------------------------------------
+// O Chromium limita ~50 AudioContexts por documento. Um contexto por bipe
+// faria `new AudioContext()` passar a lançar depois de alguns acionamentos —
+// dentro de um try/catch silencioso — e o som da emergência sumiria pelo resto
+// da sessão. O módulo precisa reutilizar um único contexto.
 
 /** Conta quantos AudioContexts foram construídos, como o Chromium faria. */
 let construidos = 0;
@@ -81,7 +69,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe('B2.13 — um único AudioContext para a sessão inteira', () => {
+describe('um único AudioContext para a sessão inteira', () => {
   it('a primeira chamada cria o contexto', () => {
     expect(getSharedAudioContext()).not.toBeNull();
     expect(construidos).toBe(1);
@@ -122,7 +110,7 @@ describe('B2.13 — um único AudioContext para a sessão inteira', () => {
   });
 });
 
-describe('B2.13 — degradação graciosa', () => {
+describe('degradação graciosa', () => {
   it('sem WebAudio, tocar som é no-op e não lança', () => {
     vi.stubGlobal('AudioContext', undefined);
     disposeSharedAudioContext();

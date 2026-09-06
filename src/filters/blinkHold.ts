@@ -1,34 +1,18 @@
-// P6.3 — hold on blink: congelar o cursor durante a piscada.
+// Hold on blink: congelar o cursor durante a piscada.
 //
-// ── O problema ──────────────────────────────────────────────────────────────
+// Durante uma piscada não há íris para medir. Descartar o quadro deixa o
+// cursor onde estava — e se a piscada acontece no meio de uma sacada, ele
+// trava no meio do caminho e depois salta. Congelar na posição PREDITA pelo
+// Kalman usa o modelo de velocidade constante como melhor estimativa de onde
+// o olho está enquanto ninguém consegue medir.
 //
-// Durante uma piscada não há íris para medir. Hoje o quadro é simplesmente
-// descartado, e o cursor fica onde estava. Se a piscada acontece no meio de uma
-// sacada, o cursor trava no meio do caminho e depois salta.
+// O teto de 2 s separa "piscada" (100–400 ms) de "olho fechado". Continuar
+// projetando velocidade constante por dez segundos mandaria o cursor para
+// fora da tela com confiança total. Depois do teto o hold para de afirmar
+// uma posição que ninguém mediu; o que fazer é decisão do chamador.
 //
-// A especificação pede congelar na posição **predita pelo Kalman** por até 2 s:
-// o modelo de velocidade constante é a melhor estimativa de onde o olho está
-// enquanto ninguém consegue medir.
-//
-// ── Por que existe um TETO de 2 s ───────────────────────────────────────────
-//
-// Porque "piscada" e "olho fechado" são coisas diferentes, e a segunda não pode
-// ser tratada como a primeira indefinidamente. Uma piscada dura 100–400 ms;
-// além de 2 s, o usuário fechou os olhos — está descansando, cochilando, ou
-// tem espasmo. Continuar projetando velocidade constante por dez segundos
-// mandaria o cursor para fora da tela, com confiança total.
-//
-// Depois do teto, o sistema entra em fallback: é decisão do chamador o que
-// fazer (o engine já tem o estado `degraded`), mas o hold para de afirmar uma
-// posição que ninguém mediu.
-//
-// ── A interação com o dwell (`B2.5`) ────────────────────────────────────────
-//
-// O dwell precisa distinguir "piscada" de "perdi o rosto". Hoje as duas chegam
-// como amostra ausente, e `B2.5` corrigiu o lado do engine para emitir a cada
-// quadro sem rosto. O hold acrescenta a informação que faltava: durante o hold
-// **o cursor tem posição confiável**, então o progresso do dwell deve ser
-// PRESERVADO. Depois do teto, não — aí a amostra é ausência de verdade.
+// Durante o hold o cursor tem posição confiável, então o progresso do dwell
+// deve ser PRESERVADO. Depois do teto, não — aí é ausência de verdade.
 
 import type { Kalman2D } from './kalman2d';
 
@@ -50,12 +34,8 @@ export interface ResultadoHold {
   posicao: { x: number; y: number } | null;
   /** Duração do episódio atual, em ms. 0 fora de episódio. */
   duracaoMs: number;
-  /**
-   * O dwell deve preservar o progresso neste quadro?
-   *
-   * `true` durante o hold (a posição é confiável), `false` depois do teto. É a
-   * distinção que `B2.5` deixou pendente entre "piscada" e "perdi o rosto".
-   */
+  /** O dwell deve preservar o progresso neste quadro? `true` durante o hold
+   *  (a posição é confiável), `false` depois do teto. */
   preservarDwell: boolean;
 }
 
@@ -69,14 +49,13 @@ export interface BlinkHoldOptions {
  * Máquina de estados do hold. Pura em relação ao tempo: recebe `nowMs`.
  *
  * Não decide se houve piscada — recebe isso pronto do `BlinkDetector`, que já
- * tem o limiar adaptativo por pessoa (`P5.4`). Duplicar o critério aqui daria
- * duas respostas para a mesma pergunta.
+ * tem o limiar adaptativo por pessoa. Duplicar o critério aqui daria duas
+ * respostas para a mesma pergunta.
  */
 export class BlinkHold {
   private readonly maxMs: number;
   private readonly nominalDt: number;
   private inicioMs: number | null = null;
-  private ultimoMs = 0;
 
   constructor(opts: BlinkHoldOptions = {}) {
     this.maxMs = opts.maxMs ?? BLINK_HOLD_MAX_MS;
@@ -93,8 +72,7 @@ export class BlinkHold {
    *
    * `kalman` é consultado, não modificado — a projeção não deve avançar o
    * estado do filtro, senão o hold reescreveria o modelo com dados que não
-   * existem. Quem avança o estado é o chamador, chamando `kalman.step()` se
-   * quiser que a incerteza cresça durante o hold.
+   * existem.
    */
   update(
     piscando: boolean,
@@ -103,12 +81,10 @@ export class BlinkHold {
   ): ResultadoHold {
     if (!piscando) {
       this.inicioMs = null;
-      this.ultimoMs = nowMs;
       return { estado: 'normal', posicao: null, duracaoMs: 0, preservarDwell: false };
     }
 
     if (this.inicioMs === null) this.inicioMs = nowMs;
-    this.ultimoMs = nowMs;
     const duracaoMs = nowMs - this.inicioMs;
 
     if (duracaoMs > this.maxMs) {
@@ -137,11 +113,5 @@ export class BlinkHold {
 
   reset(): void {
     this.inicioMs = null;
-    this.ultimoMs = 0;
-  }
-
-  /** Último instante visto, para diagnóstico. */
-  get ultimoInstanteMs(): number {
-    return this.ultimoMs;
   }
 }

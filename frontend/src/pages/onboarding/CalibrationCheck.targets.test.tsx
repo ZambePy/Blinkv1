@@ -49,6 +49,7 @@ vi.mock('../../context/GazeContext', () => ({
   useGaze: () => ({
     l2csStatus: 'ready',
     getSessionUptimeMs: () => 1000,
+    getDiagnostics: () => null,
     recording: { isActive: () => false, start: vi.fn(), stop: vi.fn() },
     calibration: {
       startCalibrationMode: (...a: unknown[]) => startCalibrationMode(...a),

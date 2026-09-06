@@ -10,7 +10,7 @@ import {
 } from './blinkClick';
 
 // -----------------------------------------------------------------------------
-// P7.3 — piscada como clique.
+// Piscada como clique.
 //
 // A especificação é explícita sobre o risco: *"piscada espontânea é
 // involuntária e frequente — exigir que o gaze esteja estável sobre um alvo

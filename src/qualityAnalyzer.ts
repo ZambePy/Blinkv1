@@ -18,19 +18,12 @@ const EYE_BBOX_INDICES = [33, 133, 159, 145, 362, 263, 386, 374];
 
 /**
  * Referência empírica de variância do Laplaciano para foco, **medida a
- * 640×480** (B3.21).
+ * 640×480**: frames nítidos de webcam nessa resolução produzem > 0,001.
  *
- * Frames nítidos de webcam nessa resolução produzem variância > 0,001.
- *
- * O número é específico da resolução, e antes de B3.21 era usado como se fosse
- * absoluto. A variância do Laplaciano escala com o quadrado do gradiente
- * inter-pixel, e esse gradiente cai proporcionalmente à resolução: a mesma
- * borda física se espalha por mais pixels a 1080p, então cada passo é menor.
- *
- * A consequência era perversa: **trocar uma webcam 480p por uma 1080p
- * aumentava o `blurEstimate` e reprovava frames nítidos.** A métrica não era
- * comparável entre setups — e é exatamente entre setups que o gate de
- * calibração precisa decidir.
+ * O número é específico da resolução. A variância do Laplaciano escala com o
+ * quadrado do gradiente inter-pixel, que cai proporcionalmente à resolução (a
+ * mesma borda física se espalha por mais pixels a 1080p). Usada como absoluta,
+ * trocar uma webcam 480p por 1080p reprovava frames nítidos.
  */
 export const BLUR_REFERENCE_AT_640x480 = 0.001;
 
@@ -39,7 +32,7 @@ const BLUR_REFERENCE_WIDTH = 640;
 
 /**
  * Converte variância do Laplaciano em estimativa de borrão [0,1], normalizando
- * pela resolução (B3.21).
+ * pela resolução.
  *
  * `1` = totalmente borrado, `0` = nítido.
  *
@@ -84,7 +77,7 @@ export class EyeQualityAnalyzer {
   private lastLandmarks: Point3D[] | null = null;
 
   /**
-   * Solta o canvas em resolução plena de vídeo (B1.7).
+   * Solta o canvas em resolução plena de vídeo.
    *
    * O canvas é dimensionado para `videoWidth × videoHeight` — a 1080p são
    * ~8,3 MB de backing store, mais o contexto 2D com `willReadFrequently`.
@@ -95,7 +88,7 @@ export class EyeQualityAnalyzer {
    * Confiança pela estabilidade dos landmarks entre quadros.
    *
    * Independe do crop — é por isso que continua sendo reportada mesmo quando a
-   * bbox é degenerada (B3.2) ou o canvas está tainted. É uma medição de fato,
+   * bbox é degenerada ou o canvas está tainted. É uma medição de fato,
    * e suprimi-la junto com as outras seria descartar informação boa.
    */
   private medirEstabilidade(landmarks: Point3D[]): number {
@@ -145,7 +138,7 @@ export class EyeQualityAnalyzer {
 
     // Bounding box em coordenadas normalizadas [0,1]
     let minX = 1, minY = 1, maxX = 0, maxY = 0;
-    // B3.2 — conta quantos landmarks de olho realmente entraram. Sem isso, um
+    // Conta quantos landmarks de olho realmente entraram: sem isso, um
     // detector que não devolveu nenhum deles deixava os valores INICIAIS
     // sobreviverem (`minX = 1, maxX = 0`), e a bbox saía invertida.
     let pontosValidos = 0;
@@ -162,19 +155,11 @@ export class EyeQualityAnalyzer {
       pontosValidos++;
     }
 
-    // B3.2 — a bbox precisa ser bem-formada ANTES de qualquer leitura de pixel.
-    //
-    // O guard antigo (`if (N === 0)`) era código morto: `cropW`/`cropH` usam
-    // `Math.max(1, ...)`, então N nunca é zero. Com landmarks degenerados a
-    // bbox virava `minX = 1.2, maxX = -0.2` depois do padding, `getImageData`
-    // lia fora do canvas — o que NÃO lança, devolve preto transparente — e o
-    // resultado publicado era `{brightness: 0, contrast: 0, blur: 1,
-    // specular: 0}`: preto absoluto, sem reflexo e borrado ao mesmo tempo.
-    // Um estado fisicamente impossível, exibido ao cuidador na pré-calibração
-    // como se tivesse sido medido.
-    //
-    // `detectorConfidence` continua sendo devolvido porque ele FOI medido —
-    // vem do deslocamento de landmarks entre quadros, não do crop.
+    // A bbox precisa ser bem-formada ANTES de qualquer leitura de pixel: com
+    // bbox invertida, `getImageData` lê fora do canvas — o que NÃO lança,
+    // devolve preto transparente — e publicaria `{brightness: 0, blur: 1}`
+    // como se tivesse sido medido. `detectorConfidence` continua sendo
+    // devolvido porque ele FOI medido (deslocamento de landmarks, não crop).
     const bboxValida = pontosValidos >= 2 && maxX > minX && maxY > minY;
     if (!bboxValida) {
       const confiancaSemCrop = this.medirEstabilidade(landmarks);
@@ -259,7 +244,7 @@ export class EyeQualityAnalyzer {
         const lapMean = lapSum / lapN;
         const lapVar = lapSumSq / lapN - lapMean * lapMean;
         // Variância alta = borda bem definida = foco. Blur é o inverso.
-        // B3.21 — normalizado pela resolução; ver `blurFromVariance`.
+        // Normalizado pela resolução; ver `blurFromVariance`.
         blurEstimate = blurFromVariance(lapVar, vw, vh);
       }
 

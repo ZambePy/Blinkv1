@@ -8,13 +8,9 @@ import {
 import { BLINK_CLICK_MAX_MS } from './blinkClick';
 
 // -----------------------------------------------------------------------------
-// Guardas da varredura encontradas na revisão pré-Sprint 8.
-//
-// Todas as três vinham do mesmo erro de raciocínio: eu tratei a varredura como
-// "o dwell, mas por relógio", e não reapliquei a ela as guardas que o `P7.3`
-// declara inegociáveis. O módulo puro estava certo naquilo que sabia; o que
-// faltava era perguntar de novo, no contexto novo, cada pergunta que já tinha
-// sido respondida no contexto antigo.
+// Guardas da varredura: as mesmas guardas inegociáveis do clique por piscada
+// (emergência, calibração, duração máxima) precisam valer também aqui — a
+// varredura não é só "o dwell, mas por relógio".
 // -----------------------------------------------------------------------------
 
 const ITENS = 4;
@@ -68,8 +64,8 @@ describe('olho fechado prolongado NÃO seleciona', () => {
   });
 
   it('uma piscada dentro da faixa continua selecionando', () => {
-    // O teto não pode ter matado a funcionalidade — que é o modo de falha da
-    // guarda de estabilidade do `P7.3`, encontrado no sprint passado.
+    // O teto não pode ter matado a funcionalidade — o modo de falha típico
+    // de uma guarda de estabilidade apertada demais.
     const a = ativada();
     expect(piscarPor(a.estado, a.t, 300).selecionou).not.toBeNull();
   });

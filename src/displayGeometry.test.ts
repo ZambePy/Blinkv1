@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   computeDisplayGeometry,
   pickPrimaryPanel,
-  parseWmiMonitorSizes,
   pickPanelForDisplay,
 } from './displayGeometry';
 
@@ -69,33 +68,6 @@ describe('pickPrimaryPanel', () => {
   it('devolve null quando nenhum painel é utilizável', () => {
     expect(pickPrimaryPanel([{ widthCm: 0, heightCm: 0 }])).toBeNull();
     expect(pickPrimaryPanel([])).toBeNull();
-  });
-});
-
-describe('parseWmiMonitorSizes', () => {
-  it('aceita OBJETO quando há um monitor só', () => {
-    // ConvertTo-Json do PowerShell não envelopa em array com um item — fonte
-    // clássica de bug em quem assume array.
-    const r = parseWmiMonitorSizes({ MaxHorizontalImageSize: 52, MaxVerticalImageSize: 29 });
-    expect(r).toEqual([{ widthCm: 52, heightCm: 29 }]);
-  });
-
-  it('aceita ARRAY quando há vários', () => {
-    const r = parseWmiMonitorSizes([
-      { MaxHorizontalImageSize: 52, MaxVerticalImageSize: 29 },
-      { MaxHorizontalImageSize: 34, MaxVerticalImageSize: 19 },
-    ]);
-    expect(r).toHaveLength(2);
-  });
-
-  it('descarta linhas sem os campos', () => {
-    const r = parseWmiMonitorSizes([{ Foo: 1 }, { MaxHorizontalImageSize: 52, MaxVerticalImageSize: 29 }]);
-    expect(r).toEqual([{ widthCm: 52, heightCm: 29 }]);
-  });
-
-  it('null/undefined viram lista vazia', () => {
-    expect(parseWmiMonitorSizes(null)).toEqual([]);
-    expect(parseWmiMonitorSizes(undefined)).toEqual([]);
   });
 });
 

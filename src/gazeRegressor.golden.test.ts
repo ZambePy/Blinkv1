@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { createRegressor, ridgeRegressorFromModel } from './gazeRegressor';
+import { createRegressor, ridgeRegressorFromModel, REGRESSOR_MODE } from './gazeRegressor';
+import { RidgeRegressor } from './ridge';
 import { trainRidgeModel, predictRidge } from './ridge';
 import { StandardScaler } from './scaler';
 
@@ -88,7 +89,8 @@ describe('GazeRegressor golden snapshot', () => {
     expect(got.y).toBe(golden.y);
   });
 
-  it('createRegressor throws for truly unsupported mode', () => {
-    expect(() => createRegressor('foo' as never)).toThrow(/Unsupported regressor mode/);
+  it('createRegressor() builds the one regressor the pipeline has, and names it', () => {
+    expect(createRegressor()).toBeInstanceOf(RidgeRegressor);
+    expect(REGRESSOR_MODE).toBe('ridge');
   });
 });

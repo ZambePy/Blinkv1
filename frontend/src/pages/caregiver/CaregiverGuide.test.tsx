@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import React from 'react';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { HashRouter, MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { CaregiverGuide } from './CaregiverGuide';
 
 // Mock base CaregiverPageLayout para simplificar as verificações
@@ -47,5 +47,35 @@ describe('CaregiverGuide Page — Guia de Onboarding do Cuidador', () => {
     fireEvent.click(backBtn);
 
     expect(screen.getByText('Painel do Cuidador')).toBeInTheDocument();
+  });
+
+  // O app roda sob `HashRouter`: o hash É a rota. Um `<a href="#guia-camera">`
+  // navegaria para a rota inexistente `/guia-camera` (tela vazia) em vez de
+  // rolar até a seção.
+  it('os tópicos são botões que rolam até a seção, não âncoras de hash (HashRouter)', () => {
+    const LocationProbe: React.FC = () => <div data-testid="pathname">{useLocation().pathname}</div>;
+    window.location.hash = '#/caregiver/guide';
+    const scroll = vi.fn();
+    Element.prototype.scrollIntoView = scroll;
+
+    render(
+      <HashRouter>
+        <LocationProbe />
+        <Routes>
+          <Route path="/caregiver/guide" element={<CaregiverGuide />} />
+          <Route path="*" element={<div>rota inexistente</div>} />
+        </Routes>
+      </HashRouter>
+    );
+
+    const nav = screen.getByRole('navigation', { name: 'Tópicos do guia' });
+    expect(nav.querySelectorAll('a[href^="#"]')).toHaveLength(0);
+
+    fireEvent.click(screen.getByRole('button', { name: 'Câmera' }));
+
+    expect(scroll).toHaveBeenCalled();
+    expect(screen.getByTestId('pathname').textContent).toBe('/caregiver/guide');
+    expect(screen.queryByText('rota inexistente')).toBeNull();
+    window.location.hash = '';
   });
 });

@@ -19,21 +19,40 @@ interface AuthContextData {
 
 const AuthContext = createContext<AuthContextData>({} as AuthContextData);
 
-const STORAGE_KEY = 'irisflow_auth';
+// O perfil do paciente persiste entre sessões (localStorage). O acesso do
+// cuidador NÃO: vive só na aba/sessão atual (sessionStorage), para fechar o
+// app não deixar a área do cuidador destravada para o paciente.
+const PROFILE_KEY = 'irisflow_auth';
+const CAREGIVER_SESSION_KEY = 'irisflow_caregiver_session';
 
-interface PersistedAuth {
+interface PersistedProfile {
   currentProfile: Profile | null;
+}
+
+interface CaregiverSession {
   isCaregiver: boolean;
   authToken: string | null;
 }
 
-const loadPersisted = (): PersistedAuth => {
+const loadProfile = (): PersistedProfile => {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { currentProfile: null, isCaregiver: false, authToken: null };
-    return { currentProfile: null, isCaregiver: false, authToken: null, ...JSON.parse(raw) };
+    const raw = localStorage.getItem(PROFILE_KEY);
+    if (!raw) return { currentProfile: null };
+    const parsed = JSON.parse(raw) as Partial<PersistedProfile>;
+    return { currentProfile: parsed.currentProfile ?? null };
   } catch {
-    return { currentProfile: null, isCaregiver: false, authToken: null };
+    return { currentProfile: null };
+  }
+};
+
+const loadCaregiverSession = (): CaregiverSession => {
+  try {
+    const raw = sessionStorage.getItem(CAREGIVER_SESSION_KEY);
+    if (!raw) return { isCaregiver: false, authToken: null };
+    const parsed = JSON.parse(raw) as Partial<CaregiverSession>;
+    return { isCaregiver: parsed.isCaregiver === true, authToken: parsed.authToken ?? null };
+  } catch {
+    return { isCaregiver: false, authToken: null };
   }
 };
 
@@ -56,24 +75,39 @@ const mockProfiles: Profile[] = [
 ];
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const initial = loadPersisted();
-  const [currentProfile, setCurrentProfile] = useState<Profile | null>(initial.currentProfile);
-  const [isCaregiver, setIsCaregiver] = useState(initial.isCaregiver);
-  const [authToken, setAuthToken] = useState<string | null>(initial.authToken);
+  const [currentProfile, setCurrentProfile] = useState<Profile | null>(
+    () => loadProfile().currentProfile
+  );
+  const [caregiver, setCaregiver] = useState<CaregiverSession>(loadCaregiverSession);
+  const { isCaregiver, authToken } = caregiver;
 
   useEffect(() => {
-    const data: PersistedAuth = { currentProfile, isCaregiver, authToken };
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [currentProfile, isCaregiver, authToken]);
+    try {
+      localStorage.setItem(PROFILE_KEY, JSON.stringify({ currentProfile }));
+    } catch {
+      // Storage indisponível: o perfil vale só nesta sessão.
+    }
+  }, [currentProfile]);
+
+  useEffect(() => {
+    try {
+      if (caregiver.isCaregiver) {
+        sessionStorage.setItem(CAREGIVER_SESSION_KEY, JSON.stringify(caregiver));
+      } else {
+        sessionStorage.removeItem(CAREGIVER_SESSION_KEY);
+      }
+    } catch {
+      // Idem.
+    }
+  }, [caregiver]);
 
   const selectProfile = (p: Profile) => setCurrentProfile(p);
 
   const loginCaregiver = (pin: string) => {
     // TEMPORÁRIO: PIN vem de env var. Substituir por autenticação no backend.
     if (pin === env.caregiverPin) {
-      setIsCaregiver(true);
       // Placeholder para JWT — hoje é um marcador local; será substituído pelo token do backend.
-      setAuthToken('local-caregiver-session');
+      setCaregiver({ isCaregiver: true, authToken: 'local-caregiver-session' });
       return true;
     }
     return false;
@@ -81,8 +115,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const logout = () => {
     setCurrentProfile(null);
-    setIsCaregiver(false);
-    setAuthToken(null);
+    setCaregiver({ isCaregiver: false, authToken: null });
   };
 
   return (

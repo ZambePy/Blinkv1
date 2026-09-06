@@ -22,12 +22,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Mock do hook useGaze para evitar loops de vídeo reais em ambiente de testes.
-//
-// B3.23 — `isDwelling` mudou de contexto: agora vem de `useIsDwelling()`, um
-// provider separado. A separação existe porque o campo alterna várias vezes
-// por segundo no teclado ocular, e enquanto ele estava nas deps do contexto
-// principal cada alternância re-renderizava os onze consumidores — sendo esta
-// tela (507 linhas) a mais cara delas.
+// `isDwelling` vem de `useIsDwelling()`, um provider separado.
 vi.mock('../context/GazeContext', () => ({
   useGaze: () => ({
     subscribe: vi.fn(() => vi.fn()),

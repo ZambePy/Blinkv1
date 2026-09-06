@@ -12,8 +12,7 @@ let calibrado = true;
 const engineMock = {
   start: vi.fn(async () => {}),
   stop: vi.fn(),
-  // B1.7/B1.8 — o provider passou a chamar `dispose()` no cleanup para
-  // liberar o FaceLandmarker e o worker L2CS. Sem este método no mock, o
+  // O provider chama `dispose()` no cleanup; sem este método no mock, o
   // cleanup lançaria.
   dispose: vi.fn(),
   subscribe: (cb: (s: GazeSample) => void) => { emitir = cb; return () => {}; },
@@ -26,8 +25,6 @@ const engineMock = {
   calibration: {
     isCalibrated: () => calibrado,
     onInvalidated: () => () => {},
-    feedOnlineSample: vi.fn(() => false),
-    setOnlineCalibrationEnabled: vi.fn(),
     setCameraFovDeg: vi.fn(),
     setEyeDominance: vi.fn(),
     abort: vi.fn(),

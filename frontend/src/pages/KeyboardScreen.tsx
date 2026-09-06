@@ -12,50 +12,41 @@ import { useNavigate } from 'react-router-dom';
  * DIREÇÃO VISUAL
  *
  * O material desta tela não são as letras — é a ESPERA. Toda ação custa ao
- * usuário ~1,5 s de olhar parado, e cada seleção errada custa fadiga real. O
- * design é organizado em torno disso:
+ * usuário ~1,5 s de olhar parado, e cada seleção errada custa fadiga real:
  *
  *  1. Feedback de dwell só na fóvea. A tecla aquece (cor, sem deslocamento) e
  *     um traço curto cresce sob o glifo. Nada se mexe nas bordas, porque
- *     movimento periférico dispara sacada reflexa e cancelaria o próprio dwell
- *     que estava sendo reportado. Ver o bloco `.kb-key` em index.css.
+ *     movimento periférico dispara sacada reflexa e cancelaria o próprio dwell.
+ *     Ver o bloco `.kb-key` em index.css.
  *
- *  2. Os dois níveis são cromaticamente distintos. Escolher um GRUPO é frio e
- *     recuado (nada comprometido ainda); escolher a LETRA é contraste cheio. O
- *     usuário sabe em que nível está sem ler nada — e "onde estou" é a pergunta
- *     que mais gera erro numa árvore de dois níveis.
+ *  2. Os dois níveis são cromaticamente distintos. Escolher um GRUPO é recuado
+ *     (nada comprometido ainda); escolher a LETRA é contraste cheio.
  *
- *  3. Quente avança, frio recua. O âmbar é o único acento e marca sempre a
- *     mesma coisa: compromisso. Aparece no dwell, na confirmação e no texto já
- *     escrito — nunca em decoração.
+ *  3. Um único acento (o âmbar de `--warn`) marca sempre a mesma coisa:
+ *     compromisso. Aparece no dwell, na confirmação e no texto já escrito.
  *
- *  4. A linha de composição é monoespaçada. É um buffer de texto: cada
- *     caractere ocupa a mesma largura, então dá para conferir o que se escreveu
- *     contando posições. As teclas usam uma humanista, de letras inequívocas.
- *     Duas famílias, dois papéis.
+ *  4. A linha de composição é monoespaçada: é um buffer de texto, e dá para
+ *     conferir o que se escreveu contando posições.
+ *
+ * Todas as cores vêm dos tokens do tema, mapeadas para as variáveis `--kb-*`
+ * que o CSS do teclado consome. Assim o teclado acompanha claro/escuro.
  * ──────────────────────────────────────────────────────────────────────────── */
-const KB = {
-  /** Quase-preto com viés azul. Preto puro em OLED provoca halação com texto
-   *  claro e cansa numa sessão longa; este recua sem brilhar. */
-  ground: '#0A0D12',
-  key: '#151B24',
-  keyEdge: '#232C3A',
+const KB_VARS = {
+  /** Cor do glifo na tecla "disparada" (fundo âmbar cheio). */
+  '--kb-ground': 'var(--on-primary)',
+  '--kb-key': 'var(--surface)',
+  '--kb-key-edge': 'var(--border)',
   /** Contraste cheio — nível 2, a letra que vai ser escrita. */
-  glyph: '#EDF1F7',
+  '--kb-glyph': 'var(--text)',
   /** Recuado — nível 1 e chrome de navegação. */
-  glyphDim: '#93A6BF',
-  /** Acento único. Quente avança contra o fundo frio: o dwell "vem para a
-   *  frente" enquanto o repouso recua. */
-  ember: '#F0A030',
-  emberEdge: '#7A5220',
-  emberBright: '#FFD98A',
-};
+  '--kb-glyph-dim': 'var(--text-3)',
+  '--kb-ember': 'var(--warn)',
+  '--kb-ember-edge': 'color-mix(in srgb, var(--warn) 45%, var(--border))',
+  '--kb-ember-bright': 'var(--warn)',
+} as const;
 
-/** Humanista, aberturas generosas, I/l/1 distinguíveis. Sem webfont: um app
- *  assistivo não pode depender de CDN para desenhar o teclado. */
-const KB_FONT_KEYS = "'Segoe UI Variable Display', 'Segoe UI', 'Inter', system-ui, sans-serif";
 /** Monoespaçada para o buffer: caracteres em células iguais, conferíveis. */
-const KB_FONT_TEXT = "'Cascadia Mono', 'Consolas', ui-monospace, 'Courier New', monospace";
+const KB_FONT_TEXT = "ui-monospace, 'Cascadia Mono', Consolas, 'Courier New', monospace";
 
 /** Barra superior alta o bastante para início/voltar respeitarem o mínimo de
  *  5° (198 px). Abaixo disso não é alvo de olhar, é enfeite. */
@@ -122,8 +113,8 @@ const EspacoGlifo: React.FC<{ width: number }> = ({ width }) => {
 
 export const KeyboardScreen: React.FC = () => {
   const { setIsComposing } = useGaze();
-  // B3.23 — contexto separado: assinar `useGaze()` para ler `isDwelling` faria
-  // esta tela (507 linhas) re-renderizar a cada mudança de estado do engine.
+  // Contexto separado: assinar `useGaze()` só para ler `isDwelling` faria a
+  // tela inteira re-renderizar a cada mudança de estado do engine.
   const isDwelling = useIsDwelling();
   const navigate = useNavigate();
   const [text, setText] = useState('');
@@ -396,21 +387,14 @@ export const KeyboardScreen: React.FC = () => {
             inset: 0,
             display: 'flex',
             flexDirection: 'column',
-            background: KB.ground,
-            fontFamily: KB_FONT_KEYS,
+            background: 'var(--bg)',
+            fontFamily: 'var(--font-body)',
             overflow: 'hidden',
             padding: GRID_GAP,
             gap: GRID_GAP,
             boxSizing: 'border-box',
             // Consumidas pelo bloco .kb-* em index.css
-            '--kb-ground': KB.ground,
-            '--kb-key': KB.key,
-            '--kb-key-edge': KB.keyEdge,
-            '--kb-glyph': KB.glyph,
-            '--kb-glyph-dim': KB.glyphDim,
-            '--kb-ember': KB.ember,
-            '--kb-ember-edge': KB.emberEdge,
-            '--kb-ember-bright': KB.emberBright,
+            ...KB_VARS,
           } as React.CSSProperties
         }
       >
@@ -465,19 +449,19 @@ export const KeyboardScreen: React.FC = () => {
               justifyContent: text === '' ? 'flex-start' : 'flex-end',
               padding: '0 2.5rem',
               borderRadius: 20,
-              border: '1px solid ' + KB.keyEdge,
-              background: KB.key,
+              border: '1px solid var(--kb-key-edge)',
+              background: 'var(--kb-key)',
               fontFamily: KB_FONT_TEXT,
               fontSize: FS_TEXT,
               fontWeight: 500,
               letterSpacing: '0.04em',
-              color: KB.ember,
+              color: 'var(--kb-ember)',
               whiteSpace: 'pre',
               overflow: 'hidden',
             }}
           >
             {text === '' ? (
-              <span style={{ color: KB.glyphDim, opacity: 0.6, fontSize: '2.4rem', letterSpacing: '0.06em' }}>
+              <span style={{ color: 'var(--kb-glyph-dim)', opacity: 0.8, fontSize: '2.4rem', letterSpacing: '0.06em' }}>
                 Escolha um grupo para começar
               </span>
             ) : (
@@ -493,11 +477,16 @@ export const KeyboardScreen: React.FC = () => {
                 width: '0.1em',
                 height: '1em',
                 marginLeft: '0.12em',
-                background: KB.ember,
+                background: 'var(--kb-ember)',
                 animation: 'kb-caret-blink 1.1s step-start infinite',
               }}
             />
           </div>
+
+          {/* Espaço do botão de emergência global (canto superior direito):
+              sem ele o botão cobriria o fim da linha de texto, onde fica o
+              cursor. */}
+          <div aria-hidden="true" style={{ flex: '0 0 var(--emergency-w)' }} />
         </div>
 
         {/* ── Grade 3×2 ── */}

@@ -4,17 +4,9 @@ import {
   consumeLastSampleDecision,
 } from './calibration';
 
-// 2.4 — a ausência de medida de qualidade não pode passar como medida boa.
-//
-// O gate comparava `quality.irisVisibilityPercentage < 0.3` e
-// `quality.detectorConfidence < 0.4` sem guarda de tipo. `undefined < 0.3` é
-// false, então um valor ausente passava silenciosamente.
-//
-// Antes de 2.4 isso era teórico: o extractor preenchia tudo com constantes.
-// Mas as constantes eram o problema — quando o `EyeQualityAnalyzer` falhava
-// (canvas sem contexto 2d, crop degenerado), elas sobreviviam ao spread do
-// engine e chegavam ao gate parecendo medição, com `detectorConfidence: 1.0`
-// afirmando confiança máxima justamente onde nada foi medido.
+// A ausência de medida de qualidade não pode passar como medida boa: comparar
+// `undefined < 0.3` dá false, então o gate precisa de guarda de tipo explícita
+// para `irisVisibilityPercentage` e `detectorConfidence` ausentes.
 
 const base = { yaw: 0.1, pitch: -0.05, roll: 0.01 };
 const v = () => [0.1, 0.2, 0.3, 0.4];
@@ -72,7 +64,7 @@ describe('gate de qualidade — ausência vs. medida ruim', () => {
     // inutilizável para quem não tem como contornar), mas tem que ser visível.
     const d = decisaoCom({});
     expect(d?.accepted).toBe(true);
-    const gate = avisos.filter((m) => m.includes('2.4'));
+    const gate = avisos.filter((m) => m.includes('qualidade não medida'));
     expect(gate.length).toBe(1);
     expect(gate[0]).toContain('detectorConfidence');
     expect(gate[0]).toContain('brightnessEstimate');
@@ -84,7 +76,7 @@ describe('gate de qualidade — ausência vs. medida ruim', () => {
     startCalibrationMode();
     startCollectingPoint(0.5, 0.5, () => {});
     for (let i = 0; i < 60; i++) feedRawData(v(), v(), { ...base });
-    expect(avisos.filter((m) => m.includes('2.4')).length).toBe(1);
+    expect(avisos.filter((m) => m.includes('qualidade não medida')).length).toBe(1);
   });
 
   it('medida parcial usa o que existe e ignora o que falta', () => {
@@ -100,6 +92,6 @@ describe('gate de qualidade — ausência vs. medida ruim', () => {
     const avisos: string[] = [];
     vi.spyOn(console, 'warn').mockImplementation((m: unknown) => { avisos.push(String(m)); });
     decisaoCom({ ...COMPLETA, contrastEstimate: NaN });
-    expect(avisos.some((m) => m.includes('2.4') && m.includes('contrastEstimate'))).toBe(true);
+    expect(avisos.some((m) => m.includes('qualidade não medida') && m.includes('contrastEstimate'))).toBe(true);
   });
 });

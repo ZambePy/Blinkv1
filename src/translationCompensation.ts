@@ -1,11 +1,9 @@
 /**
- * 1.4 — compensação de TRANSLAÇÃO lateral da cabeça, aplicada na saída.
+ * Compensação de TRANSLAÇÃO lateral da cabeça, aplicada na saída.
  *
- * ── O problema, e por que é diferente de 1.3 ───────────────────────────────
- *
- * 1.3 trata a cabeça GIRANDO. Aqui a cabeça se DESLOCA sem girar — o usuário
- * escorrega na cadeira, ou a cadeira anda. São efeitos independentes e a
- * correção de um não cobre o outro.
+ * `poseCompensation` trata a cabeça GIRANDO. Aqui a cabeça se DESLOCA sem
+ * girar — o usuário escorrega na cadeira, ou a cadeira anda. São efeitos
+ * independentes e a correção de um não cobre o outro.
  *
  * O modelo mapeia a íris (no frame da cabeça) para um ponto de tela, e esse
  * mapeamento foi ajustado com o olho numa posição `e₀`. Se o olho passa para
@@ -13,17 +11,16 @@
  * na órbita passa a ser o de `S − t`, então o modelo prevê `S − t`.
  *
  * A correção é somar `t`. **Exatamente `t`, sem escalar por distância nenhuma**
- * — o que a distingue de 1.3, onde o ganho é `d · tan(Δ)` e a distância entra.
+ * — diferente da rotação, onde o ganho é `d · tan(Δ)` e a distância entra.
  * Isto vale porque tela e olho transladam no mesmo plano: mover o olho 1 cm
  * para a direita move o ponto olhado 1 cm para a direita, esteja a tela perto
  * ou longe.
  *
  * ── O campo de visão CANCELA ───────────────────────────────────────────────
  *
- * A tarefa foi descrita como "usar `latestFaceCenter` + o FOV calibrado". O FOV
- * não é necessário, e é melhor assim: ele é justamente o parâmetro incerto do
- * setup (a webcam declara 90°, número que fabricantes costumam dar na diagonal
- * e inflar).
+ * O FOV da câmera não é necessário, e é melhor assim: ele é justamente o
+ * parâmetro incerto do setup (a webcam declara 90°, número que fabricantes
+ * costumam dar na diagonal e inflar).
  *
  * Seja `D` a distância câmera→rosto e `tanH = tan(FOV_h / 2)`. Um deslocamento
  * normalizado `Δx` na imagem corresponde a `X = 2 · Δx · D · tanH` no mundo. A
@@ -52,7 +49,7 @@
 
 /** Distância entre os CANTOS EXTERNOS dos olhos (bi-ectocanthion), em cm.
  *
- *  ⚠️ Tem que casar com o que `escala.iodPx` de fato mede. `tracker/engine.ts`
+ *  Tem que casar com o que `escala.iodPx` de fato mede. `tracker/engine.ts`
  *  calcula `latestIodPx` entre os landmarks 33 e 263, que são os cantos
  *  externos — NÃO as pupilas. A primeira versão deste módulo usava 6,3 cm, a
  *  distância interpupilar, contra uma medida cantal: 43% de erro de escala em

@@ -8,9 +8,6 @@
 //   2. Calibrar (aguardando [L2CS] worker ready no console antes de calibrar)
 //   3. SettingsScreen → "Testar precisão" → JSON baixa em Downloads/
 //   4. node scripts/l2cs_report_summarize.mjs Downloads/accuracy-report-<ts>.json
-//
-// Substitui l2cs_ab_compare.mjs. Como L2CS agora é o único pipeline, não há
-// baseline "sem L2CS" para comparar — a métrica útil é acurácia absoluta.
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -24,11 +21,8 @@ if (args.length !== 1) {
 const reportPath = path.resolve(args[0]);
 const report = JSON.parse(await readFile(reportPath, 'utf-8'));
 
-// `pipeline.variant` deixou de ser o literal fixo 'l2cs+ridge' e passou a
-// derivar do conjunto de features ativo (ex.: 'irisCore+ridge'), porque o
-// literal seguia anunciando L2CS depois que o bloco angular saiu do vetor. Aqui
-// só se cobra que o campo EXISTA — cravar um valor esperado foi justamente o
-// que deixou este script validando uma ficção.
+// `pipeline.variant` deriva do conjunto de features ativo (ex.: 'irisCore+ridge');
+// aqui só se cobra que o campo exista.
 if (!report.pipeline?.variant) {
   console.error(
     `⚠ ${path.basename(reportPath)}: pipeline.variant ausente. Relatório antigo — ` +
@@ -97,18 +91,17 @@ if (report.diagnostics && report.diagnostics.length > 0) {
   }
 }
 
-// Se meanError > 100 ou jitter alto, orienta rumo aos suspeitos silenciosos
-// documentados em §6 do L2CS-NET.md — o script serve como triagem inicial.
+// Triagem inicial: com erro ou jitter altos, aponta os suspeitos mais comuns.
 console.log('\n===== triagem =====');
 if (r.meanError > 100) {
-  console.log(`✗ meanError=${r.meanError.toFixed(0)}px alto. Investigar (§6 do L2CS-NET.md):`);
+  console.log(`✗ meanError=${r.meanError.toFixed(0)}px alto. Investigar:`);
   console.log(`  • EXPAND_FACTOR fora da convenção de treino (varredura [1.0..2.0])`);
   console.log(`  • Ordem yaw/pitch trocada (rodar l2cs_axis_validation.mjs)`);
   console.log(`  • Sinal do pitch invertido (foto look_down)`);
   console.log(`  • BGR/RGB trocado (offset sistemático em look_center)`);
 } else if (r.meanError > 60) {
   console.log(`~ meanError=${r.meanError.toFixed(0)}px marginal. Se cabeça estava livre, aceitável;`);
-  console.log(`  se estava parada, considerar retunar One Euro (E8) ou revisar EXPAND_FACTOR.`);
+  console.log(`  se estava parada, considerar retunar o One Euro ou revisar EXPAND_FACTOR.`);
 } else {
   console.log(`✓ meanError=${r.meanError.toFixed(0)}px dentro do esperado.`);
 }

@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { extractEyeFeatures } from './extractor';
+import { analyzeFace } from './extractor';
 
 // 2.3 — o fallback de ângulos de Euler rotulava os três eixos trocados.
 //
@@ -70,9 +70,9 @@ function matriz(R: number[][]): Float32Array {
 }
 
 /** Lê a pose pelo campo NOMEADO, não por índice: o layout [22..24] é do vetor
- *  compacto, e `extractEyeFeatures` produz outro. */
+ *  compacto, e `analyzeFace` não produz vetor nenhum. */
 function pose(lm: ReturnType<typeof rostoGirado>, m?: Float32Array) {
-  const f = extractEyeFeatures(lm, m).advancedFeatures!.face;
+  const f = analyzeFace(lm, m).advancedFeatures!.face;
   return { yaw: f.yaw, pitch: f.pitch, roll: f.roll };
 }
 

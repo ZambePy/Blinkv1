@@ -1,45 +1,21 @@
-// P7.5 — fallback de gaze perdido: última posição válida por 2 s, depois
-// "Posicione o rosto".
+// Fallback de gaze perdido: última posição válida por 2 s, depois "Posicione
+// o rosto".
 //
-// ── O buraco que isto fecha ─────────────────────────────────────────────────
+// Sem isto, quando o rosto some o cursor fica congelado na última posição
+// para sempre. O `stepDwell` não clica sem `hasFace`, então não há clique
+// cego — mas nada diz ao paciente o que aconteceu, e o cuidador vê um cursor
+// na tela e conclui que o sistema funciona.
 //
-// Hoje, quando o rosto some, o `GazeContext` baixa a opacidade do cursor para
-// 0.35 e **para por aí**. O cursor fica congelado na última posição, para
-// sempre, a 35% de opacidade. O `stepDwell` não clica (o `sampleIsValid` já
-// exige `hasFace`), então não há clique cego — mas também não há NADA que diga
-// ao paciente o que aconteceu.
+// Perdas curtas são a regra (detector pula quadros, cabeça vira 200 ms,
+// auto-exposure pisca), então esconder a cada perda produziria um pisca-pisca
+// pior que o congelamento. Por 2 s a última posição ainda descreve onde a
+// pessoa olhava; depois disso a resposta certa é remover o cursor e DIZER o
+// que fazer.
 //
-// O sintoma para quem está na cadeira é: o cursor parou de responder. Ele não
-// tem como distinguir "a câmera não me vê" de "o app travou" de "a calibração
-// morreu". E o cuidador, olhando de fora, vê um cursor na tela — o que sugere
-// que o sistema está funcionando.
-//
-// ── Por que segurar 2 s antes de esconder ───────────────────────────────────
-//
-// Perdas curtas são a regra, não a exceção: o detector de rosto pula quadros,
-// a pessoa vira a cabeça 200 ms, o auto-exposure da webcam pisca. Esconder o
-// cursor a cada perda produziria um pisca-pisca que é pior que o congelamento.
-//
-// Segurar é honesto por 2 s porque a última posição ainda descreve
-// razoavelmente onde a pessoa olhava. Depois disso não descreve mais nada — e
-// aí a resposta certa é remover o cursor e DIZER o que fazer, não continuar
-// desenhando um palpite velho.
-//
-// ── A diferença para o `blinkHold` (`P6.3`) ─────────────────────────────────
-//
-// Os dois seguram por até 2000 ms, e a semelhança termina aí. O `blinkHold`
-// segura durante uma PISCADA: os olhos fecharam, mas a pessoa continua olhando
-// para o alvo, então ele projeta a posição pelo Kalman e **preserva o dwell**
-// (`preservarDwell: true`).
-//
-// Aqui a causa é outra: o rosto sumiu. Ninguém sabe para onde a pessoa está
-// olhando — pode ter virado a cabeça para falar com alguém. Projetar seria
-// inventar, e preservar o dwell seria deixar um relógio correndo sobre um
-// alvo que o olhar talvez tenha abandonado. Por isso este módulo **congela** a
-// posição em vez de projetar, e **zera** o dwell em vez de preservá-lo.
-//
-// É exatamente a distinção que o `B2.5` deixou anotada como pendente no
-// `blinkHold`: "piscada" e "perdi o rosto" pedem políticas opostas.
+// Diferença para o `blinkHold`: lá os olhos fecharam mas a pessoa continua
+// olhando para o alvo, então ele projeta pelo Kalman e preserva o dwell. Aqui
+// o rosto sumiu e ninguém sabe para onde a pessoa olha — este módulo CONGELA
+// a posição em vez de projetar, e ZERA o dwell em vez de preservá-lo.
 
 /** Quanto tempo a última posição válida continua sendo desenhada, em ms. */
 export const FALLBACK_HOLD_MS = 2000;

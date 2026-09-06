@@ -3,41 +3,25 @@ import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { CSP } from '../src/electronSecurity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-// Endpoint dev que grava o accuracy-report na raiz do projeto e apaga
-// o(s) anterior(es) — evita acúmulo de JSONs em Downloads. Só existe no
-// dev server; em build, accuracy.ts cai no fallback de download.
+// Endpoint que grava o accuracy-report na raiz do projeto. Registrado no
+// dev server e no preview: o dia de medição roda no build de produção
+// (`vite preview`), que representa o desempenho real.
 function saveAccuracyReportPlugin(): Plugin {
   const projectRoot = path.resolve(__dirname, '..');
-  return {
-    name: 'save-accuracy-report',
-    configureServer(server) {
-      server.middlewares.use('/__/save-accuracy-report', (req, res, next) => {
+  const handler = (req: import('node:http').IncomingMessage,
+                   res: import('node:http').ServerResponse,
+                   next: () => void) => {
         if (req.method !== 'POST') { next(); return; }
         let body = '';
         req.on('data', (chunk) => { body += chunk; });
         req.on('end', () => {
           try {
-            // ⚠️ NÃO apagar os relatórios anteriores.
-            //
-            // Este bloco removia todo `accuracy-report-*.json` antes de gravar
-            // o novo, deixando exatamente UM arquivo sobrevivente por sessão
-            // de dev-server — que é como o Electron carrega o app
-            // (`VITE_DEV_SERVER_URL`).
-            //
-            // O protocolo do `F8.1` pede no mínimo 3 repetições por condição,
-            // com recalibração entre elas, e são ~8 condições. Um dia inteiro
-            // de medição terminaria com um único relatório no disco.
-            //
-            // E o pior não é perder o dado: é que quem abrisse o arquivo
-            // depois o leria como "a medição do dia", sem nada indicando que
-            // outras 20 existiram e foram apagadas.
-            //
-            // O nome já carrega `Date.now()`, então não há colisão. Limpeza,
-            // se for desejada, é decisão de quem opera — não efeito colateral
-            // de gravar.
+            // Nunca apagar relatórios anteriores: um dia de medição tem
+            // dezenas, e o nome com `Date.now()` já evita colisão.
             const fname = `accuracy-report-${Date.now()}.json`;
             fs.writeFileSync(path.join(projectRoot, fname), body, 'utf-8');
             res.statusCode = 200;
@@ -49,14 +33,38 @@ function saveAccuracyReportPlugin(): Plugin {
             res.end(JSON.stringify({ error: String(e) }));
           }
         });
-      });
+  };
+
+  return {
+    name: 'save-accuracy-report',
+    configureServer(server) {
+      server.middlewares.use('/__/save-accuracy-report', handler);
+    },
+    configurePreviewServer(server) {
+      server.middlewares.use('/__/save-accuracy-report', handler);
+    },
+  };
+}
+
+// No build empacotado o Electron carrega `file://`, sem cabeçalhos HTTP, então a
+// CSP entra como `<meta>`. Só no build: em dev o plugin do React injeta um
+// script inline que ela bloquearia.
+function cspMetaPlugin(): Plugin {
+  return {
+    name: 'csp-meta',
+    apply: 'build',
+    transformIndexHtml() {
+      return [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: CSP }, injectTo: 'head-prepend' }];
     },
   };
 }
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), saveAccuracyReportPlugin()],
+  // Caminhos relativos: o Electron carrega o build via `file://`, onde `/assets`
+  // apontaria para a raiz do disco.
+  base: './',
+  plugins: [react(), saveAccuracyReportPlugin(), cspMetaPlugin()],
   envPrefix: 'VITE_',
   resolve: {
     alias: {

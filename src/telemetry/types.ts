@@ -7,16 +7,9 @@
 // dado biométrico; adicionar vídeo multiplicaria o passivo sem ganho para
 // consumidores offline (que precisam reproduzir o pipeline, não a imagem).
 
-/**
- * Versão do formato do JSONL de gravação.
- *
- * Renomeada de `RECORDING_FORMAT_VERSION` porque `extractor.ts` exportava uma
- * constante com o MESMO nome e significado diferente (versão do vetor de
- * features). Duas constantes homônimas com semânticas distintas é convite a
- * importar a errada — e a que estava em extractor.ts nunca foi importada por
- * ninguém, só citada em comentários, o que sugere que a confusão já existia.
- */
-export const TELEMETRY_FORMAT_VERSION = 2; // era 1 — v2 adiciona `sampleDecision`
+/** Versão do formato do JSONL de gravação (v2 adiciona `sampleDecision`).
+ *  Não confundir com a versão do vetor de features em `extractor.ts`. */
+export const TELEMETRY_FORMAT_VERSION = 2;
 
 /** Decisão do pipeline de calibração sobre este frame. Reproduz exatamente
  *  o filtro que `calibration.feedRawData` aplicou ao vivo.
@@ -25,7 +18,7 @@ export interface RecordedSampleDecision {
   accepted: boolean;
   /** ms desde o início da coleta deste ponto. */
   elapsedMs: number;
-  reason?: 'acclimation' | 'quality' | 'pose_drift' | 'not_collecting';
+  reason?: 'acclimation' | 'quality' | 'l2cs_invalid' | 'not_collecting';
 }
 
 // Cap de frames em memória. ~30k frames a ~4 KB cada ≈ 120 MB — teto seguro
@@ -51,20 +44,13 @@ export interface RecordingHeader {
   featureVectorId?: string;
   startedAt: string;                      // ISO 8601 UTC
   /**
-   * `performance.timeOrigin` da página, em ms desde a época — B3.28.
+   * `performance.timeOrigin` da página, em ms desde a época.
    *
-   * É a ponte que faltava entre os dois relógios da gravação: `startedAt` é
-   * relógio de PAREDE, mas `captureTs`/`emitTs` são `performance.now()`, ou
-   * seja, milissegundos desde o *page load*.
-   *
-   * Sem este campo, `timeOrigin + captureTs` era incalculável e o JSONL não
-   * podia ser alinhado a NENHUM evento externo — nem a um vídeo de
-   * referência, nem a um log clínico, nem à anotação de um observador. Para um
-   * artefato cujo propósito é permitir análise offline, isso é a diferença
-   * entre dado e curiosidade.
-   *
-   * Opcional para gravações anteriores a B3.28; ausente significa "não dá para
-   * cruzar com relógio externo".
+   * Ponte entre os dois relógios da gravação: `startedAt` é relógio de parede,
+   * mas `captureTs`/`emitTs` são `performance.now()` (ms desde o page load).
+   * `timeOrigin + captureTs` é o que permite alinhar o JSONL a um vídeo de
+   * referência ou log externo. Opcional em gravações antigas; ausente
+   * significa "não dá para cruzar com relógio externo".
    */
   timeOrigin?: number;
   resolution: { w: number; h: number };   // viewport CSS px
@@ -138,21 +124,11 @@ export interface RecordedFrame {
   predicted?: { x: number; y: number };
 
   /**
-   * Ponto do regressor ANTES do filtro temporal, em px (`F8.5`).
+   * Ponto do regressor ANTES do filtro temporal, em px.
    *
-   * O `F8.5` define o método assim: *"gravar as amostras pré-filtro uma única
-   * vez e reproduzir o mesmo JSONL pelos três filtros offline. Assim as
-   * diferenças são do filtro, não da sessão."*
-   *
-   * Só `predicted` era gravado, e ele é PÓS-filtro — o método não tinha como
-   * rodar. Dava para reconstruir o pré-filtro re-executando o regressor sobre
-   * `featuresLeft`/`featuresRight`, mas isso amarra a reprodução ao modelo
-   * salvo daquela sessão: uma recalibração posterior, ou qualquer mudança no
-   * scaler, mudaria a entrada dos três filtros ao mesmo tempo — e a comparação
-   * deixaria de isolar o filtro, que é a única coisa que ela existe para
-   * isolar.
-   *
-   * Undefined nos mesmos casos que `predicted`.
+   * Permite reproduzir o mesmo JSONL por filtros diferentes offline sem
+   * depender do modelo salvo daquela sessão — assim a comparação isola o
+   * filtro. Undefined nos mesmos casos que `predicted`.
    */
   preFilter?: { x: number; y: number };
 }

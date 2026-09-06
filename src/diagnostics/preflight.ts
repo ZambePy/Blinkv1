@@ -1,22 +1,11 @@
 // Verificação pré-sessão — o que precisa estar certo ANTES de medir.
 //
-// ── Por que isto existe ─────────────────────────────────────────────────────
-//
-// O protocolo do `F8.1` depende de uma lista de coisas que o operador tem que
-// lembrar: fullscreen, diagonal informada, WebGPU de fato ativo, recarregar a
-// página depois de cada `__irisflowExp.set`, conferir o staleness, não deixar
-// uma flag da rodada anterior ligada.
-//
-// Cada item dessa lista é uma forma de perder uma sessão. E o público-alvo tem
-// fadiga limitante: uma sessão perdida não é meia hora de trabalho refeito, é
-// meia hora que o paciente não tem para dar de novo.
-//
-// O modo de falha que mais preocupa não é esquecer — é esquecer e **não
-// perceber**. Rodar a condição inteira com a flag da condição anterior produz
-// dado de aparência perfeita, atribuído à condição errada. Nada no relatório
-// denuncia, e a conclusão sai invertida.
-//
-// ── Três níveis, e a diferença importa ──────────────────────────────────────
+// O protocolo de medição depende de uma lista de coisas que o operador tem
+// que lembrar (janela maximizada, diagonal informada, WebGPU ativo, nenhuma
+// flag da rodada anterior ligada). Cada item é uma forma de perder uma
+// sessão, e o pior modo de falha é esquecer e NÃO perceber: rodar com a flag
+// da condição anterior produz dado de aparência perfeita atribuído à
+// condição errada.
 //
 // `bloqueio` não é "cuidado", é "o dado desta sessão vai para o lixo". A
 // distinção existe para que `atencao` continue significando alguma coisa: uma
@@ -58,12 +47,20 @@ export interface EntradaPreflight {
   /** Taxa de atualização medida, em Hz. `null` quando não foi medida. */
   taxaAtualizacaoHz: number | null;
 
+  /** fps que o engine está de fato entregando. `null` quando não medido. */
+  fpsRender: number | null;
+
+  /** Resolução que a câmera está ENTREGANDO — não a que foi pedida. */
+  videoPx: { w: number; h: number };
+
   l2cs: {
     status: string;
     executionProvider: string | null;
     stalePct: number;
-    /** Submissões sem resposta. Preso > 0 por muito tempo é deadlock. */
+    /** Submissões sem resposta. Ver a nota no veredito: sozinho NÃO é sinal. */
     pendingCount: number;
+    /** Taxa de inferências entregues, em Hz. `0` com fila presa = deadlock. */
+    hz: number;
   };
 
   /** Modo de filtragem pedido e o que de fato está governando. */
@@ -75,14 +72,71 @@ export interface EntradaPreflight {
   condicaoEsperada?: Readonly<Record<string, unknown>>;
 }
 
-/** Fração da tela abaixo da qual o viewport é considerado "não maximizado". */
-const FRACAO_FULLSCREEN_MIN = 0.9;
+/**
+ * Frações mínimas do viewport — assimétricas, e o motivo é físico.
+ *
+ * Havia um único limiar de 0,9 nos dois eixos, e ele estava errado por não
+ * distinguir as duas causas de viewport pequeno:
+ *
+ *   **Largura** — o navegador NÃO consome largura. Se ela some, alguma coisa
+ *   está ocupando espaço horizontal: DevTools ancorado na lateral (foi o caso
+ *   real: 1001 px de 1920, exatamente os 919 px do painel), janela dividida,
+ *   ou janela não maximizada. Todos são problema.
+ *
+ *   **Altura** — a barra do navegador (título + abas + endereço) come ~130 px
+ *   de forma legítima. Uma janela MAXIMIZADA num monitor 1080p entrega
+ *   ~1920×950, ou seja 88% de altura. Bloquear isso obrigaria a F11, e F11
+ *   com o DevTools em janela separada é ergonomicamente inviável: o Chrome
+ *   derruba o fullscreen quando a janela perde foco.
+ *
+ * O que a medição de fato exige não é fullscreen — é o MESMO viewport em todas
+ * as rodadas. Uma janela maximizada garante isso tão bem quanto F11, e o
+ * viewport exato sai no detalhe para ser anotado e conferido entre condições.
+ */
+const FRACAO_LARGURA_MIN = 0.95;
+const FRACAO_ALTURA_MIN = 0.80;
 
 /** Acima disto o rAF gira muito mais rápido que a câmera sem ganho nenhum. */
 const TAXA_ATUALIZACAO_IDEAL_HZ = 75;
 
+// Não existe limiar MÍNIMO de taxa de atualização de propósito: o rAF é
+// amostrado com o pipeline rodando, então mede `min(monitor, thread
+// principal)` — ~24 Hz nesta máquina com o monitor em 60 ou 180. Taxa baixa e
+// fps baixo são o mesmo fenômeno, e o fps já cobre. Sobra o que este número
+// distingue: taxa ALTA, que o thread não limita e é desperdício real.
+
+/**
+ * fps mínimo para a medição representar o pipeline.
+ *
+ * O teto real não é a câmera (30) — é o thread principal: mediapipe 18,9 +
+ * quality 12,2 + crop 11,2 = 42,3 ms por quadro, ~23,6 fps com WebGPU. Um piso de 20 oscilava entre ok e bloqueio no
+ * mesmo minuto. 15 é ~64% do teto: abaixo disso algo está competindo pelo
+ * thread; entre 15 e 24 é a operação normal.
+ */
+const FPS_MIN = 15;
+
 /** Staleness acima disto significa que o bloco angular está sendo zerado. */
 const STALE_PCT_MAX = 10;
+
+/**
+ * Largura mínima de captura, em px.
+ *
+ * O app PEDE 1920×1080, mas o driver pode entregar menos sem avisar — e a
+ * resolução entregue não aparecia em lugar nenhum da interface.
+ *
+ * Importa porque o README registra que *"o erro escala com o inverso da
+ * densidade de pixels sobre o olho"*: menos pixels na íris é menos sinal, e o
+ * sintoma é erro alto de forma UNIFORME, que se parece com "iluminação ruim"
+ * ou "óculos" — as causas que a mensagem de diagnóstico sugere primeiro.
+ *
+ * Numa sessão real, trocar de câmera derrubou o fps de 22,8 para 15,6 E
+ * ACELEROU todos os estágios (mediapipe 32,5 → 7,7 ms). Estágios mais rápidos
+ * com erro maior é a assinatura de imagem menor — e não havia como ver isso
+ * sem abrir o DevTools.
+ *
+ * 1280 é o piso: abaixo disso a íris ocupa poucos pixels a 60 cm.
+ */
+const VIDEO_LARGURA_MIN = 1280;
 
 export function preflight(e: EntradaPreflight): ItemPreflight[] {
   const itens: ItemPreflight[] = [];
@@ -126,18 +180,28 @@ export function preflight(e: EntradaPreflight): ItemPreflight[] {
   }
 
   // ── Viewport ───────────────────────────────────────────────────────────
-  // B2.9 — o erro é medido em px de viewport. Uma janela não maximizada muda
+  // O erro é medido em px de viewport. Uma janela não maximizada muda
   // a escala de tudo, e a comparação entre rodadas deixa de valer.
   const fracaoW = e.telaPx.w > 0 ? e.viewportPx.w / e.telaPx.w : 1;
   const fracaoH = e.telaPx.h > 0 ? e.viewportPx.h / e.telaPx.h : 1;
-  if (fracaoW < FRACAO_FULLSCREEN_MIN || fracaoH < FRACAO_FULLSCREEN_MIN) {
-    add('viewport', 'bloqueio',
-      `${e.viewportPx.w}×${e.viewportPx.h} de uma tela ${e.telaPx.w}×${e.telaPx.h} `
-      + `(${(fracaoW * 100).toFixed(0)}% × ${(fracaoH * 100).toFixed(0)}%)`,
-      'Maximize ou entre em tela cheia. O erro é medido em px de viewport: '
-      + 'rodadas com viewports diferentes não são comparáveis.');
+  const dimensoes = `${e.viewportPx.w}×${e.viewportPx.h} de uma tela `
+    + `${e.telaPx.w}×${e.telaPx.h} `
+    + `(${(fracaoW * 100).toFixed(0)}% × ${(fracaoH * 100).toFixed(0)}%)`;
+  if (fracaoW < FRACAO_LARGURA_MIN) {
+    add('viewport', 'bloqueio', dimensoes,
+      'Falta LARGURA — e o navegador não consome largura. Alguma coisa está '
+      + 'ocupando espaço horizontal: DevTools ancorado na lateral (desancore '
+      + 'em ⋮ → Dock side → Undock into separate window), janela dividida, ou '
+      + 'janela não maximizada.');
+  } else if (fracaoH < FRACAO_ALTURA_MIN) {
+    add('viewport', 'bloqueio', dimensoes,
+      'Falta ALTURA além do que a barra do navegador explica (~130 px). '
+      + 'Maximize a janela ou use F11.');
   } else {
-    add('viewport', 'ok', `${e.viewportPx.w}×${e.viewportPx.h}`);
+    // O viewport exato vai no detalhe SEMPRE, não só quando há problema: ele
+    // precisa ser anotado e conferido igual entre as condições. O que a
+    // medição exige é o MESMO viewport em todas as rodadas — não fullscreen.
+    add('viewport', 'ok', `${e.viewportPx.w}×${e.viewportPx.h} — anote e mantenha igual`);
   }
 
   // ── Taxa de atualização ────────────────────────────────────────────────
@@ -152,34 +216,70 @@ export function preflight(e: EntradaPreflight): ItemPreflight[] {
       'Fixe o monitor em 60 Hz para as sessões. Um pipeline de 30 fps não ganha '
       + 'nada acima disso, e o thread principal já está acima do orçamento.');
   } else {
+    // Sem piso: este número é limitado pelo thread principal, não pelo
+    // monitor — quem cobre o caso baixo é o item `fps`. Ver a nota acima.
     add('taxa de atualização', 'ok', `${e.taxaAtualizacaoHz.toFixed(0)} Hz`);
+  }
+
+  // ── fps entregue ───────────────────────────────────────────────────────
+  if (e.fpsRender === null) {
+    add('fps', 'atencao', 'não medido', null);
+  } else if (e.fpsRender < FPS_MIN) {
+    add('fps', 'bloqueio',
+      `${e.fpsRender.toFixed(1)} fps (teto medido desta máquina: ~23,6)`,
+      'O pipeline está perdendo quadros demais. O erro medido misturaria "o '
+      + 'modelo errou" com "o quadro nem foi processado", e as duas coisas '
+      + 'não se separam depois. Use o build de produção e feche o que estiver '
+      + 'disputando CPU/GPU.');
+  } else if (e.fpsRender < 24) {
+    // Faixa normal desta máquina. Reportada como `ok` com o contexto, para
+    // ninguém ler "19 fps" como problema — é o teto do thread principal.
+    add('fps', 'ok', `${e.fpsRender.toFixed(1)} fps (teto medido: ~23,6)`);
+  } else {
+    add('fps', 'ok', `${e.fpsRender.toFixed(1)} fps`);
+  }
+
+  // ── Câmera ─────────────────────────────────────────────────────────────
+  const cam = `${e.videoPx.w}×${e.videoPx.h}`;
+  if (!(e.videoPx.w > 0)) {
+    add('câmera', 'atencao', 'resolução não reportada', null);
+  } else if (e.videoPx.w < VIDEO_LARGURA_MIN) {
+    add('câmera', 'bloqueio', `${cam} — abaixo de ${VIDEO_LARGURA_MIN}px de largura`,
+      'A câmera está entregando menos resolução do que o app pediu. O erro '
+      + 'escala com o inverso da densidade de pixels sobre o olho, e o sintoma '
+      + 'é erro alto UNIFORME — que se parece com iluminação ruim. Troque de '
+      + 'câmera ou confira as configurações do driver.');
+  } else {
+    add('câmera', 'ok', `${cam} — anote e mantenha igual`);
   }
 
   // ── L2CS ───────────────────────────────────────────────────────────────
   if (e.l2cs.status !== 'ready') {
     add('L2CS', 'bloqueio', `status '${e.l2cs.status}'`,
-      'O critério de descarte de sessão do F8.1 lista `l2csStatus != ready`.');
+      'Sessão sem L2CS pronto é descartada pelo protocolo de medição.');
   } else if (e.l2cs.stalePct > STALE_PCT_MAX) {
     // Com o bloco angular zerado, o modelo roda com 4 das 6 dimensões — e
-    // nada na interface diz isso. Foi o que a medição de `P5.5` descobriu.
+    // nada na interface diz isso.
     add('L2CS', 'bloqueio',
       `${e.l2cs.stalePct.toFixed(1)}% das leituras obsoletas`,
       'O bloco angular está sendo zerado: o modelo roda com 4 das 6 dimensões. '
-      + "Use `l2csExecutionProvider: 'webgpu'` (medido: 50 ms contra 2319 ms em wasm).");
+      + 'Verifique se o L2CS caiu para WASM (`?ep=webgpu` força a GPU; medido: ~50 ms contra ~2300 ms em WASM).');
   } else {
     add('L2CS', 'ok',
       `${e.l2cs.executionProvider ?? 'provider desconhecido'}, `
       + `stale ${e.l2cs.stalePct.toFixed(1)}%`);
   }
 
-  if (e.l2cs.pendingCount > 0) {
-    // Evidência direta do deadlock de submissão: se ficar preso, nenhuma
-    // inferência nova acontece pelo resto da sessão, com o status ainda
-    // dizendo 'ready'.
-    add('L2CS · fila', 'atencao',
-      `${e.l2cs.pendingCount} submissão(ões) sem resposta`,
-      'Se este número não voltar a zero, a fila travou e o L2CS parou de '
-      + 'entregar — recarregue a página antes de medir.');
+  // `pendingCount > 0` SOZINHO não é sinal de nada: com submissões a ~7 Hz e
+  // inferência de ~40 ms há quase sempre uma em voo, e `fila = 1` é o estado
+  // saudável. A assinatura do deadlock são as DUAS coisas juntas: fila presa
+  // E nada voltando.
+  if (e.l2cs.pendingCount > 0 && e.l2cs.hz <= 0) {
+    add('L2CS · fila', 'bloqueio',
+      `${e.l2cs.pendingCount} submissão(ões) sem resposta e 0 Hz de retorno`,
+      'A fila travou: o worker recebeu e não respondeu, e nenhuma inferência '
+      + 'nova acontece pelo resto da sessão — com o status ainda dizendo '
+      + '`ready`. Recarregue a página antes de medir.');
   }
 
   // ── Cadeia de filtragem ────────────────────────────────────────────────

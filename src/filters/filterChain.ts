@@ -1,37 +1,16 @@
-// P7.6 / etapa 6 — a cadeia de filtragem selecionável.
+// Cadeia de filtragem selecionável por flag de lista fechada, com o
+// comportamento atual (`'oneEuro'`) como default.
 //
-// ── O que este módulo resolve ───────────────────────────────────────────────
-//
-// O Sprint 6 entregou `kalman2d`, `adaptiveEma`, `deadZone` e `blinkHold` como
-// módulos puros e testados, mas nenhum estava LIGADO: a flag `filterMode` não
-// existia. Isso deixava o `P7.6` impossível — o aceite dele pede o harness
-// rodando com `filterMode: 'kalmanEma'`.
-//
-// Uma alternativa que não se consegue selecionar não é alternativa. Foi o mesmo
-// problema do `spec11` no `P6.5`, e a solução é a mesma: uma flag de lista
-// fechada, com o comportamento atual como default.
-//
-// ── As três cadeias ─────────────────────────────────────────────────────────
-//
-//   'oneEuro'    passa-baixa com corte adaptativo. O DEFAULT — é o que roda
-//                hoje, e é o baseline contra o qual `F8.5` compara.
+//   'oneEuro'    passa-baixa com corte adaptativo. O DEFAULT e o baseline.
 //   'kalman'     Kalman posição+velocidade com predição. Tem MODELO do
 //                movimento, então pode antecipar em vez de sempre atrasar.
 //   'kalmanEma'  Kalman seguido de EMA adaptativo com zona morta. O Kalman
 //                antecipa; o EMA remove o ruído que a predição amplifica em
 //                fixação.
 //
-// ── Por que `kalmanEma` e não `emaKalman` ───────────────────────────────────
-//
-// A ordem importa e não é arbitrária. O Kalman precisa da medição CRUA para
-// estimar velocidade: alimentá-lo com um sinal já suavizado faria a velocidade
-// estimada ser a do filtro, não a do olho, e a predição perderia o sentido.
-// O EMA vem depois porque ele só precisa suavizar o que sair.
-//
-// ── Quem decide ─────────────────────────────────────────────────────────────
-//
-// `F8.5`, com medição. Este módulo torna a comparação POSSÍVEL; ele não
-// escolhe. O default continua `'oneEuro'`.
+// A ordem em `kalmanEma` não é arbitrária: o Kalman precisa da medição CRUA
+// para estimar velocidade. Alimentá-lo com um sinal já suavizado faria a
+// velocidade estimada ser a do filtro, não a do olho.
 
 import { OneEuroFilter2D } from '../oneEuroFilter';
 import { Kalman2D, type Kalman2DOptions } from './kalman2d';
@@ -47,7 +26,7 @@ export interface SaidaDoFiltro {
   alpha: number | null;
   /** Velocidade angular estimada em °/s, quando disponível. */
   velocidadeDegPorSeg: number | null;
-  /** O quadro caiu na zona morta (`P6.4`). */
+  /** O quadro caiu na zona morta do EMA. */
   naZonaMorta: boolean;
 }
 
@@ -94,10 +73,8 @@ export class FilterChain {
         this.degradou = false;
       } else {
         // Sem geometria de tela, o EMA adaptativo e a zona morta não têm como
-        // trabalhar em graus — e assumir uma tela seria assumir uma densidade
-        // de pixels e uma distância que não temos. Degrada para Kalman puro e
-        // ANUNCIA: uma cadeia que silenciosamente vira outra faria o `F8.5`
-        // comparar `kalmanEma` contra `kalman` achando que comparou outra coisa.
+        // trabalhar em graus. Degrada para Kalman puro e ANUNCIA: uma cadeia
+        // que silenciosamente vira outra invalidaria qualquer comparação.
         this.degradou = true;
         console.warn(
           "[filterChain] modo 'kalmanEma' pedido SEM geometria de tela. " +
@@ -148,7 +125,7 @@ export class FilterChain {
     };
   }
 
-  /** O Kalman por trás da cadeia, para o `blinkHold` projetar (`P6.3`).
+  /** O Kalman por trás da cadeia, para o `blinkHold` projetar.
    *  `null` no modo `'oneEuro'`, que não tem modelo de movimento. */
   get kalmanInterno(): Kalman2D | null {
     return this.kalman;

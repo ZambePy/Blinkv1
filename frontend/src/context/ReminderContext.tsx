@@ -25,26 +25,61 @@ const ReminderContext = createContext<ReminderContextValue>({
 
 export const useReminders = () => useContext(ReminderContext);
 
+const REMINDERS_KEY = 'irisflow_reminders';
+const TRIGGERED_KEY = 'irisflow_triggered_reminders';
+
+const DEFAULT_REMINDERS: Reminder[] = [
+  { id: '1', title: 'Tomar água', time: '10:00' },
+  { id: '2', title: 'Mudar de posição', time: '14:00' },
+  { id: '3', title: 'Medicação da tarde', time: '16:00' },
+];
+
+/** Lê JSON do localStorage sem nunca lançar; valor inválido cai no fallback. */
+function lerJson<T>(key: string, fallback: T, valido: (v: unknown) => v is T): T {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return fallback;
+    const parsed: unknown = JSON.parse(raw);
+    return valido(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+const ehListaDeLembretes = (v: unknown): v is Reminder[] =>
+  Array.isArray(v) &&
+  v.every(
+    (r) =>
+      r &&
+      typeof r === 'object' &&
+      typeof r.id === 'string' &&
+      typeof r.title === 'string' &&
+      typeof r.time === 'string'
+  );
+
+const ehRegistro = (v: unknown): v is Record<string, string> =>
+  !!v && typeof v === 'object' && !Array.isArray(v);
+
+function salvarJson(key: string, value: unknown): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Quota cheia ou storage bloqueado: o lembrete continua valendo na sessão.
+  }
+}
+
 export const ReminderProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [reminders, setReminders] = useState<Reminder[]>(() => {
-    const saved = localStorage.getItem('irisflow_reminders');
-    return saved
-      ? JSON.parse(saved)
-      : [
-          { id: '1', title: 'Tomar água', time: '10:00' },
-          { id: '2', title: 'Mudar de posição', time: '14:00' },
-          { id: '3', title: 'Medicação da tarde', time: '16:00' },
-        ];
-  });
+  const [reminders, setReminders] = useState<Reminder[]>(() =>
+    lerJson(REMINDERS_KEY, DEFAULT_REMINDERS, ehListaDeLembretes)
+  );
 
   const { isComposing } = useGaze();
   const [activeReminder, setActiveReminder] = useState<Reminder | null>(null);
 
   // Registra qual lembrete foi disparado em qual data para evitar repetição no mesmo minuto (id -> 'AAAA-MM-DD')
-  const [triggeredLog, setTriggeredLog] = useState<Record<string, string>>(() => {
-    const saved = localStorage.getItem('irisflow_triggered_reminders');
-    return saved ? JSON.parse(saved) : {};
-  });
+  const [triggeredLog, setTriggeredLog] = useState<Record<string, string>>(() =>
+    lerJson(TRIGGERED_KEY, {}, ehRegistro)
+  );
 
   // Fila de lembretes disparados enquanto o usuário escrevia
   const [queue, setQueue] = useState<Reminder[]>([]);
@@ -52,13 +87,13 @@ export const ReminderProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   const addReminder = (r: Omit<Reminder, 'id'>) => {
     const next = [...reminders, { ...r, id: crypto.randomUUID() }];
     setReminders(next);
-    localStorage.setItem('irisflow_reminders', JSON.stringify(next));
+    salvarJson(REMINDERS_KEY, next);
   };
 
   const deleteReminder = (id: string) => {
     const next = reminders.filter((r) => r.id !== id);
     setReminders(next);
-    localStorage.setItem('irisflow_reminders', JSON.stringify(next));
+    salvarJson(REMINDERS_KEY, next);
   };
 
   const dismissActiveReminder = () => {
@@ -67,7 +102,7 @@ export const ReminderProvider: React.FC<{ children: React.ReactNode }> = ({ chil
 
   // Salvar registro de disparo
   useEffect(() => {
-    localStorage.setItem('irisflow_triggered_reminders', JSON.stringify(triggeredLog));
+    salvarJson(TRIGGERED_KEY, triggeredLog);
   }, [triggeredLog]);
 
   // Loop de background: verifica a cada 10s

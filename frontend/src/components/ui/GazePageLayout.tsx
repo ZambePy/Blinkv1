@@ -1,175 +1,103 @@
 import React from 'react';
-import { Bell } from 'lucide-react';
+import { Bell, Eye } from 'lucide-react';
 import { BackButton } from './BackButton';
 import { GazeButton } from './GazeButton';
 import { useReminders } from '../../context/ReminderContext';
 
 interface GazePageLayoutProps {
   children: React.ReactNode;
+  /** Mostra o botão Voltar (alvo de gaze) no canto superior esquerdo. */
   showBack?: boolean;
+  /**
+   * Mantido por compatibilidade: o botão de emergência é global
+   * (EmergencyProvider) e aparece sozinho em toda tela do paciente. O layout
+   * apenas reserva o espaço dele no cabeçalho.
+   */
   showEmergency?: boolean;
   backRoute?: string;
+  /** Título curto exibido no centro do cabeçalho, acima da zona de descanso. */
+  title?: string;
   /**
-   * Modo "sem moldura": fundo preto, sem padding e sem o cabeçalho canônico
-   * (voltar + zona de descanso). A tela passa a controlar 100% do viewport e
-   * desenha a própria navegação. Usado pelo teclado de varredura, que precisa
-   * de tela cheia preta e das teclas encostando nas bordas.
-   * Os lembretes continuam sendo exibidos normalmente.
+   * Modo "sem moldura": sem padding e sem o cabeçalho canônico. A tela
+   * controla 100% do viewport e desenha a própria navegação (teclado).
+   * Os lembretes continuam sendo exibidos.
    */
   bare?: boolean;
+  className?: string;
 }
 
+/**
+ * Moldura padrão das telas do paciente.
+ *
+ * Cabeçalho (altura fixa `--gaze-header-h`): Voltar à esquerda, título +
+ * zona de descanso no centro, espaço reservado à direita para o botão de
+ * emergência global. Quando a faixa de status está visível, `html.has-status-band`
+ * empurra tudo para baixo — nada fica coberto.
+ */
 export const GazePageLayout: React.FC<GazePageLayoutProps> = ({
   children,
   showBack = true,
   backRoute,
+  title,
   bare = false,
+  className = '',
 }) => {
   const { activeReminder, dismissActiveReminder } = useReminders();
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        width: '100vw',
-        height: '100vh',
-        background: bare ? '#000000' : 'var(--color-bg-base)', // Agora usa fundo branco/claro do tema
-        color: 'var(--color-text-base)',
-        overflow: 'hidden',
-        boxSizing: 'border-box',
-        padding: bare ? 0 : '8.5rem 3rem 3rem 3rem', // Espaço para a barra superior
-        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
-      }}
-    >
-      {/* Cabeçalho de Navegação e Emergência Canônica (B1-4) */}
+    <div className={`gaze-page ${bare ? 'gaze-page--bare' : ''} ${className}`.trim()}>
       {!bare && (
-        <div
-          style={{
-            position: 'absolute',
-            top: '2rem',
-            left: '3rem',
-            right: '3rem',
-            height: '4.5rem',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            zIndex: 9990,
-          }}
-        >
-          {/* Voltar Canônico */}
-          {showBack ? (
-            <BackButton to={backRoute} />
-          ) : (
-            <div style={{ width: 180 }} />
-          )}
-
-          {/* Zona de Descanso Neutra (B1-5) */}
-          <div
-            data-no-dwell="true"
-            className="gaze-rest-zone"
-            style={{
-              width: '320px', // Equivalente a 8.0° (GAZE_TOKENS.restZoneMinDeg)
-              height: '100%',
-              background: 'rgba(15, 23, 42, 0.03)',
-              border: '2px dashed rgba(15, 23, 42, 0.15)',
-              borderRadius: '1.5rem',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'rgba(15, 23, 42, 0.6)',
-              fontSize: '1rem',
-              fontWeight: 700,
-              cursor: 'default',
-              userSelect: 'none',
-            }}
-          >
-            👁 Zona de Descanso (Sem clique)
+        <header className="gaze-page__header">
+          <div className="gaze-page__slot">
+            {showBack ? <BackButton to={backRoute} /> : <div style={{ width: 160 }} />}
           </div>
 
-          {/* Emergência Canônica (Gerenciada globalmente pelo EmergencyProvider) */}
-          <div style={{ width: 200 }} />
-        </div>
+          <div className="gaze-page__slot" style={{ flex: 1, minWidth: 0, height: '100%' }}>
+            <div
+              data-no-dwell="true"
+              className="gaze-rest-zone"
+              aria-label="Zona de descanso: olhar aqui não aciona nada"
+            >
+              {title ? (
+                <span className="gaze-page__title">{title}</span>
+              ) : (
+                <Eye size={28} aria-hidden="true" />
+              )}
+              <span>Zona de descanso</span>
+            </div>
+          </div>
+
+          {/* Espaço do botão de emergência global */}
+          <div className="gaze-page__slot gaze-page__slot--end" aria-hidden="true" />
+        </header>
       )}
 
-      {/* Conteúdo Principal */}
-      <div style={{ width: '100%', height: '100%', position: 'relative' }}>
-        {children}
-      </div>
+      <div className="gaze-page__content">{children}</div>
 
-      {/* Lembretes e Rotina (B3-4) */}
       {activeReminder && (
         <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            width: '100vw',
-            height: '100vh',
-            background: 'rgba(2, 6, 23, 0.8)',
-            backdropFilter: 'blur(4px)',
-            zIndex: 99999,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontFamily: "'Inter', sans-serif",
-          }}
+          className="gaze-modal"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="reminder-title"
         >
-          <div
-            style={{
-              background: 'var(--color-card-bg)',
-              border: '3px solid var(--color-primary)',
-              borderRadius: '2.5rem',
-              padding: '3rem',
-              maxWidth: '550px',
-              width: '90%',
-              textAlign: 'center',
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              gap: '2rem',
-              boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-            }}
-          >
-            <div
-              style={{
-                width: '80px',
-                height: '80px',
-                borderRadius: '50%',
-                background: 'rgba(27, 84, 168, 0.08)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                color: 'var(--color-primary)',
-              }}
-            >
-              <Bell size={40} />
+          <div className="gaze-modal__card">
+            <div className="gaze-modal__icon">
+              <Bell size={40} aria-hidden="true" />
             </div>
-
             <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <span style={{ fontSize: '1.2rem', opacity: 0.6, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                Lembrete de Rotina
-              </span>
-              <h2 style={{ fontSize: '2.2rem', fontWeight: 900, margin: 0, color: 'var(--color-text-base)' }}>
+              <span className="gaze-modal__eyebrow">Lembrete</span>
+              <h2 id="reminder-title" className="gaze-modal__title">
                 {activeReminder.title}
               </h2>
-              <span style={{ fontSize: '1.25rem', opacity: 0.7, fontWeight: 600 }}>
-                Horário agendado: {activeReminder.time}
-              </span>
+              <span className="gaze-modal__meta">Horário: {activeReminder.time}</span>
             </div>
-
             <GazeButton
               onClick={dismissActiveReminder}
-              style={{
-                width: '280px',
-                height: '76px',
-                borderRadius: '1.75rem',
-                background: 'var(--color-primary)',
-                color: '#ffffff',
-                boxShadow: '0 10px 20px rgba(27, 84, 168, 0.25)',
-              }}
-            >
-              <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>Confirmar</span>
-            </GazeButton>
+              variant="primary"
+              size="lg"
+              label="Entendi"
+            />
           </div>
         </div>
       )}

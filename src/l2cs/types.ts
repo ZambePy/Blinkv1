@@ -1,16 +1,13 @@
-// Contratos de dados do módulo L2CS (E4 do L2CS-NET.md).
+// Contratos de dados do módulo L2CS.
 
-// Radianos. Sinais confirmados em axis_validation_report.json:
+// Radianos, na convenção registrada em l2cs.meta.json (`signConvention`):
 //   yaw   > 0  →  olhar para a DIREITA (imagem não espelhada)
-//   pitch > 0  →  olhar para CIMA (provisional, ver l2cs.meta.json)
-// `valid` cai para false se o último resultado for mais velho que STALE_MS,
-// para que o consumidor faça degradação graciosa em vez de travar.
+//   pitch > 0  →  olhar para CIMA
+// `valid` cai para false quando o último resultado envelheceu além da
+// tolerância do cliente; o consumidor degrada em vez de usar dado velho.
 //
-// `confidence` = min(conf_yaw, conf_pitch), onde cada componente é
-// `1 - H/H_max` da distribuição softmax daquele eixo. 0 = distribuição
-// uniforme (incerteza total), 1 = massa toda num único bin. Escolhido o min
-// (o eixo pior é o gargalo) e não a média para não mascarar incerteza
-// direcional. Opcional; ainda NÃO é usado para rejeitar ou ponderar nada.
+// `confidence` = min(conf_yaw, conf_pitch), com cada componente `1 - H/H_max`
+// da softmax daquele eixo: 0 = distribuição uniforme, 1 = massa num único bin.
 export interface L2CSGaze {
   yaw: number;
   pitch: number;
@@ -30,17 +27,17 @@ export interface L2CSModelMeta {
   outputTensorNames: { yaw: string; pitch: string };
 }
 
-// Mensagens do protocolo worker↔client.
-// (wasmPath foi removido — o worker agora resolve URLs dos artefatos ORT via
-// Vite `?url` imports, não precisa de path externo.)
 export type L2CSWorkerRequest =
-  | { type: 'init'; modelUrl: string; metaUrl: string; executionProvider?: 'wasm' | 'webgpu' }
-  | { type: 'infer'; id: number; tensor: Float32Array; width: number; height: number };
+  /** `ortBaseUrl`: diretório dos artefatos do ORT, resolvido pela PÁGINA. Dentro
+   *  do worker `location.href` é a URL do script do worker (em `assets/` no
+   *  build, em `/@fs/...` no dev-server), não a da página. */
+  | { type: 'init'; modelUrl: string; metaUrl: string; provider: 'auto' | 'webgpu' | 'wasm'; ortBaseUrl?: string }
+  | { type: 'infer'; id: number; tensor: Float32Array };
 
 export type L2CSWorkerResponse =
-  /** `executionProvider` é o que de fato ficou ATIVO, não o que foi pedido —
-   *  ver a nota sobre fallback silencioso em `experiment.ts` (P5.5). */
-  | { type: 'ready'; meta: L2CSModelMeta; executionProvider: string; requested: string }
+  /** `executionProvider` é o que ficou ativo; `fallback` marca quando ele
+   *  difere do pedido (só possível no modo `auto`). */
+  | { type: 'ready'; meta: L2CSModelMeta; executionProvider: 'webgpu' | 'wasm'; requested: string; fallback: boolean }
   | { type: 'init_error'; error: string }
   | { type: 'result'; id: number; yaw: number; pitch: number; confidence: number; inferenceMs: number }
   | { type: 'infer_error'; id: number; error: string };

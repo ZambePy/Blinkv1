@@ -23,17 +23,10 @@
 //
 // POR QUE NA SAÍDA E NÃO NAS FEATURES
 //
-// `distanceCorrection.ts` tentou isto escalando as dims de offset do
-// vetor. Duas objeções:
-//
-//   1. Geometricamente, as features estão CERTAS — o ângulo do olho não mudou.
-//      Quem está errado é a conversão para pixels. Corrigir a entrada para
-//      compensar um erro da saída é heurística; corrigir a saída é a
-//      identidade geométrica.
-//   2. Aquele módulo depende de índices fixos do vetor (25..34) que deixaram
-//      de existir quando o conjunto ativo passou a ser `iris12`. Índices
-//      hardcoded de layout são exatamente o tipo de acoplamento que quebra em
-//      silêncio.
+// Geometricamente, as features estão CERTAS — o ângulo do olho não mudou.
+// Quem está errado é a conversão para pixels. Corrigir a entrada para
+// compensar um erro da saída é heurística (e dependeria de índices fixos do
+// vetor); corrigir a saída é a identidade geométrica.
 //
 // A DISTÂNCIA MEDIDA É ATÉ A CÂMERA, A QUE IMPORTA É ATÉ A TELA
 //

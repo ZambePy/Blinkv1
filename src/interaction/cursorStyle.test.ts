@@ -14,7 +14,7 @@ import {
 } from './cursorStyle';
 
 // -----------------------------------------------------------------------------
-// P7.1 — cursor de alto contraste com tamanho ajustável.
+// Cursor de alto contraste com tamanho ajustável.
 // -----------------------------------------------------------------------------
 
 const E = (tamanhoPx: number, estado: EstadoDoCursor = 'normal', dwellPct = 0) =>
@@ -133,7 +133,7 @@ describe('o preenchimento sinaliza o estado', () => {
 
   it('degradado e segurando são visualmente distintos entre si', () => {
     // `degradado` = a predição falhou, o cursor está sobre o nariz.
-    // `segurando` = o rosto sumiu e esta é a última posição conhecida (P7.5).
+    // `segurando` = o rosto sumiu e esta é a última posição conhecida.
     // São causas diferentes com ações diferentes; a mesma cor faria o cuidador
     // tratar as duas do mesmo jeito.
     expect(E(48, 'degradado').preenchimento).not.toBe(E(48, 'segurando').preenchimento);

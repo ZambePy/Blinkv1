@@ -1,37 +1,23 @@
-// P6.9 — aviso de distância fora da faixa de calibração.
+// Aviso de distância fora da faixa de calibração.
 //
-// ── Por que isto é diferente da compensação que já existe ───────────────────
+// `distanceCompensation.ts` CORRIGE a predição quando a distância muda. Este
+// módulo AVISA: em algum ponto a correção deixa de bastar, e a resposta certa
+// passa a ser pedir que a pessoa volte para onde calibrou. A compensação usa
+// limiares ABSOLUTOS em cm (a física da correção é aditiva); o aviso usa
+// PERCENTUAL da distância de calibração, porque 10 cm a 40 cm é um quarto do
+// caminho e a 100 cm é um décimo.
 //
-// `distanceCompensation.ts` CORRIGE: quando o paciente se aproxima, ele escala
-// a predição para manter o alvo. Este módulo AVISA: em algum ponto a correção
-// deixa de bastar, e a resposta certa passa a ser pedir que a pessoa volte para
-// onde calibrou.
+// A faixa de ±15% é palpite, não medição, até haver dado de degradação do
+// erro por desvio de distância — por isso o texto do aviso não traz número.
 //
-// A diferença aparece no que cada um mede. A compensação usa limiares
-// ABSOLUTOS em cm, porque a física da correção é aditiva (ver o cabeçalho de
-// lá). O aviso usa PERCENTUAL da distância de calibração, porque 10 cm a 40 cm
-// é um quarto do caminho e a 100 cm é um décimo — a mesma variação absoluta
-// significa coisas diferentes.
-//
-// ── A faixa é PROVISÓRIA ────────────────────────────────────────────────────
-//
-// ±15% é palpite, não medição. O valor real sai de `F8.7` (Dia 7), que mede a
-// degradação do erro em função do desvio de distância. Até lá, o número está
-// marcado como provisório aqui e no texto do aviso não aparece — dizer ao
-// cuidador "você está 16% longe" comunicaria uma precisão que não existe.
-//
-// ── Por que histerese ───────────────────────────────────────────────────────
-//
-// Sem ela, alguém parado exatamente no limiar veria o banner piscar a cada
-// respiração. Um aviso que pisca é pior que nenhum: ensina o cuidador a
-// ignorá-lo. Sair da faixa exige cruzar 15%; voltar exige retornar a 12%.
+// Histerese: sem ela, alguém parado no limiar veria o banner piscar a cada
+// respiração, e um aviso que pisca ensina o cuidador a ignorá-lo. Sair da
+// faixa exige cruzar 15%; voltar exige retornar a 12%.
 
 /**
- * Desvio relativo tolerado antes de avisar.
- *
- * ⚠️ **PROVISÓRIO.** Sai de `F8.7`, que mede quanto o erro cresce por unidade
- * de desvio. Enquanto não houver esse dado, 15% é uma escolha defensável e
- * nada mais.
+ * Desvio relativo tolerado antes de avisar. PROVISÓRIO: enquanto não houver
+ * medição de quanto o erro cresce por unidade de desvio, 15% é uma escolha
+ * defensável e nada mais.
  */
 export const FAIXA_PROVISORIA_PCT = 0.15;
 
@@ -146,7 +132,7 @@ export class AvisoDeDistancia {
  * "afaste-se um pouco" é acionável, "você está a 16% da distância calibrada"
  * não é.
  *
- * E não traz números: o percentual é provisório (`F8.7`), e comunicar um número
+ * E não traz números: o percentual é provisório, e comunicar um número
  * provisório ao cuidador transmite uma precisão que não existe.
  */
 export function mensagemPara(estado: EstadoDistancia): string | null {

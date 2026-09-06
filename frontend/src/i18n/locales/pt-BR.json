@@ -1,47 +1,14 @@
 {
   "common": {
-    "back": "Voltar",
     "cancel": "Cancelar",
-    "confirm": "Confirmar",
-    "save": "Salvar",
-    "loading": "Carregando…",
-    "close": "Fechar",
-    "menu": "Menu"
-  },
-  "menu": {
-    "tabs": {
-      "communication": "Comunicação",
-      "care": "Cuidados",
-      "leisure": "Lazer",
-      "system": "Sistema"
-    },
-    "items": {
-      "emergency": "Urgência\nMédica",
-      "pictograms": "Pictogramas\n(CAA)",
-      "phrases": "Frases\nRápidas",
-      "keyboard": "Teclado\nVirtual",
-      "chatbot": "Assistente\nde IA",
-      "options": "Minhas\nOpções",
-      "caregiver": "Painel do\nCuidador",
-      "meditation": "Meditação\nGuiada",
-      "iamok": "Aviso:\nEstou Bem",
-      "games": "Mini-Jogos",
-      "drawing": "Desenho\nLivre",
-      "gallery": "Galeria\nde Fotos",
-      "news": "Jornal\ndo Dia",
-      "settings": "Configuração\nGeral",
-      "virtualMouse": "Mouse\nVirtual (PC)"
-    },
-    "openItem": "Abrir {{item}}",
-    "skipToContent": "Pular para o conteúdo principal",
-    "tabsAriaLabel": "Categorias do menu"
+    "yes": "Sim",
+    "no": "Não"
   },
   "settings": {
     "title": "Configurações",
     "auth": {
       "title": "Acesso do Cuidador",
       "hint": "Insira o PIN para acessar as configurações do sistema.",
-      "pinLabel": "PIN do cuidador",
       "pinError": "PIN incorreto. Verifique com o cuidador responsável.",
       "submit": "Entrar"
     },
@@ -49,12 +16,14 @@
       "title": "Temporizador de Fixação (Dwell)",
       "slow": "Devagar",
       "normal": "Normal",
-      "fast": "Rápido"
+      "fast": "Rápido",
+      "description": "Quanto tempo o olhar precisa ficar parado sobre um botão para acioná-lo. Comece no Normal; aumente se houver cliques por engano."
     },
     "sound": {
       "title": "Áudio do Sistema",
-      "on": "Som Ativado",
-      "off": "Som Desativado"
+      "on": "Som ligado",
+      "off": "Som desligado",
+      "description": "Sons de confirmação, alarme de emergência e voz sintetizada."
     },
     "voice": {
       "title": "Clonagem de Voz Personalizada",
@@ -62,33 +31,307 @@
       "upload": "Upload de Áudio (.wav)",
       "uploading": "Enviando áudio…",
       "processing": "Processando…",
-      "ready": "✓ Voz personalizada ativada",
-      "lgpd": "LGPD: A voz é dado biométrico sensível. O modelo será armazenado exclusivamente para uso assistivo local do paciente."
+      "ready": "Voz personalizada ativada",
+      "lgpd": "LGPD: A voz é dado biométrico sensível. O modelo será armazenado exclusivamente para uso assistivo local do paciente.",
+      "cardTitle": "Voz do paciente",
+      "noProfile": "Selecione um perfil antes de clonar a voz.",
+      "apiError": "Erro {{status}} ao processar o áudio.",
+      "networkError": "Falha ao enviar o áudio. Verifique a conexão com o servidor.",
+      "active": "Voz personalizada em uso"
     },
     "backup": {
       "title": "Backup de Configurações",
-      "export": "Exportar Backup (JSON)"
+      "export": "Exportar Backup (JSON)",
+      "description": "Salva todas as configurações desta tela em um arquivo para restaurar em outro computador.",
+      "done": "Backup exportado."
     },
-    "logout": "Sair",
-    "returnToMenu": "Voltar ao Menu",
+    "dashboardLink": {
+      "button": "Abrir painel do cuidador"
+    },
     "language": {
       "title": "Idioma",
       "pt-BR": "Português (Brasil)",
       "en": "English"
+    },
+    "subtitle": "Ajustes do rastreamento, da tela e do acompanhamento do paciente.",
+    "nav": {
+      "dashboard": "Painel do cuidador",
+      "guide": "Guia",
+      "sections": "Seções desta página"
+    },
+    "tracking": {
+      "title": "Rastreamento",
+      "eye": {
+        "title": "Olho dominante",
+        "description": "Se um dos olhos tem mais dificuldade de mover, priorize o outro.",
+        "both": "Os dois",
+        "left": "Esquerdo",
+        "right": "Direito"
+      },
+      "smoothing": {
+        "title": "Suavização do cursor",
+        "description": "Vale na hora. Estável tira o tremor (leitura); Responsivo segue o olhar mais rápido (teclado e jogos).",
+        "stable": "Estável",
+        "stableSub": "menos tremor",
+        "balanced": "Balanceado",
+        "balancedSub": "padrão",
+        "responsive": "Responsivo",
+        "responsiveSub": "menos atraso",
+        "kalmanNote": "Estes níveis só valem com o filtro One Euro. Um filtro de comparação está ativo nesta sessão, então a troca é ignorada."
+      },
+      "advanced": {
+        "title": "Filtro e cursor",
+        "description": "Opções do motor de rastreamento. Elas só passam a valer depois de recarregar o aplicativo."
+      },
+      "filter": {
+        "label": "Filtro do movimento",
+        "hint": "One Euro é o filtro de produção. Kalman e Kalman + EMA existem para comparação em sessões de medição.",
+        "default": "padrão",
+        "compare": "comparação"
+      },
+      "cursorSize": {
+        "label": "Tamanho do cursor",
+        "hint": "Diâmetro do ponto que segue o olhar."
+      },
+      "ring": {
+        "title": "Anel de progresso no cursor",
+        "description": "Desenha o avanço da fixação em volta do próprio cursor, além do botão."
+      },
+      "blink": {
+        "title": "Clique por piscada",
+        "description": "Uma piscada longa confirma o botão em que o olhar está. Desligado por padrão: piscar é involuntário."
+      },
+      "scanning": {
+        "title": "Varredura automática",
+        "description": "Sem olhar por alguns segundos, os botões são destacados um a um para seleção."
+      },
+      "lost": {
+        "title": "Aviso quando o olhar se perde",
+        "description": "Segura o cursor por 2 segundos e depois avisa para reposicionar o rosto."
+      },
+      "pending": {
+        "title": "Alterações aguardando recarga",
+        "body": "As opções acima foram salvas, mas o rastreador só as lê ao iniciar. A calibração salva é mantida.",
+        "apply": "Aplicar e recarregar"
+      }
+    },
+    "display": {
+      "title": "Tela",
+      "theme": {
+        "title": "Tema",
+        "light": "Claro",
+        "dark": "Escuro",
+        "hint": "O tema escuro cansa menos os olhos em telas grandes e reduz piscadas por ofuscamento."
+      },
+      "monitorBrightness": {
+        "label": "Brilho do monitor (todo o sistema)",
+        "hint": "Escurece o monitor inteiro. Depende do suporte do driver."
+      },
+      "comfort": {
+        "title": "Conforto visual",
+        "description": "Reduza o brilho e ative o filtro âmbar se o paciente piscar muito ou reclamar de ofuscamento.",
+        "uiBrightness": "Brilho da interface",
+        "darkest": "mais escuro",
+        "normal": "normal",
+        "amber": "Filtro âmbar",
+        "amberHint": "Reduz a componente azul da luz. Alivia a sensibilidade à luz."
+      },
+      "geometry": {
+        "title": "Geometria da tela",
+        "description": "Entra no cálculo do erro em graus e na posição dos pontos de calibração. Meça com fita métrica.",
+        "diagonal": "Diagonal da tela (polegadas)",
+        "diagonalHint": "Medida de canto a canto da área visível.",
+        "distance": "Distância dos olhos à tela (cm)",
+        "distanceHint": "Na posição habitual de uso. Entre 50 e 70 cm funciona melhor.",
+        "defaultWarning": "Valores padrão em uso. Se a tela não for de 23,6 polegadas a 60 cm, o erro em graus do teste de precisão sai errado.",
+        "source": {
+          "default": "padrão",
+          "auto": "lido do sistema",
+          "manual": "medido à mão"
+        }
+      },
+      "fov": {
+        "title": "Campo de visão da câmera",
+        "calibrated": "Calibrado: {{fov}}°. O medidor de distância da preparação está ativo.",
+        "notCalibrated": "Não calibrado: o app não consegue estimar a distância sozinho. Meça a distância do rosto até a câmera, informe acima, sente o paciente na posição de uso e clique abaixo.",
+        "button": "Calibrar campo de visão",
+        "clear": "Limpar",
+        "noFace": "Rosto não detectado. Sente-se de frente para a câmera e tente de novo.",
+        "failed": "Não foi possível calcular o campo de visão. Confira a distância informada.",
+        "done": "Campo de visão calibrado: {{fov}}°."
+      }
+    },
+    "calibration": {
+      "title": "Calibração",
+      "state": {
+        "title": "Estado da calibração",
+        "description": "O modelo de olhar em uso nesta sessão.",
+        "calibrated": "Calibrado",
+        "notCalibrated": "Sem calibração",
+        "profile": "Perfil ativo",
+        "distance": "Distância calibrada"
+      },
+      "optical": {
+        "noGlasses": "Sem óculos",
+        "glasses": "Óculos",
+        "progressive": "Óculos multifocais",
+        "contacts": "Lentes de contato",
+        "unknown": "Não informado"
+      },
+      "recalibrate": "Recalibrar",
+      "recalibrateHint": "Abre a tela de preparação e calibração. A calibração atual continua valendo até a nova terminar.",
+      "accuracy": {
+        "title": "Teste de precisão",
+        "description": "Mostra 13 pontos e mede a distância entre o olhar e cada um. Informe a condição antes de começar; ela entra no relatório.",
+        "needCalibration": "Calibre primeiro para rodar o teste de precisão.",
+        "noSamples": "Teste sem amostras ({{missing}} de {{total}} pontos). Verifique o rastreamento e repita.",
+        "result": "Precisão: {{px}} px em média ({{deg}}°) — {{score}}",
+        "lighting": "Iluminação",
+        "lightingGood": "Boa",
+        "lightingPoor": "Ruim",
+        "head": "Cabeça",
+        "headStill": "Parada",
+        "headFree": "Livre",
+        "glasses": "Óculos",
+        "session": "Sessão (min)",
+        "sessionAuto": "Automático",
+        "running": "Rodando…",
+        "run": "Testar precisão",
+        "last": "Último resultado",
+        "meanDeg": "Erro médio",
+        "meanPx": "Erro médio (px)",
+        "medianPx": "Mediana",
+        "p90Px": "P90",
+        "jitter": "Tremor",
+        "points": "Pontos medidos"
+      }
+    },
+    "caregiver": {
+      "title": "Cuidador",
+      "reminders": {
+        "title": "Lembretes e rotina",
+        "description": "Aparecem para o paciente no horário marcado.",
+        "missing": "Preencha a atividade e o horário.",
+        "added": "Lembrete adicionado.",
+        "what": "Atividade",
+        "placeholder": "Ex.: tomar água, fisioterapia",
+        "when": "Horário",
+        "add": "Adicionar",
+        "scheduled": "Agendados ({{count}})",
+        "empty": "Nenhum lembrete configurado.",
+        "remove": "Excluir lembrete {{title}}",
+        "removed": "Lembrete removido."
+      },
+      "links": {
+        "title": "Painel e guia",
+        "description": "Rotina diária, diário de sintomas e o guia de instalação.",
+        "guide": "Abrir guia"
+      },
+      "emergency": {
+        "title": "Emergência",
+        "body": "O botão vermelho toca um alarme neste computador, fala em voz alta e, se houver servidor configurado, envia um aviso. Ele não liga para ninguém: mantenha um cuidador ao alcance do som."
+      }
+    },
+    "data": {
+      "title": "Dados",
+      "consentOn": "Consentimento registrado.",
+      "consentOff": "Consentimento removido. Os dados clínicos locais foram apagados.",
+      "clearConfirm": "Confirmar exclusão definitiva",
+      "cleared": "Dados clínicos locais excluídos.",
+      "exported": "Relatório clínico exportado.",
+      "clinical": {
+        "title": "Histórico clínico",
+        "description": "Evolução da precisão, frases mais usadas e horários de atividade.",
+        "lgpdTitle": "Proteção de dados (LGPD)",
+        "lgpdBody": "Os dados de uso, calibrações e frases ficam apenas neste dispositivo, para acompanhamento clínico. Nada é enviado a servidores externos.",
+        "consent": "Autorizar o registro local de rotina e calibração do paciente",
+        "locked": "Ative a autorização acima para ver o histórico.",
+        "calibrations": "Testes de precisão ({{count}})",
+        "noCalibrations": "Nenhum teste de precisão registrado.",
+        "high": "alto",
+        "good": "bom",
+        "trendHint": "Erro médio subindo ao longo das semanas pode indicar fadiga ocular, mudança de postura ou progressão da doença. Vale recalibrar e conferir luz e distância.",
+        "phrases": "Frases mais usadas",
+        "noPhrases": "Nenhuma frase registrada.",
+        "activity": "Atividade por período",
+        "noActivity": "Nenhum dado de atividade.",
+        "periods": {
+          "night": "Madrugada (0h–6h)",
+          "morning": "Manhã (6h–12h)",
+          "afternoon": "Tarde (12h–18h)",
+          "evening": "Noite (18h–24h)"
+        },
+        "utterances": "{{count}} falas",
+        "export": "Exportar relatório (JSON)",
+        "clear": "Excluir dados clínicos"
+      }
+    },
+    "diagnostics": {
+      "title": "Diagnóstico",
+      "live": {
+        "title": "Leituras ao vivo",
+        "description": "Atualizadas duas vezes por segundo. Um traço significa que ainda não foi medido.",
+        "fps": "Quadros por segundo",
+        "camera": "Resolução da câmera",
+        "face": "Rosto detectado",
+        "brightness": "Brilho do rosto",
+        "contrast": "Contraste",
+        "model": "Modelo de olhar",
+        "modelRate": "Cadência do modelo",
+        "filter": "Filtro em uso",
+        "samples": "Amostras de calibração",
+        "loopErrors": "Erros seguidos"
+      },
+      "state": {
+        "idle": "Parado",
+        "loading": "Iniciando",
+        "tracking": "Rastreando",
+        "calibrating": "Calibrando",
+        "no_face": "Sem rosto",
+        "degraded": "Degradado",
+        "uncalibrated": "Sem calibração",
+        "error": "Erro"
+      },
+      "model": {
+        "loading": "carregando",
+        "ready": "pronto",
+        "error": "com erro",
+        "disabled": "desligado"
+      },
+      "recorder": {
+        "title": "Gravador de sessão",
+        "description": "Grava os dados do rastreamento em texto (sem vídeo) para análise. Use quando o suporte pedir.",
+        "recording": "Gravando",
+        "idle": "Parado",
+        "dropped": "{{count}} descartados",
+        "stop": "Parar gravação",
+        "start": "Iniciar gravação",
+        "export": "Exportar (.jsonl)",
+        "discard": "Descartar",
+        "stopped": "Gravação parada com {{frames}} quadros.",
+        "started": "Gravação iniciada.",
+        "nothing": "Nada para exportar. Inicie uma gravação primeiro.",
+        "exported": "Exportados {{frames}} quadros.",
+        "discarded": "Gravação descartada."
+      },
+      "pinNote": "O PIN do cuidador vem da variável VITE_CAREGIVER_PIN (valor de desenvolvimento quando não definida). Deve ser substituído por autenticação no servidor antes do uso em produção."
     }
   },
   "emergency": {
     "title": "URGÊNCIA MÉDICA",
-    "alertSent": "ALERTA ENVIADO!",
-    "waiting": "Sinal de {{label}} disparado. Aguarde.",
-    "cancelAndReturn": "Cancelar Alerta e Voltar",
-    "chooseType": "Selecione o tipo de urgência",
+    "choose": "Do que você precisa?",
+    "localAlarm": "Alarme ligado neste aparelho",
+    "localAlarmDetail": "Som e tela chamando quem estiver por perto, por causa de: {{label}}. Este aparelho não envia mensagem sozinho.",
+    "escalated": "Alarme mais forte",
+    "escalatedDetail": "Ninguém desligou o alarme. O som vai continuar até alguém cancelar.",
+    "cancelAlarm": "Cancelar alarme",
+    "spoken": "Atenção, preciso de ajuda: {{label}}",
+    "spokenEscalated": "Atenção, preciso de ajuda agora.",
     "items": {
       "pain": "DOR MUITO FORTE",
       "breath": "FALTA DE AR",
       "cold": "MUITO FRIO / FEBRE",
       "other": "OUTRA URGÊNCIA"
-    },
-    "triggerAria": "Disparar alerta de urgência: {{label}}"
+    }
   }
 }

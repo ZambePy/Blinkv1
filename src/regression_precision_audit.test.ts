@@ -24,22 +24,16 @@ function syntheticFace() {
 
 describe('Auditoria Técnica e Suíte de Precisão', () => {
   describe('Conjuntos Destilados (irisCore)', () => {
-    it('projeta corretamente as dimensões essenciais (4, 7, 9, 6, 11)', () => {
+    it('projeta corretamente as dimensões essenciais (4 e 6)', () => {
       const lm = syntheticFace();
       const gaze = { yaw: 0.15, pitch: -0.10, valid: true };
       const raw = extractCompactFeatures(lm, undefined, gaze).featuresLeft;
 
       expect(projectFeatureSet(raw, 'irisCore')).toHaveLength(4);
-      expect(projectFeatureSet(raw, 'irisCore+pose')).toHaveLength(7);
-      expect(projectFeatureSet(raw, 'irisCore+posecross')).toHaveLength(9);
       expect(projectFeatureSet(raw, 'irisCore+l2cs')).toHaveLength(6);
-      expect(projectFeatureSet(raw, 'irisCore+l2cs+pose')).toHaveLength(11);
 
       expect(activeFeatureDims('irisCore')).toBe(4);
-      expect(activeFeatureDims('irisCore+pose')).toBe(7);
-      expect(activeFeatureDims('irisCore+posecross')).toBe(9);
       expect(activeFeatureDims('irisCore+l2cs')).toBe(6);
-      expect(activeFeatureDims('irisCore+l2cs+pose')).toBe(11);
     });
 
     it('elimina colinearidades de contorno de íris', () => {
@@ -100,21 +94,10 @@ describe('Auditoria Técnica e Suíte de Precisão', () => {
 
       expect(model.lambdaX).toBeDefined();
       expect(model.lambdaY).toBeDefined();
-      // B3.9 — a asserção anterior era `lambdaX <= lambdaY`, com o raciocínio
-      // "sinal limpo precisa de menos regularização". Ela dependia do bug:
-      // com a comparação `<` estrita e `bestLambda` inicializado no MENOR λ do
-      // grid, todo empate era resolvido a favor da menor regularização — e um
-      // sinal limpo produz justamente um PLATÔ de erro, onde tudo empata.
-      //
-      // Com o desempate pelo MAIOR λ, o eixo X (limpo) passa a escolher 1e-2
-      // em vez de 1e-5: três ordens de grandeza a mais de regularização, com a
-      // qualidade de predição intacta (medido abaixo — as bordas continuam
-      // sendo alcançadas). O eixo Y (ruidoso) tem ótimo mais estreito e fica
-      // no menor λ.
-      //
-      // Ou seja: a relação se INVERTE, e a inversão é o comportamento correto.
-      // O que o teste trava agora é que os dois eixos escolhem λ de forma
-      // independente — que é o nome do caso — e que a predição não degrada.
+      // Um sinal limpo produz um PLATÔ de erro no grid de λ; com o desempate
+      // pelo MAIOR λ, o eixo X (limpo) escolhe mais regularização que o eixo Y
+      // (ruidoso, ótimo mais estreito). Não se afirma a ordem — só que os dois
+      // eixos escolhem λ de forma independente e a predição não degrada.
       expect(model.lambdaX!).not.toBe(model.lambdaY!);
 
       // Predição nas bordas deve atingir ~0.1 e ~0.9 sem compressão severa de ganho

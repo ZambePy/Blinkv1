@@ -1,26 +1,144 @@
 @import 'tailwindcss';
 
+/* ============================================================================
+ * IrisFlow — sistema de tokens e utilitários
+ *
+ * Ordem do arquivo:
+ *   1. Tokens (claro em :root, escuro em html.dark) + aliases de compatibilidade
+ *   2. Tema do Tailwind v4 (@theme) apontando para os tokens
+ *   3. Base: fontes, reset leve, foco, scrollbar, acessibilidade
+ *   4. Utilitários do projeto (.glass, animações, .bg-orb)
+ *   5. Interação ocular: .gaze-hover, .gaze-button, .gaze-grid, .gaze-page
+ *   6. Componentes do cuidador (.btn, .cg-*, .page-header, .lang-switch, ...)
+ *   7. Camadas globais: faixa de status, emergência, toasts, HUDs
+ *   8. Teclado de varredura (.kb-*)
+ *   9. Teste de precisão (.accuracy-*, .diagnostic-*)
+ *
+ * Regra que vale para tudo aqui: NENHUM :hover / .gaze-hover usa transform.
+ * Movimento sob o olhar cancela o dwell. Realce é só cor, borda e brilho.
+ * ========================================================================== */
+
+/* ---------------------------------------------------------------------------
+ * 1. Tokens
+ * ------------------------------------------------------------------------- */
+:root {
+  color-scheme: light;
+
+  --bg: #f4f7fb;
+  --surface: #ffffff;
+  --surface-2: #eaf1fa;
+  --border: rgba(11, 27, 51, 0.1);
+
+  --text: #0b1b33;
+  --text-2: #3f5573;
+  --text-3: #6b7f99;
+
+  --primary: #1b54a8;
+  --primary-hover: #17488f;
+  --primary-soft: #e3ecf9;
+  --on-primary: #ffffff;
+  --accent: #3b82f6;
+
+  --ok: #16a34a;
+  --warn: #d97706;
+  --danger: #dc2626;
+  --info: #2563eb;
+  --focus: #3b82f6;
+
+  /* Fundos suaves para estados (derivados dos tokens, sem hex novo) */
+  --ok-soft: color-mix(in srgb, var(--ok) 14%, var(--surface));
+  --warn-soft: color-mix(in srgb, var(--warn) 16%, var(--surface));
+  --danger-soft: color-mix(in srgb, var(--danger) 12%, var(--surface));
+  --info-soft: color-mix(in srgb, var(--info) 14%, var(--surface));
+
+  --r-sm: 10px;
+  --r-md: 16px;
+  --r-lg: 24px;
+  --r-pill: 999px;
+
+  --shadow-1: 0 2px 8px rgba(11, 27, 51, 0.08);
+  --shadow-2: 0 12px 32px rgba(11, 27, 51, 0.14);
+
+  /* Escala tipográfica: 16/18/20/24/32/40/56 */
+  --fs-16: 1rem;
+  --fs-18: 1.125rem;
+  --fs-20: 1.25rem;
+  --fs-24: 1.5rem;
+  --fs-32: 2rem;
+  --fs-40: 2.5rem;
+  --fs-56: 3.5rem;
+
+  /* Geometria das telas do paciente */
+  --gaze-header-h: 128px; /* comporta alvos de 120 px + respiro */
+  --gaze-page-pad: 24px;
+  --status-band-h: 72px; /* faixa de status no topo (altura fixa) */
+  --emergency-w: 200px;
+  --emergency-h: 120px;
+
+  /* Anel de foco/gaze */
+  --ring: var(--focus);
+  --ring-w: 4px;
+
+  /* Aliases de compatibilidade — telas antigas ainda leem estes nomes.
+     Novos códigos devem usar os tokens acima. */
+  --color-bg-base: var(--bg);
+  --color-text-base: var(--text);
+  --color-card-bg: var(--surface);
+  --color-card-border: var(--border);
+  --color-card-shadow: rgba(11, 27, 51, 0.08);
+  --color-primary: var(--primary);
+  --color-primary-dark: var(--primary-hover);
+  --color-primary-light: var(--primary-soft);
+  --color-accent: var(--accent);
+  --settings-bg: var(--bg);
+}
+
+html.dark {
+  color-scheme: dark;
+
+  --bg: #0b1b33;
+  --surface: #122744;
+  --surface-2: #183256;
+  --border: rgba(255, 255, 255, 0.12);
+
+  --text: #f5f8fc;
+  --text-2: #c3d0e3;
+  --text-3: #8fa3c0;
+
+  --primary: #3b82f6;
+  --primary-hover: #5b9aff;
+  --primary-soft: rgba(59, 130, 246, 0.18);
+  --on-primary: #06152b;
+
+  --ok: #34d399;
+  --warn: #fbbf24;
+  --danger: #f87171;
+  --info: #60a5fa;
+
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 12px 32px rgba(0, 0, 0, 0.5);
+  --color-card-shadow: rgba(0, 0, 0, 0.4);
+}
+
+/* ---------------------------------------------------------------------------
+ * 2. Tema do Tailwind — utilitários (bg-surface, text-text-2, font-display,
+ *    rounded-lg, shadow-soft...) resolvem para os tokens acima.
+ * ------------------------------------------------------------------------- */
 @theme {
-  /* Identidade Visual IrisFlow */
-  --color-primary: #1b54a8;
-  --color-primary-dark: #143e80;
-  --color-primary-light: #e8f0fb;
+  --font-display: 'Boldonse', system-ui, sans-serif;
+  --font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
 
-  /* Modo Escuro */
-  --color-bg-base: #f8fafc;
-  --color-text-base: #0f172a;
-  --color-card-bg: rgba(255, 255, 255, 0.82);
-  --color-card-border: rgba(255, 255, 255, 0.9);
-  --color-card-shadow: rgba(27, 84, 168, 0.08);
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 1.2;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 1.15;
+  --text-5xl: 3.5rem;
+  --text-5xl--line-height: 1.1;
 
-  /* Fonte */
-  --font-family-sans: 'Boldonse', system-ui, -apple-system, sans-serif;
-
-  /* Animações */
   --animate-fade-in-up: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
   --animate-fade-in: fadeIn 0.4s ease-out both;
   --animate-scale-in: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-  --animate-float: float 6s ease-in-out infinite;
 
   @keyframes fadeInUp {
     from {
@@ -50,32 +168,51 @@
       transform: scale(1);
     }
   }
-  @keyframes float {
-    0%,
-    100% {
-      transform: translateY(0px);
-    }
-    50% {
-      transform: translateY(-10px);
-    }
-  }
 }
 
-/* Reset e base global */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-border: var(--border);
+  --color-text: var(--text);
+  --color-text-2: var(--text-2);
+  --color-text-3: var(--text-3);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-on-primary: var(--on-primary);
+  --color-accent: var(--accent);
+  --color-ok: var(--ok);
+  --color-warn: var(--warn);
+  --color-danger: var(--danger);
+  --color-info: var(--info);
+  --color-focus: var(--focus);
+
+  --radius-sm: var(--r-sm);
+  --radius-md: var(--r-md);
+  --radius-lg: var(--r-lg);
+  --radius-pill: var(--r-pill);
+
+  --shadow-soft: var(--shadow-1);
+  --shadow-lift: var(--shadow-2);
+}
+
+/* ---------------------------------------------------------------------------
+ * 3. Base
+ * ------------------------------------------------------------------------- */
+@font-face {
+  font-family: 'Boldonse';
+  src: url('./assets/fonts/Boldonse.ttf') format('truetype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-  margin: 0;
-  padding: 0;
-}
-
-@font-face {
-  font-family: 'Boldonse';
-  src: url('/Boldonse.ttf') format('truetype');
-  font-weight: normal;
-  font-style: normal;
-  font-display: swap;
 }
 
 html,
@@ -83,223 +220,110 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  font-family: 'Boldonse', system-ui, -apple-system, sans-serif;
-  background-color: var(--color-bg-base);
-  color: var(--color-text-base);
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.45;
+  background-color: var(--bg);
+  color: var(--text);
   -webkit-font-smoothing: antialiased;
-  transition: background-color 0.4s ease, color 0.4s ease;
-}
-
-/* Variáveis base (light mode) — disponíveis como CSS custom properties normais */
-:root {
-  --color-bg-base: #f8fafc;
-  --color-text-base: #0f172a;
-  --color-card-bg: rgba(255, 255, 255, 0.82);
-  --color-card-border: rgba(255, 255, 255, 0.9);
-  --color-card-shadow: rgba(27, 84, 168, 0.08);
-  --color-primary: #1b54a8;
-  --color-primary-light: #e8f0fb;
-  --settings-bg: linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%);
-}
-
-/* Modo escuro (via classe no html) */
-html.dark {
-  --color-bg-base: #0f172a;
-  --color-text-base: #f8fafc;
-  --color-card-bg: rgba(30, 41, 59, 0.90);
-  --color-card-border: rgba(255, 255, 255, 0.12);
-  --color-card-shadow: rgba(0, 0, 0, 0.4);
-  --color-primary-light: #1e293b;
-  --color-primary: #3b82f6;
-  --settings-bg: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
-}
-
-/* Glassmorphism utilitário refinado */
-.glass {
-  background: var(--color-card-bg);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid var(--color-card-border);
-  box-shadow: 0 10px 30px -10px var(--color-card-shadow);
-  transition: background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
-}
-
-.glass-card {
-  background: var(--color-card-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border: 1px solid var(--color-card-border);
-  box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.4s ease, border-color 0.4s ease;
-}
-
-.glass-card:hover {
-  border-color: rgba(27, 84, 168, 0.5);
-  box-shadow: 0 12px 32px -8px rgba(27, 84, 168, 0.2);
-  transform: translateY(-3px);
-}
-
-.glass-dark {
-  background: rgba(15, 23, 42, 0.88);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #ffffff;
-}
-
-/* Card de ação */
-.action-card {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 1.25rem;
-  padding: 2.25rem;
-  border-radius: 1.75rem;
-  cursor: pointer;
-  user-select: none;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
   transition:
-    transform 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.25s cubic-bezier(0.16, 1, 0.3, 1),
-    border-color 0.25s ease;
-}
-.action-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 16px 36px -8px rgba(27, 84, 168, 0.14);
-}
-.action-card:active {
-  transform: scale(0.98);
+    background-color 0.3s ease,
+    color 0.3s ease;
 }
 
-/* Ícone do card */
-.card-icon {
-  width: 7rem;
-  height: 7rem;
-  border-radius: 1.25rem;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 2px solid rgba(255, 255, 255, 0.9);
-  box-shadow:
-    0 4px 16px rgba(0, 0, 0, 0.05),
-    inset 0 2px 4px rgba(255, 255, 255, 0.5);
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
 }
 
-/* Botão arredondado (header) */
-.btn-pill {
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  padding: 0.75rem 1.5rem;
-  border-radius: 999px;
+/* Boldonse só em títulos e no wordmark: é uma display ultra-bold e cansa em
+   texto corrido. Corpo, botões e rótulos ficam em system-ui. */
+.font-display,
+h1 {
+  font-family: var(--font-display);
+  font-weight: normal;
+  line-height: 1.3;
+  letter-spacing: 0.01em;
+}
+
+h1,
+h2,
+h3,
+h4,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: var(--fs-40);
+}
+h2 {
+  font-size: var(--fs-32);
+  font-weight: 800;
+  line-height: 1.2;
+}
+h3 {
+  font-size: var(--fs-24);
   font-weight: 700;
-  font-size: 1.05rem;
-  cursor: pointer;
-  border: 2px solid;
-  transition:
-    transform 0.2s cubic-bezier(0.16, 1, 0.3, 1),
-    box-shadow 0.2s ease,
-    background 0.2s ease;
-  user-select: none;
-}
-.btn-pill:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 20px rgba(0, 0, 0, 0.08);
-}
-.btn-pill:active {
-  transform: scale(0.97);
+  line-height: 1.25;
 }
 
-/* Teclado Virtual */
-.key-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: white;
-  border-radius: 1rem;
-  border: 2px solid #e2e8f0;
-  font-size: 2.25rem;
-  font-weight: 700;
-  color: #1e293b;
-  cursor: pointer;
-  transition:
-    background 0.15s,
-    transform 0.1s,
-    box-shadow 0.15s,
-    border-color 0.15s;
-  box-shadow: 0 3px 0px #cbd5e1;
-  user-select: none;
-}
-.key-btn:hover {
-  background: #f0f7ff;
-  border-color: #1b54a8;
-  box-shadow: 0 3px 0px #1b54a8;
-}
-.key-btn:active {
-  transform: translateY(3px);
-  box-shadow: none;
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
 }
 
-/* Orb de fundo */
-.bg-orb {
-  position: absolute;
-  border-radius: 9999px;
-  filter: blur(90px);
+button {
+  cursor: pointer;
+}
+
+/* Foco visível (mouse/teclado) — mesmo anel do gaze, para o cuidador e o
+   paciente aprenderem um único sinal de "está aqui". */
+:focus {
+  outline: none;
+}
+:focus-visible {
+  outline: var(--ring-w) solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* Filtro âmbar (conforto visual) — html.amber-filter é ligado pelo
+   SettingsContext. Camada acima de tudo, sem capturar eventos. */
+html.amber-filter::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 2147483000;
   pointer-events: none;
-  opacity: 0.45;
+  background: rgba(255, 170, 60, 0.12);
+  mix-blend-mode: multiply;
 }
 
 /* Scrollbar discreta */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 8px;
+  height: 8px;
 }
 ::-webkit-scrollbar-track {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
-  border-radius: 9999px;
+  background: color-mix(in srgb, var(--text-3) 45%, transparent);
+  border-radius: var(--r-pill);
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
-}
-
-/* Animações utilitárias */
-.animate-fade-in-up {
-  animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.animate-fade-in {
-  animation: fadeIn 0.4s ease-out both;
-}
-.animate-scale-in {
-  animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-.animate-float {
-  animation: float 6s ease-in-out infinite;
-}
-
-/* Acessibilidade — foco visível em todos os interativos */
-:focus {
-  outline: none;
-}
-:focus-visible {
-  outline: 3px solid #1b54a8;
-  outline-offset: 3px;
-  border-radius: 6px;
-}
-button:focus-visible,
-a:focus-visible,
-input:focus-visible,
-textarea:focus-visible,
-select:focus-visible,
-[role='button']:focus-visible,
-[role='radio']:focus-visible,
-[role='switch']:focus-visible,
-[role='tab']:focus-visible {
-  outline: 3px solid #1b54a8;
-  outline-offset: 3px;
-  box-shadow: 0 0 0 6px rgba(27, 84, 168, 0.15);
+  background: color-mix(in srgb, var(--text-3) 70%, transparent);
 }
 
 /* Screen-reader only */
@@ -315,33 +339,6 @@ select:focus-visible,
   border: 0;
 }
 
-/* Skip link para leitores de tela */
-.skip-link {
-  position: absolute;
-  top: -100px;
-  left: 0;
-  background: #1b54a8;
-  color: white;
-  padding: 0.75rem 1.5rem;
-  z-index: 9999;
-  text-decoration: none;
-  font-weight: 700;
-  border-radius: 0 0 0.75rem 0;
-  transition: top 0.2s ease;
-}
-.skip-link:focus {
-  top: 0;
-}
-
-/* Contraste — texto sobre glassmorphism */
-.glass-text {
-  color: #0f172a;
-}
-.glass-dark {
-  color: #ffffff;
-}
-
-/* Reduzir movimento para usuários com preferência reduzida */
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -350,69 +347,1353 @@ select:focus-visible,
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
-  .animate-float {
-    animation: none !important;
+}
+
+/* ---------------------------------------------------------------------------
+ * 4. Utilitários do projeto
+ * ------------------------------------------------------------------------- */
+.glass {
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+  transition:
+    background-color 0.3s ease,
+    border-color 0.3s ease,
+    box-shadow 0.3s ease;
+}
+
+/* Orb decorativo de fundo */
+.bg-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(90px);
+  pointer-events: none;
+  opacity: 0.35;
+  background: var(--primary);
+}
+
+.animate-fade-in-up {
+  animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.animate-fade-in {
+  animation: fadeIn 0.4s ease-out both;
+}
+.animate-scale-in {
+  animation: scaleIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+/* ---------------------------------------------------------------------------
+ * 5. Interação ocular
+ * ------------------------------------------------------------------------- */
+
+/* Realce genérico aplicado pelo GazeContext ao alvo sob o olhar. Vale para
+   qualquer clicável (button, a, [role=button]) — inclusive os que não são
+   GazeButton. Sem transform: só anel e brilho. */
+.gaze-hover {
+  outline: var(--ring-w) solid var(--ring);
+  outline-offset: 3px;
+  box-shadow: 0 0 0 10px color-mix(in srgb, var(--ring) 22%, transparent);
+  position: relative;
+  z-index: 50;
+  transition:
+    outline-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease;
+}
+
+/* ── GazeButton ─────────────────────────────────────────────────────────── */
+.gaze-button {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  box-sizing: border-box;
+  padding: 0.75rem 1.25rem;
+  border-radius: var(--r-lg);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  font-family: var(--font-body);
+  font-weight: 700;
+  font-size: var(--fs-24);
+  line-height: 1.2;
+  text-align: center;
+  cursor: pointer;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+
+/* Tamanhos (mínimos — largura/altura explícitas continuam valendo) */
+.gaze-button--lg {
+  min-width: 160px;
+  min-height: 120px;
+  font-size: var(--fs-24);
+}
+.gaze-button--xl {
+  min-width: 200px;
+  min-height: 160px;
+  font-size: var(--fs-32);
+}
+
+/* Variantes */
+.gaze-button--primary {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: var(--on-primary);
+  --ring: var(--on-primary);
+}
+.gaze-button--secondary {
+  background: var(--surface);
+  border-color: var(--border);
+  color: var(--text);
+}
+.gaze-button--danger,
+.gaze-button.emergency {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #ffffff;
+  --ring: #ffffff;
+}
+.gaze-button--ghost {
+  background: transparent;
+  border-color: transparent;
+  color: var(--primary);
+}
+
+/* Hover de mouse e realce de gaze: mesma linguagem, sem movimento */
+.gaze-button:hover,
+.gaze-button.gaze-hover {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 24%, transparent);
+}
+.gaze-button--secondary:hover,
+.gaze-button--secondary.gaze-hover,
+.gaze-button--ghost:hover,
+.gaze-button--ghost.gaze-hover {
+  background: var(--primary-soft);
+}
+.gaze-button--primary:hover,
+.gaze-button--primary.gaze-hover {
+  background: var(--primary-hover);
+  border-color: var(--on-primary);
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--primary) 40%, transparent);
+}
+.gaze-button--danger:hover,
+.gaze-button--danger.gaze-hover,
+.gaze-button.emergency:hover,
+.gaze-button.emergency.gaze-hover {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 8px color-mix(in srgb, var(--danger) 35%, transparent);
+}
+
+.gaze-button:focus-visible {
+  outline: var(--ring-w) solid var(--focus);
+  outline-offset: 3px;
+}
+
+/* Área de acionamento ampliada. O cursor de gaze tem jitter: sem ela, um
+   tremor de poucos pixels na borda faz elementFromPoint devolver o container
+   e o dwell zera. A extensão é limitada a METADE do espaçamento real entre
+   alvos (--gaze-grid-gap, definido pelo GazeGrid e pela geometria do
+   usuário), com teto de 12 px — duas zonas vizinhas se encostam, nunca se
+   sobrepõem. */
+.gaze-button-hit-area {
+  position: absolute;
+  --gaze-hit-inset: min(12px, calc(var(--gaze-grid-gap, 24px) / 2 - 1px));
+  top: calc(-1 * var(--gaze-hit-inset));
+  left: calc(-1 * var(--gaze-hit-inset));
+  right: calc(-1 * var(--gaze-hit-inset));
+  bottom: calc(-1 * var(--gaze-hit-inset));
+  border-radius: inherit;
+  z-index: 1;
+  pointer-events: auto;
+}
+
+.gaze-button-content {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.75rem;
+  pointer-events: none;
+  min-width: 0;
+}
+.gaze-button--stacked .gaze-button-content {
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.gaze-button__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.gaze-button__icon svg {
+  width: 40px;
+  height: 40px;
+}
+.gaze-button--xl .gaze-button__icon svg {
+  width: 48px;
+  height: 48px;
+}
+.gaze-button__label {
+  white-space: pre-line;
+}
+
+/* Anel de progresso do dwell — cônico, na borda externa do botão.
+   --gaze-dwell-progress vai de 0 a 1 (setado pelo GazeContext). */
+.gaze-button-progress-ring {
+  position: absolute;
+  inset: -7px;
+  border-radius: inherit;
+  pointer-events: none;
+  border: 5px solid transparent;
+  background: conic-gradient(
+      var(--ring) calc(var(--gaze-dwell-progress, 0) * 360deg),
+      color-mix(in srgb, var(--ring) 25%, transparent) 0
+    )
+    border-box;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) padding-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: destination-out;
+  mask-composite: exclude;
+  opacity: 0;
+  z-index: 3;
+  transition: opacity 0.12s ease;
+}
+.gaze-button.gaze-hover .gaze-button-progress-ring {
+  opacity: 1;
+}
+/* Preenchimento discreto que acompanha o anel — feedback também na fóvea */
+.gaze-button.gaze-hover::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--ring) 18%, transparent);
+  opacity: var(--gaze-dwell-progress, 0);
+  z-index: 0;
+}
+
+/* Alvo de recuperação: acionável em `degraded`, dwell mais longo */
+.gaze-button[data-recovery='true'] {
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--text);
+}
+
+/* Desabilitado */
+.gaze-button:disabled,
+.gaze-button[data-no-dwell='true']:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  box-shadow: none;
+}
+
+/* ── GazeGrid ───────────────────────────────────────────────────────────── */
+.gaze-grid {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+}
+.gaze-grid > * {
+  min-width: 0;
+  min-height: 0;
+}
+
+/* ── GazePageLayout ─────────────────────────────────────────────────────── */
+.gaze-page {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+  box-sizing: border-box;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+  padding: calc(var(--gaze-header-h) + var(--gaze-page-pad) * 2) var(--gaze-page-pad)
+    var(--gaze-page-pad);
+  transition: padding-top 0.2s ease;
+}
+/* Faixa de status visível: a página desce para a faixa não cobrir alvos. */
+html.has-status-band .gaze-page {
+  padding-top: calc(var(--status-band-h) + var(--gaze-header-h) + var(--gaze-page-pad) * 2);
+}
+html.has-status-band .gaze-page__header {
+  top: calc(var(--status-band-h) + var(--gaze-page-pad));
+}
+.gaze-page--bare {
+  padding: 0;
+  background: var(--bg);
+}
+
+.gaze-page__header {
+  position: absolute;
+  top: var(--gaze-page-pad);
+  left: var(--gaze-page-pad);
+  right: var(--gaze-page-pad);
+  height: var(--gaze-header-h);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--gaze-page-pad);
+  z-index: 9990;
+  transition: top 0.2s ease;
+}
+.gaze-page__slot {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+}
+.gaze-page__slot--end {
+  width: var(--emergency-w);
+  justify-content: flex-end;
+}
+.gaze-page__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-24);
+  line-height: 1.3;
+  color: var(--text);
+  text-align: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Zona de descanso: sem alvo, sem clique. Visual quieto de propósito. */
+.gaze-rest-zone {
+  flex: 1 1 auto;
+  height: 100%;
+  min-width: 240px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.25rem;
+  border-radius: var(--r-lg);
+  border: 2px dashed var(--border);
+  background: color-mix(in srgb, var(--surface-2) 55%, transparent);
+  color: var(--text-3);
+  font-size: var(--fs-18);
+  font-weight: 600;
+  user-select: none;
+  cursor: default;
+}
+
+.gaze-page__content {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+/* Modal de lembrete (dentro do GazePageLayout) */
+.gaze-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 99999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+}
+.gaze-modal__card {
+  width: min(560px, 92vw);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.75rem;
+  padding: 2.5rem;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 3px solid var(--primary);
+  box-shadow: var(--shadow-2);
+  text-align: center;
+}
+.gaze-modal__icon {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.gaze-modal__eyebrow {
+  font-size: var(--fs-16);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-3);
+}
+.gaze-modal__title {
+  font-size: var(--fs-32);
+  font-weight: 800;
+  color: var(--text);
+}
+.gaze-modal__meta {
+  font-size: var(--fs-20);
+  color: var(--text-2);
+}
+
+/* ---------------------------------------------------------------------------
+ * 6. Componentes do cuidador (mouse/teclado, compactos)
+ * ------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.65rem 1.25rem;
+  border-radius: var(--r-md);
+  border: 1px solid transparent;
+  font-family: var(--font-body);
+  font-size: var(--fs-16);
+  font-weight: 700;
+  line-height: 1.2;
+  cursor: pointer;
+  user-select: none;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    color 0.15s ease;
+}
+.btn--block {
+  width: 100%;
+}
+.btn--primary {
+  background: var(--primary);
+  color: var(--on-primary);
+  border-color: var(--primary);
+}
+.btn--primary:hover {
+  background: var(--primary-hover);
+  border-color: var(--primary-hover);
+}
+.btn--secondary {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--border);
+  box-shadow: var(--shadow-1);
+}
+.btn--secondary:hover {
+  border-color: var(--primary);
+  background: var(--primary-soft);
+}
+.btn--danger {
+  background: var(--danger);
+  color: #ffffff;
+  border-color: var(--danger);
+}
+.btn--danger:hover {
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--danger) 25%, transparent);
+}
+.btn--ghost {
+  background: transparent;
+  color: var(--primary);
+  border-color: color-mix(in srgb, var(--primary) 30%, transparent);
+}
+.btn--ghost:hover {
+  background: var(--primary-soft);
+  border-color: var(--primary);
+}
+.btn:hover,
+.btn.gaze-hover {
+  outline: none;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 22%, transparent);
+}
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Layout do cuidador */
+.cg-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+.cg-header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.9rem 2rem;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  box-shadow: var(--shadow-1);
+}
+.cg-header__group {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+.cg-header__brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-weight: 800;
+  font-size: var(--fs-18);
+  color: var(--text);
+  white-space: nowrap;
+}
+.cg-header__brand svg {
+  color: var(--warn);
+}
+.cg-header__sep {
+  color: var(--border);
+}
+.cg-header__title {
+  font-size: var(--fs-18);
+  font-weight: 600;
+  color: var(--text-2);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cg-content {
+  flex: 1;
+  width: 100%;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem 2rem 4rem;
+  box-sizing: border-box;
+}
+
+/* Cabeçalho de página (cuidador) */
+.page-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.page-header__lead {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  min-width: 0;
+}
+.page-header__titles {
+  min-width: 0;
+}
+.page-header__row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.page-header__icon {
+  display: flex;
+  align-items: center;
+  color: var(--primary);
+}
+.page-header__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-24);
+  line-height: 1.3;
+  color: var(--text);
+}
+.page-header__subtitle {
+  margin-top: 0.25rem;
+  color: var(--text-3);
+  font-size: var(--fs-16);
+}
+.page-header__actions {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+}
+
+/* Seletor de idioma */
+.lang-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+}
+.lang-switch--compact {
+  padding: 0.25rem 0.45rem;
+}
+.lang-switch__btn {
+  min-width: 44px;
+  min-height: 36px;
+  padding: 0.3rem 0.7rem;
+  border: none;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--text-2);
+  font-weight: 700;
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease;
+}
+.lang-switch--compact .lang-switch__btn {
+  min-height: 32px;
+  font-size: 0.8rem;
+}
+.lang-switch__btn:hover {
+  background: var(--primary-soft);
+  color: var(--primary);
+}
+.lang-switch__btn[aria-pressed='true'] {
+  background: var(--primary);
+  color: var(--on-primary);
+}
+
+/* Painel de prontidão */
+.readiness {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+  padding: 0.9rem 1.1rem;
+  border-radius: var(--r-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  max-width: 46rem;
+  color: var(--text);
+}
+.readiness__measuring {
+  font-size: var(--fs-16);
+  color: var(--text-2);
+  padding: 0.5rem 0;
+}
+.readiness__item {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  font-size: var(--fs-16);
+  line-height: 1.4;
+}
+.readiness__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  margin-top: 0.1rem;
+}
+.readiness__item--ok .readiness__icon {
+  color: var(--ok);
+}
+.readiness__item--warn .readiness__icon,
+.readiness__item--warn .readiness__text {
+  color: var(--warn);
+}
+.readiness__item--fail .readiness__icon,
+.readiness__item--fail .readiness__text {
+  color: var(--danger);
+}
+.readiness__blocked {
+  margin-top: 0.4rem;
+  font-weight: 700;
+  color: var(--danger);
+}
+
+/* ---------------------------------------------------------------------------
+ * 7. Camadas globais
+ * ------------------------------------------------------------------------- */
+
+/* Faixa de status no topo: altura fixa, largura total, acima de tudo. */
+.status-band {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--status-band-h);
+  z-index: 1000000;
+  display: flex;
+  align-items: center;
+  gap: 0.9rem;
+  padding: 0 1.25rem;
+  font-family: var(--font-body);
+  font-size: var(--fs-16);
+  line-height: 1.3;
+  border-bottom: 2px solid;
+  box-shadow: var(--shadow-1);
+  overflow: hidden;
+}
+.status-band--warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--text);
+}
+.status-band--error {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+  color: var(--text);
+}
+.status-band__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+}
+.status-band--warn .status-band__icon {
+  color: var(--warn);
+}
+.status-band--error .status-band__icon {
+  color: var(--danger);
+}
+.status-band__text {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.status-band__title {
+  font-weight: 800;
+  font-size: var(--fs-18);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.status-band__detail {
+  color: var(--text-2);
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  line-height: 1.25;
+}
+
+/* Botão de emergência flutuante */
+.emergency-fab {
+  position: fixed;
+  top: var(--gaze-page-pad);
+  right: var(--gaze-page-pad);
+  z-index: 99990;
+  transition:
+    top 0.2s ease,
+    right 0.2s ease,
+    bottom 0.2s ease;
+}
+html.has-status-band .emergency-fab {
+  top: calc(var(--status-band-h) + var(--gaze-page-pad));
+}
+/* Durante a calibração: compacto no canto inferior direito, fora dos alvos */
+.emergency-fab--compact {
+  top: auto;
+  bottom: 16px;
+  right: 16px;
+}
+.emergency-fab .gaze-button__icon svg {
+  width: 36px;
+  height: 36px;
+}
+
+/* Aviso de rastreamento degradado (faixa central, sob a de status) */
+.degraded-banner {
+  position: fixed;
+  top: var(--gaze-page-pad);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99980;
+}
+html.has-status-band .degraded-banner {
+  top: calc(var(--status-band-h) + var(--gaze-page-pad));
+}
+.degraded-banner .gaze-button {
+  min-height: 120px;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--r-lg);
+  border-color: var(--warn);
+  background: var(--warn-soft);
+  color: var(--text);
+  --ring: var(--warn);
+}
+.degraded-banner .gaze-button .gaze-button__icon {
+  color: var(--warn);
+}
+
+/* Modal de confirmação de emergência */
+.emergency-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 2rem;
+  text-align: center;
+  color: #ffffff;
+  background: color-mix(in srgb, var(--danger) 92%, #000000);
+  animation: emergencyPulse 1s ease-in-out infinite alternate;
+  font-family: var(--font-body);
+}
+@keyframes emergencyPulse {
+  from {
+    background-color: color-mix(in srgb, var(--danger) 92%, #000000);
+  }
+  to {
+    background-color: color-mix(in srgb, var(--danger) 62%, #000000);
+  }
+}
+.emergency-modal__icon {
+  color: #ffffff;
+  filter: drop-shadow(0 10px 15px rgba(0, 0, 0, 0.3));
+}
+.emergency-modal__title {
+  font-family: var(--font-display);
+  font-size: var(--fs-56);
+  line-height: 1.15;
+  color: #ffffff;
+  text-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+.emergency-modal__text {
+  font-size: var(--fs-32);
+  font-weight: 700;
+  color: rgba(255, 255, 255, 0.92);
+  margin-bottom: 1.5rem;
+}
+.emergency-modal__count {
+  font-size: var(--fs-56);
+  font-weight: 900;
+  color: #ffffff;
+}
+.emergency-modal .gaze-button--cancel {
+  background: #ffffff;
+  border-color: #ffffff;
+  color: var(--danger);
+  --ring: var(--danger);
+  font-size: var(--fs-32);
+  min-width: 320px;
+  min-height: 120px;
+}
+.emergency-modal .gaze-button--cancel:hover,
+.emergency-modal .gaze-button--cancel.gaze-hover {
+  background: #ffffff;
+  border-color: var(--danger);
+  box-shadow: 0 0 0 8px rgba(255, 255, 255, 0.35);
+}
+
+/* Indicador de fadiga (sugestão de pausa, não alerta) */
+.fatigue-indicator {
+  position: fixed;
+  top: calc(var(--gaze-page-pad) + var(--gaze-header-h) + 16px);
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 99960;
+}
+html.has-status-band .fatigue-indicator {
+  top: calc(var(--status-band-h) + var(--gaze-page-pad) + var(--gaze-header-h) + 16px);
+}
+.fatigue-indicator .gaze-button {
+  min-height: 120px;
+  padding: 0.75rem 1.5rem;
+  border-color: var(--ok);
+  background: var(--ok-soft);
+  color: var(--text);
+  --ring: var(--ok);
+}
+.fatigue-indicator .gaze-button .gaze-button__icon {
+  color: var(--ok);
+}
+
+/* Toasts */
+.toast-region {
+  position: fixed;
+  top: 1.25rem;
+  right: 1.25rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  pointer-events: none;
+  max-width: 400px;
+  width: calc(100vw - 2.5rem);
+}
+html.has-status-band .toast-region {
+  top: calc(var(--status-band-h) + 1rem);
+}
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  padding: 0.75rem 0.5rem 0.75rem 1rem;
+  border-radius: var(--r-md);
+  border: 1px solid;
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-2);
+  pointer-events: auto;
+  font-family: var(--font-body);
+  font-size: var(--fs-16);
+  line-height: 1.4;
+  animation: toastIn 0.25s ease-out;
+}
+@keyframes toastIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.toast--success {
+  border-color: var(--ok);
+  background: var(--ok-soft);
+}
+.toast--error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+}
+.toast--info {
+  border-color: var(--info);
+  background: var(--info-soft);
+}
+.toast__icon {
+  flex-shrink: 0;
+  display: inline-flex;
+  margin-top: 0.6rem;
+}
+.toast--success .toast__icon {
+  color: var(--ok);
+}
+.toast--error .toast__icon {
+  color: var(--danger);
+}
+.toast--info .toast__icon {
+  color: var(--info);
+}
+.toast__message {
+  flex: 1;
+  padding-top: 0.55rem;
+}
+.toast__close {
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+}
+.toast__close:hover {
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+  color: var(--text);
+}
+
+/* HUD de depuração e painel pré-sessão (ferramentas do operador) */
+.hud {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 9999;
+  min-width: 260px;
+  padding: 12px;
+  border-radius: var(--r-sm);
+  background: rgba(0, 0, 0, 0.78);
+  color: #d1fae5;
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  pointer-events: none;
+}
+.hud__grid {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: 6px 8px;
+}
+.hud__key {
+  color: #93c5fd;
+}
+.hud__bad {
+  color: #fca5a5;
+}
+.hud__warn {
+  color: #fcd34d;
+}
+.hud__foot {
+  margin-top: 8px;
+  opacity: 0.6;
+  font-size: 10px;
+}
+
+.preflight {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  width: min(560px, 46vw);
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: 0.9rem 1rem;
+  border-radius: var(--r-md);
+  border: 2px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow-2);
+  font-family: ui-monospace, Menlo, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.preflight--ok {
+  border-color: var(--ok);
+}
+.preflight--blocked {
+  border-color: var(--danger);
+}
+.preflight__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.6rem;
+}
+.preflight__title {
+  font-size: 0.95rem;
+  font-weight: 700;
+}
+.preflight__actions {
+  display: flex;
+  gap: 0.4rem;
+}
+.preflight__btn {
+  min-height: 32px;
+  padding: 0.25rem 0.7rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+  cursor: pointer;
+}
+.preflight__btn:hover {
+  border-color: var(--primary);
+}
+.preflight__btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.preflight__toggle {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 10000;
+  min-height: 32px;
+  padding: 0.3rem 0.7rem;
+  border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font:
+    12px ui-monospace,
+    Menlo,
+    Consolas,
+    monospace;
+  cursor: pointer;
+}
+.preflight__hint {
+  color: var(--text-2);
+}
+.preflight__item {
+  padding: 0.4rem 0.6rem;
+  margin-bottom: 0.35rem;
+  border-radius: var(--r-sm);
+  border-left: 3px solid;
+}
+.preflight__item--ok {
+  background: var(--ok-soft);
+  border-color: var(--ok);
+}
+.preflight__item--atencao {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+}
+.preflight__item--bloqueio {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+.preflight__action {
+  margin-top: 0.25rem;
+  font-size: 0.92em;
+  color: var(--text-2);
+}
+.preflight__verdict {
+  margin-top: 0.6rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+  font-weight: 700;
+}
+.preflight__verdict--ok {
+  color: var(--ok);
+}
+.preflight__verdict--blocked {
+  color: var(--danger);
+}
+
+/* Destaque do modo de varredura: anel duplo, contrasta com qualquer fundo */
+.scan-highlight {
+  position: fixed;
+  border: 4px solid rgba(250, 250, 250, 0.95);
+  box-shadow:
+    0 0 0 4px rgba(17, 17, 17, 0.9),
+    0 0 24px rgba(0, 0, 0, 0.5);
+  border-radius: var(--r-md);
+  pointer-events: none;
+  z-index: 9997;
+}
+
+/* Tela de erro (ErrorBoundary) */
+.error-screen {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+.error-screen__card {
+  width: min(560px, 100%);
+  padding: 2.5rem;
+  border-radius: var(--r-lg);
+  background: var(--surface);
+  border: 2px solid var(--danger);
+  box-shadow: var(--shadow-2);
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+}
+.error-screen__icon {
+  color: var(--danger);
+}
+.error-screen__title {
+  font-size: var(--fs-32);
+  color: var(--text);
+}
+.error-screen__text {
+  color: var(--text-2);
+  line-height: 1.6;
+}
+.error-screen__detail {
+  width: 100%;
+  max-height: 160px;
+  overflow: auto;
+  padding: 1rem;
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--text-2);
+  font-size: 0.85rem;
+  text-align: left;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* Fallback de rota (carregando) */
+.route-fallback {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+  color: var(--primary);
+  font-size: var(--fs-20);
+  font-weight: 700;
+}
+
+/* ---------------------------------------------------------------------------
+ * 8. Teclado de varredura ocular (KeyboardScreen)
+ *
+ * Nada de movimento na periferia: o usuário fixa o CENTRO da tecla. Todo o
+ * feedback acontece na fóvea — a tecla aquece inteira (cor, sem
+ * deslocamento) e um traço curto cresce sob o glifo.
+ * ------------------------------------------------------------------------- */
+.kb-key {
+  background: var(--kb-key);
+  border: 1px solid var(--kb-key-edge);
+  border-radius: 20px;
+  color: var(--kb-glyph);
+  padding: 0;
+  overflow: hidden;
+  transition:
+    background-color 120ms linear,
+    border-color 120ms linear;
+}
+
+/* O gap real do teclado é 18 px: a hit-area não pode passar de 9 px. */
+.kb-key .gaze-button-hit-area,
+.kb-nav .gaze-button-hit-area {
+  --gaze-hit-inset: 8px;
+}
+
+.kb-key--group {
+  color: var(--kb-glyph-dim);
+}
+.kb-key--words {
+  color: var(--kb-glyph-dim);
+  border-color: var(--kb-ember-edge);
+}
+.kb-key--letter {
+  color: var(--kb-glyph);
+}
+
+.kb-key:hover,
+.kb-key.gaze-hover {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--kb-ember-edge);
+}
+
+/* O anel cônico canônico não serve aqui — ele vive na borda. */
+.kb-key .gaze-button-progress-ring,
+.kb-key.gaze-hover::before {
+  display: none;
+}
+
+/* A tecla aquece conforme o dwell avança (teto de 26% — inequívoco, sem
+   ofuscar). */
+.kb-key.gaze-hover {
+  background:
+    radial-gradient(
+      ellipse 58% 52% at 50% 46%,
+      rgb(240 160 48 / calc(var(--gaze-dwell-progress, 0) * 26%)),
+      transparent 72%
+    ),
+    var(--kb-key);
+}
+
+/* Traço de progresso: curto, centrado, sob o glifo. Cresce do meio para fora. */
+.kb-key::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 13%;
+  transform: translateX(-50%);
+  width: calc(var(--gaze-dwell-progress, 0) * 30%);
+  height: 10px;
+  border-radius: 999px;
+  background: var(--kb-ember);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+}
+.kb-key.gaze-hover::after {
+  opacity: 1;
+}
+
+.kb-key--fired {
+  background: var(--kb-ember-bright);
+  border-color: var(--kb-ember-bright);
+  color: var(--kb-ground);
+}
+
+.kb-key.kb-key-empty,
+.kb-key.kb-key-empty::after {
+  opacity: 0;
+  border-color: transparent;
+}
+
+.kb-nav {
+  background: transparent;
+  border: 1px solid var(--kb-key-edge);
+  border-radius: 20px;
+  color: var(--kb-glyph-dim);
+  padding: 0;
+  transition:
+    background-color 120ms linear,
+    border-color 120ms linear;
+}
+.kb-nav:hover,
+.kb-nav.gaze-hover {
+  outline: none;
+  box-shadow: none;
+  border-color: var(--kb-ember-edge);
+  background: color-mix(
+    in oklab,
+    transparent,
+    var(--kb-ember) calc(var(--gaze-dwell-progress, 0) * 34%)
+  );
+}
+.kb-nav .gaze-button-progress-ring,
+.kb-nav.gaze-hover::before {
+  display: none;
+}
+.kb-nav::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  bottom: 18%;
+  transform: translateX(-50%);
+  width: calc(var(--gaze-dwell-progress, 0) * 44%);
+  height: 8px;
+  border-radius: 999px;
+  background: var(--kb-ember);
+  opacity: 0;
+  pointer-events: none;
+}
+.kb-nav.gaze-hover::after {
+  opacity: 1;
+}
+
+@keyframes kb-caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+@keyframes kb-land {
+  from {
+    opacity: 0.35;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .kb-key,
+  .kb-nav {
+    transition: none;
+  }
+  .kb-caret,
+  .kb-landing {
+    animation: none;
   }
 }
 
-/* Zoom suave na galeria */
-.gallery-item {
-  transition: transform 0.25s cubic-bezier(0.16, 1, 0.3, 1);
-}
-.gallery-item:hover,
-.gallery-item:focus-within {
-  transform: scale(1.03);
-}
-
-/* Dwell progress — feedback visual para seleção por olhar */
-.dwell-wrapper {
-  position: relative;
-  overflow: hidden;
-}
-.dwell-progress {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(
-    to right,
-    rgba(27, 84, 168, 0.22) var(--dwell-pct, 0%),
-    transparent var(--dwell-pct, 0%)
-  );
-  pointer-events: none;
-  border-radius: inherit;
-}
-.dwell-ring {
-  position: absolute;
-  top: 0.5rem;
-  right: 0.5rem;
-  width: 28px;
-  height: 28px;
-  border-radius: 50%;
-  background: conic-gradient(
-    #1b54a8 calc(var(--dwell-pct, 0%) * 3.6deg),
-    rgba(27, 84, 168, 0.15) 0
-  );
-  transition: background 0.05s linear;
-  pointer-events: none;
-}
-
-/* Gaze feedback - aplicado dinamicamente pelo GazeContext ao hitTarget */
-.gaze-hover {
-  transform: scale(1.04) !important;
-  box-shadow: 0 12px 32px rgba(27, 84, 168, 0.25) !important;
-  border-color: #1B54A8 !important;
-  z-index: 50;
-  position: relative;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-/* ─────────────────────────────────────────────────────────────────────────────
- * Teste de precisão (src/accuracy.ts)
- *
- * Sem esse bloco o overlay era criado invisível: os divs recebiam classe mas
- * nenhuma regra existia, o teste rodava 17 s sem feedback visual e o JSON
- * gerado era lixo (o usuário estava olhando para a UI, não para os pontos).
- * ──────────────────────────────────────────────────────────────────────────── */
-
+/* ---------------------------------------------------------------------------
+ * 9. Teste de precisão (src/accuracy.ts) — overlay em tela cheia
+ *    Sempre escuro: o teste mede o olhar sobre fundo neutro.
+ * ------------------------------------------------------------------------- */
 .accuracy-overlay {
   position: fixed;
   inset: 0;
@@ -428,20 +1709,20 @@ select:focus-visible,
   top: 2rem;
   left: 50%;
   transform: translateX(-50%);
-  font-family: 'Inter', system-ui, sans-serif;
-  font-size: 1.15rem;
+  font-family: var(--font-body);
+  font-size: var(--fs-18);
   font-weight: 600;
   letter-spacing: 0.02em;
   padding: 0.75rem 1.5rem;
   background: rgba(255, 255, 255, 0.08);
   border: 1px solid rgba(255, 255, 255, 0.15);
-  border-radius: 999px;
+  border-radius: var(--r-pill);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   white-space: nowrap;
 }
 .accuracy-instruction .highlight {
-  color: #38bdf8;
+  color: var(--accent);
   font-weight: 700;
 }
 
@@ -461,30 +1742,40 @@ select:focus-visible,
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  border: 2px solid rgba(56, 189, 248, 0.4);
+  border: 2px solid color-mix(in srgb, var(--accent) 40%, transparent);
   animation: accuracyRingPulse 1.6s ease-in-out infinite;
 }
 .accuracy-dot .dot-inner {
   width: 26px;
   height: 26px;
   border-radius: 50%;
-  background: #38bdf8;
+  background: var(--accent);
   box-shadow:
-    0 0 24px rgba(56, 189, 248, 0.9),
-    0 0 60px rgba(56, 189, 248, 0.5);
+    0 0 24px color-mix(in srgb, var(--accent) 90%, transparent),
+    0 0 60px color-mix(in srgb, var(--accent) 50%, transparent);
   animation: accuracyDotPulse 1.2s ease-in-out infinite alternate;
 }
 @keyframes accuracyRingPulse {
-  0%, 100% { transform: scale(0.85); opacity: 0.9; }
-  50%      { transform: scale(1.15); opacity: 0.35; }
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.35;
+  }
 }
 @keyframes accuracyDotPulse {
-  from { transform: scale(0.9); }
-  to   { transform: scale(1.15); }
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1.15);
+  }
 }
 
-/* ── Diagnostic overlay (resumo pós-teste) ─────────────────────────────────── */
-
+/* Resumo pós-teste */
 .diagnostic-overlay {
   position: fixed;
   inset: 0;
@@ -494,8 +1785,11 @@ select:focus-visible,
   overflow: hidden;
   opacity: 0;
   transition: opacity 0.3s ease-out;
+  font-family: var(--font-body);
 }
-.diagnostic-overlay.visible { opacity: 1; }
+.diagnostic-overlay.visible {
+  opacity: 1;
+}
 
 .diagnostic-svg {
   position: absolute;
@@ -512,44 +1806,55 @@ select:focus-visible,
   transform: translateX(-50%);
   max-width: min(1100px, 92vw);
   width: 92vw;
+  max-height: calc(100vh - 4rem);
+  overflow-y: auto;
   pointer-events: auto;
 }
 
 .diagnostic-card {
-  background: rgba(15, 23, 42, 0.9);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 1.5rem;
+  background: rgba(15, 23, 42, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--r-lg);
   padding: 1.75rem 2rem;
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
   box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
-  font-family: 'Inter', system-ui, sans-serif;
 }
 
 .diagnostic-title {
-  font-size: 1.5rem;
-  font-weight: 800;
+  font-family: var(--font-display);
+  font-size: var(--fs-24);
   color: #ffffff;
   margin-bottom: 1rem;
 }
 
 .diagnostic-legend {
   display: flex;
+  flex-wrap: wrap;
   gap: 1.5rem;
   margin-bottom: 1.25rem;
   font-size: 0.9rem;
   color: #cbd5e1;
 }
-.legend-item { display: inline-flex; align-items: center; gap: 0.5rem; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
 
 .diagnostic-metrics {
   display: flex;
   align-items: stretch;
   gap: 1rem;
   padding: 1rem 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-top: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
   margin-bottom: 1.25rem;
 }
 .metric-item {
@@ -559,10 +1864,48 @@ select:focus-visible,
   align-items: center;
   justify-content: center;
   gap: 0.35rem;
+  text-align: center;
 }
-.metric-value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
-.metric-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
-.metric-divider { width: 1px; background: rgba(255, 255, 255, 0.08); }
+.metric-value {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.metric-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.metric-divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.diagnostic-hitrate {
+  font-size: 1rem;
+  color: #cbd5e1;
+  margin-bottom: 1rem;
+}
+
+.diagnostic-advice {
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.25rem;
+  border-radius: var(--r-md);
+  border-left: 3px solid var(--warn);
+  background: rgba(255, 255, 255, 0.05);
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.diagnostic-advice strong {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #ffffff;
+}
+.diagnostic-advice p {
+  margin: 0.25rem 0 0;
+}
 
 .diagnostic-point-grid {
   display: grid;
@@ -572,28 +1915,83 @@ select:focus-visible,
 }
 .diag-point-card {
   padding: 0.5rem 0.4rem;
-  border-radius: 0.6rem;
+  border-radius: var(--r-sm);
   border: 1px solid transparent;
   text-align: center;
   background: rgba(255, 255, 255, 0.04);
 }
-.diag-point-card.diag-ok   { border-color: rgba(34, 197, 94, 0.45); }
-.diag-point-card.diag-warn { border-color: rgba(255, 204, 0, 0.45); }
-.diag-point-card.diag-bad  { border-color: rgba(239, 68, 68, 0.45); }
-.diag-point-name  { font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.2rem; }
-.diag-point-error { font-size: 0.95rem; font-weight: 700; color: #ffffff; }
+.diag-point-card.diag-ok {
+  border-color: rgba(34, 197, 94, 0.5);
+}
+.diag-point-card.diag-warn {
+  border-color: rgba(251, 191, 36, 0.5);
+}
+.diag-point-card.diag-bad {
+  border-color: rgba(239, 68, 68, 0.5);
+}
+.diag-point-card.diag-none {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.18);
+  opacity: 0.6;
+}
+.diag-point-name {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-bottom: 0.2rem;
+}
+.diag-point-error {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
 
 .diagnostic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
   font-size: 0.9rem;
   color: #94a3b8;
   text-align: center;
 }
+.diagnostic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-width: 200px;
+  min-height: 64px;
+  padding: 0.75rem 1.5rem;
+  border-radius: var(--r-md);
+  border: 2px solid var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+  font-size: var(--fs-18);
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
+}
+.diagnostic-btn:hover,
+.diagnostic-btn:focus-visible {
+  box-shadow: 0 0 0 6px color-mix(in srgb, var(--accent) 30%, transparent);
+}
+.diagnostic-btn.secondary {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+.diagnostic-btn.secondary:hover {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15);
+}
 .diagnostic-actions kbd {
   display: inline-block;
   padding: 0.15rem 0.5rem;
-  margin: 0 0.2rem;
-  background: rgba(255, 255, 255, 0.1);
-  border: 1px solid rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.14);
+  border: 1px solid rgba(255, 255, 255, 0.25);
   border-radius: 0.35rem;
   font-family: inherit;
   font-size: 0.85rem;
@@ -601,311 +1999,16 @@ select:focus-visible,
   color: #ffffff;
 }
 
-/* Cores qualitativas do score (usadas no bloco de resumo persistido) */
-.accuracy-excellent { color: #22c55e; }
-.accuracy-good      { color: #00fff0; }
-.accuracy-regular   { color: #ffcc00; }
-.accuracy-poor      { color: #ef4444; }
-
-/* ────────────────────────────────────────────────────────────────────────────
- * Design System de Interação Ocular — Componentes Canônicos (Sprint B1)
- * ──────────────────────────────────────────────────────────────────────────── */
-
-.gaze-button {
-  position: relative;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-sizing: border-box;
-  border-radius: 1.5rem;
-  border: 2px solid var(--color-card-border);
-  background: var(--color-card-bg);
-  color: var(--color-text-base);
-  font-family: inherit;
-  font-weight: 700;
-  font-size: 1.25rem;
-  cursor: pointer;
-  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s, box-shadow 0.15s;
+/* Cores qualitativas do score (bloco de resumo persistido) */
+.accuracy-excellent {
+  color: #22c55e;
 }
-
-/* 1. Entrada: contorno destacado */
-.gaze-button.gaze-hover {
-  border-color: var(--color-primary, #1B54A8);
-  box-shadow: 0 0 0 4px rgba(27, 84, 168, 0.2);
-  transform: scale(1.02);
+.accuracy-good {
+  color: #38bdf8;
 }
-
-/* 2. Área de acionamento 1.2x */
-/*
- * Zona de acerto ampliada do botão — B3.27.
- *
- * A extensão existe porque o cursor de gaze tem jitter: sem ela, um tremor de
- * poucos pixels na borda do botão faz `elementFromPoint` devolver o container
- * e o dwell zera.
- *
- * ⚠️ A versão anterior usava `-10%` em todos os lados, o que estende a área
- * POR CIMA dos vizinhos. Onde o espaçamento entre botões for menor que 20% da
- * altura — o caso do teclado ocular — `elementFromPoint` passa a devolver o
- * botão ERRADO, e o paciente clica numa tecla que não estava olhando.
- *
- * A extensão agora é em pixels e limitada a metade do menor espaçamento usado
- * na UI (`--gaze-grid-gap`, 24px), com teto de 12px. Assim duas zonas vizinhas
- * se encostam no máximo, nunca se sobrepõem.
- */
-.gaze-button-hit-area {
-  position: absolute;
-  --gaze-hit-inset: min(12px, calc(var(--gaze-grid-gap, 24px) / 2));
-  top: calc(-1 * var(--gaze-hit-inset));
-  left: calc(-1 * var(--gaze-hit-inset));
-  right: calc(-1 * var(--gaze-hit-inset));
-  bottom: calc(-1 * var(--gaze-hit-inset));
-  border-radius: inherit;
-  z-index: 1;
-  pointer-events: auto; /* Garante que o hover seja disparado nessa zona maior */
+.accuracy-regular {
+  color: #fbbf24;
 }
-
-.gaze-button-content {
-  position: relative;
-  z-index: 2;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.75rem;
-  pointer-events: none;
-}
-
-/* 3. Progresso: anel desenhado por gradiente cônico */
-.gaze-button-progress-ring {
-  position: absolute;
-  inset: -2px;
-  border-radius: inherit;
-  pointer-events: none;
-  border: 4px solid transparent;
-  background: conic-gradient(
-    #1B54A8 calc(var(--gaze-dwell-progress, 0) * 360deg),
-    transparent 0
-  ) border-box;
-  -webkit-mask: 
-     linear-gradient(#fff 0 0) padding-box, 
-     linear-gradient(#fff 0 0);
-  -webkit-mask-composite: destination-out;
-  mask-composite: exclude;
-  opacity: 0;
-  z-index: 3;
-}
-.gaze-button.gaze-hover .gaze-button-progress-ring {
-  opacity: 1;
-}
-
-/* Emergência estilizada */
-.gaze-button.emergency {
-  border-color: #ef4444;
+.accuracy-poor {
   color: #ef4444;
-  background: rgba(239, 68, 68, 0.05);
-}
-.gaze-button.emergency.gaze-hover {
-  border-color: #dc2626;
-  box-shadow: 0 0 0 6px rgba(239, 68, 68, 0.25);
-  background: rgba(239, 68, 68, 0.1);
-  color: #ffffff;
-}
-.gaze-button.emergency .gaze-button-progress-ring {
-  background: conic-gradient(
-    #ef4444 calc(var(--gaze-dwell-progress, 0) * 360deg),
-    transparent 0
-  ) border-box;
-}
-
-/* Estado desabilitado */
-.gaze-button:disabled,
-.gaze-button[data-no-dwell="true"] {
-  opacity: 0.4;
-  cursor: not-allowed;
-  pointer-events: none;
-}
-
-/* ────────────────────────────────────────────────────────────────────────────
- * Teclado de varredura ocular (KeyboardScreen)
- *
- * PRINCÍPIO QUE GOVERNA ESTE BLOCO: nada de movimento na periferia.
- *
- * O usuário fixa o CENTRO da tecla. Qualquer animação nas bordas cai na
- * periferia do campo visual dele — que é a região mais sensível a movimento e
- * a que dispara sacada reflexa. Um indicador de dwell que se mexe nas bordas
- * convida o olho a sair do alvo e, com isso, cancela o próprio dwell que
- * estava reportando. Todo o feedback aqui acontece na FÓVEA: a tecla aquece
- * inteira (mudança de cor, sem deslocamento) e um traço curto cresce sob o
- * glifo, onde o olho já está pousado e não há para onde ser puxado.
- * ──────────────────────────────────────────────────────────────────────────── */
-
-.kb-key {
-  /* Anula o visual claro do .gaze-button. A tecla é uma superfície discreta
-     sobre o fundo, definida por um fio de contorno em vez de borda pesada. */
-  background: var(--kb-key);
-  border: 1px solid var(--kb-key-edge);
-  border-radius: 20px;
-  color: var(--kb-glyph);
-  padding: 0;
-  overflow: hidden;
-  /* Só a cor transiciona, e devagar: `transform` aqui deslocaria a tecla sob
-     o olhar fixo, que é exatamente o que não pode acontecer. */
-  transition: background-color 120ms linear, border-color 120ms linear;
-}
-
-/* Nível 1 — escolher um GRUPO. Recuado: contorno frio, rótulo mais quieto.
-   Nada foi comprometido ainda. */
-.kb-key--group {
-  color: var(--kb-glyph-dim);
-}
-
-/* Nível 1, tecla de palavras — a única que escreve uma palavra inteira em vez
-   de uma letra. O fio quente diz isso sem precisar de legenda. */
-.kb-key--words {
-  /* Recuada como os outros grupos: no nivel 1 tudo e previa. O fio ambar
-     sozinho ja diz que esta e a tecla que escreve palavra inteira — palavra em
-     contraste cheio MAIS fio seria o mesmo aviso dado duas vezes. */
-  color: var(--kb-glyph-dim);
-  border-color: var(--kb-ember-edge);
-}
-
-/* Nível 2 — escolher a LETRA. Avançado: glifo em contraste cheio. O par
-   recuado/avançado é o que diz ao usuário em que nível ele está sem ler nada. */
-.kb-key--letter {
-  color: var(--kb-glyph);
-}
-
-/* Sem scale nem sombra no hover: a tecla não pode se mexer sob o olhar. */
-.kb-key.gaze-hover {
-  box-shadow: none;
-  transform: none;
-  border-color: var(--kb-ember-edge);
-}
-
-/* O anel cônico canônico não serve aqui — ele vive na borda. */
-.kb-key .gaze-button-progress-ring {
-  display: none;
-}
-
-/* A tecla AQUECE conforme o dwell avança. Mudança de cor não tem posição, então
-   não existe alvo de movimento para o olho perseguir. O teto de 34% é
-   deliberado: o suficiente para ser inequívoco na visão central, longe de
-   virar um flash que ofusca. */
-.kb-key.gaze-hover {
-  background:
-    radial-gradient(
-      ellipse 58% 52% at 50% 46%,
-      rgb(240 160 48 / calc(var(--gaze-dwell-progress, 0) * 26%)),
-      transparent 72%
-    ),
-    var(--kb-key);
-}
-
-/* O traço de progresso: curto, centrado, logo abaixo do glifo. Cresce do meio
-   para fora, então ambas as pontas se afastam simetricamente e nenhuma delas
-   forma uma frente de movimento única que puxe a fixação. */
-.kb-key::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: 13%;
-  transform: translateX(-50%);
-  width: calc(var(--gaze-dwell-progress, 0) * 30%);
-  height: 10px;
-  border-radius: 999px;
-  background: var(--kb-ember);
-  opacity: 0;
-  pointer-events: none;
-  z-index: 1;
-}
-
-.kb-key.gaze-hover::after {
-  opacity: 1;
-}
-
-/* Confirmação: a tecla acende por um instante. É o único momento em que a cor
-   vai a brilho pleno, e marca a transição gaze → texto escrito. */
-.kb-key--fired {
-  background: var(--kb-ember-bright);
-  border-color: var(--kb-ember-bright);
-  color: var(--kb-ground);
-}
-
-/* Célula de preenchimento (subgrade de sugestões com menos de 6 itens):
-   ocupa a grade sem oferecer alvo nem desenhar nada. */
-.kb-key.kb-key-empty,
-.kb-key.kb-key-empty::after {
-  opacity: 0;
-  border-color: transparent;
-}
-
-/* Chrome de navegação (início / voltar). Mesma linguagem das teclas, porém
-   sempre recuado: são saídas, não conteúdo. */
-.kb-nav {
-  background: transparent;
-  border: 1px solid var(--kb-key-edge);
-  border-radius: 20px;
-  color: var(--kb-glyph-dim);
-  padding: 0;
-  transition: background-color 120ms linear, border-color 120ms linear;
-}
-
-.kb-nav.gaze-hover {
-  box-shadow: none;
-  transform: none;
-  border-color: var(--kb-ember-edge);
-  background: color-mix(
-    in oklab,
-    transparent,
-    var(--kb-ember) calc(var(--gaze-dwell-progress, 0) * 34%)
-  );
-}
-
-.kb-nav .gaze-button-progress-ring {
-  display: none;
-}
-
-.kb-nav::after {
-  content: '';
-  position: absolute;
-  left: 50%;
-  bottom: 18%;
-  transform: translateX(-50%);
-  width: calc(var(--gaze-dwell-progress, 0) * 44%);
-  height: 8px;
-  border-radius: 999px;
-  background: var(--kb-ember);
-  opacity: 0;
-  pointer-events: none;
-}
-
-.kb-nav.gaze-hover::after {
-  opacity: 1;
-}
-
-@keyframes kb-caret-blink {
-  50% {
-    opacity: 0;
-  }
-}
-
-/* O caractere recém-escrito assenta na linha de composição. Curto e sem
-   deslocamento lateral — é confirmação, não animação de trânsito. */
-@keyframes kb-land {
-  from {
-    opacity: 0.35;
-  }
-  to {
-    opacity: 1;
-  }
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .kb-key,
-  .kb-nav {
-    transition: none;
-  }
-  .kb-caret,
-  .kb-landing {
-    animation: none;
-  }
 }

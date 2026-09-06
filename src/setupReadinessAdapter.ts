@@ -1,23 +1,7 @@
-// Ponte entre `EngineDiagnostics` e `setupReadiness` — B3.16.
+// Ponte entre `EngineDiagnostics` e `ReadinessSnapshot`.
 //
-// ## Por que existe
-//
-// `evaluateReadiness` e `aggregateSnapshots` **não tinham chamador de
-// produção** — só testes. O README destaca "verificação de prontidão ao vivo"
-// como recurso, e o módulo inteiro estava lá, testado e correto, sem nunca
-// rodar.
-//
-// O que o paciente e o cuidador perdiam:
-//   • a checagem de VIEWPORT, que é a única defesa contra o erro angular
-//     inflado por rodar em janela não-maximizada (ver B2.9/B2.10);
-//   • a avaliação de `distanceRange`;
-//   • o aviso de cintilação;
-//   • e o `RunMeta` voltava a ser digitado à mão em vez de vir de medição.
-//
-// A peça que faltava era esta: `EngineDiagnostics` e `ReadinessSnapshot` têm
-// formatos diferentes, e ninguém tinha escrito a conversão. O adaptador é
-// puro, então dá para testá-lo sem DOM — e é por isso que ele mora em `src/`
-// e não dentro do componente React.
+// Os dois formatos são diferentes, e a conversão mora aqui — pura, testável
+// sem DOM — em vez de dentro do componente React.
 
 import type { EngineDiagnostics } from './tracker/engine';
 import type { ReadinessSnapshot } from './setupReadiness';
@@ -34,12 +18,11 @@ export interface ViewportInfo {
 /**
  * Converte um `EngineDiagnostics` em `ReadinessSnapshot`.
  *
- * Devolve `null` quando os campos de qualidade não foram medidos — decisão
- * herdada de B3.3: `brightness`/`contrast` são `undefined` quando o
- * `qualityAnalyzer` não conseguiu ler o crop, e `evaluateReadiness` exige
- * números. Preencher com zero faria a tela de prontidão reprovar a iluminação
- * a partir de uma não-leitura, que é exatamente o defeito que B3.3 corrigiu
- * do outro lado.
+ * Devolve `null` quando os campos de qualidade não foram medidos:
+ * `brightness`/`contrast` são `undefined` quando o `qualityAnalyzer` não
+ * conseguiu ler o crop, e `evaluateReadiness` exige números. Preencher com
+ * zero faria a tela de prontidão reprovar a iluminação a partir de uma
+ * não-leitura.
  *
  * `null` significa "ainda não dá para avaliar" — a UI mostra "medindo…" em vez
  * de um veredito falso.
@@ -49,10 +32,12 @@ export function snapshotFromDiagnostics(
   viewport: ViewportInfo,
 ): ReadinessSnapshot | null {
   const { brightness, contrast, detectorConfidence } = d.quality;
+  const specularRatio = d.framing.specularRatio;
   if (
     typeof brightness !== 'number' ||
     typeof contrast !== 'number' ||
-    typeof detectorConfidence !== 'number'
+    typeof detectorConfidence !== 'number' ||
+    typeof specularRatio !== 'number'
   ) {
     return null;
   }
@@ -68,7 +53,7 @@ export function snapshotFromDiagnostics(
     brightness,
     contrast,
     detectorConfidence,
-    specularRatio: d.framing.specularRatio,
+    specularRatio,
     viewportWidth: viewport.viewportWidth,
     viewportHeight: viewport.viewportHeight,
     screenWidth: viewport.screenWidth,

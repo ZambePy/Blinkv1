@@ -17,28 +17,9 @@
 // Este arquivo é só a parte pura: converter o que o SO devolve em diagonal.
 // A ponte com o Electron fica em `electron/main.ts` + `preload.ts`.
 
-// ---------------------------------------------------------------------------
-// B2.11 — o comando WMI mora AQUI, não inline em `electron/main.ts`.
-//
-// O bug: `electron/main.ts` montava a consulta com o literal
-//
-//   'Get-CimInstance -Namespace root\wmi -ClassName ...'
-//
-// e `\w` **não é um escape reconhecido** em string JavaScript — a barra é
-// simplesmente descartada. O PowerShell recebia `-Namespace rootwmi`, um
-// namespace que não existe, errava sempre, e o handler fazia `resolve([])`.
-//
-// O comentário do módulo chamava isso de "falha em silêncio de propósito",
-// então o sintoma parecia comportamento projetado. Na prática:
-// `screenGeometrySource` NUNCA saía de `'default'`, `screenDiagonalIn` ficava
-// travado em 23,6″, e esse número alimentava o erro angular do relatório e o
-// posicionamento dos alvos de calibração. **O recurso que o README destaca
-// como diferencial nunca funcionou uma única vez.**
-//
-// Trazer a string para o núcleo permite testá-la: o CI roda `windows-latest`
-// mas não abre o Electron, então o que dá para verificar deterministicamente é
-// a string gerada.
-// ---------------------------------------------------------------------------
+// O comando WMI mora aqui, e não inline em `electron/main.ts`, para ser
+// testável: o CI roda `windows-latest` mas não abre o Electron, então o que dá
+// para verificar deterministicamente é a string gerada.
 
 /**
  * Namespace WMI que expõe os parâmetros do painel.
@@ -125,29 +106,6 @@ export function pickPrimaryPanel(sizes: readonly PhysicalPanelSize[]): PhysicalP
 }
 
 /**
- * Normaliza o retorno do WMI.
- *
- * `Get-CimInstance WmiMonitorBasicDisplayParams` devolve
- * `MaxHorizontalImageSize` / `MaxVerticalImageSize` em CENTÍMETROS, e o
- * `ConvertTo-Json` do PowerShell entrega um objeto quando há um monitor só e
- * um array quando há vários — a fonte clássica de bug em quem consome isso.
- */
-export function parseWmiMonitorSizes(raw: unknown): PhysicalPanelSize[] {
-  const rows = Array.isArray(raw) ? raw : raw != null ? [raw] : [];
-  const out: PhysicalPanelSize[] = [];
-  for (const r of rows) {
-    if (!r || typeof r !== 'object') continue;
-    const o = r as Record<string, unknown>;
-    const w = o.MaxHorizontalImageSize ?? o.maxHorizontalImageSize;
-    const h = o.MaxVerticalImageSize ?? o.maxVerticalImageSize;
-    if (typeof w === 'number' && typeof h === 'number') {
-      out.push({ widthCm: w, heightCm: h });
-    }
-  }
-  return out;
-}
-
-/**
  * Escolhe, entre os painéis relatados pelo EDID, o que corresponde ao display
  * em que o app está rodando.
  *
@@ -156,13 +114,10 @@ export function parseWmiMonitorSizes(raw: unknown): PhysicalPanelSize[] {
  * display ativo é 16:9 e há um painel 16:9 e outro 16:10 na lista, a escolha
  * deixa de ser arbitrária.
  *
- * ⚠️ SOBRE O `scaleFactor` DO WINDOWS: ele NÃO entra na conversão px→cm, e vale
- * registrar por quê, porque a intuição diz o contrário. O app mede erro em px
- * CSS e a tela física cobre um número fixo de px CSS — com escala em 150%, uma
- * tela de 1920 px físicos reporta 1280 px CSS, e "1280 px CSS por 52 cm" é
- * exatamente a razão correta para converter um erro em px CSS para graus. A
- * escala se cancela. O que o `scaleFactor` serve é para DESAMBIGUAR qual
- * monitor é qual e para registrar a configuração no relatório.
+ * O `scaleFactor` do Windows NÃO entra na conversão px→cm: o app mede erro em
+ * px CSS e a tela física cobre um número fixo de px CSS, então a escala se
+ * cancela. Ele serve só para desambiguar qual monitor é qual e para registrar
+ * a configuração no relatório.
  */
 export function pickPanelForDisplay(
   sizes: readonly PhysicalPanelSize[],

@@ -10,7 +10,7 @@ import {
 } from './scanning';
 
 // -----------------------------------------------------------------------------
-// P7.4 — modo de varredura.
+// Modo de varredura.
 //
 // "É o fallback de acessibilidade mais importante do documento: é o que mantém
 // o paciente com alguma via de comunicação quando o rastreamento falha."
@@ -61,9 +61,9 @@ describe('a ativação', () => {
   it('o gatilho é "sem gaze", não "estado degraded"', () => {
     // Esta é a razão de a entrada não ter campo de estado do engine. Um
     // gatilho pendurado em `state === 'degraded'` herdaria os modos de falha
-    // que nunca alcançam esse estado — foi o `B2.3`, em que o app congelava em
-    // silêncio sem nunca entrar em degradado. O fallback de último recurso não
-    // pode compartilhar pressupostos com o sistema cuja falha ele cobre.
+    // que nunca alcançam esse estado (um app congelado em silêncio nunca
+    // entra em degradado). O fallback de último recurso não pode compartilhar
+    // pressupostos com o sistema cuja falha ele cobre.
     const chaves = Object.keys({
       gazeValido: false, piscando: false, nowMs: 0, totalItens: 4,
     });
@@ -170,8 +170,8 @@ describe('a seleção por piscada', () => {
 
   it('piscada CURTA (espontânea) não seleciona', () => {
     // No scanning a piscada é a ÚNICA entrada — não há "olhar estável sobre o
-    // alvo" para servir de segunda confirmação, como há no `P7.3`. A guarda de
-    // duração precisa carregar sozinha o peso que lá era dividido.
+    // alvo" para servir de segunda confirmação, como há no clique por piscada.
+    // A guarda de duração precisa carregar sozinha o peso que lá era dividido.
     const a = rodar(criarEstadoScanning(), 3100, { gazeValido: false }, 0);
     const b = rodar(a.estado, SCANNING_SELECAO_MIN_MS - 60, { gazeValido: false, piscando: true }, a.t);
     const r = stepScanning(b.estado, {
@@ -189,9 +189,8 @@ describe('a seleção por piscada', () => {
     //
     // O passo é encurtado aqui de propósito. Com os 1200 ms de produção uma
     // piscada de 250 ms quase nunca cruza a fronteira, e o teste passaria sem
-    // exercitar nada — foi o que aconteceu na primeira versão dele: o código
-    // TINHA o defeito e o teste passava. Medido com passo de 200 ms: destaque
-    // no item 1, piscada de 264 ms, selecionava o item 2.
+    // exercitar nada. Com passo de 200 ms: destaque no item 1, piscada de
+    // 264 ms, selecionaria o item 2.
     const O = { ativaAposMs: 100, passoMs: 200, saidaEstavelMs: 500, selecaoMinMs: 150 };
     let e = criarEstadoScanning();
     let t = 0;

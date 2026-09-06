@@ -7,10 +7,8 @@ import {
 } from './distanceAdvisory';
 
 // -----------------------------------------------------------------------------
-// P6.9 — aviso de distância fora de faixa.
-//
-// Aceite: os três estados (dentro / fora para perto / fora para longe), a
-// histerese, e o texto do banner dizendo a DIREÇÃO CORRETA.
+// Aviso de distância fora de faixa: os três estados (dentro / fora para perto /
+// fora para longe), a histerese, e o texto do banner dizendo a DIREÇÃO CORRETA.
 //
 // A direção é onde é fácil errar: quem está PERTO demais precisa se AFASTAR.
 // Um banner que diz o contrário piora a situação com confiança.
@@ -62,7 +60,7 @@ describe('os três estados', () => {
 
   it('o texto não traz o percentual — ele é provisório', () => {
     // Comunicar "16% fora" transmitiria uma precisão que o número não tem: a
-    // faixa sai de `F8.7` e ainda não foi medida.
+    // faixa é provisória e ainda não foi medida.
     for (const e of ['perto', 'longe'] as const) {
       expect(mensagemPara(e)).not.toMatch(/\d+\s*%/);
     }
@@ -150,7 +148,7 @@ describe('sem medição, não se afirma nada', () => {
 });
 
 describe('configuração e ciclo de vida', () => {
-  it('a faixa é configurável — F8.7 vai substituir o provisório', () => {
+  it('a faixa é configurável', () => {
     const estrito = new AvisoDeDistancia({ faixaPct: 0.05 });
     expect(estrito.avaliar(CALIB * 1.08, CALIB).estado).toBe('longe');
     const frouxo = new AvisoDeDistancia({ faixaPct: 0.4 });

@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { extractEyeFeatures, extractCompactFeatures, projectFeatureSet } from './extractor';
-import { extractFeatures, USE_COMPACT_FEATURES } from './featurePipeline';
+import { extractCompactFeatures, projectFeatureSet } from './extractor';
+import { extractFeatures } from './featurePipeline';
 import type { Point3D } from './extractor';
 
 // Deterministic synthetic MediaPipe frame: 478 landmarks with unique non-degenerate
@@ -15,25 +15,20 @@ function makeSyntheticLandmarks(): Point3D[] {
 }
 
 describe('featurePipeline: parity with the active extractor', () => {
-  // B1.1: both the extractor and the pipeline now REQUIRE the L2CS angular
-  // block to be present, because the active feature set indexes into [37..38].
-  // Passing no gaze used to yield a 37-dim vector that `projectFeatureSet`
-  // returned intact — the silent corruption B1.1 fixes. Parity is still the
-  // property under test here; the gaze is supplied to BOTH sides so the
-  // comparison is apples-to-apples.
+  // Both the extractor and the pipeline REQUIRE the L2CS angular block to be
+  // present, because the active feature set indexes into [37..38]. Passing no
+  // gaze used to yield a 37-dim vector that `projectFeatureSet` returned
+  // intact — a silent corruption. Parity is still the property under test
+  // here; the gaze is supplied to BOTH sides so the comparison is
+  // apples-to-apples.
   const GAZE = { yaw: 0.14, pitch: -0.09, valid: true } as const;
 
   it('extractFeatures returns featuresLeft and featuresRight with identical length, order, and values to the underlying extractor', () => {
     const landmarks = makeSyntheticLandmarks();
 
-    // USE_COMPACT_FEATURES: the pipeline routes to extractCompactFeatures
-    // (~31 dims) when the flag is on, and to extractEyeFeatures (~260 dims)
-    // otherwise. Parity is checked against whichever path is currently active
-    // — a silent divergence between the pipeline and its underlying extractor
+    // A silent divergence between the pipeline and its underlying extractor
     // would break stored profiles.
-    const direct = USE_COMPACT_FEATURES
-      ? extractCompactFeatures(landmarks, undefined, GAZE)
-      : extractEyeFeatures(landmarks);
+    const direct = extractCompactFeatures(landmarks, undefined, GAZE);
     const piped = extractFeatures(landmarks, undefined, GAZE);
 
     // Parity is against the PROJECTION of the extractor onto the active set,

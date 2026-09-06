@@ -6,11 +6,9 @@ import {
 } from './gazeFallback';
 
 // -----------------------------------------------------------------------------
-// P7.5 — última posição válida por 2 s, depois "Posicione o rosto".
-//
-// O comportamento atual do `GazeContext` é: rosto some → opacidade 0.35 →
-// nada mais, para sempre. O cursor fantasma fica na tela indefinidamente, e o
-// paciente não tem como distinguir "a câmera não me vê" de "o app travou".
+// Rosto perdido: última posição válida por 2 s, depois "Posicione o rosto".
+// Sem isso o cursor fantasma ficaria na tela indefinidamente e o paciente não
+// distinguiria "a câmera não me vê" de "o app travou".
 // -----------------------------------------------------------------------------
 
 const P = (x: number, y: number, nowMs: number) =>
@@ -94,8 +92,7 @@ describe('perda longa: esconde e avisa', () => {
 
   it('a posição vira `null`, não (0,0)', () => {
     // (0,0) desenharia um cursor no canto superior esquerdo, que o paciente
-    // leria como uma posição de olhar. É a mesma distinção de `B3.3`: "não
-    // sei" não é um número.
+    // leria como uma posição de olhar. "Não sei" não é um número.
     const f = new GazeFallback();
     f.step(P(800, 400, 1000));
     const r = f.step(PERDIDO(4000));

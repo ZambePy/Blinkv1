@@ -37,30 +37,24 @@ export class LowPassFilter {
 }
 
 /**
- * Intervalo mínimo entre amostras, em segundos (B3.5).
- *
- * 1/240 cobre monitores de alta taxa com folga. Existe porque `dt = 0` levava
- * `alpha` a 0 e `LowPassFilter.setAlpha` **lança** para alpha ≤ 0 — a exceção
- * subia pelo `filter()`, saía do engine e o `loopGuard` descartava o FRAME
- * INTEIRO. Alcançável com `performance.now()` grosseirizado (mitigação de
- * Spectre reduz a resolução para 1 ms ou pior em alguns browsers) e
- * trivialmente em replay, onde dois frames podem carregar o mesmo timestamp.
+ * Intervalo mínimo entre amostras, em segundos. 1/240 cobre monitores de alta
+ * taxa com folga. `dt = 0` (timestamps iguais em replay, ou `performance.now()`
+ * grosseirizado) levaria `alpha` a 0 e `setAlpha` lança — o frame inteiro
+ * seria descartado pelo `loopGuard`.
  */
 export const DT_MIN_SEC = 1 / 240;
 
 /**
- * Intervalo máximo entre amostras, em segundos (B3.5).
- *
- * 1/5 corresponde a 5 fps — abaixo disso o rastreamento já não é utilizável.
- * Existe porque `dt` grande (aba em segundo plano, GC longo, sleep/wake)
- * levava `alpha → 1`: o filtro virava identidade e o cursor SALTAVA sem
- * suavização, justamente no frame em que o usuário volta a olhar para a tela.
+ * Intervalo máximo entre amostras, em segundos. 1/5 é 5 fps — abaixo disso o
+ * rastreamento já não é utilizável. `dt` grande (aba em segundo plano, GC
+ * longo, sleep/wake) levaria `alpha → 1`: o filtro vira identidade e o cursor
+ * salta justamente no frame em que o usuário volta a olhar para a tela.
  */
 export const DT_MAX_SEC = 1 / 5;
 
 export class OneEuroFilter {
   private freq: number;
-  /** Frequência do construtor, para `reset()` poder restaurá-la (B3.5). */
+  /** Frequência do construtor, para `reset()` poder restaurá-la. */
   private readonly freqInicial: number;
   private mincutoff: number;
   private beta_: number;
@@ -80,11 +74,9 @@ export class OneEuroFilter {
     this.dcutoff = dcutoff;
   }
 
-  // Setters para mutação em tempo real pelo setParams da classe pai.
-  // Permitem que OneEuroFilter2D.setParams preserve o estado filtrado (x, dx,
-  // lasttime) enquanto troca os parâmetros de corte. Sem esses setters, a
-  // única opção era recriar a instância, o que zeraria o estado e causaria
-  // salto visível no cursor.
+  // Setters para `OneEuroFilter2D.setParams` trocar os parâmetros de corte
+  // preservando o estado filtrado — recriar a instância zeraria o estado e
+  // causaria salto visível no cursor.
   public setMincutoff(mincutoff: number): void {
     if (mincutoff <= 0) throw new Error("mincutoff should be >0");
     this.mincutoff = mincutoff;
@@ -96,31 +88,26 @@ export class OneEuroFilter {
     this.x = null;
     this.dx = null;
     this.lasttime = -1;
-    // B3.5 — `freq` também é estado de sessão. Sem restaurá-la, um dt
-    // patológico anterior continuava governando o alpha até o próximo par de
-    // timestamps válidos.
+    // `freq` também é estado de sessão: sem restaurá-la, um dt patológico
+    // anterior continuava governando o alpha até o próximo par de timestamps.
     this.freq = this.freqInicial;
   }
 
-  // Delega para a função exportada (B2.15) — uma única implementação da
-  // fórmula, para que o número declarado nos presets e o número usado pelo
-  // filtro não possam divergir.
+  // Uma única implementação da fórmula, para que o número declarado nos
+  // presets e o número usado pelo filtro não possam divergir.
   private alpha(cutoff: number): number {
     return alphaFromCutoff(cutoff, this.freq);
   }
 
   public filter(value: number, timestamp: number = -1): number {
+    // Um NaN de entrada contaminaria o estado até o próximo reset(); o filtro
+    // devolve o último valor conhecido em vez de propagar.
+    if (!Number.isFinite(value)) {
+      return this.x ? this.x.lastValue() : 0;
+    }
     if (this.lasttime !== -1 && timestamp !== -1) {
-      // B3.5 — `dt` é clampado em [DT_MIN_SEC, DT_MAX_SEC].
-      //
-      // Sem o clamp:
-      //   dt = 0        → alpha = 0 → `setAlpha` LANÇA → frame inteiro perdido
-      //   dt < 0        → alpha fora de (0,1] → idem
-      //   dt muito alto → alpha ≈ 1 → filtro vira identidade, cursor salta
-      //
-      // O primeiro caso é alcançável com `performance.now()` grosseirizado e
-      // trivial em replay; o terceiro acontece toda vez que a aba volta do
-      // segundo plano.
+      // `dt` clampado em [DT_MIN_SEC, DT_MAX_SEC]: dt ≤ 0 faria `setAlpha`
+      // lançar; dt muito alto faria o filtro virar identidade.
       const bruto = timestamp - this.lasttime;
       const dt = Number.isFinite(bruto)
         ? Math.min(DT_MAX_SEC, Math.max(DT_MIN_SEC, bruto))
@@ -130,13 +117,10 @@ export class OneEuroFilter {
     this.lasttime = timestamp;
     
     const dvalue = this.x ? (value - this.x.lastValue()) * this.freq : 0.0;
-    // E8 ponto 1 do L2CS-NET.md: alpha depende de te = 1/freq, e freq é
-    // atualizado com Δt real logo acima. Sem o setAlpha aqui, o dx ficava
-    // preso ao freq inicial do constructor (60 Hz), amortecendo demais a
-    // derivada quando os frames chegavam a 30 Hz — resultado: `edvalue`
-    // sub-representa velocidade → cutoff fica baixo durante movimento rápido
-    // → filtro suaviza demais justamente quando deveria ser responsivo.
-    // Simétrico com o setAlpha do this.x logo abaixo.
+    // alpha depende de te = 1/freq, e freq acabou de ser atualizado com o Δt
+    // real. Sem o setAlpha aqui o dx ficava preso ao freq do constructor,
+    // sub-representando a velocidade a 30 Hz e suavizando demais justamente
+    // no movimento rápido. Simétrico com o setAlpha do this.x abaixo.
     if (this.dx === null) {
       this.dx = new LowPassFilter(this.alpha(this.dcutoff));
     } else {
@@ -165,21 +149,13 @@ export class OneEuroFilter {
 export type FilterPreset = 'estavel' | 'balanceado' | 'responsivo';
 
 /**
- * Ganho do passa-baixa para um cutoff e uma taxa de amostragem (B2.15).
- *
+ * Ganho do passa-baixa para um cutoff e uma taxa de amostragem:
  * `alpha = 1/(1 + τ/te)`, com `τ = 1/(2π·fc)` e `te = 1/freq`.
  *
- * Exportada porque os presets abaixo declaram o alpha que produzem, e um
- * teste verifica que a declaração bate com a fórmula. Antes de B2.15 os
- * comentários dos presets afirmavam valores de alpha que o filtro **nunca
- * produziu** — "mincutoff=0.02 → alpha≈0.99" quando o real é 0,0042, e
- * "mincutoff=0.5 → alpha≈0.50" quando o real é 0,095 (5× menor). Os betas
- * foram reajustados em cima desses números falsos.
- *
- * **`alpha` é adimensional e não depende do espaço de coordenadas.** Só o
- * termo `beta·|ẋ|` muda de escala entre pixel e normalizado. Toda a motivação
- * original do bloco "v2" está apoiada num raciocínio que não se sustenta: o
- * que estava inativo era o efeito do BETA, não o do mincutoff.
+ * Exportada porque os presets declaram o alpha que produzem e um teste
+ * verifica que a declaração bate com a fórmula. `alpha` é adimensional e não
+ * depende do espaço de coordenadas — só o termo `beta·|ẋ|` muda de escala
+ * entre pixel e normalizado.
  */
 export function alphaFromCutoff(cutoffHz: number, freqHz: number): number {
   const te = 1 / freqHz;
@@ -187,7 +163,7 @@ export function alphaFromCutoff(cutoffHz: number, freqHz: number): number {
   return 1 / (1 + tau / te);
 }
 
-/** Constante de tempo do passa-baixa, em segundos: `τ = 1/(2π·fc)` (B2.15).
+/** Constante de tempo do passa-baixa, em segundos: `τ = 1/(2π·fc)`.
  *  É o número que descreve o comportamento observável — quanto tempo um viés
  *  residual leva para decair a ~37%. */
 export function tauFromCutoff(cutoffHz: number): number {
@@ -197,41 +173,28 @@ export function tauFromCutoff(cutoffHz: number): number {
 export interface FilterConfig {
   mincutoff: number;
   beta: number;
-  useRollingBuffer: boolean; // buffer de 6 frames — legado, pode adicionar lag sem ganho
-  // Quando true, o filtro é aplicado em coordenadas normalizadas [0,1]
-  // ANTES da conversão para pixel.
-  //
-  // B2.15 — a justificativa original desta flag estava errada. Ela dizia que
-  // em espaço de pixel "alpha≈0.99, o filtro fica praticamente inativo" e que
-  // em normalizado "mincutoff=0.5 produz alpha≈0.50". Ambos os números são
-  // falsos e `alpha` sequer depende do espaço de coordenadas.
-  //
-  // O que a flag de fato muda é a escala de `|ẋ|` no termo `beta·|ẋ|`: em
-  // pixel a velocidade é ~1000× maior que em normalizado, então o mesmo beta
-  // produz efeitos completamente diferentes. A flag continua útil por isso —
-  // só não pelo motivo que estava escrito.
+  // Quando true, o filtro é aplicado em coordenadas normalizadas [0,1] ANTES
+  // da conversão para pixel. O que muda é a escala de `|ẋ|` no termo
+  // `beta·|ẋ|`: em pixel a velocidade é ~1000× maior que em normalizado,
+  // então o mesmo beta produz efeitos completamente diferentes.
   filterInNormalizedSpace: boolean;
-  /** Alpha em repouso a 30 fps, MEDIDO pela fórmula (B2.15). Declarado no
-   *  preset para que a documentação não possa divergir do comportamento sem
-   *  quebrar um teste. */
+  /** Alpha em repouso a 30 fps, derivado da fórmula. Declarado no preset para
+   *  que a documentação não possa divergir do comportamento. */
   alphaAt30: number;
-  /** Constante de tempo em segundos (B2.15). É o número que diz quanto tempo
-   *  o cursor leva para acomodar — o que o cuidador percebe. */
+  /** Constante de tempo em segundos — quanto tempo o cursor leva para
+   *  acomodar, que é o que o cuidador percebe. */
   tauSec: number;
 }
 
-/** Monta um preset já com `alphaAt30` e `tauSec` derivados do mincutoff, para
- *  os números declarados não poderem divergir da fórmula (B2.15). */
+/** Monta um preset já com `alphaAt30` e `tauSec` derivados do mincutoff. */
 function preset(
   mincutoff: number,
   beta: number,
   filterInNormalizedSpace: boolean,
-  useRollingBuffer = false,
 ): FilterConfig {
   return {
     mincutoff,
     beta,
-    useRollingBuffer,
     filterInNormalizedSpace,
     alphaAt30: alphaFromCutoff(mincutoff, 30),
     tauSec: tauFromCutoff(mincutoff),
@@ -239,22 +202,16 @@ function preset(
 }
 
 export const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
-  // Presets em espaço de pixel (legado).
-  //
-  // B2.15 — o comentário anterior dizia "alpha≈0.99 a 30fps, suavização vem
-  // quase toda do useRollingBuffer". Os valores reais são o OPOSTO:
+  // Presets em espaço de pixel (legado). A 30 fps:
   //
   //   estavel     mincutoff 0,020 → alpha 0,0042, τ = 7,96 s
   //   balanceado  mincutoff 0,050 → alpha 0,0104, τ = 3,18 s
   //   responsivo  mincutoff 0,150 → alpha 0,0304, τ = 1,06 s
   //
-  // Ou seja: estes presets filtram DEMAIS, não de menos. Um τ de 3,18 s no
-  // "balanceado" significa que um viés residual leva mais de 3 s para decair —
-  // inutilizável para um dwell de 1,5 s.
-  //
-  // Mantidos com os mesmos números para não mudar o comportamento de sessões
-  // existentes sem medição (regra 4 do plano). O que muda é a documentação
-  // deixar de mentir. A escolha do preset default é do F8.5, no Dia 7.
+  // Estes presets filtram DEMAIS: um τ de 3,18 s significa que um viés
+  // residual leva mais de 3 s para decair — inutilizável para um dwell de
+  // 1,5 s. Mantidos com os mesmos números para não mudar o comportamento de
+  // sessões existentes sem medição.
   estavel:    preset(0.020, 0.3, false),
   balanceado: preset(0.050, 2.5, false),
   responsivo: preset(0.150, 8.0, false),
@@ -268,22 +225,14 @@ export const FILTER_PRESETS: Record<FilterPreset, FilterConfig> = {
 export type FilterPresetV2 = 'estavel-v2' | 'balanceado-v2' | 'responsivo-v2';
 
 export const FILTER_PRESETS_V2: Record<FilterPresetV2, FilterConfig> = {
-  // B2.15 — os alphas REAIS destes presets, a 30 fps:
+  // A 30 fps:
   //
   //   estavel-v2     mincutoff 0,30 → alpha 0,0592, τ = 0,53 s
   //   balanceado-v2  mincutoff 0,50 → alpha 0,0948, τ = 0,32 s
   //   responsivo-v2  mincutoff 1,00 → alpha 0,1730, τ = 0,16 s
   //
-  // O comentário anterior afirmava "mincutoff ≈ 0.5 produz alpha≈0.50". O real
-  // é 0,095 — **5× menor**. Consequência: um viés residual de 40 px converge
-  // em ~1 s, não nos ~60 ms que o número documentado sugeria. Os betas
-  // (2,5/5/12) foram escolhidos em cima dessa premissa errada.
-  //
-  // Os valores NÃO foram alterados aqui de propósito: mudar parâmetro de
-  // filtro sem medição contraria a regra 4 do plano, e o benchmark F8.5 do
-  // Dia 7 existe exatamente para escolhê-los com dado. O que B2.15 entrega é a
-  // base honesta para esse benchmark — comparar Kalman+EMA contra um One Euro
-  // cujos números ninguém sabia seria uma comparação viciada.
+  // Um viés residual de 40 px converge em ~1 s. Os betas (2,5/5/12) são
+  // provisórios até haver medição comparativa com as outras cadeias.
   'estavel-v2':    preset(0.30, 2.5,  true),
   'balanceado-v2': preset(0.50, 5.0,  true),
   'responsivo-v2': preset(1.00, 12.0, true),

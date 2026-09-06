@@ -15,20 +15,13 @@ import type { Pose } from './poseCompensation';
 import type { CentroFacial } from './translationCompensation';
 
 /**
- * Estado de referência da calibração (B1.3).
+ * Estado de referência da calibração.
  *
  * Tudo aqui é medido DURANTE a calibração e usado DEPOIS, na inferência, para
- * corrigir a predição pela diferença entre as condições de agora e as de então.
- * Antes de B1.3 nada disso era persistido: `StoredCalibrationProfile` guardava
- * só os betas e os scalers, e um F5 zerava o resto.
- *
- * A consequência era silenciosa e cara. Com `geometricPoseCompensation: true`
- * (default de produção), `compensarPredicao` chama `deslocamentoPorPose(atual,
- * referencia, …)`; com `referencia === null` a função devolve `{0,0}` por
- * contrato — ela é total de propósito, para nunca produzir NaN. Ou seja: a
- * compensação que `config/experiment.ts` documenta como valendo 361 px contra
- * 150 px simplesmente parava de agir, sem log, sem erro, sem sinal na UI.
- * Mesmo modelo, mesmo paciente, cursor diferente conforme tenha havido reload.
+ * corrigir a predição pela diferença entre as condições de agora e as de
+ * então. Precisa ser persistido junto com o modelo: sem referência,
+ * `deslocamentoPorPose` devolve `{0,0}` por contrato e a compensação de pose
+ * para de agir em silêncio após um reload.
  */
 export interface CalibrationReferenceState {
   /** Pose média das amostras aceitas na calibração. Base da compensação
@@ -40,15 +33,18 @@ export interface CalibrationReferenceState {
   /** Distância câmera→rosto medida na calibração, em cm. */
   cameraDistanceCm: number | null;
   /** Distância olho→tela na calibração, em cm. Grandeza DIFERENTE da anterior
-   *  — ver `distanceCompensation.ts` e o bug B1.4. */
+   *  — ver `distanceCompensation.ts`. */
   screenDistanceCm: number | null;
   /** Proxy adimensional `1/scale3D` da distância. Serve de razão relativa;
    *  não é centímetro. */
   refDistance: number | null;
-  /** Peso por olho na fusão binocular, medido na calibração (B1.5). Pertence
+  /** Peso por olho na fusão binocular, medido na calibração. Pertence
    *  ao PERFIL: um perfil "com óculos" com olho direito ruim não pode emprestar
    *  seus pesos para o perfil "sem óculos". */
   eyeReliability: { left: number; right: number } | null;
+  /** Viewport em px CSS em que o modelo foi treinado. O detector de resize
+   *  compara contra ele. Ausente em perfis anteriores. */
+  viewport?: { w: number; h: number } | null;
 }
 
 // Categorias observáveis pelo cuidador. `oculos_progressivo` é registrado
@@ -70,29 +66,31 @@ export interface CalibrationProfileMeta {
   opticalCondition: OpticalCondition;
 }
 
-// Snapshot serializável do que treinou. Formato pensado para viver em
-// localStorage/IndexedDB — nada de referências circulares, tudo primitivos
-// + arrays de números.
 /**
  * Versão do schema de `StoredCalibrationProfile`.
  *
- * v2 (B1.3) adiciona o campo obrigatório `reference`. Perfis v1 não têm como
- * ser migrados — o estado de referência não é derivável dos betas — então são
- * INVALIDADOS no load em vez de carregados com `reference: null`. Carregar com
- * null reproduziria exatamente o bug: modelo restaurado, compensação desligada,
- * nenhum aviso.
+ * v2 adiciona o campo obrigatório `reference`. Perfis v1 não têm como ser
+ * migrados — o estado de referência não é derivável dos betas — então são
+ * INVALIDADOS no load em vez de carregados com `reference: null` (modelo
+ * restaurado, compensação desligada, nenhum aviso).
  */
 export const PROFILE_SCHEMA_VERSION = 2;
 
+// Snapshot serializável do que treinou. Formato pensado para viver em
+// localStorage/IndexedDB — nada de referências circulares, tudo primitivos
+// + arrays de números.
 export interface StoredCalibrationProfile {
   meta: CalibrationProfileMeta;
-  /** Versão do schema. Ausente em perfis v1 (pré-B1.3). */
+  /** Chave de contexto (viewport + pipeline) no momento do treino. Um perfil
+   *  só é carregável na mesma chave. */
+  contextKey?: string;
+  /** Versão do schema. Ausente em perfis v1. */
   schemaVersion?: number;
   modelLeft: RidgeModel;
   modelRight: RidgeModel;
   scalerParamsLeft:  { means: number[]; stds: number[] };
   scalerParamsRight: { means: number[]; stds: number[] };
-  /** Estado de referência da sessão que treinou este perfil (B1.3/B1.5).
+  /** Estado de referência da sessão que treinou este perfil.
    *  Obrigatório a partir do schema v2; ausente nos perfis antigos, que por
    *  isso são rejeitados no load. */
   reference?: CalibrationReferenceState;
@@ -222,7 +220,7 @@ export class ProfileRegistry {
 // Singleton do processo. Fica em memória.
 export const profileRegistry = new ProfileRegistry();
 
-// Sinalização honesta na UI (B parte). Progressivas são um limite físico:
+// Sinalização honesta na UI. Progressivas são um limite físico:
 // a refração muda com a região da lente pela qual o usuário olha, então
 // o modelo linear falha estruturalmente. `oculos_progressivo` NÃO é bug
 // a corrigir — é condição a comunicar.

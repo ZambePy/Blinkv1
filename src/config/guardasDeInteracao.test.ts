@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 // -----------------------------------------------------------------------------
-// Guardas de interação encontradas na revisão pré-Sprint 8.
+// Guardas de interação do frontend (emergência, calibração, varredura).
 //
 // Estes testes são de CONVENÇÃO — leem o texto do arquivo em vez de executá-lo.
 // Não é a forma preferida, e a razão de ser dela aqui é específica: os defeitos
@@ -29,8 +29,8 @@ describe('a varredura não pode acionar a emergência', () => {
     // piscada acionava, por outro caminho, exatamente o botão que ela tem
     // proibição explícita de acionar.
     //
-    // E aqui é pior que no `P7.3`: lá a pessoa escolhe o alvo olhando para
-    // ele. Na varredura o ciclo percorre os botões sozinho, e basta uma
+    // E aqui é pior que no clique por olhar, onde a pessoa escolhe o alvo
+    // olhando para ele. Na varredura o ciclo percorre os botões sozinho, e basta uma
     // piscada involuntária no instante em que ele passa pela emergência. O
     // paciente não escolheu — o relógio escolheu por ele.
     expect(src).toMatch(/dataset\.emergency\s*===\s*'true'\s*\)\s*return false/);
@@ -78,8 +78,8 @@ describe('a varredura não roda durante a calibração', () => {
     // Durante a coleta o `uncalibrated` vale `true`, então `gazeValido` fica
     // `false` e a varredura ligava sozinha depois de 3 s — passando a clicar
     // os botões da própria tela de calibração enquanto o paciente olha para os
-    // pontos. No Dia 7 isso corromperia a coleta em silêncio: o relatório
-    // registraria uma calibração concluída sobre dados que uma piscada
+    // pontos. Numa sessão de medição isso corromperia a coleta em silêncio: o
+    // relatório registraria uma calibração concluída sobre dados que uma piscada
     // involuntária interrompeu.
     const src = ler('frontend', 'src', 'components', 'ScanningMode.tsx');
     expect(src).toMatch(/stateRef\.current\s*===\s*'calibrating'/);

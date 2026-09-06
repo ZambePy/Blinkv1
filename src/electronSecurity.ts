@@ -1,38 +1,14 @@
-// Política de segurança do processo principal do Electron — B3.30.
+// Política de segurança do processo principal do Electron.
 //
-// Mora em `src/` (e não inline em `electron/main.ts`) pelo mesmo motivo de
-// B2.11: o CI roda `windows-latest` mas não abre o Electron. O que dá para
-// verificar deterministicamente é a DECISÃO — dada uma origem, permitir ou
-// não —, e uma decisão de segurança sem teste é uma decisão que ninguém sabe
-// se está certa.
-//
-// ## O que estava errado
-//
-//   session.defaultSession.setPermissionRequestHandler((_wc, permission, cb) => {
-//     cb(permission === 'media');
-//   });
-//
-// O primeiro argumento — o `webContents` que fez o pedido — era descartado.
-// **Qualquer origem carregada na janela ganhava acesso à câmera**, e o app não
-// tinha `setPermissionCheckHandler`, `will-navigate`, `setWindowOpenHandler`
-// nem CSP. Bastava uma navegação para fora (um link, um redirect, um iframe)
-// para uma página arbitrária pedir a webcam de um paciente com ELA e receber.
-//
-// A superfície é pequena porque o app carrega conteúdo local, mas "pequena"
-// não é "inexistente", e o custo de fechá-la é uma função de dez linhas.
+// Fica em `src/` (e não inline em `electron/main.ts`) para que a decisão —
+// dada uma origem, permitir ou não — seja testável sem abrir o Electron.
 
 /** Permissões que o app legitimamente precisa. */
 const PERMISSOES_PERMITIDAS = new Set(['media']);
 
 /**
- * Origens confiáveis.
- *
- * - `file://` é o build empacotado (`win.loadFile`).
- * - `http://localhost:*` e `http://127.0.0.1:*` são o servidor de dev do Vite.
- *
- * Nada mais. Em particular, nenhum host remoto: o projeto é 100% local por
- * design, e uma origem remota pedindo câmera é, por definição, coisa que não
- * deveria estar acontecendo.
+ * Origens confiáveis: `file://` (build empacotado) e `localhost`/`127.0.0.1`
+ * (servidor de dev do Vite). Nenhum host remoto — o app é 100% local.
  */
 export function origemConfiavel(url: string | null | undefined): boolean {
   if (!url) return false;
@@ -50,11 +26,8 @@ export function origemConfiavel(url: string | null | undefined): boolean {
 }
 
 /**
- * Decide um pedido de permissão.
- *
- * Só concede o que o app precisa (`media`) e só para origem confiável. Tudo o
- * mais é negado — inclusive permissões que hoje ninguém pede, porque a lista
- * de permissões do Chromium cresce e um `default: allow` envelheceria mal.
+ * Só concede o que o app precisa (`media`) e só para origem confiável. Lista
+ * explícita, não `default: allow`: a lista de permissões do Chromium cresce.
  */
 export function permitirPermissao(
   permission: string,
@@ -63,13 +36,7 @@ export function permitirPermissao(
   return PERMISSOES_PERMITIDAS.has(permission) && origemConfiavel(url);
 }
 
-/**
- * Decide se uma navegação pode acontecer.
- *
- * O app não navega para fora de si mesmo. Um link externo — num texto que o
- * paciente compôs, por exemplo — não pode substituir a aplicação inteira por
- * uma página remota que herda o contexto do processo.
- */
+/** O app não navega para fora de si mesmo (um link num texto do paciente, por exemplo). */
 export function permitirNavegacao(url: string | null | undefined): boolean {
   return origemConfiavel(url);
 }
@@ -77,24 +44,44 @@ export function permitirNavegacao(url: string | null | undefined): boolean {
 /**
  * Content-Security-Policy do app.
  *
- * `'unsafe-inline'` em `style-src` é necessário: o projeto usa estilos inline
- * em vários componentes (`style={{...}}` do React). `'wasm-unsafe-eval'` é
- * exigido pelo MediaPipe e pelo ONNX Runtime, que compilam WebAssembly.
+ * - `'wasm-unsafe-eval'`: MediaPipe e ONNX Runtime compilam WebAssembly.
+ * - `'unsafe-inline'` em `style-src`: o React usa `style={{...}}`.
+ * - `connect-src` só aceita a própria origem e `localhost` — é o que torna a
+ *   promessa de privacidade (nada sai do dispositivo) uma política de
+ *   navegador. O `localhost` cobre o servidor de dev e o backend de
+ *   demonstração das telas de chatbot/perfis.
+ * - `blob:` em worker/media: o worker do L2CS e o `<video>` da câmera.
  *
- * `connect-src 'self'` é o que fecha a promessa de privacidade do README —
- * nenhuma imagem, landmark ou perfil sai do dispositivo — em política de
- * navegador, e não apenas em disciplina de código.
+ * No build empacotado (`file://`) não há cabeçalho HTTP; a mesma política é
+ * injetada como `<meta http-equiv>` pelo Vite (ver `frontend/vite.config.ts`).
  */
 export const CSP = [
   "default-src 'self'",
   "script-src 'self' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob:",
+  // `https:` em img-src só para as imagens de exemplo da galeria/perfis; nada
+  // do paciente sai por aí.
+  "img-src 'self' data: blob: https:",
   "media-src 'self' blob:",
-  "connect-src 'self'",
+  "font-src 'self' data:",
+  "connect-src 'self' http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*",
   "worker-src 'self' blob:",
   "object-src 'none'",
   "frame-src 'none'",
   "base-uri 'self'",
   "form-action 'none'",
 ].join('; ');
+
+/**
+ * Variante para o servidor de DESENVOLVIMENTO (Electron com `loadURL`).
+ *
+ * O `@vitejs/plugin-react` injeta no `index.html` um `<script>` INLINE (o
+ * preâmbulo do Fast Refresh) e todo módulo transformado lança se ele não
+ * rodou. Com `script-src 'self'` no cabeçalho, o app em dev abria em branco.
+ * Só `script-src` muda, e só fora do build empacotado — a política de
+ * produção continua sendo `CSP`.
+ */
+export const CSP_DEV = CSP.replace(
+  "script-src 'self' 'wasm-unsafe-eval'",
+  "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'",
+);

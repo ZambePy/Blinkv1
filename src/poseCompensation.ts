@@ -1,7 +1,5 @@
 /**
- * 1.3 — compensação geométrica de pose, aplicada na SAÍDA.
- *
- * ── O problema ─────────────────────────────────────────────────────────────
+ * Compensação geométrica de pose, aplicada na SAÍDA.
  *
  * O modelo mapeia a íris (medida no frame da CABEÇA) para um ponto de tela.
  * Esse mapeamento só vale para a pose em que foi calibrado: se a cabeça girar
@@ -9,24 +7,17 @@
  * ponto olhado se desloca `d · tan(Δ)` — mas o offset não mudou, então o modelo
  * prevê o mesmo ponto de antes.
  *
- * 1.1 mediu que isso é grande e real nesta base: a postura migra 2,38° em yaw e
- * 3,92° em pitch ao longo de UMA calibração, o que a 39,6 px/grau são 94 px em
- * X e 155 px em Y.
+ * O efeito é grande e real: medido, a postura migra 2,38° em yaw e 3,92° em
+ * pitch ao longo de UMA calibração — a 39,6 px/grau, 94 px em X e 155 px em Y.
  *
- * ── Por que aqui e não no vetor de features ────────────────────────────────
+ * Por que na saída e não como feature do Ridge: dar a pose ao Ridge piorou
+ * 8,6%. O coeficiente aprendido discordava 7× entre os eixos quando a
+ * geometria exige a mesma magnitude — a pose virava atalho para adivinhar o
+ * alvo, já que deriva junto com a ordem de coleta. Aqui não há coeficiente
+ * livre: o ganho é `d · tan(Δ)` com `d` medido, e a extrapolação para poses
+ * fora da faixa de treino é correta por construção.
  *
- * 1.2 tentou dar a pose ao Ridge como feature e piorou 8,6%. O coeficiente
- * aprendido saiu em −83,6 px/grau para yaw→X e +11,9 para pitch→Y, quando a
- * geometria exige a MESMA magnitude nos dois eixos (pixels são quadrados). Os
- * eixos discordaram por 7×: não era compensação, era a pose sendo usada como
- * atalho para adivinhar o alvo, já que ela deriva junto com a ordem de coleta.
- *
- * Aqui não há coeficiente livre. O ganho é `d · tan(Δ)` com `d` medido, então
- * não há o que memorizar e a extrapolação para poses fora da faixa de treino
- * é correta por construção — que é exatamente onde 1.2 falhou (84,4% dos
- * frames do teste tinham pitch fora da faixa vista no treino).
- *
- * ── Derivação dos sinais ───────────────────────────────────────────────────
+ * Derivação dos sinais:
  *
  * Os sinais NÃO foram escolhidos por medirem melhor; vêm da convenção com que
  * `extractor.ts` extrai os ângulos da matriz de transformação facial:
@@ -64,7 +55,7 @@ export interface Pose {
 
 /**
  * Maior desvio de pose (em relação à referência de calibração) que a
- * compensação geométrica aceita, em radianos — B3.12.
+ * compensação geométrica aceita, em radianos.
  *
  * π/6 = 30°. Acima disso a hipótese do modelo já não vale: a compensação
  * assume que a cabeça girou em torno de um centro fixo e que `tan(Δ)` descreve
@@ -97,17 +88,12 @@ export function deslocamentoPorPose(
   const dpitch = atual.pitch - referencia.pitch;
   if (!Number.isFinite(dyaw) || !Number.isFinite(dpitch)) return { dx: 0, dy: 0 };
 
-  // B3.12 — Δpose fora da faixa plausível ZERA aquele eixo.
+  // Δpose fora da faixa plausível ZERA aquele eixo.
   //
   // `yaw` vem de `atan2`, que salta de sinal quando a cabeça vira de perfil ou
-  // quando a matriz de transformação degenera. Nesses instantes `dyaw` se
-  // aproxima de ±π/2 e `tan` explode: `tan(π/2 − 0,001) ≈ 1000`, e com
-  // `distanciaPx = 2000` isso vira 2 milhões de pixels de deslocamento.
-  //
-  // O `softClamp` do caller segura o valor FINAL, então o cursor não some da
-  // tela. Mas o pico já entrou no buffer temporal e no One Euro antes do
-  // clamp — e o filtro leva vários frames para decair, produzindo um salto
-  // visível que dura muito mais que o frame ruim que o causou.
+  // a matriz degenera; `dyaw` chega perto de ±π/2 e `tan` explode para
+  // milhões de pixels. O `softClamp` do caller segura o valor FINAL, mas o
+  // pico já entrou no filtro temporal e leva vários frames para decair.
   //
   // Zerar em vez de clampar é deliberado: um Δ de 60° entre a calibração e o
   // frame corrente não é rotação de cabeça, é matriz degenerada. Compensar por

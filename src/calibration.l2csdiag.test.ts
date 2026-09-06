@@ -26,7 +26,7 @@ function amostras(dims: number, preencherSlots: number[] | null) {
         const v = Array.from({ length: dims }, (_, d) => (d === 0 ? x : d === 1 ? y : rnd() * 0.01));
         // Zera tudo que for slot angular e depois preenche só o pedido: assim o
         // teste controla exatamente quantas amostras têm bloco "válido".
-        for (const s of l2csSlotsInSet('iris12+l2cs')) if (s < v.length) v[s] = 0;
+        for (const s of l2csSlotsInSet('irisCore+l2cs')) if (s < v.length) v[s] = 0;
         if (preencherSlots) for (const s of preencherSlots) if (s < v.length) v[s] = 0.3;
         featuresLeft.push(v); featuresRight.push([...v]);
         targets.push({ screenX: x, screenY: y });
@@ -70,20 +70,16 @@ describe('l2csValidFraction — distingue "não se aplica" de "falhou"', { timeo
     const slots = l2csSlotsInSet(ACTIVE_FEATURE_SET);
     expect(slots.length).toBeGreaterThan(0);
     const a = amostras(6, null);
-    // Força os slots angulares a zero em todas as amostras — o helper por
-    // default só zera slots do `iris12+l2cs` (≥12), que não caem no vetor de 6.
-    for (const v of a.featuresLeft) for (const s of slots) v[s] = 0;
-    for (const v of a.featuresRight) for (const s of slots) v[s] = 0;
     const d = computeFitDiagnostics(a.featuresLeft, a.featuresRight, a.targets, undefined, { w: 1920, h: 1080 });
     expect(d.l2csValidFraction).toBe(0);
     expect(d.l2csValidFraction).not.toBeNull();
   });
 
   it('o campo não é decorativo: quando há bloco maior, ainda mede', () => {
-    // Verificação da mecânica: 'iris12+l2cs' leva as 7 dims completas.
-    const slots = l2csSlotsInSet('iris12+l2cs');
+    // Verificação da mecânica: `compact` leva as 7 dims completas do bloco.
+    const slots = l2csSlotsInSet('compact');
     expect(slots.length).toBeGreaterThan(0);
-    const a = amostras(19, slots);
+    const a = amostras(44, slots);
     const preenchidas = a.featuresLeft.filter((v) => slots.some((s) => v[s] !== 0)).length;
     expect(preenchidas).toBe(a.featuresLeft.length);
   });

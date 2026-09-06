@@ -17,16 +17,9 @@ import {
   type GeometriaDeTela,
 } from './angularVelocity';
 
-// -----------------------------------------------------------------------------
-// P6.2 — α por velocidade angular. P6.4 — zona morta.
-//
-// O aceite de `P6.2` pede três coisas: α monotônico na velocidade, respeitando
-// os limites, e **a conversão px→°/s batendo com a geometria declarada** — que
-// é o ponto onde a dependência de `B2.9`/`B2.10` aparece.
-//
-// O aceite de `P6.4` pede ruído sub-limiar (saída constante), movimento de 0,5°
-// (saída acompanha), e **sem "grudar" perceptível ao sair da zona**.
-// -----------------------------------------------------------------------------
+// EMA adaptativa: α monotônico na velocidade angular (respeitando os limites),
+// conversão px→°/s batendo com a geometria declarada, e zona morta que segura
+// ruído sub-limiar sem "grudar" ao sair dela.
 
 /** Setup de referência do projeto: 23,6" 16:9 a 60 cm, 1920×1080. */
 const TELA: GeometriaDeTela = {
@@ -36,7 +29,7 @@ const TELA: GeometriaDeTela = {
   distanciaCm: 60,
 };
 
-describe('conversão px ↔ grau (a base de P6.2 e P6.4)', () => {
+describe('conversão px ↔ grau', () => {
   it('bate com a geometria declarada do posto de referência', () => {
     // 1920 px / 52,25 cm = 36,75 px/cm. Um grau a 60 cm cobre
     // 60 · tan(1°) = 1,047 cm → 36,75 × 1,047 = 38,5 px/grau.
@@ -96,7 +89,7 @@ describe('conversão px ↔ grau (a base de P6.2 e P6.4)', () => {
   });
 });
 
-describe('P6.2 — α por velocidade', () => {
+describe('α por velocidade', () => {
   it('os limites são os da especificação', () => {
     expect(ALPHA_LENTO).toBe(0.08);
     expect(ALPHA_RAPIDO).toBe(0.35);
@@ -200,7 +193,7 @@ describe('AdaptiveEma — comportamento', () => {
   });
 });
 
-describe('P6.4 — zona morta', () => {
+describe('zona morta', () => {
   const ppg = pixelsPorGrau(TELA)!;
   const comZona = () => new AdaptiveEma({ geometria: TELA });
 

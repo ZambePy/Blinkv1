@@ -1,142 +1,156 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import { ThumbsUp, Send } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ThumbsUp, Send, Check, TriangleAlert, RotateCcw, X } from 'lucide-react';
 import { api } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
 import { GazeButton } from '../../components/ui/GazeButton';
 
+/** Segundos até o sinal sair sozinho, se o paciente não fizer nada. */
+const CONTAGEM_S = 30;
+
+type Resultado = 'ok' | 'falha' | null;
+
+/**
+ * Sinal "Estou bem": envia um aviso ao serviço configurado. Se o envio falhar,
+ * a tela diz que falhou e oferece tentar de novo, em vez de fingir sucesso.
+ */
 export const IAmOkScreen: React.FC = () => {
+  const navigate = useNavigate();
   const { currentProfile } = useAuth();
   const toast = useToast();
-  const [timeLeft, setTimeLeft] = useState(30);
-  const [sent, setSent] = useState(false);
+  const [timeLeft, setTimeLeft] = useState(CONTAGEM_S);
   const [sending, setSending] = useState(false);
+  const [resultado, setResultado] = useState<Resultado>(null);
 
-  const dispatchSignal = useCallback(async () => {
-    if (sending || sent) return;
+  const enviar = useCallback(async () => {
+    if (sending) return;
     setSending(true);
     try {
       await api.sendIAmOk(currentProfile?.id ?? 'anon');
-      toast.success('Sinal "Estou Bem" enviado.');
+      setResultado('ok');
+      toast.success('Sinal "Estou bem" enviado.');
     } catch (err) {
-      console.warn('Falha ao enviar sinal "Estou Bem":', err);
-      toast.error('Falha ao enviar sinal. Tente novamente.');
+      console.warn('Falha ao enviar sinal "Estou bem":', err);
+      setResultado('falha');
+      toast.error('Não foi possível enviar o sinal.');
     } finally {
-      setSent(true);
       setSending(false);
     }
-  }, [sending, sent, currentProfile, toast]);
+  }, [sending, currentProfile, toast]);
 
+  // Contagem regressiva: para assim que houver um resultado (ou um envio em curso).
   useEffect(() => {
-    if (sent) return;
-    if (timeLeft === 0) {
-      dispatchSignal();
+    if (resultado !== null || sending) return;
+    if (timeLeft <= 0) {
+      void enviar();
       return;
     }
-    const timer = setInterval(() => setTimeLeft((t) => t - 1), 1000);
-    return () => clearInterval(timer);
-  }, [timeLeft, sent, dispatchSignal]);
+    const timer = setTimeout(() => setTimeLeft((t) => t - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [timeLeft, resultado, sending, enviar]);
+
+  const tentarDeNovo = () => {
+    setResultado(null);
+    setTimeLeft(CONTAGEM_S);
+  };
 
   return (
-    <GazePageLayout showBack={true} backRoute="/menu">
+    <GazePageLayout backRoute="/menu" title="Estou bem">
+      <h1 className="sr-only">Sinal "Estou bem"</h1>
       <div
         style={{
+          height: '100%',
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
           justifyContent: 'center',
-          height: '100%',
-          width: '100%',
-          boxSizing: 'border-box',
+          gap: '2rem',
+          textAlign: 'center',
         }}
       >
-        <div
-          style={{
-            background: 'var(--color-card-bg)',
-            padding: '3.5rem 3rem',
-            borderRadius: '2.5rem',
-            border: '2px solid var(--color-card-border)',
-            boxShadow: '0 20px 40px rgba(0,0,0,0.05)',
-            textAlign: 'center',
-            maxWidth: 600,
-            width: '100%',
-            boxSizing: 'border-box',
-          }}
-        >
-          <div style={{ display: 'inline-flex', background: 'rgba(22, 163, 74, 0.1)', padding: '1.5rem', borderRadius: '2rem', marginBottom: '1.5rem' }}>
-            <ThumbsUp size={80} color="#16a34a" aria-hidden="true" />
+        {resultado === 'ok' && (
+          <div role="status" aria-live="polite" data-no-dwell="true" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <Check size={96} color="var(--ok)" aria-hidden="true" />
+            <p style={{ fontSize: 'var(--fs-32)', fontWeight: 800, color: 'var(--ok)' }}>Sinal enviado</p>
+            <p style={{ fontSize: 'var(--fs-20)', color: 'var(--text-2)' }}>
+              Avisamos que você está bem.
+            </p>
           </div>
-          
-          <h1
-            id="iamok-title"
-            style={{ fontSize: '2.5rem', color: '#166534', margin: '0 0 1rem 0', fontWeight: 900 }}
-          >
-            Modo "Estou Bem"
-          </h1>
+        )}
 
-          {sent ? (
-            <div role="status" aria-live="polite" style={{ marginTop: '1.5rem' }}>
-              <p style={{ fontSize: '1.6rem', color: '#15803d', fontWeight: 700 }}>
-                Sinal enviado aos cuidadores com sucesso!
-              </p>
-              <div style={{ display: 'inline-flex', marginTop: '1.5rem', animation: 'bounce 2s infinite' }}>
-                <Send size={48} color="#22c55e" aria-hidden="true" />
-              </div>
-            </div>
-          ) : (
-            <div style={{ marginTop: '1rem' }}>
-              <p style={{ fontSize: '1.4rem', color: 'var(--color-text-base)', opacity: 0.9, fontWeight: 500 }}>
-                Enviando notificação automática em:
-              </p>
+        {resultado === 'falha' && (
+          <div role="alert" data-no-dwell="true" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <TriangleAlert size={96} color="var(--danger)" aria-hidden="true" />
+            <p style={{ fontSize: 'var(--fs-32)', fontWeight: 800, color: 'var(--danger)' }}>Não foi possível enviar</p>
+            <p style={{ fontSize: 'var(--fs-20)', color: 'var(--text-2)' }}>
+              O aparelho não conseguiu falar com o serviço. Peça ajuda ou tente de novo.
+            </p>
+          </div>
+        )}
+
+        {resultado === null && (
+          <div data-no-dwell="true" style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.75rem' }}>
+            <ThumbsUp size={80} color="var(--ok)" aria-hidden="true" />
+            <p style={{ fontSize: 'var(--fs-24)', color: 'var(--text-2)' }}>
+              {sending ? 'Enviando o sinal...' : 'O sinal "Estou bem" será enviado em'}
+            </p>
+            {!sending && (
               <div
                 role="timer"
                 aria-live="polite"
                 aria-atomic="true"
-                style={{ fontSize: '5rem', fontWeight: 900, color: '#16a34a', margin: '1rem 0' }}
+                style={{ fontSize: 'var(--fs-56)', fontWeight: 900, color: 'var(--ok)', lineHeight: 1.1 }}
               >
-                {timeLeft}s
+                {timeLeft} s
               </div>
+            )}
+          </div>
+        )}
 
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', marginTop: '1.5rem' }}>
-                <GazeButton
-                  onClick={dispatchSignal}
-                  disabled={sending}
-                  style={{
-                    width: '100%',
-                    height: '76px',
-                    background: '#16a34a',
-                    border: 'none',
-                    borderRadius: '1.25rem',
-                    color: 'white',
-                  }}
-                >
-                  <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>
-                    {sending ? 'Enviando…' : 'Enviar Agora'}
-                  </span>
-                </GazeButton>
-
-                <GazeButton
-                  onClick={() => window.history.back()}
-                  style={{
-                    width: '100%',
-                    height: '76px',
-                    background: 'rgba(239, 68, 68, 0.05)',
-                    border: '2px solid rgba(239, 68, 68, 0.2)',
-                    borderRadius: '1.25rem',
-                    color: '#dc2626',
-                  }}
-                >
-                  <span style={{ fontSize: '1.4rem', fontWeight: 800 }}>
-                    Cancelar
-                  </span>
-                </GazeButton>
-              </div>
-            </div>
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap', justifyContent: 'center' }}>
+          {resultado === null && (
+            <>
+              <GazeButton
+                onClick={() => void enviar()}
+                disabled={sending}
+                size="xl"
+                variant="primary"
+                icon={<Send />}
+                label="Enviar agora"
+                aria-label="Enviar o sinal Estou bem agora"
+              />
+              <GazeButton
+                onClick={() => navigate(-1)}
+                disabled={sending}
+                size="xl"
+                variant="secondary"
+                icon={<X color="var(--danger)" />}
+                label="Cancelar"
+                aria-label="Cancelar e voltar"
+              />
+            </>
+          )}
+          {resultado === 'falha' && (
+            <GazeButton
+              onClick={tentarDeNovo}
+              size="xl"
+              variant="primary"
+              icon={<RotateCcw />}
+              label="Tentar de novo"
+            />
+          )}
+          {resultado !== null && (
+            <GazeButton
+              onClick={() => navigate('/menu')}
+              size="xl"
+              variant="secondary"
+              label="Voltar ao menu"
+            />
           )}
         </div>
       </div>
-      <style>{`@keyframes bounce { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }`}</style>
     </GazePageLayout>
   );
 };

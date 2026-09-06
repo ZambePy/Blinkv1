@@ -28,6 +28,20 @@ vi.mock('../../context/ToastContext', () => ({
   }),
 }));
 
+// O painel lê o estado do rastreamento; sem provider o hook lançaria.
+vi.mock('../../context/GazeContext', () => ({
+  useGaze: () => ({
+    state: 'tracking',
+    l2csStatus: 'ready',
+    isDegraded: false,
+    cameraError: null,
+    calibrationInvalidated: null,
+    gazeLostMessage: null,
+    calibration: { isCalibrated: () => true, getDistanceRange: () => null },
+    getDiagnostics: () => null,
+  }),
+}));
+
 // Mock base CaregiverPageLayout para simplificar as verificações do dashboard
 vi.mock('../../components/ui/CaregiverPageLayout', () => ({
   CaregiverPageLayout: ({ children, title }: { children: React.ReactNode; title: string }) => (

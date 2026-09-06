@@ -181,27 +181,18 @@ describe('deriveHorizontalFovDeg', () => {
   });
 });
 
-describe('planTuningStep — contraste (item 2)', () => {
+describe('planTuningStep — contraste', () => {
   it('sobe o contraste quando o brilho já convergiu', () => {
     const caps = { ...CAPS_COMPLETA, contrast: { min: 0, max: 255, step: 1 } };
     const s = planTuningStep(caps, { zoom: 2, contrast: 128 }, noAlvo({ contrast: 0.094 }));
     expect(s.constraints.contrast).toBeGreaterThan(128);
   });
 
-  it('B3.14 — ajusta contraste MESMO com o brilho fora do alvo', () => {
-    // ATÉ B3.14 este teste afirmava o contrário, com o raciocínio "em muitos
-    // drivers o ganho de contraste altera o brilho aparente; mexer nos dois ao
-    // mesmo tempo faz um passo desfazer o outro".
-    //
-    // O raciocínio é legítimo, mas a premissa não se sustentava: o brilho
-    // usava passo bang-bang de 15% fixo e podia oscilar em torno da faixa
-    // morta indefinidamente, sem NUNCA declarar convergência. Como o contraste
-    // estava condicionado a `brightnessConverged`, ele nunca era ajustado —
-    // justamente quando a imagem está pior e a borda da íris mais precisa de
-    // contraste para o landmark não escorregar.
-    //
-    // A oscilação cruzada passou a ser tratada na causa: ganho proporcional no
-    // brilho (converge em vez de caçar) e faixa morta nos dois eixos.
+  it('ajusta contraste mesmo com o brilho fora do alvo', () => {
+    // Em muitos drivers o ganho de contraste altera o brilho aparente, mas a
+    // oscilação cruzada é tratada na causa (ganho proporcional no brilho e
+    // faixa morta nos dois eixos), não condicionando o contraste à
+    // convergência do brilho — senão ele nunca seria ajustado.
     const caps = { ...CAPS_COMPLETA, contrast: { min: 0, max: 255, step: 1 } };
     const s = planTuningStep(caps, { zoom: 2, contrast: 128 }, noAlvo({ brightness: 0.10, contrast: 0.094 }));
     expect(s.constraints.contrast).toBeDefined();
@@ -226,7 +217,7 @@ describe('planTuningStep — contraste (item 2)', () => {
   });
 });
 
-describe('planStabilizationStep — cintilação (item 1)', () => {
+describe('planStabilizationStep — cintilação', () => {
   it('aplica powerLineFrequency quando o driver suporta a rede inferida', () => {
     const caps = { ...CAPS_COMPLETA, powerLineFrequency: [0, 50, 60] };
     expect(planStabilizationStep(caps, 50).constraints.powerLineFrequency).toBe(50);

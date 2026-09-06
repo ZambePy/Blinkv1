@@ -1,16 +1,7 @@
 // Construção do `RunMeta` para o teste de precisão automático pós-calibração.
-// Existe como função pura, isolada da árvore React, por dois motivos:
-//
-//   1. Testabilidade. Testar a partir do componente React exigiria montar
-//      todo o `GazeProvider` só para observar o objeto que a UI passa ao
-//      `startAccuracyTest`. Extraído aqui, o teste é uma linha.
-//
-//   2. "O que a UI afirma tem que ser verdade". Antes deste util, todo
-//      relatório automático saía com `iluminacao: 'boa', oculos: false,
-//      movimentoCabeca: 'parada', minutosDeSessao: 0` — independente da
-//      realidade. Um gráfico de deriva erro×tempo fica impossível de
-//      construir se `minutosDeSessao` for sempre 0; a filtragem por
-//      condição óptica fica impossível se `oculos` for sempre `false`.
+// Função pura, fora da árvore React, para ser testável sem montar o
+// `GazeProvider` — e para o relatório refletir a sessão real (uptime, condição
+// óptica) em vez de valores fixos.
 import type { RunMeta } from '@tracker/accuracy';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { ReadinessReport } from '@tracker/setupReadiness';
@@ -28,12 +19,9 @@ export interface AutoTestMetaInput {
   /** Diagonal física do monitor em polegadas. Definida pelo cuidador. */
   telaPolegadas: number;
   /**
-   * De onde veio `telaPolegadas` (B2.10): `'default'` (hardcode 23,6″),
-   * `'auto'` (EDID) ou `'manual'` (o cuidador mediu).
-   *
-   * Sem este campo o relatório declarava `geometryAssumed: false` sempre que o
-   * número existisse — e como o default sempre existe, TODO relatório afirmava
-   * ter medido a diagonal. O erro angular é calculado sobre ela.
+   * De onde veio `telaPolegadas`: `'default'` (hardcode 23,6″), `'auto'`
+   * (EDID) ou `'manual'` (o cuidador mediu). O erro angular é calculado sobre
+   * a diagonal, então o relatório precisa saber se ela foi medida ou assumida.
    */
   screenGeometrySource?: 'default' | 'auto' | 'manual';
   /** ISO date do dia (yyyy-mm-dd). Injetável para o teste ser determinístico. */
@@ -63,23 +51,14 @@ export function buildAutoTestMeta(input: AutoTestMetaInput): RunMeta {
       `condição óptica=${input.opticalCondition})`,
     distanciaCm: input.distanciaCm,
     telaPolegadas: input.telaPolegadas,
-    // B2.10 — a procedência da diagonal viaja com o relatório. Ausente é
-    // tratado como 'default' pelo consumidor, que é o pior caso honesto.
+    // Ausente é tratado como 'default' pelo consumidor — o pior caso honesto.
     screenGeometrySource: input.screenGeometrySource ?? 'default',
   };
 }
 
-// No fluxo de accuracy test MANUAL (SettingsScreen), o `RunMeta` que a UI
-// monta vinha com `minutosDeSessao: 0` hardcoded. O cuidador tinha que editar
-// o select "Sessão (min)" toda vez para o relatório refletir a realidade.
-//
-// Contrato:
-//   - Se `meta.minutosDeSessao` for `0` (default do state), substitui pelo
-//     uptime real do engine e anota `observacoes` com a origem.
-//   - Se o cuidador escolheu manualmente um valor (para simular deriva ou
-//     testar curva de fadiga), a escolha manual é preservada — override
-//     manual do humano SEMPRE vence auto.
-//   - Não toca em outros campos (iluminação, óculos, distância, tela).
+// Preenche `minutosDeSessao` com o uptime real do engine quando o cuidador
+// deixou o select no default (0). Um valor escolhido manualmente é preservado
+// — override humano sempre vence o automático. Não toca em outros campos.
 export function applyUptimeToRunMetaIfDefault(
   meta: RunMeta,
   sessionUptimeMs: number,

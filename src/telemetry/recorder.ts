@@ -48,10 +48,8 @@ export function startRecording(input: StartRecordingInput): void {
     // pode gravar um valor errado por engano.
     featureVectorId: FEATURE_VECTOR_ID,
     startedAt: new Date().toISOString(),
-    // B3.28 — a ponte entre os dois relógios da gravação. `startedAt` é
-    // relógio de parede; `captureTs`/`emitTs` são `performance.now()`. Sem
-    // `timeOrigin` não há como converter um no outro, e o JSONL não pode ser
-    // alinhado a nenhum evento externo.
+    // Ponte entre os dois relógios da gravação: `startedAt` é relógio de
+    // parede, `captureTs`/`emitTs` são `performance.now()`.
     timeOrigin: typeof performance !== 'undefined' && Number.isFinite(performance.timeOrigin)
       ? performance.timeOrigin
       : Date.now(),
@@ -70,14 +68,9 @@ export function recordFrame(frame: RecordedFrame): void {
     dropped++;
     return;
   }
-  // B3.28 — `frameIdx` é reindexado como posição NESTA gravação.
-  //
-  // O engine passa `framesSeen`, seu contador vitalício. Uma gravação iniciada
-  // 10 minutos após o boot abria no frame ~18000, e quem lê o arquivo conclui
-  // que perdeu o começo. `frames.length` é a posição real e é contígua por
-  // construção — inclusive quando frames sem rosto entram no meio, que é o
-  // caso em que um índice esparso quebraria consumidores que iteram por
-  // posição.
+  // `frameIdx` é reindexado como posição NESTA gravação: o engine passa seu
+  // contador vitalício, e um arquivo começando no frame ~18000 parece
+  // truncado. `frames.length` é contíguo por construção.
   frames.push({ ...frame, frameIdx: frames.length });
 }
 
@@ -115,9 +108,8 @@ export function exportAsJSONL(): string {
   return lines.join('\n');
 }
 
-// Parser inverso — usado pelos testes do gravador.
-// Retorna null quando o texto não é um JSONL válido no formato esperado
-// (sem header, formatVersion ausente/errado, JSON inválido).
+// Inverso de `exportAsJSONL`. Retorna null quando o texto não é um JSONL
+// válido no formato esperado (sem header, formatVersion ausente, JSON inválido).
 export function parseJSONL(text: string): Recording | null {
   const lines = text.split(/\r?\n/).filter((l) => l.length > 0);
   if (lines.length === 0) return null;

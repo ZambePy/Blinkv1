@@ -3,16 +3,8 @@ import { FilterChain, type FilterMode } from './filterChain';
 import type { GeometriaDeTela } from './angularVelocity';
 import { sanitizeExperiment, VALORES_ACEITOS } from '../config/experiment';
 
-// -----------------------------------------------------------------------------
-// P7.6 — a cadeia selecionável.
-//
-// O Sprint 6 entregou os filtros como módulos puros e testados, mas nenhum
-// estava LIGADO: `filterMode` não existia. Isso tornava o aceite do `P7.6`
-// impossível — ele pede o harness rodando com `filterMode: 'kalmanEma'`.
-//
-// Mesmo problema do `spec11` no `P6.5`: uma alternativa que não se consegue
-// selecionar não é alternativa.
-// -----------------------------------------------------------------------------
+// A cadeia de filtros é selecionável por `filterMode`; uma alternativa que não
+// se consegue ligar não é alternativa, e o benchmark precisa das três.
 
 const TELA: GeometriaDeTela = {
   larguraPx: 1920, alturaPx: 1080, larguraCm: 52.25, distanciaCm: 60,
@@ -102,7 +94,7 @@ describe('a ORDEM da cadeia: Kalman antes do EMA', () => {
     expect(c.kalmanInterno!.state.vx).toBeCloseTo(velocidade, -1);
   });
 
-  it('o Kalman interno fica acessível para o blinkHold projetar (P6.3)', () => {
+  it('o Kalman interno fica acessível para o blinkHold projetar', () => {
     expect(new FilterChain({ mode: 'kalman' }).kalmanInterno).not.toBeNull();
     expect(new FilterChain({ mode: 'kalmanEma', geometria: TELA }).kalmanInterno).not.toBeNull();
     // `oneEuro` não tem modelo de movimento — não há o que projetar.
@@ -120,7 +112,7 @@ describe('kalmanEma SEM geometria degrada, e ANUNCIA', () => {
   });
 
   it('o aviso diz que a medição NÃO representa kalmanEma', () => {
-    // Silenciar aqui faria o `F8.5` comparar `kalman` contra `kalman` achando
+    // Silenciar aqui faria o benchmark comparar `kalman` contra `kalman` achando
     // que comparou três cadeias — e o resultado "kalmanEma não ajudou" seria
     // lido como conclusão quando é artefato de configuração.
     const avisos = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -158,7 +150,7 @@ describe('kalmanEma expõe o que o diagnóstico precisa', () => {
 
   it('as outras cadeias devolvem null nesses campos, não zero', () => {
     // Zero significaria "velocidade medida como zero"; `null` significa "esta
-    // cadeia não mede isso". A distinção é a mesma de `B3.3`.
+    // cadeia não mede isso".
     for (const mode of ['oneEuro', 'kalman'] as const) {
       const c = new FilterChain({ mode, geometria: TELA });
       c.filter(500, 300, 0, 0, DT);

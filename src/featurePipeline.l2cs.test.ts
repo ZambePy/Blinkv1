@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { extractFeatures, USE_COMPACT_FEATURES } from './featurePipeline';
-import { extractCompactFeatures, projectFeatureSet, IRIS12_DIMS, activeFeatureDims } from './extractor';
+import { extractFeatures } from './featurePipeline';
+import { extractCompactFeatures, projectFeatureSet, activeFeatureDims } from './extractor';
 import { buildL2CSBlock, L2CS_BLOCK_DIM } from './l2cs/block';
 import type { Point3D } from './extractor';
 
@@ -26,7 +26,7 @@ const extractFull = (
   l2csGaze?: Parameters<typeof extractCompactFeatures>[2],
 ) => extractCompactFeatures(lms, faceMatrix, l2csGaze);
 
-describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
+describe('anexo do bloco L2CS ao vetor por olho', () => {
   it('sem l2csGaze: comportamento idêntico ao pré-L2CS (parity mantida)', () => {
     const lms = makeLandmarks();
     const withoutArg = extractFull(lms);
@@ -41,7 +41,6 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
   });
 
   it('gaze invalid: anexa 7 zeros no fim de ambos os vetores', () => {
-    if (!USE_COMPACT_FEATURES) return; // path legado sem suporte
     const lms = makeLandmarks();
     const baseline = extractFull(lms);
     const withInvalid = extractFull(lms, undefined, {
@@ -49,15 +48,11 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
       pitch: 0.2,
       valid: false,
     });
-    // ⚠️ O bloco L2CS NÃO é mais o final do vetor.
-    //
-    // `P6.5` acrescentou o bloco `spec11` em [44..49], então "os últimos 7"
-    // deixou de localizar o bloco angular — passou a apanhar os quadráticos do
-    // gaze e os EAR. O índice FIXO [37..43] é a única forma estável de apontar
-    // para ele, e é a mesma lição que `l2csSlotsInSet` já tinha registrado:
-    // localizar bloco por posição relativa ao fim quebra quando o vetor cresce.
-    expect(withInvalid.featuresLeft.length).toBe(baseline.featuresLeft.length + L2CS_BLOCK_DIM + 6);
-    expect(withInvalid.featuresRight.length).toBe(baseline.featuresRight.length + L2CS_BLOCK_DIM + 6);
+    // O índice FIXO [37..43] é a forma estável de apontar para o bloco:
+    // localizar por posição relativa ao fim quebra quando o vetor cresce, e é
+    // a mesma lição que `l2csSlotsInSet` registra.
+    expect(withInvalid.featuresLeft.length).toBe(baseline.featuresLeft.length + L2CS_BLOCK_DIM);
+    expect(withInvalid.featuresRight.length).toBe(baseline.featuresRight.length + L2CS_BLOCK_DIM);
     for (let i = 0; i < L2CS_BLOCK_DIM; i++) {
       expect(withInvalid.featuresLeft[37 + i]).toBe(0);
       expect(withInvalid.featuresRight[37 + i]).toBe(0);
@@ -65,7 +60,6 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
   });
 
   it('gaze valid: o bloco em [37..43] bate com buildL2CSBlock(...)', () => {
-    if (!USE_COMPACT_FEATURES) return;
     const lms = makeLandmarks();
     const gaze = { yaw: 0.1, pitch: 0.05, valid: true };
     const result = extractFull(lms, undefined, gaze);
@@ -84,7 +78,6 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
   });
 
   it('ambos olhos recebem OS MESMOS 7 dims (gaze é face-level)', () => {
-    if (!USE_COMPACT_FEATURES) return;
     const lms = makeLandmarks();
     const result = extractFull(lms, undefined, { yaw: 0.15, pitch: -0.1, valid: true });
     for (let i = 0; i < L2CS_BLOCK_DIM; i++) {
@@ -94,21 +87,15 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
     }
   });
 
-  it('diff de tamanho é o bloco L2CS mais o bloco spec11 de P6.5', () => {
-    if (!USE_COMPACT_FEATURES) return;
+  it('diff de tamanho é exatamente o bloco L2CS', () => {
     const lms = makeLandmarks();
     const off = extractFull(lms);
     const on = extractFull(lms, undefined, { yaw: 0, pitch: 0, valid: true });
-    // 7 do bloco angular + 6 do bloco `spec11` (P6.5). Os dois são anexados
-    // JUNTOS e sob a mesma condição — três dos seis termos do spec11 são
-    // funções do gaze, e anexá-los sem gaze produziria constantes.
-    const SPEC11_BLOCK_DIM = 6;
-    expect(on.featuresLeft.length - off.featuresLeft.length).toBe(L2CS_BLOCK_DIM + SPEC11_BLOCK_DIM);
-    expect(on.featuresRight.length - off.featuresRight.length).toBe(L2CS_BLOCK_DIM + SPEC11_BLOCK_DIM);
+    expect(on.featuresLeft.length - off.featuresLeft.length).toBe(L2CS_BLOCK_DIM);
+    expect(on.featuresRight.length - off.featuresRight.length).toBe(L2CS_BLOCK_DIM);
   });
 
   it('gaze extremo (fora do clamp) continua produzindo vetor finito', () => {
-    if (!USE_COMPACT_FEATURES) return;
     const lms = makeLandmarks();
     const result = extractFull(lms, undefined, {
       yaw: Math.PI,   // > π/4 — vai ser clampeado no bloco
@@ -120,17 +107,16 @@ describe('E6 — anexo do bloco L2CS ao vetor por olho', () => {
     for (const v of result.featuresRight) expect(Number.isFinite(v)).toBe(true);
   });
 
-  it('vetor COMPLETO tem sempre 50 dims quando l2csGaze != null, independente de valid', () => {
-    if (!USE_COMPACT_FEATURES) return;
+  it('vetor COMPLETO tem sempre 44 dims quando l2csGaze != null, independente de valid', () => {
     const lms = makeLandmarks();
-    
+
     const withValid = extractFull(lms, undefined, { yaw: 0, pitch: 0, valid: true });
-    expect(withValid.featuresLeft).toHaveLength(50);
-    expect(withValid.featuresRight).toHaveLength(50);
-    
+    expect(withValid.featuresLeft).toHaveLength(44);
+    expect(withValid.featuresRight).toHaveLength(44);
+
     const withInvalid = extractFull(lms, undefined, { yaw: 0, pitch: 0, valid: false });
-    expect(withInvalid.featuresLeft).toHaveLength(50);
-    expect(withInvalid.featuresRight).toHaveLength(50);
+    expect(withInvalid.featuresLeft).toHaveLength(44);
+    expect(withInvalid.featuresRight).toHaveLength(44);
   });
 });
 
@@ -183,11 +169,11 @@ describe('projeção do vetor no conjunto ativo', () => {
   });
 
   it("projectFeatureSet('compact') é identidade", () => {
-    const v = Array.from({ length: 50 }, (_, i) => i * 1.5);
+    const v = Array.from({ length: 44 }, (_, i) => i * 1.5);
     expect(projectFeatureSet(v, 'compact')).toEqual(v);
   });
 
   it('projectFeatureSet preserva vetor vazio (frame sem rosto)', () => {
-    expect(projectFeatureSet([], 'iris12')).toEqual([]);
+    expect(projectFeatureSet([], 'irisCore')).toEqual([]);
   });
 });

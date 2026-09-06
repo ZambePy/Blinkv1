@@ -3,7 +3,7 @@ import { writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { runHarness } from './pipelineHarness';
 
-// Utilitário-teste da tarefa T0.4: grava `docs/baseline_a28bdb0.json` com o
+// Utilitário-teste: grava `harness-baseline.json` com o
 // resultado do harness na semente default (12345). Guardado por env var para
 // não rodar na suíte normal — se rodasse, cada `npm test` sobrescreveria o
 // baseline em disco, o que anularia o gate de regressão.
@@ -11,17 +11,17 @@ import { runHarness } from './pipelineHarness';
 // Como usar:
 //   IRISFLOW_WRITE_BASELINE=1 npx vitest run src/testUtils/writeBaseline.test.ts
 //
-// Depois de gravar, verifique com `git diff docs/baseline_a28bdb0.json` que
+// Depois de gravar, verifique com `git diff` que
 // os números fazem sentido e commite o arquivo. Regravar num commit posterior
 // só se a mudança for INTENCIONAL — mudança silenciosa no baseline é o
 // oposto do que ele existe para fazer.
 
 const WRITE_BASELINE = process.env.IRISFLOW_WRITE_BASELINE === '1';
-const OUT_PATH = join(__dirname, '..', '..', 'docs', 'baseline_a28bdb0.json');
+const OUT_PATH = join(__dirname, 'harness-baseline.json');
 
-describe('T0.4 — gravar baseline instrumental', () => {
+describe('gravar baseline do harness', () => {
   it.skipIf(!WRITE_BASELINE)(
-    'grava docs/baseline_a28bdb0.json com o resultado do harness (seed=12345)',
+    'grava harness-baseline.json com o resultado do harness (seed=12345)',
     () => {
       const result = runHarness({ seed: 12345 });
       mkdirSync(dirname(OUT_PATH), { recursive: true });
@@ -40,7 +40,7 @@ describe('T0.4 — gravar baseline instrumental', () => {
       };
       writeFileSync(OUT_PATH, JSON.stringify(persisted, null, 2) + '\n', 'utf-8');
       // eslint-disable-next-line no-console
-      console.log(`[T0.4] baseline gravado em ${OUT_PATH}`);
+      console.log(`[harness] baseline gravado em ${OUT_PATH}`);
       expect(result.trajectories).toHaveLength(6);
     },
   );

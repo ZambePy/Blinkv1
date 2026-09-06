@@ -4,7 +4,6 @@ import React from 'react';
 import { RestScreen } from './RestScreen';
 import { BrowserRouter } from 'react-router-dom';
 
-// Mock do hook useGaze
 vi.mock('../../context/GazeContext', () => ({
   useGaze: () => ({
     isDwelling: false,
@@ -13,24 +12,23 @@ vi.mock('../../context/GazeContext', () => ({
 }));
 
 describe('RestScreen — Modo Descanso', () => {
-  it('deve renderizar com instruções de tela suspensa e botão de acordar com 3s', () => {
+  it('mostra a zona sem alvo e um único botão de voltar com dwell de 3 s', () => {
     render(
       <BrowserRouter>
         <RestScreen />
       </BrowserRouter>
     );
 
-    // Verifica título da página
     expect(screen.getByText('Modo Descanso')).toBeInTheDocument();
+    expect(screen.getByText(/Nada aqui reage ao olhar/i)).toBeInTheDocument();
 
-    // Verifica texto explicativo do repouso
-    expect(
-      screen.getByText(/O rastreamento ocular de ações foi pausado/i)
-    ).toBeInTheDocument();
+    // O centro é zona de descanso: não pode ser alvo de dwell.
+    expect(screen.getByLabelText(/Zona de descanso/i)).toHaveAttribute('data-no-dwell', 'true');
 
-    // Verifica botão de acordar e atributo customizado de dwell de 3000ms
-    const btnWake = screen.getByText('Acordar Tela (3s)');
-    expect(btnWake).toBeInTheDocument();
-    expect(btnWake.closest('button')).toHaveAttribute('data-dwell-ms', '3000');
+    // Um único alvo na tela, com dwell alongado.
+    const botoes = screen.getAllByRole('button');
+    expect(botoes).toHaveLength(1);
+    expect(botoes[0]).toHaveTextContent('Voltar ao menu');
+    expect(botoes[0]).toHaveAttribute('data-dwell-ms', '3000');
   });
 });

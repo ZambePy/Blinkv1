@@ -5,7 +5,6 @@ import {
   aggregateSnapshots,
   CANTHAL_DISTANCE_CM,
   idealDistanceCm,
-  effectiveViewingDistanceCm,
   TARGET_IOD_FRACTION,
   type ReadinessSnapshot,
   type CheckId,
@@ -313,42 +312,6 @@ describe('reflexo — persistência distingue lente de brilho passageiro', () =>
     expect(agg.screenHeight).toBe(1080);
   });
 });
-
-describe('effectiveViewingDistanceCm — a medição realimenta o pipeline', () => {
-  it('sem medição usa o valor configurado', () => {
-    expect(effectiveViewingDistanceCm(null, 60)).toEqual({ cm: 60, source: 'configured' });
-    expect(effectiveViewingDistanceCm(undefined, 60)).toEqual({ cm: 60, source: 'configured' });
-  });
-
-  it('com medição plausível, a medição vence a digitação', () => {
-    const r = effectiveViewingDistanceCm(47, 60);
-    expect(r.cm).toBe(47);
-    expect(r.source).toBe('measured');
-  });
-
-  it('medição absurda é descartada COM motivo, não silenciosamente', () => {
-    // Campo de visão mal calibrado produz estimativas sem sentido; usá-las
-    // moveria a grade de calibração para o lugar errado.
-    const r = effectiveViewingDistanceCm(400, 60);
-    expect(r.cm).toBe(60);
-    expect(r.source).toBe('configured');
-    expect(r.rejectedReason).toMatch(/fora da faixa plausível/);
-  });
-
-  it('rejeita distância perto demais para um posto de uso', () => {
-    expect(effectiveViewingDistanceCm(5, 60).source).toBe('configured');
-  });
-
-  it('NaN não passa como número', () => {
-    expect(effectiveViewingDistanceCm(NaN, 60).source).toBe('configured');
-  });
-
-  it('as bordas da faixa plausível são aceitas', () => {
-    expect(effectiveViewingDistanceCm(25, 60).source).toBe('measured');
-    expect(effectiveViewingDistanceCm(130, 60).source).toBe('measured');
-  });
-});
-
 describe('checagem de faixa de distância', () => {
   it('sem calibração com distâncias, o item nem aparece', () => {
     const ids = evaluateReadiness(goodSnapshot()).checks.map((c) => c.id);

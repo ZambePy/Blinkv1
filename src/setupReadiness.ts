@@ -14,7 +14,7 @@
 // É puro e sem DOM de propósito: os limiares são a parte que precisa de teste,
 // e testar UI para verificar um limiar é caro e frágil.
 //
-// ⚠️ Os limiares vêm de poucas instalações. São defensáveis porque derivam de
+// Os limiares vêm de poucas instalações. São defensáveis porque derivam de
 // medições, não de palpite, mas a faixa "ideal" precisa de re-medição com mais
 // usuários.
 
@@ -160,11 +160,8 @@ const VIEWPORT_COVERAGE_WARN = 0.92;
 
 /**
  * Distância entre cantos externos dos olhos num adulto (bi-ectocanthion).
- *
- * P5.3 — o valor mora em `src/anthropometry.ts`, junto com a interpupilar e com
- * os índices de landmark de cada uma. Reexportado aqui para não quebrar os
- * consumidores existentes; quem for escrever código novo deve importar do
- * módulo de antropometria.
+ * O valor mora em `src/anthropometry.ts`; reexportado aqui para os
+ * consumidores existentes.
  */
 export { CANTHAL_DISTANCE_CM } from './anthropometry';
 import { CANTHAL_DISTANCE_CM } from './anthropometry';
@@ -506,58 +503,4 @@ export function aggregateSnapshots(frames: readonly ReadinessSnapshot[]): Readin
     screenWidth: last.screenWidth,
     screenHeight: last.screenHeight,
   };
-}
-
-/**
- * Faixa em que uma distância olho→câmera é fisicamente plausível num posto de
- * uso. Fora disto o número quase certamente vem de um campo de visão mal
- * calibrado, não de alguém sentado num lugar esquisito.
- */
-const PLAUSIBLE_DISTANCE_CM: readonly [number, number] = [25, 130];
-
-export interface EffectiveDistance {
-  /** Valor a usar no pipeline. */
-  cm: number;
-  /** De onde veio — entra no relatório para o leitor não confundir medida
-   *  com digitação. */
-  source: 'measured' | 'configured';
-  /** Preenchido quando a medição foi descartada, com o porquê. */
-  rejectedReason?: string;
-}
-
-/**
- * Decide qual distância o pipeline usa.
- *
- * POR QUE IMPORTA: `viewingDistanceCm` não é decorativo — entra em
- * `computeCalibrationTargets` (posição dos alvos pelo orçamento de
- * excentricidade) e na conversão px→graus do relatório. Até aqui era SEMPRE
- * digitado, então se o paciente sentasse 10 cm mais perto, a grade continuava
- * montada para a distância de ontem. As duas gravações reais do repositório
- * diferiam 30% em tamanho de rosto — exatamente esse efeito.
- *
- * ⚠️ LIMITE HONESTO SOBRE O ABSOLUTO: a medição vem de `estimateDistanceCm`,
- * que depende do campo de visão, que por sua vez foi derivado de UMA medição
- * com fita. Se aquela fita errou por 10%, toda estimativa erra por 10% junto —
- * a cadeia não se conserta sozinha. O que a medição entrega de verdade é o
- * RELATIVO: mudanças de postura entre sessões passam a ser vistas, e é isso
- * que estava causando a irreprodutibilidade.
- */
-export function effectiveViewingDistanceCm(
-  measuredCm: number | null | undefined,
-  configuredCm: number,
-): EffectiveDistance {
-  if (measuredCm == null || !Number.isFinite(measuredCm)) {
-    return { cm: configuredCm, source: 'configured' };
-  }
-  const [lo, hi] = PLAUSIBLE_DISTANCE_CM;
-  if (measuredCm < lo || measuredCm > hi) {
-    return {
-      cm: configuredCm,
-      source: 'configured',
-      rejectedReason:
-        `distância medida (${measuredCm.toFixed(0)} cm) fora da faixa plausível ` +
-        `[${lo}, ${hi}] — provável campo de visão mal calibrado`,
-    };
-  }
-  return { cm: measuredCm, source: 'measured' };
 }

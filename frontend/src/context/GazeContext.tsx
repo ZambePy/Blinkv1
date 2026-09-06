@@ -10,7 +10,7 @@ import React, {
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
 import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
-import { stepDwell, createDwellState, type DwellTarget } from '@tracker/interaction/dwell';
+import { stepDwell, createDwellState, DEFAULT_DWELL_CONFIG, type DwellTarget } from '@tracker/interaction/dwell';
 import { estiloDoCursor, limitarTamanho } from '@tracker/interaction/cursorStyle';
 import { geometriaDoAnel } from '@tracker/interaction/dwellRing';
 import { GazeFallback } from '@tracker/interaction/gazeFallback';
@@ -21,18 +21,13 @@ import { ScanningMode } from '../components/ScanningMode';
 import type { FilterPreset, FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import {
-  planTuningStep, planStabilizationStep, planExposureStep,
+  planTuningStep, planStabilizationStep,
   type CameraCapabilities, type CameraState, type TuningStep,
 } from '@tracker/cameraTuner';
-// P4.2 — a estratégia de captura é decidida a partir do que o navegador
-// realmente expõe, e registrada. Enquanto `captureWorker` estiver desligada
-// (default), isto só informa; nada no caminho muda.
-import { detectCaptureEnvironment, planCaptureStrategy } from '@tracker/capture/captureWorker';
 import { detectFlicker, inferPowerLineHz } from '@tracker/flickerDetector';
-// P6.9 — aviso de distância fora da faixa de calibração, com histerese.
 import { AvisoDeDistancia } from '@tracker/distanceAdvisory';
 import { useSettings } from './SettingsContext';
-
+import { isDevMode, onDevModeChange } from '../devMode';
 
 export type { GazeEngine, GazeSample, EngineState, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 
@@ -42,35 +37,8 @@ const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
   normal: 1500,
   fast: 800,
 };
-// After firing, ignore gaze for REFRACTORY_MS to prevent double-fire on the same
-// target while the user's eye is still on it.
-const REFRACTORY_MS = 800;
-// Selector for elements the global dispatcher treats as clickable. Add
 // data-no-dwell="true" on any element that should opt out.
 export const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
-
-// Em estado 'degraded' o cursor está sobre o nariz (fallback do engine), não
-// sobre o olhar. Permitir dwell nesse estado dispara cliques aleatórios — em
-// software de saúde, mensagem errada ao cuidador é falha crítica. O dwell é
-// bloqueado, EXCETO em elementos com data-emergency="true": para o botão de
-// emergência vale mais um falso positivo ocasional do que um pedido de socorro
-// impossível. Nesses elementos o tempo é multiplicado por este fator para
-// reduzir o risco de falso positivo.
-const EMERGENCY_DEGRADED_MULT = 1.8;
-// B1.9 — mesma lógica para elementos com data-recovery="true" (o botão
-// "Recalibre aqui"). Fator MAIOR que o de emergência: um alarme disparado por
-// engano é reversível, uma recalibração disparada por engano custa 1–2 min de
-// sessão a um paciente com fadiga limitante — e o risco é maior justamente
-// porque o cursor está instável. Provisório até a medição de F8.5 (métrica 7,
-// estabilidade do dwell) no Dia 7.
-const RECOVERY_DEGRADED_MULT = 2.5;
-// Janela em que sair e voltar ao mesmo alvo preserva o progresso do dwell.
-const DWELL_GRACE_MS = 300;
-// Lacuna de amostras válidas acima da qual o progresso é ZERADO em vez de
-// apenas pausado. Também limita quanto tempo um único frame pode acrescentar,
-// o que impede que um salto de relógio (aba em segundo plano, GC longo)
-// complete um dwell de uma só vez.
-const DWELL_LOST_RESET_MS = 500;
 
 interface GazeContextValue {
   subscribe: (cb: (sample: GazeSample) => void) => () => void;
@@ -96,9 +64,9 @@ interface GazeContextValue {
    *  parado sem rastrear e sem dizer por quê — num software assistivo, quem
    *  está na frente da tela não tem como abrir o DevTools. */
   cameraError: string | null;
-  /** 0.2 — preenchido quando o pipeline mudou sob um perfil salvo e o modelo
-   *  foi descartado. Antes disso o app ia para `degraded` em silêncio: cursor
-   *  no fallback do nariz, sem dizer que a saída era recalibrar. */
+  /** Preenchido quando o pipeline mudou sob um perfil salvo e o modelo foi
+   *  descartado. Sem isto o app ia para `degraded` em silêncio: cursor no
+   *  fallback do nariz, sem dizer que a saída era recalibrar. */
   calibrationInvalidated: string | null;
   // Tempo em ms desde o start bem-sucedido do engine. 0 antes do start.
   // Consumido pelo relatório pós-calibração para preencher o campo
@@ -109,7 +77,7 @@ interface GazeContextValue {
   setIsComposing: (val: boolean) => void;
   isDegraded: boolean;
   /**
-   * `P7.5` — mensagem quando o gaze está perdido além do hold, ou `null`.
+   * Mensagem quando o gaze está perdido além do hold, ou `null`.
    *
    * Só existe com a flag `gazeLostFallback` ligada. Sem ela o comportamento
    * continua o de sempre: cursor congelado a 35% de opacidade, sem aviso.
@@ -126,19 +94,12 @@ export const useGaze = (): GazeContextValue => {
 };
 
 /**
- * Contexto separado só para `isDwelling` — B3.23.
+ * Contexto separado só para `isDwelling`.
  *
- * ## Por que separar
- *
- * `isDwelling` alterna a cada entrada e saída de alvo. No teclado ocular, onde
- * as teclas são vizinhas e o cursor tem jitter, isso acontece **várias vezes
- * por segundo**. Enquanto ele estava nas deps do `useMemo` do contexto
- * principal, cada alternância criava um `value` novo e re-renderizava os **11
- * consumidores** de `useGaze()` — a maioria dos quais nem lê o campo.
- *
- * `KeyboardScreen` (507 linhas) era o mais caro dos onze, e é também o único
- * que de fato usa `isDwelling`. Separar o contexto significa que ele continua
- * recebendo o sinal de que precisa, e os outros dez param de pagar por ele.
+ * O valor alterna várias vezes por segundo no teclado ocular (teclas vizinhas
+ * + jitter do cursor). Se entrasse nas deps do `useMemo` do contexto
+ * principal, cada alternância re-renderizaria todos os consumidores de
+ * `useGaze()` — e só o teclado lê o campo.
  */
 const DwellContext = createContext<boolean>(false);
 
@@ -236,31 +197,25 @@ async function openCameraWithFallback(): Promise<MediaStream> {
 }
 
 /**
- * Guard de instância única do provider (B1.8).
+ * Guard de instância única do provider.
  *
- * Precisa ser de MÓDULO, não um ref. O guard original testava
- * `engineRef.current`, mas o próprio cleanup fazia `engineRef.current = null`
- * — então no segundo mount do StrictMode o ref já estava limpo, o guard não
- * barrava nada, e nascia um segundo engine com um segundo `getUserMedia`.
- *
- * Um contador de módulo sobrevive ao ciclo mount→cleanup→mount e é a única
- * coisa que consegue distinguir "estou remontando" de "sou o primeiro".
+ * Precisa ser de MÓDULO, não um ref: o cleanup zera `engineRef.current`, então
+ * no segundo mount do StrictMode um guard baseado no ref não barraria nada e
+ * nasceria um segundo engine com um segundo `getUserMedia`.
  */
 let provedorAtivo = 0;
 
 export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { settings } = useSettings();
+  // Os hooks de console e o boot leem as configurações fora do ciclo de render;
+  // o ref garante que vejam o valor atual, não o do primeiro render.
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
   const engineRef = useRef<GazeEngine | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
-  /**
-   * Stream da câmera, guardada assim que `getUserMedia` resolve (B1.8).
-   *
-   * O cleanup lia a stream de `videoRef.current?.srcObject`. Quando ele roda
-   * durante o await de `getUserMedia`, `srcObject` ainda é `null` — e
-   * `stream?.getTracks().forEach(t => t.stop())` não parava nada. Guardar a
-   * referência aqui, antes de qualquer atribuição ao <video>, dá ao cleanup
-   * algo concreto para parar.
-   */
+  // Stream da câmera, guardada assim que `getUserMedia` resolve. Se o cleanup
+  // rodar durante o await, `video.srcObject` ainda é null — este ref é o que
+  // garante que as tracks sejam paradas mesmo assim.
   const streamRef = useRef<MediaStream | null>(null);
   const cursorRef = useRef<HTMLDivElement | null>(null);
   const [state, setState] = useState<EngineState>('idle');
@@ -269,7 +224,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [isComposing, setIsComposing] = useState(false);
   const [isDegraded, setIsDegraded] = useState(false);
   const [cameraError, setCameraError] = useState<string | null>(null);
-  /** P6.9 — aviso de distância fora da faixa de calibração. */
+  /** Aviso de distância fora da faixa de calibração. */
   const [distanceAdvice, setDistanceAdvice] = useState<string | null>(null);
   const avisoDistanciaRef = useRef(new AvisoDeDistancia());
   const [calibrationInvalidated, setCalibrationInvalidated] = useState<string | null>(null);
@@ -280,25 +235,23 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // model instead of React state to avoid re-rendering the tree at 30 Hz.
   const subscribersRef = useRef<Set<(s: GazeSample) => void>>(new Set());
   const cameraTuningRef = useRef<TuningStep | null>(null);
-  // Item 4 — estado da câmera antes de qualquer ajuste nosso.
+  // Estado da câmera antes de qualquer ajuste nosso, para restaurar ao sair.
   const originalCameraSettingsRef = useRef<Record<string, number | string> | null>(null);
 
   // Global dwell dispatcher state. Kept in refs to avoid re-renders — the loop
   // runs at 30 Hz and reads/writes these directly from the gaze callback.
   const dwellMsRef = useRef<number>(DWELL_MS_BY_SPEED[settings.dwellSpeed]);
   // Todo o estado do dwell vive num único objeto imutável, avançado pelo
-  // redutor puro de `src/interaction/dwell.ts`. Os refs anteriores (alvo,
-  // início, refratário, último alvo, saída, progresso congelado) eram mutados
-  // em pontos diferentes do callback e saíam de sincronia — foi assim que o
-  // dwell chegou a completar com os olhos fechados.
+  // redutor puro de `src/interaction/dwell.ts`. Refs soltos mutados em pontos
+  // diferentes do callback saem de sincronia (dwell completando de olho fechado).
   const dwellStateRef = useRef(createDwellState());
-  // P7.5 — segura a última posição válida por 2 s, depois esconde e avisa.
+  // Gaze perdido: segura a última posição válida por 2 s, depois esconde e avisa.
   const fallbackRef = useRef(new GazeFallback());
   const [gazeLostMessage, setGazeLostMessage] = useState<string | null>(null);
   const gazeLostMessageRef = useRef<string | null>(null);
-  // P7.2 — o `<circle>` do anel de progresso, quando a flag está ligada.
+  // O `<circle>` do anel de progresso, quando a flag está ligada.
   const anelRef = useRef<SVGCircleElement | null>(null);
-  // P7.3 — piscada como clique. Desligada por default; ver a flag.
+  // Piscada como clique. Desligada por default; ver a flag.
   const blinkClickRef = useRef(criarEstadoBlinkClick());
   // Nó que está com o realce `gaze-hover` aplicado no DOM.
   const hoveredNodeRef = useRef<HTMLElement | null>(null);
@@ -307,8 +260,6 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const clearDwellVisuals = React.useCallback(() => {
     const n = hoveredNodeRef.current;
     if (n) {
-      // F-FE-33 — nó pode ter sido desmontado sob o olhar; `isConnected` evita
-      // segurar referência a um elemento fora da árvore.
       n.classList.remove('gaze-hover');
       n.style.removeProperty('--gaze-dwell-progress');
     }
@@ -326,6 +277,13 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     engineRef.current?.calibration.setEyeDominance?.(settings.eyeDominance);
   }, [settings.eyeDominance]);
+
+  // Geometria da tela para os filtros que trabalham em graus. Também é
+  // reaplicada quando o engine sobe (ver o boot), porque este efeito pode
+  // rodar antes de `createGazeEngine`.
+  useEffect(() => {
+    engineRef.current?.setScreenGeometry(settings.screenDiagonalIn, settings.viewingDistanceCm);
+  }, [settings.screenDiagonalIn, settings.viewingDistanceCm]);
 
   // O campo de visão habilita a compensação de distância: sem ele o pipeline
   // não converte tamanho de rosto em centímetros e a compensação fica inativa.
@@ -370,12 +328,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       return;
     }
 
-    // Item 4 — fotografa o estado ORIGINAL antes de mexer.
-    //
-    // `applyConstraints` altera o dispositivo, não só a nossa view dele: em
-    // vários drivers o zoom e o brilho que deixamos aqui aparecem no Teams
-    // depois. O pedido era adaptar a câmera "somente ao nosso produto", então
-    // guardamos o que havia e devolvemos ao sair.
+    // Fotografa o estado original antes de mexer: `applyConstraints` altera o
+    // dispositivo, não só a nossa view dele — em vários drivers o zoom e o
+    // brilho que deixamos aqui aparecem no Teams depois. Devolvemos ao sair.
     try {
       const st = track.getSettings() as unknown as Record<string, unknown>;
       const keys = ['zoom', 'brightness', 'contrast', 'exposureMode', 'whiteBalanceMode', 'focusMode', 'powerLineFrequency'];
@@ -388,7 +343,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       console.log('[camera] estado original da câmera guardado para restauração:', snap);
     } catch { /* getSettings indisponível: não há o que restaurar */ }
 
-    // Item 3 — usar a MAIOR resolução que a câmera oferece, até o teto.
+    // Usa a MAIOR resolução que a câmera oferece, até o teto.
     //
     // O `getUserMedia` pede 1920×1080 como `ideal`, mas o browser negocia e
     // pode entregar menos. Aqui, já com as capabilities na mão, sabemos o
@@ -443,6 +398,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     await settle(2000);
 
     const MAX_ITER = 14;
+    let ultimoBrilho: number | undefined;
+    let convergiu = false;
     for (let i = 0; i < MAX_ITER; i++) {
       if (isCancelled()) return;
       const d = engine.getDiagnostics();
@@ -466,6 +423,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         contrast: d.quality.contrast,
       });
       cameraTuningRef.current = step;
+      ultimoBrilho = d.quality.brightness;
+      convergiu = step.converged;
 
       if (step.converged || Object.keys(step.constraints).length === 0) {
         if (step.reasons.length) console.log('[camera]', step.reasons.join(' | '));
@@ -477,20 +436,16 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         await track.applyConstraints(step.constraints as MediaTrackConstraints);
       } catch (e) {
-        // Driver recusou. Não insiste: continuar tentando a mesma constraint
-        // rejeitada só gastaria o orçamento de iterações.
+        // Driver recusou. Insistir na mesma constraint só gastaria iterações.
         console.warn('[camera] applyConstraints rejeitado, ajuste interrompido:', e);
         break;
       }
       await settle(450);
     }
 
-    // Estabilização só DEPOIS de convergir — travar antes congelaria uma
-    // exposição ainda não assentada.
     if (isCancelled()) return;
-    // Item 1 — cintilação: mede a série de brilho na cadência de frame e, se
-    // houver batimento compatível com 50/60 Hz, corrige na origem pelo
-    // `powerLineFrequency` do driver.
+    // Cintilação: mede a série de brilho na cadência de frame e, se houver
+    // batimento compatível com 50/60 Hz, corrige na origem pelo driver.
     let powerLineHz: 50 | 60 | null = null;
     const dFinal = engine.getDiagnostics();
     if (dFinal && dFinal.brightnessHistoryFps > 0) {
@@ -504,62 +459,33 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         );
       }
     }
+
+    // Travar exposição/balanço/foco só faz sentido com a imagem boa: travar
+    // uma imagem escura porque o zoom bateu no limite congelaria o problema
+    // pelo resto da sessão. Sem brilho medido, a exposição segue automática.
+    const imagemBoa = typeof ultimoBrilho === 'number' && ultimoBrilho >= 0.25 && ultimoBrilho <= 0.75;
     const stab = planStabilizationStep(caps, powerLineHz);
-    if (Object.keys(stab.constraints).length > 0) {
+    const constraints: Record<string, unknown> = {};
+    if (stab.constraints.powerLineFrequency !== undefined) {
+      constraints.powerLineFrequency = stab.constraints.powerLineFrequency;
+    }
+    if (convergiu || imagemBoa) {
+      for (const k of ['exposureMode', 'whiteBalanceMode', 'focusMode'] as const) {
+        if (stab.constraints[k] !== undefined) constraints[k] = stab.constraints[k];
+      }
+    } else if (ultimoBrilho !== undefined) {
+      console.log(`[camera] brilho ${ultimoBrilho.toFixed(2)} fora da faixa — exposição segue automática.`);
+    }
+    if (Object.keys(constraints).length > 0) {
       try {
-        await track.applyConstraints(stab.constraints as MediaTrackConstraints);
-        console.log('[camera] estabilização:', stab.reasons.join(' | '));
+        await track.applyConstraints(constraints as MediaTrackConstraints);
+        console.log('[camera] estabilização:', Object.entries(constraints).map(([k, v]) => `${k} → ${v}`).join(' | '));
       } catch (e) {
         console.warn('[camera] estabilização rejeitada (exposição segue automática):', e);
       }
-    } else {
-      console.log('[camera]', stab.reasons.join(' | '));
-      if (stab.physicalAdvice) console.warn('[camera]', stab.physicalAdvice);
+    } else if (stab.physicalAdvice) {
+      console.warn('[camera]', stab.physicalAdvice);
     }
-
-    // ── P4.3 — exposição manual DERIVADA da medição ──────────────────────────
-    //
-    // Roda aqui, e não no warm-up de 2 s da câmera, por um motivo simples: o
-    // plano depende de `d.quality.brightness`, que só existe com o engine
-    // rodando. A versão anterior pedia `exposureMode: 'manual'` às cegas antes
-    // do engine subir — travava a exposição sem saber se a imagem estava boa, e
-    // não tinha o que dizer ao cuidador quando o driver não colaborava.
-    //
-    // Continua atrás da MESMA flag (`lockCameraExposure`, default false), então
-    // o caminho de produção não muda enquanto ela estiver desligada.
-    if (!EXPERIMENT.lockCameraExposure) {
-      console.log('[camera] lockCameraExposure=false, exposição segue automática');
-      return;
-    }
-    if (isCancelled()) return;
-    const dExp = engine.getDiagnostics();
-    let stateExp: CameraState = {};
-    try {
-      const st = track.getSettings() as unknown as Record<string, unknown>;
-      stateExp = {
-        exposureTime: typeof st.exposureTime === 'number' ? st.exposureTime : undefined,
-        exposureCompensation: typeof st.exposureCompensation === 'number' ? st.exposureCompensation : undefined,
-      };
-    } catch { /* getSettings indisponível: o planner parte do meio da faixa */ }
-
-    const exp = planExposureStep(caps, stateExp, {
-      hasFace: dExp?.framing.hasFace ?? false,
-      iodFraction: dExp && dExp.video.width > 0 ? dExp.framing.iodPx / dExp.video.width : 0,
-      brightness: dExp?.quality.brightness,
-      contrast: dExp?.quality.contrast,
-    });
-    console.log(`[camera] exposição (suporte: ${exp.supportLevel}):`, exp.reasons.join(' | '));
-    if (Object.keys(exp.constraints).length > 0) {
-      try {
-        await track.applyConstraints(exp.constraints as MediaTrackConstraints);
-      } catch (e) {
-        console.warn('[camera] constraints de exposição rejeitadas:', e);
-      }
-    }
-    // O conselho físico é a saída honesta quando o software esgotou o que
-    // podia. Ele existe justamente para o caso em que não há constraint a
-    // aplicar — silenciar aqui deixaria o cuidador sem ação nenhuma.
-    if (exp.physicalAdvice) console.warn('[camera] ação física necessária:', exp.physicalAdvice);
   }, []);
 
   useEffect(() => {
@@ -567,14 +493,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // getUserMedia + FaceLandmarker são caros e mantêm estado global (module-scope
     // da calibração), então travamos a segunda inicialização. Em produção o guard
     // é inofensivo — StrictMode não faz double-invoke fora de dev.
-    //
-    // B1.8 — o guard usa um contador de MÓDULO, não `engineRef.current`. O
-    // antigo se auto-anulava: o cleanup fazia `engineRef.current = null`, então
-    // o segundo mount encontrava o ref limpo, passava direto, e criava engine
-    // #2 + um segundo getUserMedia. Resultado: LED da webcam permanentemente
-    // aceso, decode de 1080p órfão, e `NotReadableError` em vários drivers
-    // Windows — que o app traduzia como "OUTRO PROGRAMA está usando a câmera",
-    // culpando o Teams por um bug nosso.
+    // Ver `provedorAtivo` para o motivo de ser um contador de módulo.
     if (provedorAtivo > 0) {
       console.log('[IrisFlow] GazeProvider effect ignorado — já existe um provider ativo.');
       return;
@@ -586,11 +505,19 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     const engine = createGazeEngine();
     engineRef.current = engine;
 
+    // Os efeitos de `eyeDominance` e `cameraHorizontalFovDeg` acima rodam
+    // ANTES deste (ordem de declaração), quando `engineRef` ainda é null: sem
+    // esta aplicação inicial, um FOV calibrado e salvo só voltaria a valer
+    // quando o cuidador o alterasse — e sem FOV a compensação de distância
+    // e o aviso de distância ficam inativos em silêncio.
+    engine.calibration.setEyeDominance(settingsRef.current.eyeDominance);
+    engine.calibration.setCameraFovDeg(settingsRef.current.cameraHorizontalFovDeg);
+
     // Cursor DOM node — direct writes via ref, no React state.
     // transform-origin: center lets scale() grow around the cursor's centre
     // (used by the dwell dispatcher for visual feedback) without breaking
     // the translate3d positioning.
-    // P7.1 — o diâmetro vem da flag. `limitarTamanho` prende à faixa em vez de
+    // O diâmetro vem da flag. `limitarTamanho` prende à faixa em vez de
     // rejeitar: um valor corrompido não pode deixar o paciente sem cursor, que
     // é justamente o que ele usaria para chegar às configurações e consertá-lo.
     const tamanhoCursor = limitarTamanho(EXPERIMENT.cursorSizePx);
@@ -617,13 +544,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     document.body.appendChild(cursor);
     cursorRef.current = cursor;
 
-    // P7.2 — anel de progresso ao redor do cursor.
-    //
-    // Fica FORA do fluxo do dwell no alvo (que continua existindo): alvos
-    // pequenos escondem o próprio progresso debaixo do cursor, e olhando para
-    // o vazio não há onde desenhá-lo. O anel acompanha o olhar, então está
-    // sempre onde a fóvea está — ler um indicador fora dele exigiria um
-    // sacádico, que cancelaria o dwell que se queria acompanhar.
+    // Anel de progresso ao redor do cursor. Complementa a barra no alvo: alvos
+    // pequenos escondem o próprio progresso debaixo do cursor, e o anel fica
+    // sempre onde a fóvea está — ler um indicador fora dela exigiria um
+    // sacádico, que cancelaria o dwell.
     if (EXPERIMENT.dwellRingOnCursor) {
       const g = geometriaDoAnel(tamanhoCursor, 0);
       const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -658,7 +582,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       anelRef.current = circulo;
     }
 
-    // 0.2 — calibração descartada por incompatibilidade de pipeline.
+    // Calibração descartada por incompatibilidade de pipeline.
     const unsubInvalid = engine.calibration.onInvalidated(() => {
       if (cancelled) return;
       setCalibrationInvalidated(
@@ -675,23 +599,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (!cancelled) setL2csStatus(s);
     });
 
-    // B3.23 — `sessionStorage` lido UMA vez, no mount.
-    //
-    // A leitura estava dentro do callback de gaze, ou seja, no caminho quente:
-    // 30 acessos por segundo a uma API síncrona que atravessa a fronteira do
-    // JS para o armazenamento do navegador. O valor é um modo de depuração
-    // que ninguém alterna no meio de uma sessão — e se alterar, um F5 aplica.
-    let isDevMode = false;
-    try {
-      isDevMode = sessionStorage.getItem('irisflow_dev_mode') === 'true';
-    } catch {
-      // sessionStorage indisponível (modo privado restritivo, iframe sem
-      // permissão). Modo de depuração desligado é o default correto.
-    }
+    // Lido fora do caminho quente e atualizado por evento quando a tela
+    // inicial alterna o modo.
+    let devMode = isDevMode();
+    const unsubDevMode = onDevModeChange((on) => { devMode = on; });
 
     let cbInvocations = 0;
     const unsubGaze = engine.subscribe((sample) => {
-      if (isDevMode) {
+      if (devMode) {
         if (cursorRef.current) {
           cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
           cursorRef.current.style.opacity = '0';
@@ -716,18 +631,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         setIsDegraded(isDegraded);
       }
 
-      // B3.25 — durante a calibração, só a EMERGÊNCIA continua acionável.
-      //
-      // A regra anterior zerava o dwell a cada frame enquanto `calibrating`,
-      // com o raciocínio de que um dwell acidental corromperia a coleta. O
-      // raciocínio vale para os botões da própria tela de calibração — e não
-      // vale para o botão de emergência, que fica VISÍVEL durante os 1–2
-      // minutos da coleta e ficava completamente inoperante.
-      //
-      // A política de exceção que existe para `degraded` nunca foi estendida
-      // à calibração. O resultado: o paciente passa dois minutos olhando para
-      // pontos, vê o botão de socorro na tela, e ele não responde. Para o
-      // público-alvo, dois minutos sem via de comunicação não é detalhe.
+      // Durante a calibração, só a EMERGÊNCIA continua acionável. Um dwell
+      // acidental nos botões da própria tela corromperia a coleta, mas o botão
+      // de socorro fica visível durante os 1–2 minutos e não pode ficar
+      // inoperante nesse tempo.
       const alvoDuranteCalibracao = engineIsCalibrating
         ? ((document.elementFromPoint(sample.x, sample.y) as Element | null)
             ?.closest('[data-emergency="true"]') as HTMLElement | null)
@@ -751,10 +658,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               key: node,
               customDwellMs,
               isEmergency: node.dataset.emergency === 'true',
-              // B1.9 — alvo de recuperação: aceito em `degraded` como o de
-              // emergência, com dwell mais longo. É o que torna o botão
-              // "Recalibre aqui" acionável exatamente no estado em que ele
-              // aparece. Sem isto o banner é decorativo.
+              // Alvo de recuperação: aceito em `degraded` como o de emergência,
+              // com dwell mais longo — é o que torna o "Recalibre aqui"
+              // acionável exatamente no estado em que ele aparece.
               isRecovery: node.dataset.recovery === 'true',
               isDisabled:
                 (node as HTMLButtonElement).disabled ||
@@ -784,48 +690,26 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           },
           target,
           {
+            ...DEFAULT_DWELL_CONFIG,
             dwellMs: dwellMsRef.current,
-            emergencyDegradedMult: EMERGENCY_DEGRADED_MULT,
-            recoveryDegradedMult: RECOVERY_DEGRADED_MULT,
-            refractoryMs: REFRACTORY_MS,
-            graceMs: DWELL_GRACE_MS,
-            lostResetMs: DWELL_LOST_RESET_MS,
           },
         );
         dwellStateRef.current = outcome.state;
 
-        // ── P7.3 — piscada como clique ──────────────────────────────────
+        // ── Piscada como clique ─────────────────────────────────────────
         //
-        // Roda em PARALELO ao dwell, não no lugar dele: o plano pede
-        // "combinável com dwell (fixa + pisca = confirma)". As cinco guardas
-        // (duração 150–800 ms, alvo estável há 300 ms, refratário de 1 s,
-        // nunca em emergência) vivem no módulo puro.
+        // Roda em PARALELO ao dwell (fixa + pisca = confirma). As guardas de
+        // duração, estabilidade, refratário e emergência vivem no módulo puro.
         //
-        // O alvo passado é `node`, não `outcome.hoverKey`: o `hoverKey` já
-        // reflete a política do dwell (que zera durante a piscada, porque com
-        // o olho fechado não há amostra válida). Alimentar a piscada-clique
-        // com ele faria o alvo sumir justamente no quadro em que a piscada
-        // começa — que é o mesmo defeito que a guarda de estabilidade do
-        // módulo teve, e que os testes dele pegaram.
+        // O alvo passado é `node`, não `outcome.hoverKey`: o `hoverKey` zera
+        // durante a piscada (olho fechado = sem amostra válida), o que faria o
+        // alvo sumir justamente no quadro em que a piscada começa.
         //
-        // ⚠️ As guardas de ESTADO DO SISTEMA vivem aqui, não no módulo puro.
-        // `stepBlinkClick` conhece duração, estabilidade, refratário e
-        // emergência — ele não sabe se o sistema está calibrado. Sem o filtro
-        // abaixo, a piscada clicava onde o `stepDwell` se RECUSA a clicar:
-        //
-        //   - `uncalibrated`: o ponto emitido é o fallback do NARIZ, que não
-        //     tem relação nenhuma com a direção do olhar. Uma piscada ali
-        //     aciona um botão escolhido pela posição da cabeça — e o `dwell`
-        //     bloqueia tudo nesse estado, inclusive a emergência, exatamente
-        //     por isso.
-        //   - `degraded`: a predição falhou. O `dwell` só permite emergência e
-        //     recuperação, as duas com dwell mais LONGO. Deixar a piscada
-        //     passar aqui daria o caminho mais curto justamente no estado
-        //     menos confiável — e um "Recalibre aqui" disparado por engano
-        //     custa 1–2 min de sessão a quem tem fadiga limitante.
-        //   - `isDisabled`: cobre `disabled`, `aria-disabled` e
-        //     `data-no-dwell`. Um botão que o dwell não clica não pode virar
-        //     clicável só porque a pessoa piscou.
+        // As guardas de ESTADO DO SISTEMA ficam aqui: `stepBlinkClick` não sabe
+        // se o sistema está calibrado. Sem este filtro a piscada clicava onde o
+        // `stepDwell` se recusa a clicar — com o ponto no fallback do nariz
+        // (`uncalibrated`), em `degraded` (só emergência/recuperação, com dwell
+        // mais longo) e em alvos desabilitados.
         const piscadaPermitida =
           sample.uncalibrated !== true
           && !isDegraded
@@ -833,7 +717,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
         if (EXPERIMENT.blinkClick) {
           const rb = stepBlinkClick(blinkClickRef.current, {
-            piscando: sample.eyeState === 'closed',
+            piscando: !sample.hasFace || sample.eyeState === undefined
+              ? null
+              : sample.eyeState === 'closed',
             nowMs: now,
             // `null` quando o estado proíbe: o relógio de estabilidade não
             // deve acumular sobre um alvo que não poderia ser clicado.
@@ -871,40 +757,6 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const alvo = outcome.effect.targetKey as HTMLElement;
           clearDwellVisuals();
 
-          // B2.14 — alimenta a calibração online com o clique confirmado.
-          //
-          // Esta chamada NÃO EXISTIA, apesar de `calibration.ts` afirmar que
-          // "`feedOnlineSample` é disparado em todo dwell click da UI". A
-          // cadeia de consequências: `biasSamples` ficava sempre em 0, então o
-          // `DriftIndicator` (que exige `MIN_BIAS_SAMPLES = 20`) NUNCA
-          // renderizava, e o interruptor "calibração online" em
-          // `SettingsScreen` ligava um caminho que não recebia amostra nenhuma.
-          // O cuidador tinha um botão que não fazia nada e um alerta de deriva
-          // que nunca disparava.
-          //
-          // Conectada só agora, depois de `B2.8`: com o RLS anterior (λ com
-          // semântica invertida) uma única amostra online anulava o Ridge
-          // offline, e ligar isto teria degradado a predição em vez de
-          // corrigi-la.
-          //
-          // Continua inócua por default — os DOIS consumidores estão atrás de
-          // flag desligada (`sessionBiasEnabled` e `USE_ONLINE_CALIBRATION`).
-          // O que muda é que agora existe sinal para elas consumirem quando o
-          // F8.4 mandar ligar.
-          try {
-            // O alvo é o CENTRO do botão: é para lá que o paciente estava
-            // olhando quando o dwell completou, não para o ponto exato do
-            // cursor (que carrega justamente o erro que se quer corrigir).
-            const r = alvo.getBoundingClientRect();
-            engineRef.current?.calibration.feedOnlineSample?.(
-              r.left + r.width / 2,
-              r.top + r.height / 2,
-            );
-          } catch (err) {
-            // Aprender com o clique é secundário; executá-lo não é.
-            console.warn('[IrisFlow] feedOnlineSample falhou:', err);
-          }
-
           // O refratário já está armado dentro de `outcome.state`, que foi
           // commitado ACIMA. Se o handler React lançar, o dwell não redispara
           // sob o mesmo olhar e o loop segue vivo.
@@ -935,26 +787,21 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           cursorRef.current.style.opacity = '0';
           if (anelRef.current) anelRef.current.ownerSVGElement!.style.opacity = '0';
 
-          // P7.5 — o fallback NÃO roda aqui (não há cursor para segurar), mas
-          // a mensagem dele precisa ser limpa.
-          //
-          // Sem isto, um "Posicione o rosto na câmera" emitido antes de a
-          // calibração começar sobrevive à transição e fica na tela durante
-          // os 1–2 minutos inteiros da coleta — sobre a própria UI de
-          // calibração, mandando o paciente fazer algo que ele já está
-          // fazendo. O `GazeFallback` também é zerado, senão ele retomaria
-          // com uma âncora de posição de antes da calibração.
+          // O fallback de gaze perdido não roda aqui (não há cursor para
+          // segurar), mas a mensagem dele precisa ser limpa: um "Posicione o
+          // rosto" emitido antes da calibração ficaria na tela durante a coleta
+          // inteira. O `GazeFallback` também é zerado, senão retomaria com uma
+          // âncora de posição de antes da calibração.
           if (gazeLostMessageRef.current !== null) {
             gazeLostMessageRef.current = null;
             setGazeLostMessage(null);
             fallbackRef.current.reset();
           }
         } else {
-          // ── P7.5 — fallback de gaze perdido ────────────────────────────
+          // ── Fallback de gaze perdido ───────────────────────────────────
           //
           // Com a flag desligada, `fb` reproduz o comportamento de sempre
-          // (posição da amostra, cursor visível), então o caminho abaixo é o
-          // mesmo de antes — nenhum paciente vê mudança sem alguém ligar.
+          // (posição da amostra, cursor visível).
           const fb = EXPERIMENT.gazeLostFallback
             ? fallbackRef.current.step({
                 gazeValido: sample.hasFace,
@@ -989,14 +836,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             cursorRef.current.style.opacity = '0';
             if (anelRef.current) anelRef.current.ownerSVGElement!.style.opacity = '0';
           } else {
-            // ── P7.1 — geometria e cores vêm do módulo puro ──────────────
-            //
-            // Em especial o `offsetPx`. O código anterior subtraía `24` — a
-            // metade do `width:48px` escrita à mão em outro arquivo. Com o
-            // tamanho ajustável, esse `24` desenharia um cursor de 96 px a
-            // 24 px do ponto olhado; e esse erro não parece bug de layout,
-            // parece erro de calibração: viés constante que piora conforme o
-            // cursor cresce.
+            // Geometria e cores vêm do módulo puro — em especial o `offsetPx`:
+            // um meio-tamanho escrito à mão aqui viraria viés constante assim
+            // que o diâmetro do cursor mudasse, e viés constante parece erro
+            // de calibração, não de layout.
             const est = estiloDoCursor({
               tamanhoPx: limitarTamanho(EXPERIMENT.cursorSizePx),
               estado: hitTarget
@@ -1023,7 +866,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               ? '2px dashed rgba(234,179,8,0.9)'
               : '';
 
-            // ── P7.2 — anel de progresso do dwell ──────────────────────────
+            // Anel de progresso do dwell.
             if (anelRef.current) {
               const svg = anelRef.current.ownerSVGElement!;
               if (hitTarget) {
@@ -1056,9 +899,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
       });
 
-      // Sincroniza o estado de isDwelling de forma segura sem floodar re-renders.
-      // Lê o estado do redutor puro (`dwellStateRef`), que substituiu os sete
-      // refs mutáveis anteriores.
+      // Sincroniza `isDwelling` sem floodar re-renders.
       const targetExists = dwellStateRef.current.targetKey !== null;
       if (wasDwellingRef.current !== targetExists) {
         wasDwellingRef.current = targetExists;
@@ -1092,9 +933,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         console.log('[IrisFlow] solicitando getUserMedia...');
         const stream = await openCameraWithFallback();
-        // B1.8 — registra a stream ANTES de qualquer outra coisa. A partir
-        // daqui o cleanup consegue pará-la mesmo que nunca cheguemos a
-        // atribuí-la ao <video>.
+        // Registra a stream ANTES de qualquer outra coisa: a partir daqui o
+        // cleanup consegue pará-la mesmo que nunca cheguemos ao <video>.
         streamRef.current = stream;
         // E se o cleanup JÁ rodou enquanto esperávamos, a stream que acabou de
         // chegar não tem dono: para agora mesmo em vez de deixar a câmera
@@ -1134,41 +974,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           );
         }
 
-        // P4.3 — a trava de exposição SAIU DAQUI e foi para `autoTuneCamera`.
-        //
-        // O que existia aqui era um `setTimeout(2000)` que pedia
-        // `exposureMode/focusMode/whiteBalanceMode = 'manual'` às cegas: sem
-        // medir a imagem, sem escolher QUAL exposição, e sem nada a dizer
-        // quando o driver não expunha os controles. Travar uma exposição ruim é
-        // pior que deixá-la automática — a câmera perde a capacidade de
-        // compensar e a imagem fica ruim pelo resto da sessão.
-        //
-        // Agora o plano vem de `planExposureStep`, que precisa de
-        // `d.quality.brightness` — ou seja, precisa do engine rodando. Por isso
-        // o lugar certo é depois da convergência da malha, em `autoTuneCamera`.
-        // A flag continua sendo `lockCameraExposure` (default false).
-
-        // P4.2 — registra a estratégia de captura que este navegador permite.
-        //
-        // Fica no log mesmo com a flag desligada, e de propósito: sem isso,
-        // uma gravação feita numa máquina sem `MediaStreamTrackProcessor` é
-        // indistinguível de outra feita com ele, e as duas têm jitter de
-        // agendamento diferente. É contexto que o Dia 7 vai precisar.
-        const capturePlan = planCaptureStrategy(detectCaptureEnvironment());
-        console.log(
-          `[capture] estratégia possível: ${capturePlan.strategy} ` +
-          `(fora do thread principal: ${capturePlan.offMainThread ? 'sim' : 'não'}) — ` +
-          capturePlan.reasons.join(' | '),
-        );
-        if (EXPERIMENT.captureWorker && !capturePlan.offMainThread) {
-          console.warn(
-            '[capture] captureWorker está LIGADA mas este navegador não permite a captura sair ' +
-            'do thread principal. O caminho segue o de sempre — a flag não tem efeito aqui.',
-          );
-        }
-        // B1.8 — segundo ponto de saída, depois de `loadeddata` e do warm-up
-        // de exposição. Antes o `return` aqui era nu: saía sem parar as
-        // tracks, deixando um decode de 1080p vivo pelo resto da página.
+        // Segundo ponto de saída, depois de `loadeddata`: sair sem parar as
+        // tracks deixaria um decode de 1080p vivo pelo resto da página.
         if (cancelled) {
           stream.getTracks().forEach((t) => t.stop());
           streamRef.current = null;
@@ -1176,18 +983,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
         }
         await engine.start(video);
+        engine.setScreenGeometry(settingsRef.current.screenDiagonalIn, settingsRef.current.viewingDistanceCm);
         console.log('[IrisFlow] engine.start() concluído; loop rAF em execução.');
 
-        // ── P5.5 — hooks de console para a medição de latência ──────────────
-        //
-        // Sem isto, `stageLatency` só existia dentro do contexto React: não
-        // havia caminho pelo DevTools, e o roteiro de medição de
-        // `docs/LATENCIA_L2CS.md` não era executável.
+        // ── Hooks de console para diagnóstico e medição de latência ────────
         //
         // `__irisflowDiag()` devolve o diagnóstico inteiro;
-        // `__irisflowLatencia()` imprime só a tabela de estágios, ordenada
-        // pelo p95 — que é o número que decide onde o orçamento está sendo
-        // gasto. Ambos são removidos no cleanup do provider.
+        // `__irisflowLatencia()` imprime a tabela de estágios ordenada pelo
+        // p95. Ambos são removidos no cleanup do provider.
         if (typeof window !== 'undefined') {
           const w = window as unknown as Record<string, unknown>;
           w.__irisflowDiag = () => engineRef.current?.getDiagnostics() ?? null;
@@ -1210,11 +1013,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               }))
               .sort((a, b) => b.p95ms - a.p95ms);
             console.table(linhas);
-            // ⚠️ `stalePct` JÁ vem em percentual (0–100), não em fração —
-            // `engine.ts` faz o `× 100` na origem. A primeira versão desta
-            // linha multiplicava de novo e imprimia `stale=10000.0%`, que é
-            // absurdo o bastante para ser notado; se o valor real fosse 0,5%
-            // teria virado 50% e passaria como plausível.
+            // `stalePct` JÁ vem em percentual (0–100), não em fração —
+            // `engine.ts` faz o `× 100` na origem. Não multiplicar de novo.
             console.log(
               `[latencia] fps=${d.fpsRender.toFixed(1)} l2cs=${d.l2cs.hz.toFixed(1)} Hz ` +
               `inferência=${d.l2cs.latencyMs.toFixed(0)} ms stale=${d.l2cs.stalePct.toFixed(1)}% ` +
@@ -1223,7 +1023,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             if (d.l2cs.stalePct > 50) {
               console.warn(
                 `[latencia] ${d.l2cs.stalePct.toFixed(0)}% das leituras do L2CS estão OBSOLETAS ` +
-                `(inferência ${d.l2cs.latencyMs.toFixed(0)} ms contra tolerância de 400 ms). ` +
+                `(inferência ${d.l2cs.latencyMs.toFixed(0)} ms contra tolerância de ${d.l2cs.staleMs.toFixed(0)} ms). ` +
                 'O bloco angular está sendo zerado — as features [4] e [5] do vetor não carregam sinal.',
               );
             }
@@ -1231,15 +1031,11 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           };
           // ── Verificação pré-sessão ────────────────────────────────────
           //
-          // Transforma a lista de "lembre-se de" do protocolo `F8.1` num
-          // comando só. Cada item dessa lista é uma forma de perder a sessão —
-          // e o modo de falha que mais preocupa não é esquecer, é esquecer e
-          // NÃO PERCEBER: rodar a condição inteira com a flag da anterior
-          // produz dado de aparência perfeita, atribuído à condição errada.
-          //
-          // O parâmetro opcional é a condição PRETENDIDA. Declará-la é o que
-          // pega o erro mais provável do dia — `__irisflowExp.set` só passa a
-          // valer depois de recarregar a página.
+          // Checklist do protocolo de medição num comando só. O parâmetro
+          // opcional é a condição PRETENDIDA: declará-la pega o erro mais
+          // provável — `__irisflowExp.set` só vale depois de recarregar, e
+          // medir com a flag da condição anterior produz dado de aparência
+          // perfeita atribuído à condição errada.
           //
           //   __irisflowPreflight()
           //   __irisflowPreflight({ filterMode: 'kalmanEma', l2csInputSize: 224 })
@@ -1270,20 +1066,23 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             const itens = preflight({
               estadoEngine: engineRef.current?.getState() ?? 'desconhecido',
               calibrado: engineRef.current?.calibration.isCalibrated() ?? false,
-              telaPolegadas: settings.screenDiagonalIn,
-              origemGeometria: settings.screenGeometrySource ?? 'default',
-              distanciaCm: settings.viewingDistanceCm,
+              telaPolegadas: settingsRef.current.screenDiagonalIn,
+              origemGeometria: settingsRef.current.screenGeometrySource ?? 'default',
+              distanciaCm: settingsRef.current.viewingDistanceCm,
               viewportPx: {
                 w: document.documentElement.clientWidth,
                 h: document.documentElement.clientHeight,
               },
               telaPx: { w: window.screen.width, h: window.screen.height },
               taxaAtualizacaoHz: hz,
+              fpsRender: d.fpsRender,
+              videoPx: { w: d.video.width, h: d.video.height },
               l2cs: {
                 status: d.l2cs.status,
                 executionProvider: d.l2cs.executionProvider ?? null,
                 stalePct: d.l2cs.stalePct,
                 pendingCount: d.l2cs.pendingCount,
+                hz: d.l2cs.hz,
               },
               filtro: d.filtro,
               flags: EXPERIMENT as unknown as Record<string, unknown>,
@@ -1338,24 +1137,20 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       unsubInvalid();
       unsubL2CSStatus();
       unsubGaze();
-      // B1.8/B1.7 — `dispose()` em vez de `stop()`. `stop()` só para o loop;
-      // `dispose()` fecha o FaceLandmarker (heap WASM + contexto GPU) e para
-      // o worker L2CS com ~91 MB de sessão ONNX. Sem isso cada mount vazava
-      // esses recursos — dois mounts em StrictMode = ~182 MB de ONNX vivos.
-      //
-      // O try/catch não é decorativo: uma exceção aqui abortaria o resto do
-      // cleanup — incluindo `provedorAtivo--` e o `track.stop()` — e deixaria
-      // o provider permanentemente travado, com a câmera acesa. Falhar ao
-      // liberar um recurso não pode impedir a liberação dos outros.
+      unsubDevMode();
+      // `dispose()` em vez de `stop()`: `stop()` só para o loop; `dispose()`
+      // fecha o FaceLandmarker (heap WASM + GPU) e o worker L2CS (~91 MB de
+      // sessão ONNX). O try/catch importa: uma exceção aqui abortaria o resto
+      // do cleanup (`provedorAtivo--`, `track.stop()`) e deixaria o provider
+      // travado com a câmera acesa.
       try {
         engine.dispose();
       } catch (e) {
         console.warn('[IrisFlow] engine.dispose() falhou durante o cleanup:', e);
       }
       engineRef.current = null;
-      // P5.5 — remove os hooks de console junto com o engine. Deixá-los vivos
-      // apontando para um engine descartado devolveria `null` em silêncio, e
-      // quem estivesse medindo leria isso como "o estágio não rodou".
+      // Remove os hooks de console junto com o engine: vivos, apontando para
+      // um engine descartado, devolveriam `null` em silêncio.
       if (typeof window !== 'undefined') {
         delete (window as unknown as Record<string, unknown>).__irisflowDiag;
         delete (window as unknown as Record<string, unknown>).__irisflowLatencia;
@@ -1365,26 +1160,15 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // remount imediato não encontre recursos meio liberados.
       provedorAtivo = Math.max(0, provedorAtivo - 1);
 
-      // B1.8 — a stream vem do ref, não de `videoRef.current?.srcObject`.
-      // Quando o cleanup roda durante o await de `getUserMedia`, `srcObject`
-      // ainda é null e a leitura antiga devolvia `null`: nenhuma track era
-      // parada e a câmera ficava acesa. O `?? ` mantém o caminho antigo como
-      // rede de segurança para o caso de a stream ter sido trocada no <video>
-      // por outro caminho.
+      // A stream vem do ref (ver `streamRef`); o `??` é rede de segurança para
+      // o caso de ela ter sido trocada no <video> por outro caminho.
       const stream = streamRef.current
         ?? (videoRef.current?.srcObject as MediaStream | null);
 
-      // Item 4 — devolve a câmera como estava ANTES de `track.stop()`.
-      //
-      // Zoom e brilho aplicados por `applyConstraints` persistem no dispositivo
-      // em vários drivers: sem isto, o usuário abriria a próxima videochamada
-      // com o zoom que deixamos. O pedido era adaptar a câmera "somente ao
-      // nosso produto".
-      //
-      // Best-effort e síncrono-ish: o cleanup do React não espera Promise, mas
-      // `applyConstraints` chega ao driver antes do `stop()` porque a chamada é
-      // despachada imediatamente. Se falhar, o `stop()` a seguir libera o
-      // dispositivo de qualquer forma.
+      // Devolve a câmera como estava ANTES de `track.stop()`: zoom e brilho
+      // aplicados por `applyConstraints` persistem no dispositivo em vários
+      // drivers. Best-effort — o cleanup do React não espera Promise, mas a
+      // chamada é despachada ao driver antes do `stop()`.
       const original = originalCameraSettingsRef.current;
       const track0 = stream?.getVideoTracks()[0];
       if (original && track0 && Object.keys(original).length > 0) {
@@ -1421,16 +1205,12 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getCalibrationMode: () => engineRef.current?.calibration.getCalibrationMode() ?? null,
       startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
       completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
-      // 1.1-UI — deriva de pose da calibração recém-treinada, para a tela poder
-      // avisar em vez de deixar o usuário seguir com um modelo contaminado.
+      // Deriva de pose da calibração recém-treinada, para a tela poder avisar
+      // em vez de deixar o usuário seguir com um modelo contaminado.
       getPoseDriftVerdict: () => engineRef.current?.calibration.getPoseDriftVerdict() ?? null,
       abort: () => engineRef.current?.calibration.abort(),
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,
-      feedOnlineSample: (x, y) => engineRef.current?.calibration.feedOnlineSample(x, y) ?? false,
-      setOnlineCalibrationEnabled: (enabled) =>
-        engineRef.current?.calibration.setOnlineCalibrationEnabled(enabled),
-      onlineSampleCount: () => engineRef.current?.calibration.onlineSampleCount() ?? 0,
       setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
       setCameraFovDeg: (fov) => engineRef.current?.calibration.setCameraFovDeg(fov),
       getCalibrationDistancesCm: () =>
@@ -1442,9 +1222,6 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         engineRef.current?.calibration.getCurrentCameraDistanceCm() ?? null,
       getDistanceRange: () => engineRef.current?.calibration.getDistanceRange() ?? null,
       onInvalidated: (cb) => engineRef.current?.calibration.onInvalidated(cb) ?? (() => {}),
-      setSessionBiasEnabled: (enabled) => engineRef.current?.calibration.setSessionBiasEnabled(enabled),
-      resetSessionBias: () => engineRef.current?.calibration.resetSessionBias(),
-      getSessionBias: () => engineRef.current?.calibration.getSessionBias() ?? { x: 0, y: 0, samples: 0 },
       getRecentBlinkRatePerMinute: (windowMs) => engineRef.current?.calibration.getRecentBlinkRatePerMinute(windowMs) ?? 0,
       getActiveOpticalCondition: () => engineRef.current?.calibration.getActiveOpticalCondition() ?? 'desconhecido',
     }),
@@ -1464,16 +1241,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     [],
   );
 
-
-  // ── P6.9 — aviso de distância, a 2 Hz ────────────────────────────────────
-  //
-  // 2 Hz e não por quadro: a distância muda na escala de segundos (a pessoa se
-  // reacomoda na cadeira), e reavaliar 30 vezes por segundo só gastaria
-  // re-render. A histerese do `AvisoDeDistancia` cuida da estabilidade; a
-  // cadência baixa cuida do custo.
-  //
-  // O `setState` só acontece quando o TEXTO muda — sem isso, cada tique
-  // re-renderizaria os consumidores do contexto com o mesmo valor.
+  // Aviso de distância a 2 Hz, não por quadro: a distância muda na escala de
+  // segundos. A histerese do `AvisoDeDistancia` cuida da estabilidade, e o
+  // `setState` só acontece quando o texto muda.
   useEffect(() => {
     const id = setInterval(() => {
       const faixa = engineRef.current?.calibration.getDistanceRange?.() ?? null;
@@ -1496,12 +1266,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getCameraStream: () => (videoRef.current?.srcObject as MediaStream | null) ?? null,
       getCameraTuning: () => cameraTuningRef.current,
       getSessionUptimeMs: () => engineRef.current?.getSessionUptimeMs() ?? 0,
-      // B3.23 — `isDwelling` continua exposto aqui por compatibilidade, mas
-      // NÃO entra nas deps do memo: quem precisa dele deve usar
-      // `useIsDwelling()`, que assina o contexto separado. Ler daqui devolve o
-      // valor do último render em que outra coisa mudou, o que é suficiente
-      // para os consumidores que apenas o repassam, e evita re-renderizar os
-      // onze consumidores várias vezes por segundo.
+      // `isDwelling` continua exposto por compatibilidade, mas NÃO entra nas
+      // deps do memo: quem precisa dele deve usar `useIsDwelling()`. Ler daqui
+      // devolve o valor do último render em que outra coisa mudou.
       isDwelling,
       isComposing,
       setIsComposing,
@@ -1529,13 +1296,11 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         distanceAdvice={distanceAdvice}
         gazeLostMessage={gazeLostMessage}
       />
-      {/* P7.4 — a varredura fica DENTRO do provider e FORA do `DwellContext`:
-          ela não depende de dwell (é o que resta quando o dwell não é
-          alcançável) e não deve re-renderizar a cada alternância dele. */}
+      {/* A varredura fica DENTRO do provider e FORA do `DwellContext`: ela não
+          depende de dwell e não deve re-renderizar a cada alternância dele. */}
       <ScanningMode />
-      {/* B3.23 — `isDwelling` num provider próprio, POR DENTRO do principal.
-          Uma alternância de dwell agora só invalida este contexto; os
-          consumidores que assinam apenas `useGaze()` não re-renderizam. */}
+      {/* `isDwelling` num provider próprio: uma alternância de dwell só
+          invalida este contexto, não os consumidores de `useGaze()`. */}
       <DwellContext.Provider value={isDwelling}>
         {children}
       </DwellContext.Provider>

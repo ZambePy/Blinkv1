@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { FEATURE_VECTOR_ID, ACTIVE_FEATURE_SET, IRIS12_DIMS, activeFeatureDims } from '../extractor';
+import { FEATURE_VECTOR_ID, ACTIVE_FEATURE_SET, activeFeatureDims } from '../extractor';
 import { startRecording, stopRecording, clearRecording, getRecording, parseJSONL, exportAsJSONL, recordFrame } from './recorder';
 
 // O identificador do vetor existe para que uma gravação nunca seja medida
@@ -14,11 +14,12 @@ describe('FEATURE_VECTOR_ID', () => {
     // 37 sem bloco L2CS, 44 com. Quem grava em `compact` não pode comparar por
     // dimensão — tem de recomputar.
     expect(activeFeatureDims('compact')).toBe('var');
-    expect(activeFeatureDims('iris12')).toBe(IRIS12_DIMS);
+    expect(activeFeatureDims('irisCore')).toBe(4);
   });
 
   it('muda quando o conjunto ativo muda — é o ponto do identificador', () => {
-    expect(`iris12:${activeFeatureDims('iris12')}`).not.toBe(`compact:${activeFeatureDims('compact')}`);
+    expect(`irisCore:${activeFeatureDims('irisCore')}`).not.toBe(`irisCore+l2cs:${activeFeatureDims('irisCore+l2cs')}`);
+    expect(`irisCore:${activeFeatureDims('irisCore')}`).not.toBe(`compact:${activeFeatureDims('compact')}`);
   });
 });
 
