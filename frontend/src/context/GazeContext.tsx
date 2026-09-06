@@ -37,7 +37,7 @@ const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
   normal: 1500,
   fast: 800,
 };
-// data-no-dwell="true" on any element that should opt out.
+// Data-no-dwell="true" on any element that should opt out.
 export const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 
 interface GazeContextValue {
@@ -288,7 +288,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // O campo de visão habilita a compensação de distância: sem ele o pipeline
   // não converte tamanho de rosto em centímetros e a compensação fica inativa.
   // Propagado em efeito próprio para reagir à calibração de FOV feita em
-  // Configurações sem exigir recarregar.
+  // configurações sem exigir recarregar.
   useEffect(() => {
     engineRef.current?.calibration.setCameraFovDeg?.(settings.cameraHorizontalFovDeg);
   }, [settings.cameraHorizontalFovDeg]);
@@ -617,7 +617,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const now = performance.now();
 
       // ── Global dwell dispatcher ───────────────────────────────────────────
-      // Finds the topmost clickable under the gaze via elementFromPoint (the
+      // finds the topmost clickable under the gaze via elementFromPoint (the
       // cursor itself is pointer-events:none, so it doesn't occlude). If the
       // gaze stays on the same target for dwellMs, fires a real .click() —
       // React's synthetic click handlers respond just like a mouse click.
@@ -1208,6 +1208,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Deriva de pose da calibração recém-treinada, para a tela poder avisar
       // em vez de deixar o usuário seguir com um modelo contaminado.
       getPoseDriftVerdict: () => engineRef.current?.calibration.getPoseDriftVerdict() ?? null,
+      // Diagnóstico do ajuste: a tela usa `targetsSkipped` para avisar que a
+      // calibração treinou sem parte da grade.
+      getCalibrationFitDiagnostics: () =>
+        engineRef.current?.calibration.getCalibrationFitDiagnostics() ?? null,
       abort: () => engineRef.current?.calibration.abort(),
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,

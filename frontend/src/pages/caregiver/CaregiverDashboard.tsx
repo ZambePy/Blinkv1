@@ -1,33 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  Activity,
-  ArrowLeft,
-  BellRing,
-  BookOpen,
-  CheckCircle2,
-  Circle,
-  Crosshair,
-  Eye,
-  Frown,
-  HeartPulse,
-  History,
-  RefreshCw,
-  Save,
-  Settings,
-  Smile,
-  Target,
-} from 'lucide-react';
+import { CheckCircle2, Circle, Activity, Frown, Smile, HeartPulse, Save } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
-import { useGaze } from '../../context/GazeContext';
-import { useReminders } from '../../context/ReminderContext';
-import { getClinicalData, hasConsent } from '../../utils/clinicalLogger';
 import { CaregiverPageLayout } from '../../components/ui/CaregiverPageLayout';
-import { PageHeader } from '../../components/ui/PageHeader';
-import { CaregiverPinGate } from './CaregiverPinGate';
-import { Badge, Card, KV, Note, Segmented } from './CaregiverControls';
-import './caregiver.css';
+import { hoverAndFocusBackground } from '../../components/ui/hoverFocus';
 
 interface Task {
   id: number;
@@ -60,110 +37,36 @@ const loadState = (userId: string): CaregiverState => {
     if (!raw) return { tasks: DEFAULT_TASKS, entries: [] };
     const parsed = JSON.parse(raw) as Partial<CaregiverState>;
     return {
-      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : DEFAULT_TASKS,
-      entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      tasks: parsed.tasks ?? DEFAULT_TASKS,
+      entries: parsed.entries ?? [],
     };
   } catch {
     return { tasks: DEFAULT_TASKS, entries: [] };
   }
 };
 
-const STATE_LABEL: Record<string, string> = {
-  idle: 'Parado',
-  loading: 'Iniciando',
-  tracking: 'Rastreando',
-  calibrating: 'Calibrando',
-  no_face: 'Sem rosto',
-  degraded: 'Degradado',
-  uncalibrated: 'Sem calibração',
-  error: 'Erro',
-};
-
-const MODEL_LABEL: Record<string, string> = {
-  loading: 'carregando',
-  ready: 'pronto',
-  error: 'com erro',
-  disabled: 'desligado',
-};
-
-const fmtDate = (iso: string) => new Date(iso).toLocaleString('pt-BR');
-
-/**
- * Painel do cuidador: estado do rastreamento, alertas e eventos recentes,
- * atalhos, rotina diária e diário de sintomas. Rotina e diário persistem
- * por perfil no localStorage.
- */
 export const CaregiverDashboard: React.FC = () => {
-  const { currentProfile, isCaregiver } = useAuth();
-  const toast = useToast();
-
-  if (!isCaregiver) {
-    return (
-      <CaregiverPinGate
-        title="Acesso Restrito ao Cuidador"
-        hint="Digite o PIN do cuidador para abrir o painel de rotina, diário e estado do rastreamento."
-        errorText="PIN inválido"
-        submitLabel="Entrar"
-        cancelLabel="Voltar"
-      />
-    );
-  }
-
-  return <Dashboard userId={currentProfile?.id ?? 'guest'} profileName={currentProfile?.name} toast={toast} />;
-};
-
-interface DashboardProps {
-  userId: string;
-  profileName?: string;
-  toast: ReturnType<typeof useToast>;
-}
-
-const Dashboard: React.FC<DashboardProps> = ({ userId, profileName, toast }) => {
+  const { currentProfile, isCaregiver, loginCaregiver } = useAuth();
   const navigate = useNavigate();
-  const { state, l2csStatus, isDegraded, cameraError, calibrationInvalidated, gazeLostMessage, calibration, getDiagnostics } =
-    useGaze();
-  const { reminders } = useReminders();
-
+  const toast = useToast();
+  const userId = currentProfile?.id ?? 'guest';
   const initial = useMemo(() => loadState(userId), [userId]);
+
   const [tasks, setTasks] = useState<Task[]>(initial.tasks);
   const [entries, setEntries] = useState<DiaryEntry[]>(initial.entries);
   const [painLevel, setPainLevel] = useState(0);
   const [mood, setMood] = useState<'good' | 'bad' | null>(null);
 
+  const [pin, setPin] = useState('');
+  const [pinError, setPinError] = useState<string | null>(null);
+
   useEffect(() => {
-    try {
-      localStorage.setItem(storageKey(userId), JSON.stringify({ tasks, entries }));
-    } catch {
-      // Sem storage o painel vale só nesta sessão.
-    }
+    localStorage.setItem(storageKey(userId), JSON.stringify({ tasks, entries }));
   }, [tasks, entries, userId]);
 
-  // Leituras do engine não são reativas: 1 Hz é suficiente para um painel.
-  const [live, setLive] = useState(() => ({
-    calibrated: calibration.isCalibrated(),
-    fps: null as number | null,
-    hasFace: null as boolean | null,
-    distance: calibration.getDistanceRange(),
-  }));
-  useEffect(() => {
-    // Só pelo intervalo: chamar no mount faria o efeito realimentar o render
-    // se o contexto vier sem memoização (como nos testes).
-    const id = setInterval(() => {
-      const d = getDiagnostics();
-      setLive({
-        calibrated: calibration.isCalibrated(),
-        fps: d ? d.fpsRender : null,
-        hasFace: d ? d.framing.hasFace : null,
-        distance: calibration.getDistanceRange(),
-      });
-    }, 1000);
-    return () => clearInterval(id);
-  }, [calibration, getDiagnostics]);
-
-  const clinical = useMemo(() => (hasConsent() ? getClinicalData() : null), []);
-
-  const toggleTask = (id: number) =>
+  const toggleTask = (id: number) => {
     setTasks((t) => t.map((task) => (task.id === id ? { ...task, done: !task.done } : task)));
+  };
 
   const saveEntry = () => {
     const entry: DiaryEntry = { timestamp: new Date().toISOString(), painLevel, mood };
@@ -171,287 +74,533 @@ const Dashboard: React.FC<DashboardProps> = ({ userId, profileName, toast }) => 
     toast.success('Diário salvo.');
   };
 
-  // Alertas ativos, do mais grave para o menos.
-  const alerts: { tone: 'danger' | 'warn'; text: string }[] = [];
-  if (cameraError) alerts.push({ tone: 'danger', text: cameraError });
-  if (calibrationInvalidated) alerts.push({ tone: 'danger', text: calibrationInvalidated });
-  if (!live.calibrated && !calibrationInvalidated) {
-    alerts.push({ tone: 'warn', text: 'Sem calibração: o paciente não consegue clicar com o olhar. Use "Recalibrar".' });
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (loginCaregiver(pin)) {
+      setPinError(null);
+      setPin('');
+    } else {
+      setPinError('PIN inválido');
+      setPin('');
+    }
+  };
+
+  if (!isCaregiver) {
+    return (
+      <main
+        style={{
+          minHeight: '100vh',
+          backgroundColor: '#0f172a',
+          color: '#f8fafc',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          padding: '2rem',
+          fontFamily: "'Inter', sans-serif",
+        }}
+      >
+        <div
+          style={{
+            background: '#1e293b',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: '3rem',
+            borderRadius: '2rem',
+            textAlign: 'center',
+            maxWidth: '450px',
+            width: '100%',
+            boxShadow: '0 20px 40px rgba(0,0,0,0.3)',
+          }}
+        >
+          <h2 style={{ fontSize: '2rem', fontWeight: 800, color: '#f8fafc', margin: '0 0 0.5rem 0' }}>
+            Acesso Restrito ao Cuidador
+          </h2>
+          <p style={{ fontSize: '1.1rem', color: '#94a3b8', lineHeight: 1.5, margin: '0 0 2.0rem 0' }}>
+            Por favor, digite o PIN numérico do cuidador para acessar o dashboard de atividades e dados clínicos.
+          </p>
+
+          <form
+            onSubmit={handleLogin}
+            style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}
+          >
+            <input
+              id="caregiver-pin"
+              type="password"
+              value={pin}
+              onChange={(e) => setPin(e.target.value)}
+              maxLength={8}
+              autoComplete="one-time-code"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              placeholder="••••"
+              aria-invalid={pinError ? true : undefined}
+              style={{
+                textAlign: 'center',
+                fontSize: '2.5rem',
+                letterSpacing: '0.8rem',
+                padding: '0.75rem',
+                borderRadius: '1rem',
+                border: pinError ? '2px solid #ef4444' : '2px solid #334155',
+                background: '#0f172a',
+                color: '#f8fafc',
+                outline: 'none',
+              }}
+            />
+            {pinError && (
+              <p role="alert" style={{ color: '#ef4444', fontSize: '0.95rem', fontWeight: 600, margin: '0.25rem 0' }}>
+                {pinError}
+              </p>
+            )}
+
+            {/* Teclado Numérico Virtual */}
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(3, 1fr)',
+                gap: '0.75rem',
+                margin: '1.5rem 0',
+                width: '100%',
+              }}
+            >
+              {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((num) => (
+                <button
+                  key={num}
+                  type="button"
+                  onClick={() => pin.length < 8 && setPin((p) => p + num)}
+                  style={{
+                    height: '55px',
+                    borderRadius: '0.75rem',
+                    background: '#334155',
+                    border: 'none',
+                    fontSize: '1.35rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    color: '#f8fafc',
+                    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+                  }}
+                >
+                  {num}
+                </button>
+              ))}
+              <button
+                type="button"
+                onClick={() => setPin('')}
+                style={{
+                  height: '55px',
+                  borderRadius: '0.75rem',
+                  background: 'rgba(239, 68, 68, 0.15)',
+                  border: 'none',
+                  fontSize: '1.0rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#ef4444',
+                }}
+              >
+                Limpar
+              </button>
+              <button
+                type="button"
+                onClick={() => pin.length < 8 && setPin((p) => p + '0')}
+                style={{
+                  height: '55px',
+                  borderRadius: '0.75rem',
+                  background: '#334155',
+                  border: 'none',
+                  fontSize: '1.35rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#f8fafc',
+                }}
+              >
+                0
+              </button>
+              <button
+                type="button"
+                onClick={() => setPin((p) => p.slice(0, -1))}
+                style={{
+                  height: '55px',
+                  borderRadius: '0.75rem',
+                  background: '#475569',
+                  border: 'none',
+                  fontSize: '1.0rem',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  color: '#cbd5e1',
+                }}
+              >
+                Apagar
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
+              <button
+                type="button"
+                onClick={() => navigate('/menu')}
+                style={{
+                  flex: 1,
+                  padding: '0.85rem',
+                  background: '#334155',
+                  borderRadius: '0.75rem',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '1.0rem',
+                  fontWeight: 700,
+                  color: '#cbd5e1',
+                }}
+              >
+                Voltar
+              </button>
+              <button
+                type="submit"
+                style={{
+                  flex: 1,
+                  padding: '0.85rem',
+                  background: 'linear-gradient(135deg, #1B54A8, #2563eb)',
+                  borderRadius: '0.75rem',
+                  border: 'none',
+                  cursor: 'pointer',
+                  fontSize: '1.0rem',
+                  fontWeight: 700,
+                  color: 'white',
+                  boxShadow: '0 4px 16px rgba(27,84,168,0.3)',
+                }}
+              >
+                Entrar
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+    );
   }
-  if (isDegraded) alerts.push({ tone: 'warn', text: 'O rastreamento está degradado. Confira luz e distância; se persistir, recalibre.' });
-  if (gazeLostMessage) alerts.push({ tone: 'warn', text: gazeLostMessage });
-  if (live.distance && (live.distance.status === 'out' || live.distance.status === 'warn')) {
-    alerts.push({ tone: live.distance.status === 'out' ? 'danger' : 'warn', text: live.distance.message });
-  }
-
-  // Eventos recentes: testes de precisão (com consentimento) e diário.
-  const events = [
-    ...(clinical?.calibrations ?? []).map((c) => ({
-      at: c.timestamp,
-      icon: <Target size={20} aria-hidden="true" />,
-      text: `Teste de precisão: ${c.errorDeg.toFixed(2)}° de erro médio`,
-      tone: c.errorDeg >= 1.5 ? ('warn' as const) : ('ok' as const),
-    })),
-    ...entries.map((e) => ({
-      at: e.timestamp,
-      icon: <HeartPulse size={20} aria-hidden="true" />,
-      text: `Diário: dor ${e.painLevel}/10 · humor ${e.mood === 'good' ? 'bem' : e.mood === 'bad' ? 'mal' : 'não registrado'}`,
-      tone: e.painLevel >= 7 || e.mood === 'bad' ? ('warn' as const) : ('ok' as const),
-    })),
-  ]
-    .sort((a, b) => b.at.localeCompare(a.at))
-    .slice(0, 6);
-
-  const nextReminders = [...reminders].sort((a, b) => a.time.localeCompare(b.time)).slice(0, 3);
-  const doneCount = tasks.filter((t) => t.done).length;
-
-  const stateTone = state === 'tracking' ? 'ok' : state === 'error' || state === 'degraded' ? 'danger' : 'warn';
 
   return (
     <CaregiverPageLayout title="Painel do Cuidador">
-      <div className="cg-stack">
-        <PageHeader
-          title="Visão geral"
-          subtitle={profileName ? `Acompanhamento de ${profileName}` : 'Estado do rastreamento, rotina e diário do paciente'}
-          icon={<Activity size={28} aria-hidden="true" />}
-          showBack={false}
-        />
+      {/* Bloco de Boas-vindas e Guia do Cuidador */}
+      <div
+        style={{
+          background: 'linear-gradient(135deg, #1e293b, #0f172a)',
+          border: '1px solid rgba(255, 255, 255, 0.08)',
+          borderRadius: '1.5rem',
+          padding: '2rem',
+          marginBottom: '2rem',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: '1.5rem',
+          flexWrap: 'wrap',
+        }}
+      >
+        <div>
+          <h3 style={{ fontSize: '1.5rem', fontWeight: 800, color: '#f8fafc', margin: '0 0 0.5rem 0' }}>
+            Olá, Cuidador!
+          </h3>
+          <p style={{ fontSize: '1.05rem', color: '#94a3b8', margin: 0, lineHeight: 1.5 }}>
+            Certifique-se de que a câmera esteja bem posicionada e o ambiente iluminado para manter o rastreamento ocular calibrado.
+          </p>
+        </div>
+        <button
+          onClick={() => navigate('/caregiver/guide?from=/caregiver')}
+          style={{
+            padding: '0.85rem 1.75rem',
+            background: 'rgba(255, 255, 255, 0.08)',
+            border: '1.5px solid rgba(255, 255, 255, 0.15)',
+            borderRadius: '1rem',
+            color: '#f8fafc',
+            fontSize: '1rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            transition: 'background 0.2s',
+          }}
+          {...hoverAndFocusBackground('rgba(255, 255, 255, 0.08)', 'rgba(255, 255, 255, 0.15)')}
+        >
+          Ler Guia do Cuidador
+        </button>
+      </div>
 
-        {/* Atalhos: alvos grandes. "Voltar ao menu" é dwell-ável — o
-            paciente pode precisar sair daqui sozinho. */}
-        <div className="cg-grid cg-grid--tight" role="navigation" aria-label="Atalhos">
-          <button type="button" className="cg-tile cg-tile--primary" onClick={() => navigate('/menu')}>
-            <span className="cg-tile__icon" aria-hidden="true">
-              <ArrowLeft size={26} />
-            </span>
-            <span className="cg-tile__title">Voltar ao menu do paciente</span>
-            <span className="cg-tile__desc">Devolve a tela ao uso pelo olhar.</span>
-          </button>
-          <button type="button" className="cg-tile" onClick={() => navigate('/calibration-check')} data-no-dwell="true">
-            <span className="cg-tile__icon" aria-hidden="true">
-              <RefreshCw size={26} />
-            </span>
-            <span className="cg-tile__title">Recalibrar</span>
-            <span className="cg-tile__desc">Preparação, calibração e teste de precisão.</span>
-          </button>
-          <button type="button" className="cg-tile" onClick={() => navigate('/settings')} data-no-dwell="true">
-            <span className="cg-tile__icon" aria-hidden="true">
-              <Settings size={26} />
-            </span>
-            <span className="cg-tile__title">Configurações</span>
-            <span className="cg-tile__desc">Tempo de fixação, tela, voz e dados.</span>
-          </button>
+      <div
+        style={{
+          display: 'grid',
+          gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))',
+          gap: '2rem',
+        }}
+      >
+        <section
+          aria-labelledby="tasks-title"
+          style={{
+            background: '#1e293b',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: '2rem',
+            borderRadius: '2rem',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
+          }}
+        >
+          <h2
+            id="tasks-title"
+            style={{
+              fontSize: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              color: '#f8fafc',
+              marginTop: 0,
+            }}
+          >
+            <Activity color="#38bdf8" aria-hidden="true" /> Rotina Diária
+          </h2>
+          <ul
+            style={{
+              listStyle: 'none',
+              padding: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '1rem',
+              marginTop: '1.5rem',
+            }}
+          >
+            {tasks.map((task) => (
+              <li key={task.id}>
+                <button
+                  type="button"
+                  role="checkbox"
+                  aria-checked={task.done}
+                  onClick={() => toggleTask(task.id)}
+                  aria-label={`${task.done ? 'Desmarcar' : 'Marcar'} tarefa: ${task.label}`}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '1rem',
+                    padding: '1.25rem',
+                    borderRadius: '1rem',
+                    border: 'none',
+                    background: task.done ? 'rgba(34, 197, 94, 0.1)' : '#334155',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    boxShadow: task.done ? 'inset 0 0 0 2px #22c55e' : 'none',
+                    width: '100%',
+                    textAlign: 'left',
+                    color: task.done ? '#4ade80' : '#cbd5e1',
+                  }}
+                >
+                  {task.done ? (
+                    <CheckCircle2 size={32} color="#22c55e" aria-hidden="true" />
+                  ) : (
+                    <Circle size={32} color="#64748b" aria-hidden="true" />
+                  )}
+                  <span
+                    style={{
+                      fontSize: '1.15rem',
+                      fontWeight: 600,
+                      textDecoration: task.done ? 'line-through' : 'none',
+                    }}
+                  >
+                    {task.label}
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <section
+          aria-labelledby="diary-title"
+          style={{
+            background: '#1e293b',
+            border: '1px solid rgba(255, 255, 255, 0.08)',
+            padding: '2rem',
+            borderRadius: '2rem',
+            boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
+          }}
+        >
+          <h2
+            id="diary-title"
+            style={{
+              fontSize: '1.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              color: '#f8fafc',
+              marginTop: 0,
+            }}
+          >
+            <HeartPulse color="#f87171" aria-hidden="true" /> Registro de Sintomas
+          </h2>
+
+          <div style={{ marginTop: '2rem' }}>
+            <label
+              htmlFor="pain-slider"
+              style={{ fontSize: '1.15rem', fontWeight: 600, color: '#cbd5e1' }}
+            >
+              Nível de Dor Atual: <strong style={{ color: '#f87171' }}>{painLevel}</strong>
+            </label>
+            <input
+              id="pain-slider"
+              type="range"
+              min={0}
+              max={10}
+              value={painLevel}
+              onChange={(e) => setPainLevel(parseInt(e.target.value, 10))}
+              aria-valuemin={0}
+              aria-valuemax={10}
+              aria-valuenow={painLevel}
+              style={{ width: '100%', height: '20px', cursor: 'pointer', marginTop: '0.75rem' }}
+            />
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                marginTop: '0.5rem',
+                color: '#64748b',
+              }}
+            >
+              <span>0 (Sem dor)</span>
+              <span>10 (Dor máxima)</span>
+            </div>
+          </div>
+
+          <fieldset style={{ marginTop: '2rem', border: 'none', padding: 0 }}>
+            <legend
+              style={{
+                fontSize: '1.15rem',
+                fontWeight: 600,
+                color: '#cbd5e1',
+                marginBottom: '0.75rem',
+              }}
+            >
+              Humor / Bem-Estar
+            </legend>
+            <div
+              role="radiogroup"
+              aria-label="Humor atual"
+              style={{ display: 'flex', gap: '1rem' }}
+            >
+              <button
+                type="button"
+                role="radio"
+                aria-checked={mood === 'bad'}
+                onClick={() => setMood('bad')}
+                style={{
+                  flex: 1,
+                  padding: '1.5rem',
+                  background: mood === 'bad' ? 'rgba(239, 68, 68, 0.15)' : '#334155',
+                  border: mood === 'bad' ? '2px solid #ef4444' : '2px solid transparent',
+                  borderRadius: '1rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  color: '#fca5a5',
+                }}
+              >
+                <Frown size={48} color="#ef4444" aria-hidden="true" />
+                <span style={{ fontWeight: 700 }}>Mal</span>
+              </button>
+              <button
+                type="button"
+                role="radio"
+                aria-checked={mood === 'good'}
+                onClick={() => setMood('good')}
+                style={{
+                  flex: 1,
+                  padding: '1.5rem',
+                  background: mood === 'good' ? 'rgba(34, 197, 94, 0.15)' : '#334155',
+                  border: mood === 'good' ? '2px solid #22c55e' : '2px solid transparent',
+                  borderRadius: '1rem',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '0.5rem',
+                  color: '#86efac',
+                }}
+              >
+                <Smile size={48} color="#22c55e" aria-hidden="true" />
+                <span style={{ fontWeight: 700 }}>Bem</span>
+              </button>
+            </div>
+          </fieldset>
+
           <button
             type="button"
-            className="cg-tile"
-            onClick={() => navigate('/caregiver/guide?from=/caregiver')}
-            data-no-dwell="true"
+            onClick={saveEntry}
+            aria-label="Salvar diário do dia"
+            style={{
+              width: '100%',
+              padding: '1.25rem',
+              marginTop: '2rem',
+              background: '#1B54A8',
+              color: 'white',
+              border: 'none',
+              borderRadius: '1rem',
+              fontSize: '1.15rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              boxShadow: '0 4px 15px rgba(27,84,168,0.3)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '0.5rem',
+              transition: 'background 0.2s',
+            }}
+            {...hoverAndFocusBackground('#1B54A8', '#2563eb')}
           >
-            <span className="cg-tile__icon" aria-hidden="true">
-              <BookOpen size={26} />
-            </span>
-            <span className="cg-tile__title">Guia do cuidador</span>
-            <span className="cg-tile__desc">Câmera, luz, distância e o que fazer quando piora.</span>
+            <Save size={20} aria-hidden="true" /> Salvar Diário
           </button>
-        </div>
+        </section>
 
-        <div className="cg-grid">
-          <Card
-            id="tracking-status"
-            title="Rastreamento"
-            description="Estado do olhar neste momento."
-            icon={<Eye size={24} />}
-            iconTone={stateTone === 'ok' ? 'ok' : stateTone === 'danger' ? 'danger' : 'warn'}
-            aside={<Badge tone={stateTone}>{STATE_LABEL[state] ?? state}</Badge>}
+        {entries.length > 0 && (
+          <section
+            aria-labelledby="history-title"
+            style={{
+              background: '#1e293b',
+              border: '1px solid rgba(255, 255, 255, 0.08)',
+              padding: '2rem',
+              borderRadius: '2rem',
+              boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
+              gridColumn: '1 / -1',
+            }}
           >
-            <KV
-              items={[
-                {
-                  key: 'Calibração',
-                  value: live.calibrated ? 'Pronta' : 'Ausente',
-                  tone: live.calibrated ? 'ok' : 'warn',
-                },
-                {
-                  key: 'Rosto na câmera',
-                  value: live.hasFace === null ? '—' : live.hasFace ? 'Sim' : 'Não',
-                  tone: live.hasFace === null ? undefined : live.hasFace ? 'ok' : 'danger',
-                },
-                {
-                  key: 'Quadros por segundo',
-                  value: live.fps === null ? '—' : live.fps.toFixed(0),
-                  tone: live.fps !== null && live.fps < 20 ? 'warn' : undefined,
-                },
-                { key: 'Modelo de olhar', value: MODEL_LABEL[l2csStatus] ?? l2csStatus, tone: l2csStatus === 'ready' ? 'ok' : l2csStatus === 'error' ? 'danger' : undefined },
-                {
-                  key: 'Distância',
-                  value:
-                    live.distance?.screenDistanceNowCm != null ? `${Math.round(live.distance.screenDistanceNowCm)} cm` : '—',
-                  tone: live.distance?.status === 'out' ? 'danger' : live.distance?.status === 'warn' ? 'warn' : undefined,
-                },
-              ]}
-            />
-          </Card>
-
-          <Card
-            id="alerts"
-            title="Alertas"
-            description={alerts.length === 0 ? 'Nenhum alerta ativo.' : `${alerts.length} ponto(s) de atenção.`}
-            icon={<Crosshair size={24} />}
-            iconTone={alerts.length === 0 ? 'ok' : alerts.some((a) => a.tone === 'danger') ? 'danger' : 'warn'}
-          >
-            {alerts.length === 0 ? (
-              <Note tone="ok">O rastreamento está em condições de uso.</Note>
-            ) : (
-              <div className="cg-card__body">
-                {alerts.map((a) => (
-                  <Note key={a.text} tone={a.tone} role="status">
-                    {a.text}
-                  </Note>
-                ))}
-              </div>
-            )}
-          </Card>
-
-          <Card
-            id="events"
-            title="Eventos recentes"
-            description={clinical ? 'Testes de precisão e registros do diário.' : 'Registros do diário. Autorize o histórico clínico em Configurações para ver os testes de precisão.'}
-            icon={<History size={24} />}
-          >
-            {events.length === 0 ? (
-              <p className="cg-empty">Nenhum evento registrado ainda.</p>
-            ) : (
-              <ul className="cg-list">
-                {events.map((e) => (
-                  <li key={`${e.at}-${e.text}`} className={`cg-list__item ${e.tone === 'warn' ? 'cg-list__item--warn' : ''}`.trim()}>
-                    <div className="cg-list__lead">
-                      <span style={{ color: e.tone === 'warn' ? 'var(--warn)' : 'var(--ok)', display: 'inline-flex' }}>{e.icon}</span>
-                      <div>
-                        <div className="cg-list__title">{e.text}</div>
-                        <div className="cg-list__meta">{fmtDate(e.at)}</div>
-                      </div>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card
-            id="next-reminders"
-            title="Próximos lembretes"
-            description="Configurados em Configurações → Cuidador."
-            icon={<BellRing size={24} />}
-          >
-            {nextReminders.length === 0 ? (
-              <p className="cg-empty">Nenhum lembrete configurado.</p>
-            ) : (
-              <ul className="cg-list">
-                {nextReminders.map((r) => (
-                  <li key={r.id} className="cg-list__item">
-                    <div className="cg-list__lead">
-                      <span className="cg-list__time">{r.time}</span>
-                      <span className="cg-list__title">{r.title}</span>
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            )}
-          </Card>
-
-          <Card
-            id="tasks"
-            title="Rotina diária"
-            description={`${doneCount} de ${tasks.length} concluídas.`}
-            icon={<CheckCircle2 size={24} />}
-            iconTone={doneCount === tasks.length && tasks.length > 0 ? 'ok' : 'primary'}
-          >
-            <ul className="cg-list">
-              {tasks.map((task) => (
-                <li key={task.id}>
-                  <button
-                    type="button"
-                    role="checkbox"
-                    aria-checked={task.done}
-                    onClick={() => toggleTask(task.id)}
-                    aria-label={`${task.done ? 'Desmarcar' : 'Marcar'} tarefa: ${task.label}`}
-                    className="cg-check"
-                    data-no-dwell="true"
-                  >
-                    <span className="cg-check__icon">
-                      {task.done ? <CheckCircle2 size={28} aria-hidden="true" /> : <Circle size={28} aria-hidden="true" />}
-                    </span>
-                    <span>{task.label}</span>
-                  </button>
+            <h2
+              id="history-title"
+              style={{ fontSize: '1.35rem', color: '#f8fafc', marginTop: 0, marginBottom: '1rem', fontWeight: 700 }}
+            >
+              Histórico recente ({entries.length})
+            </h2>
+            <ul
+              style={{
+                listStyle: 'none',
+                padding: 0,
+                display: 'grid',
+                gap: '0.75rem',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+              }}
+            >
+              {entries.slice(0, 12).map((e) => (
+                <li
+                  key={e.timestamp}
+                  style={{
+                    padding: '1rem',
+                    background: '#334155',
+                    borderRadius: '0.75rem',
+                    fontSize: '0.95rem',
+                    color: '#cbd5e1',
+                  }}
+                >
+                  <div style={{ fontWeight: 700, color: '#f8fafc', marginBottom: '0.25rem' }}>
+                    {new Date(e.timestamp).toLocaleString('pt-BR')}
+                  </div>
+                  <div>
+                    Dor: <strong style={{ color: '#f87171' }}>{e.painLevel}/10</strong> · Humor:{' '}
+                    <strong style={{ color: e.mood === 'good' ? '#86efac' : '#fca5a5' }}>
+                      {e.mood === 'good' ? 'Bem' : e.mood === 'bad' ? 'Mal' : 'não registrado'}
+                    </strong>
+                  </div>
                 </li>
               ))}
             </ul>
-          </Card>
-
-          <Card id="diary" title="Registro de sintomas" description="Anote dor e humor de hoje." icon={<HeartPulse size={24} />} iconTone="danger">
-            <div className="cg-card__body">
-              <div className="cg-field">
-                <label htmlFor="pain-slider" className="cg-label">
-                  <span>Nível de dor</span>
-                  <span className="cg-label__value" style={{ color: painLevel >= 7 ? 'var(--danger)' : undefined }}>
-                    {painLevel}/10
-                  </span>
-                </label>
-                <input
-                  id="pain-slider"
-                  type="range"
-                  className="cg-range"
-                  min={0}
-                  max={10}
-                  value={painLevel}
-                  onChange={(e) => setPainLevel(parseInt(e.target.value, 10))}
-                  data-no-dwell="true"
-                />
-                <div className="cg-range-scale" aria-hidden="true">
-                  <span>0 · sem dor</span>
-                  <span>10 · dor máxima</span>
-                </div>
-              </div>
-
-              <div className="cg-field">
-                <span className="cg-label" id="mood-label">
-                  Humor / bem-estar
-                </span>
-                <Segmented
-                  ariaLabelledBy="mood-label"
-                  value={mood ?? ''}
-                  onChange={(v) => setMood(v === '' ? null : v)}
-                  options={[
-                    { value: 'bad', label: 'Mal', icon: <Frown size={20} /> },
-                    { value: 'good', label: 'Bem', icon: <Smile size={20} /> },
-                  ]}
-                />
-              </div>
-
-              <button type="button" className="btn btn--primary btn--block" onClick={saveEntry} data-no-dwell="true">
-                <Save size={18} aria-hidden="true" /> Salvar diário
-              </button>
-            </div>
-          </Card>
-
-          {entries.length > 0 && (
-            <Card id="history" title={`Histórico do diário (${entries.length})`} icon={<History size={24} />} className="cg-span-all">
-              <ul className="cg-list" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 260px), 1fr))' }}>
-                {entries.slice(0, 12).map((e) => (
-                  <li key={e.timestamp} className="cg-list__item" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: '0.25rem' }}>
-                    <span className="cg-list__meta">{fmtDate(e.timestamp)}</span>
-                    <span>
-                      Dor <strong style={{ color: e.painLevel >= 7 ? 'var(--danger)' : 'var(--text)' }}>{e.painLevel}/10</strong> · Humor{' '}
-                      <strong style={{ color: e.mood === 'good' ? 'var(--ok)' : e.mood === 'bad' ? 'var(--danger)' : 'var(--text-3)' }}>
-                        {e.mood === 'good' ? 'bem' : e.mood === 'bad' ? 'mal' : 'não registrado'}
-                      </strong>
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </Card>
-          )}
-        </div>
+          </section>
+        )}
       </div>
     </CaregiverPageLayout>
   );

@@ -8,7 +8,7 @@ import {
 
 // O Chromium limita ~50 AudioContexts por documento. Um contexto por bipe
 // faria `new AudioContext()` passar a lançar depois de alguns acionamentos —
-// dentro de um try/catch silencioso — e o som da emergência sumiria pelo resto
+// Dentro de um try/catch silencioso — e o som da emergência sumiria pelo resto
 // da sessão. O módulo precisa reutilizar um único contexto.
 
 /** Conta quantos AudioContexts foram construídos, como o Chromium faria. */
@@ -84,7 +84,7 @@ describe('um único AudioContext para a sessão inteira', () => {
 
   it('100 bipes consomem UM contexto, não 100', () => {
     // Antes: cada bipe era um `new AudioCtx()`. 100 bipes = 100 contextos, e o
-    // Chromium já teria lançado no 51º.
+    // chromium já teria lançado no 51º.
     for (let i = 0; i < 100; i++) playTickSound();
     expect(construidos).toBe(1);
   });

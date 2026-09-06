@@ -4,10 +4,24 @@ import { HashRouter, BrowserRouter, Routes, Route, Link } from 'react-router-dom
 import React from 'react';
 import { AppRouter } from './App';
 
-// No build empacotado o Electron faz `win.loadFile(...)`, então o app roda
-// sob `file://`. `BrowserRouter` usa a History API: `navigate('/menu')` gera
-// `file:///menu`, um caminho que não existe no disco — qualquer reload cai em
-// tela branca. Este arquivo trava a escolha do `HashRouter`.
+// -----------------------------------------------------------------------------
+// `BrowserRouter` com `loadFile` (`file://`) no build empacotado.
+//
+// Em produção o Electron faz `win.loadFile(path.join(..., 'index.html'))`, então
+// O app roda sob `file://`. `BrowserRouter` usa a History API:
+// `navigate('/menu')` gera `file:///menu` — um caminho que não existe no disco.
+//
+// Qualquer reload, crash-recovery do Chromium ou `location.reload()` cai em
+// "file not found" e o app morre em **tela branca**, sem console para o
+// cuidador. Para um usuário com ELA, possivelmente desacompanhado, isso é o
+// fim da sessão.
+//
+// ⚠️ O plano marca este item como *suspeita* quanto à extensão exata: o build
+// empacotado não foi executado na análise. O que é verificável aqui é a
+// ESCOLHA do router — o par `BrowserRouter` + `loadFile` é incompatível por
+// construção. A confirmação definitiva exige rodar o instalador, e fica
+// registrada como verificação manual pendente.
+// -----------------------------------------------------------------------------
 
 describe('o app usa HashRouter, não BrowserRouter', () => {
   it('AppRouter é o HashRouter', () => {

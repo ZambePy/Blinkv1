@@ -1,101 +1,106 @@
 import React, { useState } from 'react';
-import { Sparkles } from 'lucide-react';
-import { GazePageLayout } from '../components/ui/GazePageLayout';
-import { GazeButton } from '../components/ui/GazeButton';
+import { BackButton } from '../components/ui/BackButton';
 
-/** Diâmetro da bolha: acima do mínimo de alvo (160 px) com folga. */
-const BOLHA_PX = 184;
-
-/**
- * Sorteia uma posição dentro da área de jogo, mantendo a bolha inteira visível
- * e longe das bordas (em percentual do container).
- */
-function novaPosicao(): { top: string; left: string } {
-  const top = 15 + Math.random() * 70;
-  const left = 12 + Math.random() * 76;
-  return { top: `${top.toFixed(1)}%`, left: `${left.toFixed(1)}%` };
-}
-
-/**
- * Estoura Bolhas: treino de fixação. A bolha é o único elemento que se move,
- * e só depois de ser acionada. Voltar e emergência ficam no cabeçalho fixo.
- */
 export const BubblePopGame: React.FC = () => {
   const [score, setScore] = useState(0);
-  const [pos, setPos] = useState({ top: '50%', left: '50%' });
+  const [pos, setPos] = useState({ top: '45%', left: '45%' });
 
   const pop = () => {
     setScore((s) => s + 1);
-    setPos(novaPosicao());
+    const top = `${Math.floor(Math.random() * 70) + 10}%`;
+    const left = `${Math.floor(Math.random() * 70) + 10}%`;
+    setPos({ top, left });
   };
 
   return (
-    <GazePageLayout backRoute="/games" title={`Bolhas · ${score} ${score === 1 ? 'ponto' : 'pontos'}`}>
-      <h1 className="sr-only">Estoura Bolhas</h1>
+    <main
+      role="main"
+      aria-labelledby="bubble-title"
+      style={{
+        position: 'relative',
+        height: '100vh',
+        background: 'linear-gradient(160deg, #eef2ff 0%, #c7d2fe 50%, #ede9fe 100%)',
+        overflow: 'hidden',
+      }}
+    >
+      <h1 id="bubble-title" className="sr-only">
+        Estoura Bolhas
+      </h1>
+
+      <div style={{ position: 'absolute', top: '1.5rem', left: '1.5rem', zIndex: 50 }}>
+        <BackButton to="/games" />
+      </div>
+
       <div
         role="status"
         aria-live="polite"
-        className="sr-only"
-      >
-        Pontuação: {score} pontos
-      </div>
-
-      <div
+        aria-label={`Pontuação: ${score} pontos`}
         style={{
-          position: 'relative',
-          width: '100%',
-          height: '100%',
-          borderRadius: 'var(--r-lg)',
-          border: '2px solid var(--border)',
-          background:
-            'radial-gradient(ellipse at 30% 20%, color-mix(in srgb, var(--primary) 12%, var(--surface)) 0%, var(--surface) 65%)',
-          overflow: 'hidden',
+          position: 'absolute',
+          top: '1.5rem',
+          right: '1.5rem',
+          zIndex: 50,
+          background: 'rgba(255,255,255,0.7)',
+          backdropFilter: 'blur(12px)',
+          border: '2px solid rgba(255,255,255,0.8)',
+          borderRadius: '999px',
+          padding: '0.75rem 2rem',
+          fontFamily: 'Boldonse, sans-serif',
+          fontSize: '1.5rem',
+          fontWeight: 700,
+          color: '#312e81',
+          boxShadow: '0 4px 16px rgba(0,0,0,0.1)',
         }}
       >
-        <p
-          aria-hidden="true"
-          data-no-dwell="true"
-          style={{
-            position: 'absolute',
-            left: 0,
-            right: 0,
-            bottom: '1.25rem',
-            textAlign: 'center',
-            color: 'var(--text-3)',
-            fontSize: 'var(--fs-20)',
-            fontWeight: 600,
-            pointerEvents: 'none',
-            userSelect: 'none',
-          }}
-        >
-          Olhe para a bolha até ela estourar
-        </p>
-
-        <GazeButton
-          onClick={pop}
-          aria-label="Estourar bolha"
-          variant="primary"
-          width={BOLHA_PX}
-          height={BOLHA_PX}
-          icon={<Sparkles />}
-          style={{
-            position: 'absolute',
-            top: pos.top,
-            left: pos.left,
-            marginTop: -BOLHA_PX / 2,
-            marginLeft: -BOLHA_PX / 2,
-            borderRadius: '50%',
-            padding: 0,
-            borderColor: 'color-mix(in srgb, var(--on-primary) 70%, transparent)',
-            background:
-              'radial-gradient(circle at 35% 35%, color-mix(in srgb, var(--on-primary) 55%, transparent), var(--accent) 60%, var(--primary) 100%)',
-            // A bolha "voa" para o próximo lugar depois de estourar — movimento
-            // intencional, que só acontece após o acionamento.
-            transition:
-              'top 0.45s cubic-bezier(0.4, 0, 0.2, 1), left 0.45s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.15s ease, border-color 0.15s ease',
-          }}
-        />
+        <span aria-hidden="true">🎯 </span>
+        {score} pontos
       </div>
-    </GazePageLayout>
+
+      <p
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          top: '50%',
+          left: '50%',
+          transform: 'translate(-50%, -50%)',
+          color: 'rgba(79,70,229,0.2)',
+          fontSize: '3rem',
+          fontWeight: 900,
+          whiteSpace: 'nowrap',
+          pointerEvents: 'none',
+          userSelect: 'none',
+        }}
+      >
+        Clique na bolha!
+      </p>
+
+      <button
+        type="button"
+        onClick={pop}
+        aria-label="Estourar bolha"
+        style={{
+          position: 'absolute',
+          top: pos.top,
+          left: pos.left,
+          transform: 'translate(-50%, -50%)',
+          width: '9rem',
+          height: '9rem',
+          borderRadius: '9999px',
+          background:
+            'radial-gradient(circle at 35% 35%, rgba(255,255,255,0.6), rgba(79,70,229,0.7) 70%, rgba(109,40,217,0.9))',
+          border: '3px solid rgba(255,255,255,0.6)',
+          cursor: 'pointer',
+          boxShadow: '0 8px 40px rgba(79,70,229,0.5), inset 0 -6px 12px rgba(0,0,0,0.1)',
+          transition:
+            'top 0.5s cubic-bezier(0.4, 0, 0.2, 1), left 0.5s cubic-bezier(0.4, 0, 0.2, 1)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '2.5rem',
+        }}
+      >
+        <span aria-hidden="true">✨</span>
+      </button>
+    </main>
   );
 };

@@ -2,29 +2,15 @@ import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Lock, LogOut } from 'lucide-react';
 import { BackButton } from './BackButton';
-import { LanguageSwitcher } from './LanguageSwitcher';
+import { hoverAndFocusBackground } from './hoverFocus';
 import { useAuth } from '../../context/AuthContext';
 
 interface CaregiverPageLayoutProps {
   children: React.ReactNode;
   title: string;
-  /** Ações extras no cabeçalho (à esquerda do idioma/sair). */
-  actions?: React.ReactNode;
-  /** Esconde o seletor de idioma no cabeçalho. */
-  hideLanguage?: boolean;
 }
 
-/**
- * Moldura das telas do cuidador: cabeçalho fixo com Voltar, identificação da
- * área, título da tela, idioma e "Encerrar acesso". Operada por mouse —
- * os controles do cabeçalho não são alvos de dwell.
- */
-export const CaregiverPageLayout: React.FC<CaregiverPageLayoutProps> = ({
-  children,
-  title,
-  actions,
-  hideLanguage = false,
-}) => {
+export const CaregiverPageLayout: React.FC<CaregiverPageLayoutProps> = ({ children, title }) => {
   const navigate = useNavigate();
   const { logout } = useAuth();
 
@@ -34,34 +20,62 @@ export const CaregiverPageLayout: React.FC<CaregiverPageLayoutProps> = ({
   };
 
   return (
-    <div className="cg-page">
-      <header className="cg-header">
-        <div className="cg-header__group">
-          <BackButton compact to="/menu" />
-          <span className="cg-header__brand">
-            <Lock size={18} aria-hidden="true" /> Área do Cuidador
+    <div
+      style={{
+        minHeight: '100vh',
+        backgroundColor: '#0f172a', // Slate escuro padrão administrativo
+        color: '#f8fafc',
+        fontFamily: "'Inter', sans-serif",
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      {/* Cabeçalho do Cuidador */}
+      <header
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          padding: '1.25rem 2.5rem',
+          borderBottom: '1px solid rgba(255, 255, 255, 0.08)',
+          background: '#1e293b',
+          zIndex: 100,
+        }}
+      >
+        <div style={{ display: 'flex', gap: '1.25rem', alignItems: 'center' }}>
+          <BackButton to="/menu" />
+          <span style={{ fontSize: '1.35rem', fontWeight: 800, color: '#f8fafc', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <Lock size={18} color="#eab308" /> Área do Cuidador
           </span>
-          <span className="cg-header__sep" aria-hidden="true">
-            |
-          </span>
-          <span className="cg-header__title">{title}</span>
+          <span style={{ color: 'rgba(255,255,255,0.15)' }}>|</span>
+          <span style={{ fontSize: '1.2rem', color: '#94a3b8', fontWeight: 500 }}>{title}</span>
         </div>
 
-        <div className="cg-header__group">
-          {actions}
-          {!hideLanguage && <LanguageSwitcher compact />}
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="btn btn--ghost"
-            data-no-dwell="true"
-          >
-            <LogOut size={16} aria-hidden="true" /> Encerrar acesso
-          </button>
-        </div>
+        <button
+          onClick={handleLogout}
+          style={{
+            background: 'rgba(255, 255, 255, 0.05)',
+            border: '1px solid rgba(255, 255, 255, 0.1)',
+            borderRadius: '0.75rem',
+            padding: '0.6rem 1.2rem',
+            color: '#f8fafc',
+            fontWeight: 600,
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+            transition: 'background 0.2s',
+          }}
+          {...hoverAndFocusBackground('rgba(255, 255, 255, 0.05)', 'rgba(239, 68, 68, 0.15)')}
+        >
+          <LogOut size={16} /> Encerrar Acesso
+        </button>
       </header>
 
-      <main className="cg-content">{children}</main>
+      {/* Área de Conteúdo Principal */}
+      <div style={{ flex: 1, padding: '2.5rem 2.5rem 4rem 2.5rem', maxWidth: '1200px', width: '100%', margin: '0 auto', boxSizing: 'border-box' }}>
+        {children}
+      </div>
     </div>
   );
 };

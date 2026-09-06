@@ -1,19 +1,17 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertTriangle, BookOpen, Check, Crosshair, Loader2, Play, RotateCcw, Zap } from 'lucide-react';
-import { useGaze, type EngineDiagnostics } from '../../context/GazeContext';
+import { CheckCircle2, Loader2, AlertTriangle } from 'lucide-react';
+import { useGaze } from '../../context/GazeContext';
 import { useSettings } from '../../context/SettingsContext';
 import { BackButton } from '../../components/ui/BackButton';
-import { GazeButton } from '../../components/ui/GazeButton';
-import { GazeGrid } from '../../components/ui/GazeGrid';
-import { ReadinessPanel } from '../../components/ui/ReadinessPanel';
+import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hoverFocus';
 import { startAccuracyTest, type RuntimeInfo } from '@tracker/accuracy';
 import { buildAutoTestMeta } from '../../utils/autoTestMeta';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { VeredictoDeriva } from '@tracker/calibration';
-import { getResumoDoPonto, getCalibrationFitDiagnostics } from '@tracker/calibration';
 import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
-import { EXPERIMENT } from '@tracker/config/experiment';
+import { getResumoDoPonto } from '@tracker/calibration';
+import { ReadinessPanel } from '../../components/ui/ReadinessPanel';
 
 interface CalibrationPointUI { x: number; y: number; name: string; }
 const POINT_NAME: Record<string, string> = {
@@ -30,7 +28,7 @@ const POINT_NAME: Record<string, string> = {
 
 const OPTICAL_LABELS: Record<OpticalCondition, string> = {
   sem_oculos:          'Sem óculos',
-  oculos_simples:      'Óculos comuns (leitura, miopia)',
+  oculos_simples:      'Óculos comuns (leitura, míopia)',
   oculos_progressivo:  'Óculos progressivos (multifocais)',
   lentes_contato:      'Lentes de contato',
   desconhecido:        'Prefiro não dizer',
@@ -43,56 +41,59 @@ const OPTICAL_OPTIONS: OpticalCondition[] = [
   'desconhecido',
 ];
 
-// Falhas do ajuste final, explicadas para quem está na frente da tela.
+// ─── Paleta CAA — escura em todas as etapas ────────────────────────────────
+// fundo preto reduz fadiga ocular e força menos a piscada, permitindo fixações
+// mais longas e estáveis. Contraste alto (branco/âmbar sobre preto) é o padrão CAA.
+const BG           = '#000000';
+const TEXT_PRIMARY = '#FFFFFF';
+const TEXT_DIM     = 'rgba(255,255,255,0.65)';
+const ACCENT       = '#1B54A8';          // IrisFlow Azul
+
+const SUCCESS      = '#22C55E';
+const DANGER       = '#EF4444';
+
 const humanMessage: Record<string, string> = {
-  singular_matrix: 'Não foi possível concluir o ajuste. A causa mais comum é reflexo constante nos óculos ou o olhar muito fora dos pontos.',
-  insufficient_samples: 'Faltaram amostras. Mantenha o rosto visível e centralizado durante toda a calibração.',
-  degenerate_features: 'Os dados variaram pouco. A causa mais comum é reflexo nos óculos ou o olhar fixo fora dos pontos.',
-  unknown: 'Algo deu errado no ajuste. Tente novamente.',
+  singular_matrix: 'Não foi possível treinar o modelo (matriz singular). A causa mais comum é reflexo constante nos óculos ou desvio extremo do olhar.',
+  insufficient_samples: 'Amostras insuficientes coletadas. Certifique-se de que seu rosto está visível e centralizado durante toda a calibração.',
+  degenerate_features: 'Os dados coletados não variaram o suficiente. A causa mais comum é reflexo nos óculos travando a detecção ou olhar fixo fora dos pontos.',
+  unknown: 'Erro desconhecido durante o treinamento do modelo. Por favor, tente novamente.',
 };
 
 const AUTO_RECORD_STORAGE_KEY = 'irisflow.autoRecordOnCalibrate';
 
-/** Estado do runtime para o relatório do teste de precisão. */
-function runtimeInfoDoEngine(getDiagnostics: () => EngineDiagnostics | null): RuntimeInfo | undefined {
-  const d = getDiagnostics();
-  if (!d) return undefined;
-  return {
-    l2csExecutionProvider: d.l2cs.executionProvider,
-    l2csFallback: d.l2cs.fallback,
-    l2csLatencyMs: d.l2cs.latencyMs,
-    l2csStalePct: d.l2cs.stalePct,
-    l2csInputSize: EXPERIMENT.l2csInputSize,
-    filterEffective: d.filtro.efetivo,
-    filterPreset: d.filtro.preset,
-    fpsRender: d.fpsRender,
-    video: { width: d.video.width, height: d.video.height },
-  };
-}
-
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
   const { calibration, l2csStatus, getSessionUptimeMs, recording, getDiagnostics } = useGaze();
-  // Geometria física do posto de uso: fonte única para o erro angular do
-  // relatório e para o posicionamento dos alvos.
+  // Geometria física do posto de uso. Fonte ÚNICA para (a) o erro angular do
+  // relatório e (b) o posicionamento dos alvos pelo orçamento de
+  // excentricidade. Antes eram dois hardcodes de 15,6"/60 cm em arquivos
+  // diferentes, e numa tela de 23,6" o erro angular saía 34% menor que o real.
   const { settings } = useSettings();
 
-  // `disabled` libera a calibração tanto quanto `ready`: o caminho do L2CS é
-  // opcional, e sem esta linha a tela esperaria um modelo que ninguém pediu.
+  // 2.5 — `disabled` libera a calibração tanto quanto `ready`.
+  //
+  // Este booleano destrava o botão de começar. Quando o caminho do L2CS passou
+  // a ser opcional (default desligado, porque o bloco angular não entra em
+  // `iris12`), o status virou 'disabled' — e sem esta linha o usuário ficaria
+  // preso na tela de pré-calibração para sempre, esperando um modelo que nunca
+  // vai carregar porque ninguém pediu que carregasse.
   const l2csReady  = l2csStatus === 'ready' || l2csStatus === 'disabled';
   const l2csFailed = l2csStatus === 'error';
 
-  const [stage, setStage] = useState<'tutorial' | 'calibrating' | 'testing' | 'review'>('tutorial');
+  const [stage, setStage] = useState<
+    'tutorial' | 'calibrating' | 'testing' | 'transitioning' | 'drift-warning'
+  >('tutorial');
   // Espelho do `stage` para os listeners de visibilidade/blur, que são
   // registrados uma única vez e fechariam sobre o valor do primeiro render.
   const stageRef = useRef(stage);
   useEffect(() => { stageRef.current = stage; }, [stage]);
 
-  // Revisão antes do teste: deriva de pose durante a coleta e/ou alvos que
-  // ficaram de fora. Qualquer um dos dois para a tela e deixa a pessoa decidir.
+  // veredito da deriva de pose da calibração recém-treinada. Não-nulo
+  // significa que a cabeça migrou mais que o limiar DURANTE a coleta.
   const [driftVerdict, setDriftVerdict] = useState<VeredictoDeriva | null>(null);
+  // Alvos que a coleta desistiu de medir. Um modelo treinado sem a linha de
+  // baixo prediz a linha de baixo por extrapolação, e a tela precisa dizer.
   const [alvosPulados, setAlvosPulados] = useState(0);
-  const puladosNaSessaoRef = useRef(0);
 
   // Distância efetiva escolhida no início desta calibração. Congelada aqui
   // para a grade e o relatório usarem exatamente o mesmo número.
@@ -107,9 +108,10 @@ export const CalibrationCheck: React.FC = () => {
 
   const [opticalCondition, setOpticalCondition] = useState<OpticalCondition>('desconhecido');
 
-  // Opt-in do cuidador para gravar a sessão junto com a calibração. Persistido
-  // para não precisar remarcar a cada rodada; parar e exportar continuam
-  // manuais em Configurações. Default desligado.
+  // Checkbox opt-in para iniciar a gravação junto com a calibração.
+  // Persistido para o operador não precisar remarcar a cada rodada. STOP e
+  // EXPORT continuam manuais em Configurações. Default OFF: usuário normal
+  // nunca dispara gravação sem querer.
   const [autoRecord, setAutoRecord] = useState<boolean>(() => {
     try { return localStorage.getItem(AUTO_RECORD_STORAGE_KEY) === 'true'; }
     catch { return false; }
@@ -118,7 +120,9 @@ export const CalibrationCheck: React.FC = () => {
     try { localStorage.setItem(AUTO_RECORD_STORAGE_KEY, String(autoRecord)); }
     catch { /* localStorage indisponível — silencia */ }
   }, [autoRecord]);
-  // Espelho reativo do isActive() do recorder, só para o indicador "Gravando".
+  // Espelho reativo do isActive() do recorder — usado só para mostrar o
+  // indicador "🔴 Gravando" na UI. Poll a 500 ms é barato e evita ter que
+  // adicionar API de subscription no recorder por conta desse único consumidor.
   const [isRecording, setIsRecording] = useState<boolean>(false);
   useEffect(() => {
     const tick = () => setIsRecording(recording.isActive());
@@ -126,10 +130,23 @@ export const CalibrationCheck: React.FC = () => {
     const id = window.setInterval(tick, 500);
     return () => window.clearInterval(id);
   }, [recording]);
+  const [calibrationMode, setCalibrationMode] = useState<'full' | 'quick' | null>(null);
+
   // Lista de alvos da SESSÃO EM CURSO, congelada em `handleStart` depois de
-  // `startCalibrationMode`. O ref é a fonte da verdade para o loop (síncrono,
-  // imune a render velho); o state existe só para o JSX redesenhar. Os dois
-  // são escritos juntos, nunca separadamente — ver `commitSessionTargets`.
+  // `startCalibrationMode`.
+  //
+  // Antes, `startNextPoint` lia o `activePoints` do render em que `handleStart`
+  // rodou. Nesse render `calibrationMode` ainda era `null`, então a lista era
+  // a que `getCalibrationTargets()` devolvia ANTES do modo ser aplicado — a
+  // grade nominal, calculada no load do módulo com a geometria default. O
+  // `shuffleOrderRef` já era montado sobre a lista NOVA. Os índices de uma
+  // lista indexavam a outra: em modo rápido a UI mostrava 4 cantos e o engine
+  // coletava TL/TC/TR/ML da grade de 9; em modo completo divergiam sempre que
+  // a distância medida da sessão ≠ default (que é o caso normal).
+  //
+  // O ref é a fonte da verdade para o loop (síncrono, imune a render velho);
+  // o state existe só para o JSX redesenhar. Os dois são escritos juntos e
+  // nunca separadamente — ver `commitSessionTargets`.
   const activePointsRef = useRef<CalibrationPointUI[]>([]);
   const [sessionPoints, setSessionPoints] = useState<CalibrationPointUI[] | null>(null);
 
@@ -148,7 +165,8 @@ export const CalibrationCheck: React.FC = () => {
     return pts;
   };
 
-  // Lista NOMINAL — usada só para o preview, antes de qualquer sessão começar.
+  // Lista NOMINAL — usada só para o preview do tutorial, antes de qualquer
+  // sessão começar. Nunca alimenta a coleta.
   const nominalPoints: CalibrationPointUI[] = useMemo(() => {
     const targets = calibration.getCalibrationTargets?.() ?? [];
     if (targets.length === 0) {
@@ -159,7 +177,7 @@ export const CalibrationCheck: React.FC = () => {
       ].map((t) => ({ x: t.x * 100, y: t.y * 100, name: POINT_NAME[`${t.x},${t.y}`] ?? '' }));
     }
     return toUiPoints(targets);
-  }, [calibration]);
+  }, [calibrationMode, calibration]);
 
   // O que a tela desenha: os alvos da sessão quando existe uma, senão o preview.
   const activePoints: CalibrationPointUI[] = sessionPoints ?? nominalPoints;
@@ -169,9 +187,12 @@ export const CalibrationCheck: React.FC = () => {
   const retryCountRef            = useRef(0);
   const MAX_RETRIES_PER_POINT    = 3;
 
-  // Só finalizamos gravação que ESTE componente iniciou. Se o operador começou
-  // manualmente em Configurações, deixamos em paz.
+  // Ownership da gravação auto-iniciada. Só finalizamos gravação que ESTE
+  // componente iniciou (via handleStart com autoRecord marcado). Se o
+  // operador começou manualmente em Configurações, deixamos em paz.
   const autoRecordOwnedRef = useRef(false);
+  // Ref atualizada a cada render pra callback de unmount + timeouts sempre
+  // enxergarem a versão mais nova (evita closure obsoleto sobre `recording`).
   const finalizeAutoRecordingRef = useRef<(exportFile: boolean) => void>(() => {});
   finalizeAutoRecordingRef.current = (exportFile: boolean) => {
     if (!autoRecordOwnedRef.current) return;
@@ -196,7 +217,7 @@ export const CalibrationCheck: React.FC = () => {
       URL.revokeObjectURL(url);
       console.log(`[calib] gravação finalizada + exportada — ${stats.frames} frames`);
     } else {
-      console.log('[calib] gravação descartada (tentativa incompleta)');
+      console.log('[calib] gravação descartada (attempt incompleto)');
     }
     recording.clear();
     autoRecordOwnedRef.current = false;
@@ -206,17 +227,23 @@ export const CalibrationCheck: React.FC = () => {
     isMounted.current = true;
     return () => {
       isMounted.current = false;
-      // Sair no meio da coleta deixaria o engine em `calibrating` para sempre
-      // (dwell desligado e cursor oculto em todo o app). Abortar não descarta
-      // o modelo anterior — só encerra a sessão em curso.
+      // Sair da tela no meio da coleta deixava `isCalibrating` ligado para
+      // sempre: o engine reportava `calibrating` a cada frame, o dwell ficava
+      // desligado e o cursor oculto em TODO o app, sem recuperação a não ser
+      // completar uma calibração inteira. Abortar não descarta o modelo
+      // anterior — só encerra a sessão em curso.
       calibration.abort?.();
+      // Sair da tela no meio de uma gravação auto-iniciada: descarta pra não
+      // deixar JSONL parcial em lugar nenhum.
       finalizeAutoRecordingRef.current(false);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // A janela perder o foco durante a coleta contaminaria o modelo com amostras
-  // que não correspondem a alvo nenhum. Aborta e volta ao início.
+  // A janela perder o foco durante a coleta é o mesmo problema por outra
+  // porta: os alvos continuariam sendo coletados enquanto o usuário olha para
+  // outro lugar, contaminando o modelo com amostras que não correspondem a
+  // alvo nenhum. Aborta e devolve a tela ao início, em vez de treinar sujo.
   useEffect(() => {
     const abortarPorPerdaDeFoco = (motivo: string) => {
       if (document.visibilityState === 'visible' && motivo === 'visibility') return;
@@ -242,30 +269,51 @@ export const CalibrationCheck: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const finishAndTransition = () => {
+    setStage('transitioning');
+    setTimeout(() => { navigate('/menu'); }, 800);
+  };
+
   const runAccuracyTestThenExit = () => {
     const meta = buildAutoTestMeta({
       sessionUptimeMs: getSessionUptimeMs(),
       opticalCondition: calibration.getActiveOpticalCondition?.() ?? 'desconhecido',
       distanciaCm: sessionDistanceRef.current ?? settings.viewingDistanceCm,
       telaPolegadas: settings.screenDiagonalIn,
-      // Procedência da diagonal: `'default'` é o valor assumido, e o relatório
-      // precisa dizer isso em vez de afirmar que mediu.
+      // a procedência da diagonal. `'default'` significa o hardcode de
+      // 23,6″, e o relatório precisa dizer isso em vez de afirmar que mediu.
       screenGeometrySource: settings.screenGeometrySource,
     });
     meta.screenScaleFactor = settings.screenScaleFactor;
+
+    // Sem isto o relatório não sabe em que provider o L2CS rodou nem qual
+    // filtro governava — e duas condições viram um número só.
+    const d = getDiagnostics();
+    const runtime: RuntimeInfo | undefined = d ? {
+      l2csExecutionProvider: d.l2cs?.executionProvider ?? null,
+      l2csFallback: d.l2cs?.fallback,
+      l2csLatencyMs: d.l2cs?.latencyMs,
+      l2csStalePct: d.l2cs?.stalePct,
+      filterEffective: d.filtro?.efetivo,
+      filterPreset: d.filtro?.preset ?? null,
+      fpsRender: d.fpsRender,
+      video: d.video ? { width: d.video.width, height: d.video.height } : undefined,
+    } : undefined;
+
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
       if (action === 'redo') {
-        // Tentativa descartada — não exporta um JSONL parcial.
+        // Attempt descartado — não exporta um JSONL parcial.
         finalizeAutoRecordingRef.current(false);
         calibration.clear?.();
         setStage('tutorial');
         setCompletedList([]);
         return;
       }
+      // Fluxo bem-sucedido: para + exporta antes de sair da tela.
       finalizeAutoRecordingRef.current(true);
-      navigate('/welcome');
-    }, meta, runtimeInfoDoEngine(getDiagnostics));
+      finishAndTransition();
+    }, meta, runtime);
   };
 
   const startNextPoint = (step: number) => {
@@ -276,17 +324,18 @@ export const CalibrationCheck: React.FC = () => {
       setStage('testing');
       calibration.completeCalibration?.((outcome) => {
         if (!outcome || outcome.ok !== false) {
-          // Se a cabeça migrou mais que o limiar entre o primeiro e o último
-          // alvo, o modelo aprendeu postura junto com alvo; se algum alvo ficou
-          // de fora, a região dele é chute. Nos dois casos a tela para aqui.
+          // a deriva de pose já era medida e só ia para o console. Se a
+          // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
+          // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
+          // decidir, em vez de seguir para o teste com um ajuste contaminado.
           const veredito = calibration.getPoseDriftVerdict?.() ?? null;
-          const pulados = getCalibrationFitDiagnostics()?.targetsSkipped.length ?? puladosNaSessaoRef.current;
+          const pulados = calibration.getCalibrationFitDiagnostics?.()?.targetsSkipped?.length ?? 0;
           if ((veredito || pulados > 0) && isMounted.current) {
             if (veredito) console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
-            if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) de calibração ignorado(s).`);
+            if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
             setDriftVerdict(veredito);
             setAlvosPulados(pulados);
-            setStage('review');
+            setStage('drift-warning');
             return;
           }
           console.log('[React] Calibração concluída — disparando teste de precisão automático');
@@ -296,7 +345,8 @@ export const CalibrationCheck: React.FC = () => {
             const reason = outcome.reason || 'unknown';
             const msg = humanMessage[reason] || humanMessage.unknown;
             console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
-            // Sem teste de precisão útil, o JSONL até aqui é descartado.
+            // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
+            // Descarta em vez de exportar; próxima tentativa recomeça limpa.
             finalizeAutoRecordingRef.current(false);
             setErrorMessage(msg);
             setStage('tutorial');
@@ -312,11 +362,12 @@ export const CalibrationCheck: React.FC = () => {
     setLastCompletedPoint(null);
 
     // SEMPRE do ref: `activePoints` aqui seria a lista do render em que esta
-    // closure nasceu, anterior a `startCalibrationMode`.
+    // closure nasceu, que é anterior a `startCalibrationMode`.
     const pt = activePointsRef.current[pointIdx];
     if (!pt) {
       // Ordem e lista dessincronizadas: abortar é melhor que treinar em alvo
-      // errado.
+      // errado — era exatamente esse silêncio que fazia o bug de índices
+      // trocados entre a UI e o engine passar batido.
       console.error(
         `[calib] alvo ${pointIdx} inexistente na lista da sessão ` +
         `(${activePointsRef.current.length} alvos). Coleta abortada.`,
@@ -335,22 +386,21 @@ export const CalibrationCheck: React.FC = () => {
       } else {
         retryCountRef.current++;
         if (retryCountRef.current >= MAX_RETRIES_PER_POINT) {
-          // Desiste deste alvo para a sessão não travar; a revisão avisa depois.
           retryCountRef.current = 0;
-          puladosNaSessaoRef.current++;
           setCompletedList(prev => [...prev, pointIdx]);
           setTimeout(() => { if (isMounted.current) startNextPoint(step + 1); }, 500);
         } else {
-          // A mensagem diz a CAUSA REAL: culpar o movimento quando o problema é
-          // a lâmpada faz o paciente tentar se mover ainda menos, sem efeito.
+          // A mensagem diz a causa real: culpar o movimento quando o
+          // problema é a lâmpada faz o paciente tentar se mexer menos, sem
+          // efeito nenhum.
           const r = getResumoDoPonto();
-          const detalhe = `${r.aceitos} de ${r.necessario} amostras`;
+          const detalhe = `${r.aceitos}/${r.necessario} amostras`;
           setErrorMessage(
             r.porQualidade >= r.porL2cs && r.porQualidade > 0
-              ? `A imagem ficou ruim neste ponto (${detalhe}). Confira a luz e o reflexo nos óculos. Vamos tentar de novo.`
+              ? `Imagem ruim neste ponto (${detalhe}) — verifique iluminação e reflexo nos óculos. Tentando novamente...`
               : r.porL2cs > 0
-                ? `O sistema perdeu o olhar por um instante (${detalhe}). Vamos tentar de novo.`
-                : `Poucas amostras neste ponto (${detalhe}). O rosto pode ter saído da câmera. Vamos tentar de novo.`,
+                ? `O sistema perdeu o olhar por um instante (${detalhe}). Tentando novamente...`
+                : `Poucas amostras neste ponto (${detalhe}) — o rosto pode ter saído do enquadramento. Tentando novamente...`,
           );
           setTimeout(() => { if (isMounted.current) startNextPoint(step); }, 1500);
         }
@@ -358,25 +408,44 @@ export const CalibrationCheck: React.FC = () => {
     });
   };
 
-  // Inicia calibração. `quick=true` reduz para 4 cantos; `opticalCondition`
-  // grava o perfil sob a condição escolhida.
+  // Inicia calibração. `quick=true` reduz para 4 cantos e passa opts.quick
+  // para o backend. `opticalCondition` grava o perfil sob a condição
+  // escolhida.
   const handleStart = (quick: boolean = false) => {
     if (!l2csReady) return;
 
+    // Se o operador marcou o opt-in E ainda não há gravação ativa (ex.:
+    // iniciada manualmente em Configurações), inicia agora. Paramos +
+    // exportamos automaticamente após o accuracy test bem-sucedido. NÃO
+    // paramos gravação iniciada manualmente em Settings (o
+    // `autoRecordOwnedRef` é a distinção). Cancelamentos/redos são
+    // descartados em vez de exportados.
     if (autoRecord && !recording.isActive()) {
       recording.start();
       autoRecordOwnedRef.current = true;
       console.log('[calib] gravação iniciada junto com a calibração (opt-in)');
     }
 
+    setCalibrationMode(quick ? 'quick' : 'full');
     setStage('calibrating');
     setCompletedList([]);
-    setDriftVerdict(null);
-    setAlvosPulados(0);
-    puladosNaSessaoRef.current = 0;
 
-    // As duas distâncias são grandezas DIFERENTES: a da câmera (medida) e a da
-    // tela (configurada). A grade é posicionada pela distância até a TELA.
+    // A distância MEDIDA nesta sessão manda, quando existe.
+    // `viewingDistanceCm` posiciona os alvos pelo orçamento de excentricidade.
+    // Enquanto era só digitado, um paciente que sentasse 10 cm mais perto
+    // recebia a grade montada para a distância de ontem — e duas gravações
+    // reais diferiam 30% em tamanho de rosto exatamente por esse efeito. Fica
+    // registrado em `sessionDistanceRef` para o relatório usar a MESMA
+    // distância que a grade usou.
+    // as duas distâncias são grandezas DIFERENTES e não podem se
+    // substituir. Antes desta correção o código fazia
+    // `distCm = estimatedDistanceCm ?? settings.viewingDistanceCm`, e a
+    // medida de câmera assumia o papel da distância de tela sempre que
+    // existisse (isto é, sempre que o FOV estivesse calibrado). Num setup
+    // câmera-perto/tela-longe — o RECOMENDADO pelo README — isso colapsava a
+    // grade de calibração de 17%/83% para 28%/72%, errava o denominador da
+    // compensação de distância (0,76 no lugar de 0,90) e inflava o erro
+    // angular do relatório por ~2,4×.
     const { cameraCm, screenCm } = resolveCalibrationDistances({
       measuredCameraDistanceCm: calibration.getCurrentCameraDistanceCm?.() ?? null,
       configuredViewingDistanceCm: settings.viewingDistanceCm,
@@ -388,15 +457,23 @@ export const CalibrationCheck: React.FC = () => {
       `(configurada), câmera ${cameraCm === null ? 'não medida' : `${cameraCm.toFixed(1)} cm`}.`,
     );
 
-    // Congela as distâncias desta calibração: a compensação de distância usa a
-    // VARIAÇÃO em relação a elas quando o paciente sentar mais perto ou longe.
-    calibration.setCalibrationDistancesCm?.(cameraCm, screenCm);
+    // Congela as distâncias desta calibração. A compensação de distância usa
+    // a VARIAÇÃO em relação a estes dois números para reescalar a predição
+    // quando o paciente sentar mais perto ou mais longe depois.
+    calibration.setCalibrationDistancesCm?.(
+      cameraCm,
+      screenCm,
+    );
 
     calibration.startCalibrationMode?.({
       quick,
       opticalCondition,
       geometry: {
         screenDiagonalIn: settings.screenDiagonalIn,
+        // A grade é posicionada por orçamento de excentricidade ANGULAR, que
+        // depende da distância até a TELA — o ângulo que o olho precisa girar
+        // para alcançar o alvo. A distância até a câmera não tem relação
+        // alguma com essa geometria.
         viewingDistanceCm: screenCm,
       },
     });
@@ -419,160 +496,145 @@ export const CalibrationCheck: React.FC = () => {
     }, PREPARE_MS);
   };
 
-  const refazer = () => {
-    setDriftVerdict(null);
-    setAlvosPulados(0);
-    handleStart(false);
-  };
+  const progressPct = activePoints.length > 0
+    ? (completedList.length / activePoints.length) * 100
+    : 0;
 
-  const continuarParaOTeste = () => {
-    setStage('testing');
-    runAccuracyTestThenExit();
-  };
-
-  // ─── COLETA: palco escuro em tela cheia ─────────────────────────────────
-  if (stage === 'calibrating') {
+  // ─── TRANSIÇÃO ────────────────────────────────────────────────────────────
+  if (stage === 'transitioning') {
     return (
-      <main role="main" aria-label="Calibração em andamento" className="accuracy-overlay">
-        {isRecording && (
-          <div
-            data-testid="recording-indicator"
-            className="accuracy-instruction"
-            style={{ left: 'auto', right: '2rem', transform: 'none', color: 'var(--danger)' }}
-          >
-            Gravando
-          </div>
-        )}
-
-        {/* Progresso e instrução: uma faixa só, no topo, longe dos pontos */}
-        <div
-          className="accuracy-instruction"
-          role="status"
-          aria-live="polite"
-          style={{ whiteSpace: 'normal', maxWidth: 'min(90vw, 720px)', textAlign: 'center' }}
-        >
-          Ponto {Math.min(completedList.length + 1, activePoints.length)} de{' '}
-          <span className="highlight" data-testid="calib-progress-total">{activePoints.length}</span>
-          {preparing && <> — olhe para o ponto azul e fique parado</>}
-          {errorMessage && <> — {errorMessage}</>}
-        </div>
-
-        {/* Pontos de calibração */}
-        {activePoints.map((pt, idx) => {
-          const isCurrent      = idx === currentIndex;
-          const isDone         = completedList.includes(idx);
-          const isJustFinished = idx === lastCompletedPoint;
-
-          if (isCurrent && !isJustFinished) {
-            return (
-              <div
-                key={idx}
-                className="accuracy-dot"
-                data-calibration-target=""
-                style={{ left: `${pt.x}%`, top: `${pt.y}%` }}
-              >
-                <div className="dot-inner" />
-              </div>
-            );
-          }
-
-          return (
-            <div
-              key={idx}
-              data-calibration-target=""
-              style={{
-                position: 'absolute',
-                left: `${pt.x}%`, top: `${pt.y}%`,
-                transform: 'translate(-50%, -50%)',
-                width: 48, height: 48,
-                display: 'flex', alignItems: 'center', justifyContent: 'center',
-                pointerEvents: 'none',
-              }}
-            >
-              {isJustFinished ? (
-                <div
-                  className="animate-scale-in"
-                  style={{
-                    width: 48, height: 48, borderRadius: '50%',
-                    background: 'var(--ok)',
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                  }}
-                >
-                  <Check size={28} style={{ color: 'var(--on-primary)' }} aria-hidden="true" />
-                </div>
-              ) : (
-                <div
-                  style={{
-                    width: isDone ? 10 : 8, height: isDone ? 10 : 8, borderRadius: '50%',
-                    background: isDone
-                      ? 'color-mix(in srgb, var(--ok) 45%, transparent)'
-                      : 'color-mix(in srgb, var(--accent) 35%, transparent)',
-                  }}
-                />
-              )}
-            </div>
-          );
-        })}
-      </main>
+      <div style={{
+        position: 'fixed', inset: 0,
+        backgroundColor: BG,
+        zIndex: 9999,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        animation: 'cfFadeOut 0.8s ease-in-out forwards',
+      }}>
+        <div style={{
+          width: '100vw', height: '100vh',
+          background: `radial-gradient(circle, ${ACCENT} 0%, ${BG} 100%)`,
+          animation: 'cfRipple 0.8s ease-out forwards',
+        }} />
+        <style>{`
+          @keyframes cfFadeOut { from { opacity:1; } to { opacity:0; } }
+          @keyframes cfRipple  { from { transform:scale(0.1); opacity:1; } to { transform:scale(3); opacity:0; } }
+        `}</style>
+      </div>
     );
   }
 
-  // ─── Demais etapas: moldura padrão do paciente ──────────────────────────
   return (
-    <main role="main" className="gaze-page">
-      <header className="gaze-page__header">
-        <div className="gaze-page__slot">
-          {stage === 'tutorial' ? <BackButton /> : <div style={{ width: 160 }} />}
-        </div>
-        <div className="gaze-page__slot" style={{ flex: 1, minWidth: 0, height: '100%' }}>
-          <div
-            data-no-dwell="true"
-            className="gaze-rest-zone"
-            aria-label="Zona de descanso: olhar aqui não aciona nada"
-          >
-            <span className="gaze-page__title">Calibração</span>
-            <span>Zona de descanso</span>
+    <>
+      <main
+        role="main"
+        style={{
+          position: 'relative',
+          width: '100vw', height: '100vh',
+          background: BG,
+          color: TEXT_PRIMARY,
+          overflow: 'hidden',
+          userSelect: 'none',
+          display: 'flex', flexDirection: 'column',
+          fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+        }}
+      >
+        {/* Botão Voltar */}
+        {(stage === 'tutorial') && (
+          <div style={{ position: 'absolute', top: '2rem', left: '2rem', zIndex: 60 }}>
+            <BackButton />
           </div>
-        </div>
-        {/* Espaço do botão de emergência global */}
-        <div className="gaze-page__slot gaze-page__slot--end" aria-hidden="true" />
-      </header>
+        )}
 
-      <div className="gaze-page__content" style={{ overflowY: 'auto' }}>
-        {/* ─── PREPARAÇÃO ───────────────────────────────────────────── */}
+
+        {/* ─── TUTORIAL / INÍCIO ───────────────────────────────────────── */}
         {stage === 'tutorial' && (
-          <div
-            className="animate-fade-in"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'minmax(320px, 5fr) minmax(360px, 6fr)',
-              gap: 40,
-              alignItems: 'start',
-              minHeight: '100%',
-            }}
-          >
-            {/* Coluna do cuidador: condições do posto e opções (mouse) */}
-            <section
-              aria-labelledby="calib-prep-title"
-              style={{
-                display: 'flex', flexDirection: 'column', gap: '1rem',
-                padding: '1.25rem',
-                borderRadius: 'var(--r-lg)',
-                background: 'var(--surface)',
-                border: '1px solid var(--border)',
-              }}
-            >
-              <h2 id="calib-prep-title" style={{ fontSize: 'var(--fs-20)', fontWeight: 800 }}>
-                Preparação do posto de uso
-              </h2>
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+            <div style={{
+              maxWidth: 500, width: '100%',
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              textAlign: 'center', gap: '2rem',
+              animation: 'cfFadeUp 0.4s ease-out both',
+            }}>
+              {/* Preview do ponto — mostra ao usuário o que vai aparecer */}
+              <div style={{ position: 'relative', width: 90, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                <div style={{ position: 'absolute', width: 80, height: 80, borderRadius: '50%', background: `radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)`, animation: 'cfRadarPing 2s ease-out infinite' }} />
+                <div style={{ width: 34, height: 34, borderRadius: '50%', background: ACCENT, boxShadow: `0 0 30px ${ACCENT}`, animation: 'cfPulse 1.2s infinite alternate' }} />
+                <div style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: BG, opacity: 0.85 }} />
+              </div>
+
+              <div>
+                <h1 style={{ fontSize: '2.1rem', fontWeight: 800, margin: '0 0 0.75rem', color: TEXT_PRIMARY }}>
+                  Calibração
+                </h1>
+                <p style={{ fontSize: '1.1rem', color: TEXT_DIM, margin: 0, lineHeight: 1.65 }}>
+                  Um ponto <strong style={{ color: ACCENT }}>azul</strong> vai aparecer na tela.<br />
+                  Olhe <strong style={{ color: TEXT_PRIMARY }}>direto para ele</strong> e fique parado até sumir.
+                </p>
+              </div>
+
+              {/* verificação de prontidão do posto de uso.
+                  `evaluateReadiness` existia, era testada e correta, e NUNCA
+                  tinha chamador de produção. O README anuncia esta tela como
+                  recurso; até aqui ela não existia. O item mais caro que ela
+                  traz de volta é a checagem de viewport, única defesa contra
+                  calibrar em janela não-maximizada — o que infla o erro
+                  angular do relatório (/). */}
               <ReadinessPanel />
+
+              {errorMessage && (
+                <div style={{
+                  padding: '1rem',
+                  background: 'rgba(239, 68, 68, 0.1)',
+                  border: `1px solid ${DANGER}`,
+                  borderRadius: '0.75rem',
+                  color: DANGER,
+                  fontSize: '0.95rem',
+                  maxWidth: 400,
+                  lineHeight: 1.5,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.75rem',
+                  textAlign: 'left',
+                  animation: 'cfFadeUp 0.3s ease-out both'
+                }}>
+                  <AlertTriangle size={24} style={{ flexShrink: 0 }} />
+                  <div>
+                    <strong style={{ display: 'block', marginBottom: '0.15rem' }}>Falha na calibração</strong>
+                    {errorMessage}
+                    <div style={{ marginTop: '0.5rem' }}>
+                      <a
+                        href="/caregiver/guide"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          navigate('/caregiver/guide?from=/calibration-check');
+                        }}
+                        style={{
+                          color: '#ef4444',
+                          fontWeight: 700,
+                          textDecoration: 'underline',
+                          fontSize: '0.9rem',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        Ver Guia de Instalação e Dicas do Cuidador
+                      </a>
+                    </div>
+                  </div>
+                </div>
+              )}
 
               <label
                 htmlFor="opticalConditionSelect"
                 data-testid="optical-condition-label"
-                style={{ fontSize: 'var(--fs-16)', fontWeight: 700, color: 'var(--text-2)' }}
+                style={{
+                  fontSize: '0.9rem',
+                  color: TEXT_DIM,
+                  alignSelf: 'stretch',
+                  textAlign: 'left',
+                  fontWeight: 600,
+                }}
               >
-                Condição visual do usuário
+                Condição óptica do usuário:
               </label>
               <select
                 id="opticalConditionSelect"
@@ -581,28 +643,38 @@ export const CalibrationCheck: React.FC = () => {
                 onChange={(e) => setOpticalCondition(e.target.value as OpticalCondition)}
                 data-no-dwell="true"
                 style={{
-                  padding: '0.7rem 0.9rem',
-                  borderRadius: 'var(--r-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface-2)',
-                  color: 'var(--text)',
-                  fontSize: 'var(--fs-16)',
+                  alignSelf: 'stretch',
+                  padding: '0.75rem 1rem',
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid rgba(255,255,255,0.15)',
+                  borderRadius: '0.75rem',
+                  color: TEXT_PRIMARY,
+                  fontSize: '1rem',
+                  fontFamily: 'inherit',
+                  cursor: 'pointer',
                 }}
               >
                 {OPTICAL_OPTIONS.map((cond) => (
-                  <option key={cond} value={cond}>{OPTICAL_LABELS[cond]}</option>
+                  <option key={cond} value={cond} style={{ background: '#111' }}>
+                    {OPTICAL_LABELS[cond]}
+                  </option>
                 ))}
               </select>
 
               <label
                 data-testid="auto-record-label"
                 style={{
-                  display: 'flex', alignItems: 'flex-start', gap: '0.7rem',
-                  padding: '0.75rem 0.9rem',
-                  borderRadius: 'var(--r-sm)',
-                  border: '1px solid var(--border)',
-                  background: 'var(--surface-2)',
-                  fontSize: 'var(--fs-16)', color: 'var(--text-2)', cursor: 'pointer',
+                  alignSelf: 'stretch',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.6rem',
+                  fontSize: '0.9rem',
+                  color: TEXT_DIM,
+                  cursor: 'pointer',
+                  padding: '0.6rem 0.9rem',
+                  background: 'rgba(255,255,255,0.04)',
+                  border: '1px solid rgba(255,255,255,0.10)',
+                  borderRadius: '0.75rem',
                 }}
               >
                 <input
@@ -611,256 +683,361 @@ export const CalibrationCheck: React.FC = () => {
                   onChange={(e) => setAutoRecord(e.target.checked)}
                   data-no-dwell="true"
                   data-testid="auto-record-checkbox"
-                  style={{ width: 20, height: 20, marginTop: 2, accentColor: 'var(--primary)' }}
+                  style={{ width: 18, height: 18, cursor: 'pointer', accentColor: ACCENT }}
                 />
-                <span>
-                  <strong style={{ color: 'var(--text)' }}>Gravar sessão</strong> junto com esta calibração
+                <span style={{ flex: 1, textAlign: 'left' }}>
+                  <strong style={{ color: TEXT_PRIMARY }}>Gravar sessão</strong> junto com esta calibração
                   {isRecording && (
-                    <strong style={{ color: 'var(--danger)', marginLeft: '0.5rem' }}>gravando</strong>
+                    <span style={{ color: DANGER, marginLeft: '0.5rem', fontWeight: 700 }}>
+                      🔴 gravando
+                    </span>
                   )}
                   <br />
-                  <span style={{ color: 'var(--text-3)' }}>
-                    Grava calibração e teste de precisão; o arquivo baixa sozinho ao terminar. Refazer ou falhar descarta.
+                  <span style={{ fontSize: '0.78rem', color: TEXT_DIM }}>
+                    Grava calibração + teste de precisão. JSONL baixa automático quando
+                    o teste termina. Redo/falha descarta.
                   </span>
                 </span>
               </label>
 
-              {errorMessage && (
-                <div
-                  role="alert"
-                  className="animate-fade-in"
+              {/* `data-no-dwell` REMOVIDO daqui.
+                  Com ele, um usuário gaze-only não conseguia iniciar a própria
+                  (re)calibração: o único caminho para restaurar o rastreamento
+                  exigia um cuidador com mouse. Para o público-alvo (ELA, uso
+                  possivelmente desacompanhado), isso é perda de autonomia
+                  exatamente no momento em que ela mais importa.
+                  Em vez de bloquear, um dwell LONGO (`data-dwell-ms`): iniciar
+                  a calibração por acidente custa 1–2 min de sessão, então o
+                  acionamento tem que ser deliberado — mas possível. */}
+              <button
+                type="button"
+                onClick={() => handleStart(false)}
+                disabled={!l2csReady}
+                data-dwell-ms="2500"
+                data-testid="start-calibration-full"
+                aria-disabled={!l2csReady}
+                aria-describedby="l2cs-status-message"
+                style={{
+                  background: l2csReady ? ACCENT : 'rgba(255,255,255,0.10)',
+                  color: l2csReady ? '#fff' : TEXT_DIM,
+                  border: 'none',
+                  padding: '1rem 3rem',
+                  borderRadius: '2rem',
+                  fontSize: '1.15rem', fontWeight: 800,
+                  cursor: l2csReady ? 'pointer' : 'not-allowed',
+                  display: 'flex', alignItems: 'center', gap: '0.7rem',
+                  transition: 'all 0.2s',
+                  boxShadow: l2csReady ? '0 8px 24px rgba(27, 84, 168, 0.40)' : 'none',
+                  opacity: l2csReady ? 1 : 0.75,
+                }}
+                {...hoverAndFocus(
+                  el => { if (l2csReady) { el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } },
+                  el => { if (l2csReady) { el.style.transform = ''; el.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; } }
+                )}
+              >
+                {l2csReady && '👁  Começar (9 pontos)'}
+                {l2csStatus === 'loading' && (<><Loader2 size={20} style={{ animation: 'cfSpin 1s linear infinite' }} />Carregando...</>)}
+                {l2csFailed && (<><AlertTriangle size={20} />Modelo indisponível</>)}
+              </button>
+
+              {l2csReady && (
+                <button
+                  type="button"
+                  onClick={() => handleStart(true)}
+                  /* idem ao botão de 9 pontos: dwell longo em vez de
+                     bloqueio, para a recalibração rápida ser alcançável só
+                     com o olhar. */
+                  data-dwell-ms="2500"
+                  data-testid="start-calibration-quick"
                   style={{
-                    display: 'flex', gap: '0.75rem', alignItems: 'flex-start',
-                    padding: '1rem',
-                    borderRadius: 'var(--r-md)',
-                    background: 'var(--danger-soft)',
-                    border: '1px solid var(--danger)',
-                    color: 'var(--text)',
-                    lineHeight: 1.5,
+                    background: 'transparent',
+                    color: TEXT_PRIMARY,
+                    border: `1px solid rgba(255,255,255,0.35)`,
+                    padding: '0.7rem 2.2rem',
+                    borderRadius: '2rem',
+                    fontSize: '0.95rem', fontWeight: 700,
+                    cursor: 'pointer',
+                    transition: 'all 0.15s',
                   }}
+                  {...hoverAndFocusBackground('transparent', 'rgba(255,255,255,0.08)')}
                 >
-                  <AlertTriangle size={24} style={{ flexShrink: 0, color: 'var(--danger)' }} aria-hidden="true" />
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                    <div>
-                      <strong style={{ display: 'block' }}>A calibração não foi concluída</strong>
-                      {errorMessage}
-                    </div>
-                    <button
-                      type="button"
-                      className="btn btn--ghost"
-                      data-no-dwell="true"
-                      style={{ alignSelf: 'flex-start' }}
-                      onClick={() => navigate('/caregiver/guide?from=/calibration-check')}
-                    >
-                      <BookOpen size={16} aria-hidden="true" /> Ver o guia do cuidador
-                    </button>
-                  </div>
-                </div>
+                  Recalibração rápida (4 pontos)
+                </button>
               )}
 
               <div
                 id="l2cs-status-message"
                 role={l2csFailed ? 'alert' : 'status'}
                 aria-live="polite"
-                style={{ fontSize: 'var(--fs-16)', color: l2csFailed ? 'var(--danger)' : 'var(--text-3)', minHeight: '1.4rem', lineHeight: 1.5 }}
+                style={{ fontSize: '0.88rem', color: l2csFailed ? DANGER : TEXT_DIM, minHeight: '1.4rem', maxWidth: 400, lineHeight: 1.5 }}
               >
-                {l2csStatus === 'loading' && 'Preparando o rastreamento (10 a 15 s na primeira vez). Não feche a página.'}
-                {l2csFailed && 'Não foi possível carregar o rastreamento. Recarregue a página e tente novamente.'}
+                {l2csStatus === 'loading' && 'Aguardando o modelo (~10-15s na 1ª vez). Não feche a página.'}
+                {l2csFailed && 'Não foi possível carregar o modelo. Recarregue a página e tente novamente.'}
               </div>
-            </section>
+            </div>
+          </div>
+        )}
 
-            {/* Coluna do paciente: o que vai acontecer e os alvos para começar */}
-            <section
-              aria-labelledby="calib-title"
-              style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', alignItems: 'center', textAlign: 'center' }}
-            >
+        {/* ─── CALIBRANDO ──────────────────────────────────────────────── */}
+        {stage === 'calibrating' && (
+          <>
+            {isRecording && (
               <div
-                aria-hidden="true"
-                style={{ position: 'relative', width: 96, height: 96, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                data-testid="recording-indicator"
+                style={{
+                  position: 'absolute', top: '1.25rem', right: '1.5rem', zIndex: 45,
+                  display: 'flex', alignItems: 'center', gap: '0.4rem',
+                  padding: '0.35rem 0.7rem',
+                  background: 'rgba(239,68,68,0.10)',
+                  border: `1px solid ${DANGER}`,
+                  borderRadius: '999px',
+                  color: DANGER, fontSize: '0.8rem', fontWeight: 700,
+                }}
               >
-                <div
-                  style={{
-                    position: 'absolute', inset: 0, borderRadius: '50%',
-                    border: '2px solid color-mix(in srgb, var(--accent) 40%, transparent)',
-                  }}
-                />
-                <div
-                  style={{
-                    width: 30, height: 30, borderRadius: '50%',
-                    background: 'var(--accent)',
-                    boxShadow: '0 0 24px color-mix(in srgb, var(--accent) 80%, transparent)',
-                  }}
-                />
+                <span style={{
+                  width: 8, height: 8, borderRadius: '50%', background: DANGER,
+                  animation: 'cfPulseRed 1.2s infinite alternate',
+                }} />
+                Gravando
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxWidth: '36ch' }}>
-                <h1 id="calib-title" className="font-display" style={{ fontSize: 'var(--fs-32)' }}>
-                  Calibração
-                </h1>
-                <p style={{ fontSize: 'var(--fs-24)', color: 'var(--text-2)', lineHeight: 1.45 }}>
-                  Um ponto azul vai aparecer na tela. Olhe direto para ele e fique parado até ele sumir.
+            )}
+
+            {/* Barra de progresso — discreta, no topo, não distrai o olhar */}
+            <div style={{
+              position: 'absolute', top: '1.25rem', left: '50%', transform: 'translateX(-50%)',
+              zIndex: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem',
+            }}>
+              <div style={{ width: 130, height: 4, background: 'rgba(255,255,255,0.10)', borderRadius: 2, overflow: 'hidden' }}>
+                <div style={{ width: `${progressPct}%`, height: '100%', background: ACCENT, transition: 'width 0.5s ease-out', borderRadius: 2 }} />
+              </div>
+              <span style={{ fontSize: '0.8rem', color: TEXT_DIM, fontVariantNumeric: 'tabular-nums' }}>
+                {completedList.length} / <span data-testid="calib-progress-total">{activePoints.length}</span>
+              </span>
+            </div>
+
+            {/* Instrução contextual — só quando necessário (prepare-se / erro) */}
+            {(preparing || errorMessage) && (
+              <div style={{
+                position: 'absolute', bottom: '2.5rem', left: '50%', transform: 'translateX(-50%)',
+                zIndex: 40, padding: '0.7rem 2rem',
+                background: errorMessage ? 'rgba(239,68,68,0.12)' : 'rgba(27, 84, 168, 0.10)',
+                border: `1px solid ${errorMessage ? DANGER : ACCENT}`,
+                borderRadius: '3rem',
+                color: errorMessage ? DANGER : ACCENT,
+                fontSize: '1.05rem', fontWeight: 600, whiteSpace: 'nowrap',
+              }}>
+                {errorMessage ?? '👁  Prepare-se… olhe para o ponto azul'}
+              </div>
+            )}
+
+            {/* Pontos de calibração */}
+            {activePoints.map((pt, idx) => {
+              const isCurrent      = idx === currentIndex;
+              const isDone         = completedList.includes(idx);
+              const isJustFinished = idx === lastCompletedPoint;
+
+              return (
+                <div
+                  key={idx}
+                  data-calibration-target=""
+                  style={{
+                    position: 'absolute',
+                    left: `${pt.x}%`, top: `${pt.y}%`,
+                    transform: 'translate(-50%, -50%)',
+                    width: 80, height: 80,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    zIndex: isCurrent ? 30 : 10,
+                  }}
+                >
+                  {/* ── Ponto atual ── */}
+                  {isCurrent && !isJustFinished && (
+                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {/* Halo pulsante — "olhe aqui" */}
+                      <div style={{
+                        position: 'absolute', width: 72, height: 72, borderRadius: '50%',
+                        background: 'radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)',
+                        animation: 'cfRadarPing 2.2s ease-out infinite',
+                      }} />
+                      {/* Anel rotativo de guia */}
+                      <div style={{
+                        position: 'absolute', width: 52, height: 52, borderRadius: '50%',
+                        border: '2px solid rgba(27, 84, 168, 0.40)',
+                        animation: 'cfHalo 3s linear infinite',
+                      }} />
+                      {/* Ponto central — azul, limpo, sem elementos sobre ele */}
+                      <div style={{
+                        width: 34, height: 34, borderRadius: '50%',
+                        background: ACCENT,
+                        boxShadow: `0 0 0 8px rgba(27, 84, 168, 0.18), 0 0 36px ${ACCENT}`,
+                        animation: 'cfPulse 1.2s infinite alternate',
+                      }} />
+                    </div>
+                  )}
+
+                  {/* ── Recém concluído ── */}
+                  {isJustFinished && (
+                    <div style={{
+                      width: 48, height: 48, borderRadius: '50%',
+                      background: SUCCESS,
+                      display: 'flex', alignItems: 'center', justifyContent: 'center',
+                      boxShadow: `0 0 24px rgba(34,197,94,0.70)`,
+                      animation: 'cfScaleIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
+                    }}>
+                      <CheckCircle2 size={28} color="#fff" />
+                    </div>
+                  )}
+
+                  {/* ── Feito, não recente ── */}
+                  {isDone && !isJustFinished && (
+                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: SUCCESS, opacity: 0.35 }} />
+                  )}
+
+                  {/* ── Pendente ── */}
+                  {!isCurrent && !isDone && (
+                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.13)' }} />
+                  )}
+                </div>
+              );
+            })}
+          </>
+        )}
+
+        {/* ─── TESTING ─────────────────────────────────────────────────── */}
+        {stage === 'testing' && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+            <div style={{
+              display: 'flex', flexDirection: 'column', alignItems: 'center',
+              textAlign: 'center', gap: '1.5rem',
+              animation: 'cfFadeUp 0.4s ease-out both',
+            }}>
+              <Loader2 size={52} color={ACCENT} style={{ animation: 'cfSpin 1s linear infinite' }} />
+              <div>
+                <h2 style={{ fontSize: '1.65rem', fontWeight: 800, margin: '0 0 0.5rem', color: TEXT_PRIMARY }}>
+                  Iniciando teste de precisão
+                </h2>
+                <p style={{ color: TEXT_DIM, fontSize: '1rem', margin: 0, lineHeight: 1.6 }}>
+                  Não se mexa. Olhe para os pontos que aparecerem.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ───: DERIVA DE POSE DURANTE A CALIBRAÇÃO ─────────────── */}
+        {stage === 'drift-warning' && (driftVerdict || alvosPulados > 0) && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+            <div
+              role="alertdialog"
+              aria-labelledby="drift-title"
+              aria-describedby="drift-msg"
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                textAlign: 'center', gap: '1.5rem', maxWidth: 620,
+                background: 'rgba(255,255,255,0.04)',
+                border: '1px solid rgba(245, 158, 11, 0.35)',
+                borderRadius: '1.5rem', padding: '2.5rem',
+                animation: 'cfFadeUp 0.4s ease-out both',
+              }}
+            >
+              <AlertTriangle size={52} color="#f59e0b" aria-hidden="true" />
+
+              <div>
+                <h2 id="drift-title" style={{ fontSize: '1.65rem', fontWeight: 800, margin: '0 0 0.75rem', color: TEXT_PRIMARY }}>
+                  {driftVerdict
+                    ? 'A cabeça se moveu durante a calibração'
+                    : 'Alguns pontos não foram medidos'}
+                </h2>
+                <p id="drift-msg" style={{ color: TEXT_DIM, fontSize: '1.05rem', margin: 0, lineHeight: 1.65 }}>
+                  {driftVerdict?.mensagem}
+                  {alvosPulados > 0 && (
+                    <>
+                      {driftVerdict ? ' ' : ''}
+                      {alvosPulados === 1
+                        ? '1 ponto foi ignorado — recomendamos refazer.'
+                        : `${alvosPulados} pontos foram ignorados — recomendamos refazer.`}
+                    </>
+                  )}
                 </p>
               </div>
 
-              {/* Dwell longo nos dois alvos: começar por acidente custa 1–2 min
-                  de sessão, então o acionamento tem de ser deliberado — mas
-                  possível só com o olhar, para quem está sozinho. */}
-              <div style={{ width: 'min(100%, 560px)', height: 380 }}>
-                <GazeGrid columns={1} rows={2} gap={32}>
-                  <GazeButton
-                    variant="primary"
-                    size="xl"
-                    icon={
-                      l2csStatus === 'loading'
-                        ? <Loader2 className="animate-spin" />
-                        : l2csFailed ? <AlertTriangle /> : <Play />
-                    }
-                    label={
-                      l2csReady ? 'Começar (9 pontos)'
-                        : l2csFailed ? 'Rastreamento indisponível'
-                          : 'Preparando…'
-                    }
-                    onClick={() => handleStart(false)}
-                    disabled={!l2csReady}
-                    dwellMs={2500}
-                    data-testid="start-calibration-full"
-                    aria-disabled={!l2csReady}
-                    aria-describedby="l2cs-status-message"
-                  />
-                  <GazeButton
-                    variant="secondary"
-                    size="lg"
-                    icon={<Zap />}
-                    label="Calibração rápida (4 pontos)"
-                    onClick={() => handleStart(true)}
-                    disabled={!l2csReady}
-                    dwellMs={2500}
-                    data-testid="start-calibration-quick"
-                  />
-                </GazeGrid>
-              </div>
-            </section>
-          </div>
-        )}
-
-        {/* ─── AJUSTANDO / TESTE ─────────────────────────────────────── */}
-        {stage === 'testing' && (
-          <div
-            className="animate-fade-in"
-            role="status"
-            aria-live="polite"
-            style={{
-              height: '100%',
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center',
-              textAlign: 'center', gap: '1.25rem',
-            }}
-          >
-            <Loader2 size={56} className="animate-spin" style={{ color: 'var(--primary)' }} aria-hidden="true" />
-            <h2 className="font-display" style={{ fontSize: 'var(--fs-32)' }}>Quase lá</h2>
-            <p style={{ fontSize: 'var(--fs-24)', color: 'var(--text-2)', maxWidth: '36ch' }}>
-              Agora vem um teste rápido. Continue parado e olhe para os pontos que aparecerem.
-            </p>
-          </div>
-        )}
-
-        {/* ─── REVISÃO: deriva de pose e/ou alvos ignorados ─────────── */}
-        {stage === 'review' && (
-          <div
-            role="alertdialog"
-            aria-labelledby="review-title"
-            aria-describedby="review-msg"
-            className="animate-fade-in"
-            style={{
-              height: '100%',
-              display: 'flex', flexDirection: 'column',
-              alignItems: 'center', justifyContent: 'center',
-              gap: '1.5rem',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                textAlign: 'center', gap: '1rem',
-                width: 'min(100%, 720px)',
-                padding: '1.75rem',
-                borderRadius: 'var(--r-lg)',
-                background: 'var(--warn-soft)',
-                border: '2px solid var(--warn)',
-              }}
-            >
-              <AlertTriangle size={48} style={{ color: 'var(--warn)' }} aria-hidden="true" />
-              <h2 id="review-title" style={{ fontSize: 'var(--fs-32)' }}>
-                {driftVerdict
-                  ? 'A cabeça se moveu durante a calibração'
-                  : 'Alguns pontos ficaram de fora'}
-              </h2>
-              <div id="review-msg" style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: 'var(--fs-20)', color: 'var(--text-2)', lineHeight: 1.45 }}>
-                {driftVerdict && (
-                  <p>
-                    {driftVerdict.acao === 'apoiar-a-nuca'
-                      ? 'A postura foi mudando aos poucos. Apoie bem a cabeça antes de refazer; senão a próxima calibração sai igual.'
-                      : 'Houve movimento durante a coleta. Refazer com a cabeça parada deve melhorar a precisão.'}
-                  </p>
-                )}
-                {alvosPulados > 0 && (
-                  <p data-testid="skipped-warning">
-                    {alvosPulados === 1
-                      ? '1 ponto foi ignorado — recomendamos refazer.'
-                      : `${alvosPulados} pontos foram ignorados — recomendamos refazer.`}
-                  </p>
-                )}
-              </div>
-
-              {/* Detalhe medido, para o cuidador: separa "achei que mexi" de um
-                  número. */}
-              {driftVerdict && (
-                <div style={{ display: 'flex', gap: '2rem', alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
-                  <div>
-                    <div data-testid="drift-px" style={{ fontSize: 'var(--fs-32)', fontWeight: 800, color: 'var(--warn)' }}>
-                      {driftVerdict.piorEixoPx.toFixed(0)}px
-                    </div>
-                    <div style={{ fontSize: 'var(--fs-16)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                      deslocamento
-                    </div>
+              {/* O número medido fica visível: é o que separa "achei que mexi" de
+                  "mexi 238px-equivalentes". */}
+              <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
+                <div>
+                  <div data-testid="drift-px" style={{ fontSize: '2rem', fontWeight: 800, color: '#f59e0b' }}>
+                    {driftVerdict ? `${driftVerdict.piorEixoPx.toFixed(0)}px` : '—'}
                   </div>
-                  <div>
-                    <div style={{ fontSize: 'var(--fs-32)', fontWeight: 800 }}>
-                      {driftVerdict.monotona ? 'Progressiva' : 'Errática'}
-                    </div>
-                    <div style={{ fontSize: 'var(--fs-16)', color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
-                      padrão do movimento
-                    </div>
+                  <div style={{ fontSize: '0.85rem', color: TEXT_DIM, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    deriva equivalente
                   </div>
                 </div>
-              )}
-            </div>
+                <div>
+                  <div style={{ fontSize: '2rem', fontWeight: 800, color: TEXT_PRIMARY }}>
+                    {driftVerdict ? (driftVerdict.monotona ? 'Progressiva' : 'Errática') : '—'}
+                  </div>
+                  <div style={{ fontSize: '0.85rem', color: TEXT_DIM, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                    padrão do movimento
+                  </div>
+                </div>
+              </div>
 
-            {/* Refazer vem primeiro: é a ação que corrige. Continuar segue
-                possível — repetir a coleta custa fadiga real. */}
-            <div style={{ width: 'min(100%, 720px)', height: 180 }}>
-              <GazeGrid columns={2} rows={1} gap={40}>
-                <GazeButton
-                  variant="primary"
-                  size="lg"
-                  icon={<RotateCcw />}
-                  label="Refazer calibração"
-                  dwellMs={2500}
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                {/* Recalibrar vem primeiro: é a ação que corrige o problema. */}
+                <button
+                  type="button"
+                  data-no-dwell="true"
                   data-testid="drift-recalibrar"
-                  onClick={refazer}
-                />
-                <GazeButton
-                  variant="secondary"
-                  size="lg"
-                  icon={<Crosshair />}
-                  label="Continuar mesmo assim"
+                  onClick={() => { setDriftVerdict(null); handleStart(false); }}
+                  style={{
+                    background: ACCENT, color: '#fff', border: 'none',
+                    padding: '1rem 2.4rem', borderRadius: '2rem',
+                    fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
+                  }}
+                >
+                  Refazer calibração
+                </button>
+                {/* Seguir assim continua possível — para um usuário com ELA,
+                    repetir a coleta custa fadiga real. Mas é escolha informada. */}
+                <button
+                  type="button"
+                  data-no-dwell="true"
                   data-testid="drift-continuar"
-                  onClick={continuarParaOTeste}
-                />
-              </GazeGrid>
+                  onClick={() => { setStage('testing'); runAccuracyTestThenExit(); }}
+                  style={{
+                    background: 'transparent', color: TEXT_PRIMARY,
+                    border: '1px solid rgba(255,255,255,0.35)',
+                    padding: '1rem 2rem', borderRadius: '2rem',
+                    fontSize: '0.98rem', fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  Continuar mesmo assim
+                </button>
+              </div>
             </div>
           </div>
         )}
-      </div>
-    </main>
+
+        {/* ─── KEYFRAMES ───────────────────────────────────────────────── */}
+        <style>{`
+          @keyframes cfPulse {
+            0%   { transform: scale(0.88); box-shadow: 0 0 0 8px rgba(27, 84, 168, 0.15), 0 0 18px #1B54A8; }
+            100% { transform: scale(1.10); box-shadow: 0 0 0 12px rgba(27, 84, 168, 0.05), 0 0 44px #1B54A8; }
+          }
+          @keyframes cfRadarPing {
+            0%   { transform: scale(0.1); opacity: 0.9; }
+            100% { transform: scale(2.8); opacity: 0; }
+          }
+          @keyframes cfHalo {
+            from { transform: rotate(0deg)   scale(1);    border-color: rgba(27, 84, 168, 0.40); }
+            50%  { transform: rotate(180deg) scale(1.06); border-color: rgba(27, 84, 168, 0.20); }
+            to   { transform: rotate(360deg) scale(1);    border-color: rgba(27, 84, 168, 0.40); }
+          }
+          @keyframes cfSpin    { from { transform:rotate(0deg); } to { transform:rotate(360deg); } }
+          @keyframes cfFadeUp  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
+          @keyframes cfScaleIn { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:scale(1); } }
+          @keyframes cfPulseRed { from { opacity: 0.55; } to { opacity: 1; } }
+        `}</style>
+      </main>
+    </>
   );
 };

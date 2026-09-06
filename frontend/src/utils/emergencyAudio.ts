@@ -1,7 +1,7 @@
 // Feedback sonoro da emergência.
 //
 // Um único `AudioContext` de módulo, criado sob demanda e reutilizado. O
-// Chromium limita ~50 contextos por documento: criar um por bipe fazia
+// chromium limita ~50 contextos por documento: criar um por bipe fazia
 // `new AudioContext()` passar a lançar depois de alguns acionamentos e o som
 // da emergência sumir em silêncio pelo resto da sessão. Os osciladores
 // continuam sendo criados por bipe — são baratos; o contexto é que é escasso.

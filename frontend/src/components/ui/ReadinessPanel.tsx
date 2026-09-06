@@ -1,17 +1,33 @@
 import React, { useEffect, useState } from 'react';
-import { Check, AlertTriangle, X } from 'lucide-react';
 import { useGaze } from '../../context/GazeContext';
 import { evaluateReadiness, type ReadinessReport } from '@tracker/setupReadiness';
 import { snapshotFromDiagnostics, lerViewport } from '@tracker/setupReadinessAdapter';
 
 /**
- * Painel de prontidão do posto de uso: distância, enquadramento, postura,
- * iluminação, contraste, reflexo em lentes e viewport, avaliados ao vivo
- * antes de gastar tempo de calibração com dado ruim.
+ * Painel de prontidão do posto de uso.
  *
- * Avisos (`warn`) não bloqueiam — a decisão é do cuidador. Só `fail` impede.
- * Enquanto a qualidade não foi medida, o painel diz "medindo" em vez de
- * emitir veredito.
+ * ## Por que este componente existe
+ *
+ * `evaluateReadiness` e `aggregateSnapshots` estavam escritos, testados e
+ * corretos em `src/setupReadiness.ts` — e **não tinham chamador de produção**.
+ * O README anuncia "verificação de prontidão ao vivo: distância, enquadramento,
+ * postura da cabeça, iluminação, contraste, reflexo em lentes e cintilação,
+ * todos medidos e exibidos antes de gastar tempo de coleta com dado ruim", e
+ * nada disso chegava ao cuidador.
+ *
+ * O item mais caro da lista é a checagem de **viewport**: é a única defesa
+ * contra rodar a calibração numa janela não-maximizada, que infla o erro
+ * angular do relatório. Sem ela, o relatório sai com
+ * números que parecem medidos e não são comparáveis com nenhum outro.
+ *
+ * ## Postura
+ *
+ * Avisos (`warn`) NÃO bloqueiam — a decisão de prosseguir é do cuidador, que
+ * sabe coisas que o software não sabe (o paciente está cansado hoje; a luz vai
+ * melhorar em dez minutos). Só `fail` impede.
+ *
+ * Quando a qualidade ainda não foi medida, o painel diz "medindo…" em vez de
+ * emitir veredito —.
  */
 export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void }> = ({
   onReadyChange,
@@ -41,33 +57,42 @@ export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void
 
   if (medindo || !report) {
     return (
-      <div className="readiness" role="status" aria-live="polite">
-        <div className="readiness__measuring">Medindo as condições do posto de uso…</div>
+      <div style={{ fontSize: '1rem', opacity: 0.7, padding: '0.5rem 0' }}>
+        Medindo as condições do posto de uso…
       </div>
     );
   }
 
-  const Icon = ({ status }: { status: string }) =>
-    status === 'fail' ? (
-      <X size={18} aria-hidden="true" />
-    ) : status === 'warn' ? (
-      <AlertTriangle size={18} aria-hidden="true" />
-    ) : (
-      <Check size={18} aria-hidden="true" />
-    );
+  const cor = (s: string) =>
+    s === 'fail' ? '#ef4444' : s === 'warn' ? '#f59e0b' : '#22c55e';
+  const icone = (s: string) => (s === 'fail' ? '✕' : s === 'warn' ? '!' : '✓');
 
   return (
-    <div className="readiness" role="status" aria-live="polite">
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '0.35rem',
+        padding: '0.75rem 1rem',
+        borderRadius: '0.75rem',
+        background: 'rgba(255,255,255,0.04)',
+        maxWidth: '46rem',
+      }}
+    >
       {report.checks.map((c) => (
-        <div key={c.id} className={`readiness__item readiness__item--${c.status}`}>
-          <span className="readiness__icon">
-            <Icon status={c.status} />
+        <div key={c.id} style={{ display: 'flex', gap: '0.6rem', alignItems: 'baseline' }}>
+          <span aria-hidden="true" style={{ color: cor(c.status), fontWeight: 700, width: '1rem' }}>
+            {icone(c.status)}
           </span>
-          <span className="readiness__text">{c.message}</span>
+          <span style={{ fontSize: '1rem', color: c.status === 'ok' ? 'inherit' : cor(c.status) }}>
+            {c.message}
+          </span>
         </div>
       ))}
       {report.blockedHard && (
-        <div className="readiness__blocked">Corrija os itens acima antes de calibrar.</div>
+        <div style={{ marginTop: '0.4rem', color: '#ef4444', fontWeight: 700 }}>
+          Corrija os itens acima antes de calibrar.
+        </div>
       )}
     </div>
   );

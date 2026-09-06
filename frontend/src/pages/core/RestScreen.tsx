@@ -1,19 +1,8 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Moon, ArrowLeft } from 'lucide-react';
+import { Moon } from 'lucide-react';
 import { GazeButton } from '../../components/ui/GazeButton';
 
-/**
- * Dwell mais longo que o normal: sair do descanso por um olhar distraído
- * anularia o próprio descanso.
- */
-const DWELL_VOLTAR_MS = 3000;
-
-/**
- * Tela de descanso: o centro inteiro é zona sem alvo. O único botão fica no
- * canto inferior esquerdo, longe de onde o olhar repousa naturalmente. O
- * botão de emergência global continua no canto superior direito.
- */
 export const RestScreen: React.FC = () => {
   const navigate = useNavigate();
 
@@ -21,68 +10,93 @@ export const RestScreen: React.FC = () => {
     <main
       role="main"
       aria-labelledby="rest-title"
-      className="gaze-page gaze-page--bare"
       style={{
+        width: '100vw',
+        height: '100vh',
+        background: '#020617', // Fundo ultra-escuro (Slate-950) para descanso do olhar
+        color: '#f8fafc',
         display: 'flex',
+        flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
-        background:
-          'radial-gradient(ellipse at center, color-mix(in srgb, var(--primary) 8%, var(--bg)) 0%, var(--bg) 70%)',
+        gap: '2.5rem',
+        overflow: 'hidden',
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       }}
     >
       <div
-        data-no-dwell="true"
-        aria-label="Zona de descanso: olhar aqui não aciona nada"
         style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: '1.5rem',
+          gap: '1.25rem',
           textAlign: 'center',
-          maxWidth: 560,
-          padding: '2rem',
-          color: 'var(--text-2)',
-          userSelect: 'none',
+          maxWidth: '500px',
+          animation: 'fadeIn 0.6s ease-out',
         }}
       >
         <div
-          aria-hidden="true"
           style={{
-            width: 112,
-            height: 112,
+            width: '90px',
+            height: '90px',
             borderRadius: '50%',
+            background: 'rgba(59, 130, 246, 0.08)',
+            border: '2px solid rgba(59, 130, 246, 0.25)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'var(--primary-soft)',
-            color: 'var(--primary)',
+            color: '#3b82f6',
+            boxShadow: '0 0 40px rgba(59, 130, 246, 0.1)',
+            marginBottom: '1rem',
           }}
         >
-          <Moon size={52} />
+          <Moon size={44} className="animate-float" />
         </div>
 
-        <h1 id="rest-title" style={{ fontSize: 'var(--fs-40)', color: 'var(--text)' }}>
+        <h1
+          id="rest-title"
+          style={{
+            fontSize: '2rem',
+            fontWeight: 800,
+            margin: 0,
+            color: '#f1f5f9',
+          }}
+        >
           Modo Descanso
         </h1>
-        <p style={{ fontSize: 'var(--fs-24)', lineHeight: 1.5 }}>
-          Nada aqui reage ao olhar. Descanse o quanto quiser.
-        </p>
-        <p style={{ fontSize: 'var(--fs-20)', color: 'var(--text-3)' }}>
-          Para voltar, olhe por 3 segundos para o botão no canto de baixo.
+        <p
+          style={{
+            fontSize: '1.15rem',
+            opacity: 0.65,
+            lineHeight: 1.5,
+            margin: 0,
+            fontWeight: 500,
+          }}
+        >
+          O rastreamento ocular de ações foi pausado.
+          <br />
+          Olhe fixamente para o botão abaixo para acordar.
         </p>
       </div>
 
-      <div style={{ position: 'absolute', left: 'var(--gaze-page-pad)', bottom: 'var(--gaze-page-pad)' }}>
-        <GazeButton
-          onClick={() => navigate('/menu')}
-          size="xl"
-          variant="secondary"
-          icon={<ArrowLeft />}
-          label="Voltar ao menu"
-          dwellMs={DWELL_VOLTAR_MS}
-          aria-label="Voltar ao menu (olhe por 3 segundos)"
-        />
-      </div>
+      <GazeButton
+        onClick={() => navigate('/menu')}
+        style={{
+          width: '320px',
+          height: '96px',
+          background: 'rgba(255, 255, 255, 0.04)',
+          border: '2px solid rgba(255, 255, 255, 0.12)',
+          borderRadius: '2rem',
+          color: '#ffffff',
+          boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
+          transition: 'all 0.3s ease',
+        }}
+        data-dwell-ms={3000} // Tempo absoluto customizado: 3.0s
+      >
+        <span style={{ fontSize: '1.5rem', fontWeight: 800, letterSpacing: '0.02em' }}>
+          Acordar Tela (3s)
+        </span>
+      </GazeButton>
     </main>
   );
 };

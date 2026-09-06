@@ -57,7 +57,7 @@ export const PreflightPanel: React.FC = () => {
     setRodando(true);
 
     // Janela de prontidão: ~2 s de snapshots coletados DURANTE a medição de
-    // Hz. Um quadro só não serve — iluminação e contraste são ruidosos, e o
+    // hz. Um quadro só não serve — iluminação e contraste são ruidosos, e o
     // reflexo persistente de lente só existe no agregado.
     const janela: ReadinessSnapshot[] = [];
     const coleta = setInterval(() => {

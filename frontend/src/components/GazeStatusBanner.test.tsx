@@ -5,9 +5,13 @@ import React from 'react';
 import { GazeStatusBanner } from './GazeStatusBanner';
 import { mensagemPara } from '@tracker/distanceAdvisory';
 
+// -----------------------------------------------------------------------------
+// O aceite pede que "o texto do banner diga a direção correta".
+//
 // `distanceAdvisory.test.ts` cobre a máquina de estados e o texto. Este arquivo
-// cobre que o texto CHEGA à tela, e que a ordem de precedência não o deixa
-// aparecer quando há coisa mais grave acontecendo.
+// cobre o que faltava: que o texto CHEGA à tela, e que a ordem de precedência
+// não o deixa aparecer quando há coisa mais grave acontecendo.
+// -----------------------------------------------------------------------------
 
 const semProblemas = {
   state: 'tracking',
@@ -85,18 +89,18 @@ describe('a ordem de precedência', () => {
     // O sistema continua funcionando, só com precisão pior que a calibrada.
     // Tratar isso como erro ensinaria o cuidador a ignorar banners vermelhos —
     // e aí o banner que importa de verdade também seria ignorado.
-    // As cores vêm de tokens CSS (classes `.status-band--warn/--error`), não
-    // de estilo inline; o tom é exposto em `data-tone` para ser verificável.
+    // ⚠️ O React renderiza `style` como `rgb(...)`, não como hex — procurar
+    // por '78350f' no HTML nunca casa.
     const aviso = render(<GazeStatusBanner {...semProblemas} distanceAdvice={mensagemPara('perto')} />);
-    const cardAviso = aviso.getByTestId('gaze-status-banner');
-    expect(cardAviso.dataset.tone).toBe('aviso');
-    expect(cardAviso.classList.contains('status-band--warn')).toBe(true);
+    const cardAviso = aviso.getByTestId('gaze-status-banner').firstElementChild as HTMLElement;
     aviso.unmount();
 
     const erro = render(<GazeStatusBanner {...semProblemas} cameraError="x" />);
-    const cardErro = erro.getByTestId('gaze-status-banner');
-    expect(cardErro.dataset.tone).toBe('erro');
-    expect(cardErro.classList.contains('status-band--error')).toBe(true);
-    expect(cardAviso.dataset.tone).not.toBe(cardErro.dataset.tone);
+    const cardErro = erro.getByTestId('gaze-status-banner').firstElementChild as HTMLElement;
+
+    // Âmbar (#78350f) para aviso, vermelho (#7f1d1d) para erro.
+    expect(cardAviso.style.backgroundColor).toBe('rgb(120, 53, 15)');
+    expect(cardErro.style.backgroundColor).toBe('rgb(127, 29, 29)');
+    expect(cardAviso.style.backgroundColor).not.toBe(cardErro.style.backgroundColor);
   });
 });

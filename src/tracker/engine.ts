@@ -167,6 +167,11 @@ export interface CalibrationApi {
    */
   getPoseDriftVerdict(): import('../calibration').VeredictoDeriva | null;
   /**
+   * Diagnóstico do ajuste da última calibração — erro de treino, LOO, λ e os
+   * alvos que ficaram de fora. `null` antes de qualquer treino.
+   */
+  getCalibrationFitDiagnostics(): import('../calibration').CalibrationFitDiagnostics | null;
+  /**
    * Encerra uma calibração em curso SEM treinar e sem descartar o
    * modelo anterior. A tela chama no unmount e quando a janela perde o foco;
    * sem isto, sair no meio da coleta prendia o app em `calibrating`.
@@ -1564,6 +1569,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getPoseDriftVerdict() {
         return calibration.avaliarDerivaDePose(calibration.getSessionPoseDrift());
+      },
+      getCalibrationFitDiagnostics() {
+        return calibration.getCalibrationFitDiagnostics();
       },
       abort(): void {
         calibration.abortCalibration();

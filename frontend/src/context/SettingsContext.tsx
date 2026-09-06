@@ -76,7 +76,7 @@ const defaultSettings: Settings = {
   amberFilter: false,
   monitorBrightness: null,
   // Defaults = o posto de uso de referência (medido). Editáveis em
-  // Configurações → Teste de precisão; qualquer tela diferente PRECISA ser
+  // configurações → Teste de precisão; qualquer tela diferente PRECISA ser
   // ajustada, senão o erro angular do relatório mente e a grade de
   // calibração fica posicionada para a tela errada.
   screenDiagonalIn: 23.6,
@@ -124,7 +124,7 @@ const SETTINGS_KEY = 'irisflow_settings';
 /**
  * Lê as configurações do disco sem nunca lançar. Um localStorage truncado
  * (acontece quando os perfis de calibração estouram a quota) não pode derrubar
- * o `SettingsProvider` no boot — seria tela branca sem recuperação.
+ * O `SettingsProvider` no boot — seria tela branca sem recuperação.
  */
 function lerSettingsDoDisco(): Partial<Settings> | null {
   try {

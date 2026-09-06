@@ -1,128 +1,153 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Crosshair, LayoutGrid } from 'lucide-react';
-import { GazePageLayout } from '../components/ui/GazePageLayout';
-import { GazeButton } from '../components/ui/GazeButton';
-import { GazeGrid } from '../components/ui/GazeGrid';
-import { ICON_URL } from '../design/assets';
 
-/** Resumo que o teste de precisão grava ao terminar (ver `accuracy.ts`). */
-interface ResumoDePrecisao {
-  score: string;
-  colorClass: string;
-  meanErrorDeg: number | null;
-  timestamp: number;
-}
-
-/** Um resultado antigo não descreve a sessão de agora. */
-const VALIDADE_DO_RESULTADO_MS = 30 * 60_000;
-/** Sem ação do paciente, o menu abre sozinho. */
-const AUTO_AVANCO_MS = 20_000;
-
-/** Frase curta, sem número, para o paciente. */
-const FRASE_POR_SCORE: Record<string, string> = {
-  Excelente: 'Sua calibração ficou excelente.',
-  Bom: 'Sua calibração ficou boa.',
-  Regular: 'Sua calibração ficou razoável. Se os botões não responderem bem, vale refazer.',
-  Ruim: 'A calibração não ficou boa. Recomendamos refazer antes de usar.',
-};
-
-function lerResumoDePrecisao(): ResumoDePrecisao | null {
-  try {
-    const raw = localStorage.getItem('accuracyResult');
-    if (!raw) return null;
-    const r = JSON.parse(raw) as Partial<ResumoDePrecisao>;
-    if (typeof r.score !== 'string' || typeof r.timestamp !== 'number') return null;
-    if (Date.now() - r.timestamp > VALIDADE_DO_RESULTADO_MS) return null;
-    return {
-      score: r.score,
-      colorClass: typeof r.colorClass === 'string' ? r.colorClass : '',
-      meanErrorDeg: typeof r.meanErrorDeg === 'number' ? r.meanErrorDeg : null,
-      timestamp: r.timestamp,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/** Boas-vindas depois da calibração: saudação, resultado e um caminho só. */
 export const WelcomeScreen: React.FC = () => {
   const navigate = useNavigate();
-  const resumo = useMemo(lerResumoDePrecisao, []);
-  const frase = resumo ? FRASE_POR_SCORE[resumo.score] : undefined;
-  const sugerirRefazer = resumo?.score === 'Regular' || resumo?.score === 'Ruim';
 
   useEffect(() => {
-    const id = setTimeout(() => navigate('/menu'), AUTO_AVANCO_MS);
-    return () => clearTimeout(id);
+    const timer = setTimeout(() => navigate('/menu'), 5000);
+    return () => clearTimeout(timer);
   }, [navigate]);
 
   return (
-    <GazePageLayout showBack={false} title="Bem-vindo">
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '1.5rem' }}>
-        <section
-          aria-labelledby="welcome-title"
-          className="animate-fade-in-up"
+    <main
+      role="main"
+      aria-labelledby="welcome-title"
+      style={{
+        minHeight: '100vh',
+        background: 'linear-gradient(135deg, #eef4ff 0%, #dbeafe 50%, #e0f2fe 100%)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        aria-hidden="true"
+        className="bg-orb animate-float"
+        style={{
+          width: 480,
+          height: 480,
+          background: 'radial-gradient(circle, rgba(27,84,168,0.25), transparent)',
+          top: '-10%',
+          left: '-8%',
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="bg-orb animate-float"
+        style={{
+          width: 560,
+          height: 560,
+          background: 'radial-gradient(circle, rgba(20,180,180,0.18), transparent)',
+          bottom: '-12%',
+          right: '-8%',
+          animationDelay: '2s',
+        }}
+      />
+      <div
+        aria-hidden="true"
+        className="bg-orb animate-float"
+        style={{
+          width: 300,
+          height: 300,
+          background: 'radial-gradient(circle, rgba(27,84,168,0.12), transparent)',
+          top: '60%',
+          left: '60%',
+          animationDelay: '3.5s',
+        }}
+      />
+
+      <div
+        className="glass animate-fade-in-up"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: '2rem',
+          padding: '4rem 5rem',
+          borderRadius: '3rem',
+          maxWidth: 620,
+          width: '90%',
+          textAlign: 'center',
+          position: 'relative',
+          zIndex: 10,
+        }}
+      >
+        <img
+          src="/LOGO.png"
+          alt=""
+          aria-hidden="true"
+          className="animate-float"
           style={{
-            flex: '1 1 auto',
-            minHeight: 0,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-            gap: '1rem',
+            height: 130,
+            width: 'auto',
+            objectFit: 'contain',
+            filter: 'drop-shadow(0 8px 24px rgba(27,84,168,0.3))',
+          }}
+          onError={(e) => (e.currentTarget.style.display = 'none')}
+        />
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+          <h1
+            id="welcome-title"
+            style={{
+              fontSize: '3.5rem',
+              fontWeight: 900,
+              fontStyle: 'italic',
+              background: 'linear-gradient(135deg, #1B54A8, #2563eb)',
+              WebkitBackgroundClip: 'text',
+              WebkitTextFillColor: 'transparent',
+              lineHeight: 1.1,
+              margin: 0,
+            }}
+          >
+            Bem vindo!
+          </h1>
+          <p
+            style={{
+              fontSize: '1.1rem',
+              color: 'var(--color-text-base)', opacity: 0.9,
+              fontWeight: 500,
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Posicione-se em frente à câmera.
+            <br />O sistema será iniciado em instantes...
+          </p>
+        </div>
+
+        <button
+          type="button"
+          onClick={() => navigate('/menu')}
+          aria-label="Iniciar agora e ir ao menu principal"
+          style={{
+            marginTop: '0.5rem',
+            padding: '1rem 3rem',
+            background: 'linear-gradient(135deg, #1B54A8, #2563eb)',
+            color: 'white',
+            border: 'none',
+            borderRadius: '999px',
+            fontSize: '1.25rem',
+            fontWeight: 700,
+            fontFamily: 'Boldonse, sans-serif',
+            cursor: 'pointer',
+            boxShadow: '0 8px 32px rgba(27,84,168,0.4)',
+            transition: 'transform 0.2s ease, box-shadow 0.2s ease',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.transform = 'translateY(-3px)';
+            e.currentTarget.style.boxShadow = '0 16px 40px rgba(27,84,168,0.5)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.transform = 'translateY(0)';
+            e.currentTarget.style.boxShadow = '0 8px 32px rgba(27,84,168,0.4)';
           }}
         >
-          <img
-            src={ICON_URL}
-            alt=""
-            aria-hidden="true"
-            width={96}
-            height={96}
-            style={{ width: 96, height: 96, objectFit: 'contain' }}
-          />
-          <h1 id="welcome-title" className="font-display" style={{ fontSize: 'var(--fs-40)' }}>
-            Tudo pronto
-          </h1>
-          <p style={{ fontSize: 'var(--fs-24)', color: 'var(--text-2)', maxWidth: '40ch' }}>
-            {frase ?? 'O sistema já está acompanhando o seu olhar.'}
-          </p>
-          {resumo && (
-            <p
-              className={resumo.colorClass}
-              style={{ fontSize: 'var(--fs-18)', fontWeight: 700 }}
-            >
-              Precisão: {resumo.score}
-              {resumo.meanErrorDeg !== null && ` (${resumo.meanErrorDeg.toFixed(1)}°)`}
-            </p>
-          )}
-          <p style={{ fontSize: 'var(--fs-16)', color: 'var(--text-3)' }}>
-            Se preferir esperar, o menu abre sozinho.
-          </p>
-        </section>
-
-        <div style={{ height: 200, flex: '0 0 auto', width: 'min(100%, 880px)', alignSelf: 'center' }}>
-          <GazeGrid columns={sugerirRefazer ? 2 : 1} rows={1} gap={40}>
-            {sugerirRefazer && (
-              <GazeButton
-                size="xl"
-                variant="secondary"
-                icon={<Crosshair />}
-                label="Refazer calibração"
-                onClick={() => navigate('/calibration-check')}
-              />
-            )}
-            <GazeButton
-              size="xl"
-              variant="primary"
-              icon={<LayoutGrid />}
-              label="Ir para o menu"
-              onClick={() => navigate('/menu')}
-            />
-          </GazeGrid>
-        </div>
+          Iniciar Agora
+        </button>
       </div>
-    </GazePageLayout>
+    </main>
   );
 };

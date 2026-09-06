@@ -1,391 +1,225 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
-  AlertOctagon,
-  ArrowLeft,
   ArrowRight,
-  Check,
-  Crosshair,
   Eye,
-  Home,
-  Moon,
-  SkipForward,
+  Keyboard,
+  Monitor,
+  Settings,
+  Play
 } from 'lucide-react';
-import { GazePageLayout } from '../../components/ui/GazePageLayout';
-import { GazeButton } from '../../components/ui/GazeButton';
-import { GazeGrid } from '../../components/ui/GazeGrid';
+import { hoverAndFocus } from '../../components/ui/hoverFocus';
 
-const TOTAL_PASSOS = 7;
-const ALVOS_DA_PRATICA = 3;
-
-/* ── Ilustrações (SVG inline, cores só por token) ─────────────────────── */
-
-const estiloSvg: React.CSSProperties = { width: 'min(100%, 420px)', height: 'auto' };
-
-/** Câmera olhando para o olho: não precisa mexer a cabeça. */
-const IlustracaoCamera: React.FC = () => (
-  <svg viewBox="0 0 420 200" style={estiloSvg} aria-hidden="true">
-    <rect x="20" y="30" width="230" height="140" rx="14" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="3" />
-    <rect x="105" y="170" width="60" height="10" rx="4" fill="var(--text-3)" />
-    <circle cx="135" cy="30" r="9" fill="var(--text)" />
-    <circle cx="135" cy="30" r="4" fill="var(--accent)" />
-    <path d="M150 34 L330 100" stroke="var(--accent)" strokeWidth="3" strokeDasharray="8 8" fill="none" />
-    <ellipse cx="345" cy="100" rx="44" ry="26" fill="var(--surface)" stroke="var(--text)" strokeWidth="4" />
-    <circle cx="345" cy="100" r="16" fill="var(--primary)" />
-    <circle cx="345" cy="100" r="7" fill="var(--text)" />
-  </svg>
-);
-
-/** Vista lateral do posto de uso: distância do braço, luz na frente. */
-const IlustracaoPosicao: React.FC = () => (
-  <svg viewBox="0 0 420 220" style={estiloSvg} aria-hidden="true">
-    {/* tela com câmera */}
-    <rect x="30" y="40" width="18" height="130" rx="6" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="3" />
-    <circle cx="39" cy="40" r="7" fill="var(--text)" />
-    <circle cx="39" cy="40" r="3" fill="var(--accent)" />
-    {/* luz na frente, junto da tela */}
-    <circle cx="80" cy="26" r="14" fill="var(--warn)" />
-    <path d="M62 26 H50 M98 26 H110 M80 8 V2 M69 15 L62 8 M91 15 L98 8" stroke="var(--warn)" strokeWidth="3" strokeLinecap="round" />
-    {/* pessoa */}
-    <circle cx="300" cy="80" r="34" fill="var(--surface)" stroke="var(--text)" strokeWidth="4" />
-    <circle cx="282" cy="78" r="6" fill="var(--primary)" />
-    <path d="M300 114 V180 M300 130 L250 150 M300 130 L340 160" stroke="var(--text)" strokeWidth="6" strokeLinecap="round" fill="none" />
-    <rect x="240" y="180" width="120" height="14" rx="6" fill="var(--text-3)" />
-    {/* distância do braço */}
-    <path d="M60 205 H270" stroke="var(--primary)" strokeWidth="3" markerEnd="url(#seta)" markerStart="url(#seta)" />
-    <text x="165" y="200" textAnchor="middle" fontSize="16" fontWeight="700" fill="var(--primary)" fontFamily="var(--font-body)">
-      um braço
-    </text>
-    {/* janela atrás, riscada */}
-    <rect x="360" y="20" width="44" height="60" rx="4" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="3" />
-    <path d="M382 20 V80 M360 50 H404" stroke="var(--border)" strokeWidth="3" />
-    <path d="M356 16 L408 84 M408 16 L356 84" stroke="var(--danger)" strokeWidth="5" strokeLinecap="round" />
-    <defs>
-      <marker id="seta" markerWidth="8" markerHeight="8" refX="4" refY="4" orient="auto-start-reverse">
-        <path d="M0 0 L8 4 L0 8 Z" fill="var(--primary)" />
-      </marker>
-    </defs>
-  </svg>
-);
-
-/** Tela pequena com os pontos da calibração; um deles aceso. */
-const IlustracaoCalibracao: React.FC = () => (
-  <svg viewBox="0 0 420 220" style={estiloSvg} aria-hidden="true">
-    <rect x="40" y="20" width="340" height="190" rx="14" fill="var(--surface-2)" stroke="var(--border)" strokeWidth="3" />
-    {[0, 1, 2].flatMap((linha) =>
-      [0, 1, 2].map((coluna) => {
-        const aceso = linha === 0 && coluna === 0;
-        return (
-          <circle
-            key={`${linha}-${coluna}`}
-            cx={90 + coluna * 120}
-            cy={60 + linha * 55}
-            r={aceso ? 14 : 6}
-            fill={aceso ? 'var(--accent)' : 'var(--text-3)'}
-            opacity={aceso ? 1 : 0.5}
-          />
-        );
-      }),
-    )}
-    <circle cx="90" cy="60" r="26" fill="none" stroke="var(--accent)" strokeWidth="3" opacity="0.5" />
-  </svg>
-);
-
-/**
- * Demonstração do dwell: um alvo que "enche" sozinho, em ciclo. Não é botão
- * de verdade — é uma `div` com as classes do GazeButton, para o anel ser
- * exatamente o que o paciente vai ver depois.
- */
-const DemoDeDwell: React.FC = () => {
-  const ref = useRef<HTMLDivElement>(null);
-  const [cheio, setCheio] = useState(false);
-
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const DURACAO_MS = 1500;
-    const PAUSA_MS = 900;
-    let inicio = performance.now();
-    let cheioLocal = false;
-    const id = window.setInterval(() => {
-      const t = performance.now() - inicio;
-      if (t < DURACAO_MS) {
-        el.style.setProperty('--gaze-dwell-progress', String(t / DURACAO_MS));
-        if (cheioLocal) { cheioLocal = false; setCheio(false); }
-      } else if (t < DURACAO_MS + PAUSA_MS) {
-        el.style.setProperty('--gaze-dwell-progress', '1');
-        if (!cheioLocal) { cheioLocal = true; setCheio(true); }
-      } else {
-        inicio = performance.now();
-      }
-    }, 40);
-    return () => window.clearInterval(id);
-  }, []);
-
-  return (
-    <div
-      ref={ref}
-      aria-hidden="true"
-      className={`gaze-button gaze-button--lg gaze-hover ${cheio ? 'gaze-button--primary' : 'gaze-button--secondary'}`}
-      style={{ width: 240, height: 140, cursor: 'default' }}
-    >
-      <span className="gaze-button-content">
-        <span className="gaze-button__icon">{cheio ? <Check /> : <Eye />}</span>
-        <span className="gaze-button__label">{cheio ? 'Clicou!' : 'Olhe aqui'}</span>
-      </span>
-      <span className="gaze-button-progress-ring" />
-    </div>
-  );
-};
-
-/* ── Tela ─────────────────────────────────────────────────────────────── */
+const TUTORIAL_STEPS = [
+  {
+    id: 'intro',
+    icon: <Eye size={100} color="#1B54A8" />,
+    title: 'Comunicação',
+    description: 'Comunique-se de forma rápida e eficiente utilizando apenas o movimento dos seus olhos.',
+  },
+  {
+    id: 'keyboard',
+    icon: <Keyboard size={100} color="#16a34a" />,
+    title: 'Teclado Virtual',
+    description: 'Digite textos, navegue na internet e expresse suas ideias através do nosso teclado adaptado para o olhar.',
+  },
+  {
+    id: 'computer',
+    icon: <Monitor size={100} color="#8b5cf6" />,
+    title: 'Controle do Computador',
+    description: 'Use o IrisFlow como um mouse virtual para controlar totalmente o sistema operacional do seu computador.',
+  },
+  {
+    id: 'settings',
+    icon: <Settings size={100} color="#f59e0b" />,
+    title: 'Personalização',
+    description: 'Ajuste a velocidade de seleção, sensibilidade do olhar e o layout da tela para o seu maior conforto.',
+  },
+  {
+    id: 'ready',
+    icon: <Play size={100} color="#ec4899" />,
+    title: 'Tudo Pronto!',
+    description: 'Vamos realizar uma rápida calibração do seu olhar para garantir a máxima precisão antes de começar.',
+  },
+];
 
 export const TutorialScreen: React.FC = () => {
   const navigate = useNavigate();
-  const [passo, setPasso] = useState(0);
+  const [currentStep, setCurrentStep] = useState(0);
+  const [isAnimating, setIsAnimating] = useState(false);
 
-  // Prática de dwell: os alvos precisam ser acionados na ordem 1, 2, 3.
-  // Funciona igual com o olhar (o dwell dispara um click de verdade) e com o
-  // mouse do cuidador quando o rastreamento ainda não está calibrado.
-  const [acertos, setAcertos] = useState(0);
-  const praticaConcluida = acertos >= ALVOS_DA_PRATICA;
-
-  const ultimo = passo === TOTAL_PASSOS - 1;
-  const proximo = () => setPasso((p) => Math.min(TOTAL_PASSOS - 1, p + 1));
-  const anterior = () => setPasso((p) => Math.max(0, p - 1));
-
-  const acertarAlvo = (indice: number) => {
-    if (indice === acertos) setAcertos(indice + 1);
+  const handleNext = () => {
+    if (isAnimating) return;
+    if (currentStep < TUTORIAL_STEPS.length - 1) {
+      setIsAnimating(true);
+      setTimeout(() => {
+        setCurrentStep((s) => s + 1);
+        setIsAnimating(false);
+      }, 300);
+    } else {
+      navigate('/calibration-check');
+    }
   };
 
-  const passos: { titulo: string; corpo: React.ReactNode; figura: React.ReactNode }[] = [
-    {
-      titulo: 'A câmera vê seus olhos',
-      figura: <IlustracaoCamera />,
-      corpo: (
-        <>
-          <p>A câmera do computador acompanha para onde você está olhando.</p>
-          <p>Você não precisa mexer a cabeça: só os olhos. Mantenha a cabeça confortável e parada.</p>
-        </>
-      ),
-    },
-    {
-      titulo: 'Fique numa boa posição',
-      figura: <IlustracaoPosicao />,
-      corpo: (
-        <>
-          <p>Sente-se a mais ou menos um braço de distância da tela, com o rosto no meio da imagem.</p>
-          <p>A luz deve vir da frente, não de trás. Evite janela ou lâmpada atrás de você.</p>
-        </>
-      ),
-    },
-    {
-      titulo: 'Para clicar, é só olhar',
-      figura: <DemoDeDwell />,
-      corpo: (
-        <>
-          <p>Olhe para um botão e fique olhando. Um anel vai se enchendo em volta dele.</p>
-          <p>Quando o anel completa, o botão é acionado. Se desviar o olhar antes, nada acontece.</p>
-        </>
-      ),
-    },
-    {
-      titulo: 'Vamos praticar',
-      figura: (
-        <div style={{ width: 'min(100%, 720px)', height: 180 }}>
-          <GazeGrid columns={ALVOS_DA_PRATICA} rows={1} gap={40}>
-            {Array.from({ length: ALVOS_DA_PRATICA }, (_, i) => {
-              const feito = i < acertos;
-              const daVez = i === acertos;
-              return (
-                <GazeButton
-                  key={i}
-                  size="lg"
-                  variant={daVez ? 'primary' : 'secondary'}
-                  disabled={feito}
-                  icon={feito ? <Check /> : <Crosshair />}
-                  label={feito ? 'Feito' : `Alvo ${i + 1}`}
-                  aria-label={feito ? `Alvo ${i + 1} já acionado` : `Alvo ${i + 1}`}
-                  onClick={() => acertarAlvo(i)}
-                />
-              );
-            })}
-          </GazeGrid>
-        </div>
-      ),
-      corpo: praticaConcluida ? (
-        <p role="status" style={{ color: 'var(--ok)', fontWeight: 700 }}>
-          Muito bem! Você já sabe clicar com o olhar.
-        </p>
-      ) : (
-        <>
-          <p>Olhe para os alvos na ordem, do 1 ao 3, até cada um ser acionado.</p>
-          <p role="status" aria-live="polite" style={{ fontWeight: 700 }}>
-            {acertos} de {ALVOS_DA_PRATICA}
-          </p>
-        </>
-      ),
-    },
-    {
-      titulo: 'O botão de emergência',
-      figura: (
-        <div
-          aria-hidden="true"
-          className="gaze-button gaze-button--danger gaze-button--lg"
-          style={{ width: 200, height: 120, cursor: 'default' }}
-        >
-          <span className="gaze-button-content">
-            <span className="gaze-button__icon"><AlertOctagon /></span>
-            <span className="gaze-button__label">Emergência</span>
-          </span>
-        </div>
-      ),
-      corpo: (
-        <>
-          <p>O botão vermelho fica sempre no canto superior direito da tela.</p>
-          <p>Olhe para ele quando precisar de ajuda. Ele conta cinco segundos antes de chamar, e nesse tempo você pode cancelar.</p>
-        </>
-      ),
-    },
-    {
-      titulo: 'Descansar os olhos',
-      figura: (
-        <div
-          data-no-dwell="true"
-          className="gaze-rest-zone"
-          aria-hidden="true"
-          style={{ width: 'min(100%, 420px)', height: 120, flex: 'none' }}
-        >
-          <Moon size={28} />
-          <span>Zona de descanso</span>
-        </div>
-      ),
-      corpo: (
-        <>
-          <p>A área tracejada no alto de cada tela não aciona nada. Deixe o olhar parado ali quando quiser pensar.</p>
-          <p>Para uma pausa maior, o menu tem a opção Descansar: a tela escurece e só um botão acorda o sistema.</p>
-        </>
-      ),
-    },
-    {
-      titulo: 'Agora, a calibração',
-      figura: <IlustracaoCalibracao />,
-      corpo: (
-        <>
-          <p>Para o sistema aprender o seu olhar, pontos vão aparecer um por vez na tela.</p>
-          <p>Olhe para cada ponto e fique parado até ele sumir. Leva cerca de um minuto.</p>
-        </>
-      ),
-    },
-  ];
+  const handlePrev = () => {
+    if (isAnimating) return;
+    if (currentStep > 0) {
+      setIsAnimating(true);
+      setTimeout(() => {
+        setCurrentStep((s) => s - 1);
+        setIsAnimating(false);
+      }, 300);
+    }
+  };
 
-  const atual = passos[passo];
+  const skipTutorial = () => navigate('/calibration-check');
+
+  const step = TUTORIAL_STEPS[currentStep];
+  const isLast = currentStep === TUTORIAL_STEPS.length - 1;
 
   return (
-    <GazePageLayout showBack backRoute="/" title="Tutorial">
-      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', gap: '1.25rem' }}>
-        {/* Conteúdo do passo */}
-        <section
-          key={passo}
-          className="animate-fade-in"
-          aria-labelledby="tutorial-step-title"
+    <main
+      role="main"
+      style={{
+        minHeight: '100vh',
+        backgroundColor: 'var(--color-bg-base)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        padding: '2rem',
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
+      }}
+    >
+      <div
+        style={{
+          maxWidth: 800,
+          width: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center',
+          gap: '2.5rem',
+          opacity: isAnimating ? 0 : 1,
+          transform: isAnimating ? 'scale(0.98) translateY(10px)' : 'scale(1) translateY(0)',
+          transition: 'all 0.3s cubic-bezier(0.4, 0, 0.2, 1)',
+        }}
+      >
+        <div
+          key={`icon-${step.id}`}
+          className="animate-fade-in-up"
           style={{
-            flex: '1 1 auto',
-            minHeight: 0,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            justifyContent: 'center',
-            textAlign: 'center',
-            gap: '1.5rem',
-            padding: '0 1rem',
+            padding: '2rem',
+            animationDuration: '0.6s'
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: '100%' }}>
-            {atual.figura}
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxWidth: '44ch' }}>
-            <p style={{ fontSize: 'var(--fs-16)', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--text-3)' }}>
-              Passo {passo + 1} de {TOTAL_PASSOS}
-            </p>
-            <h2 id="tutorial-step-title" className="font-display" style={{ fontSize: 'var(--fs-32)' }}>
-              {atual.titulo}
-            </h2>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', fontSize: 'var(--fs-24)', color: 'var(--text-2)', lineHeight: 1.45 }}>
-              {atual.corpo}
-            </div>
-          </div>
-        </section>
+          {step.icon}
+        </div>
 
-        {/* Indicador de progresso (não é alvo) */}
+        <div key={`text-${step.id}`} style={{ display: 'flex', flexDirection: 'column', gap: '1rem', padding: '0 2rem' }}>
+          <h1
+            className="animate-fade-in-up"
+            style={{ fontSize: '2.8rem', color: 'var(--color-text-base)', margin: 0, fontWeight: 800, animationDelay: '0.1s', animationFillMode: 'both' }}
+          >
+            {step.title}
+          </h1>
+          <p 
+            className="animate-fade-in-up"
+            style={{ fontSize: '1.4rem', color: 'var(--color-text-base)', opacity: 0.8, lineHeight: 1.6, margin: 0, animationDelay: '0.2s', animationFillMode: 'both', maxWidth: 600 }}
+          >
+            {step.description}
+          </p>
+        </div>
+
         <ol
-          aria-label={`Passo ${passo + 1} de ${TOTAL_PASSOS}`}
-          style={{ display: 'flex', justifyContent: 'center', gap: '0.6rem', listStyle: 'none', margin: 0, padding: 0 }}
+          style={{
+            display: 'flex',
+            gap: '1rem',
+            margin: '1.5rem 0',
+            listStyle: 'none',
+            padding: 0,
+          }}
         >
-          {passos.map((p, i) => (
+          {TUTORIAL_STEPS.map((_, idx) => (
             <li
-              key={p.titulo}
-              aria-current={i === passo ? 'step' : undefined}
+              key={idx}
               style={{
-                width: i === passo ? 36 : 12,
-                height: 12,
-                borderRadius: 'var(--r-pill)',
-                background: i <= passo ? 'var(--primary)' : 'var(--border)',
-                transition: 'width 0.25s ease, background-color 0.25s ease',
+                width: idx === currentStep ? '32px' : '12px',
+                height: '12px',
+                borderRadius: '6px',
+                background: idx === currentStep ? '#1B54A8' : '#cbd5e1',
+                transition: 'all 0.4s cubic-bezier(0.4, 0, 0.2, 1)',
               }}
             />
           ))}
         </ol>
 
-        {/* Navegação: uma ação principal (à direita), as outras discretas */}
-        <div style={{ height: 160, flex: '0 0 auto' }}>
-          <GazeGrid columns={3} rows={1} gap={40}>
-            <GazeButton
-              size="lg"
-              variant="secondary"
-              icon={<ArrowLeft />}
-              label="Voltar"
-              disabled={passo === 0}
-              onClick={anterior}
-            />
-            {ultimo ? (
-              <GazeButton
-                size="lg"
-                variant="ghost"
-                icon={<Home />}
-                label="Voltar ao início"
-                onClick={() => navigate('/')}
-              />
-            ) : (
-              <GazeButton
-                size="lg"
-                variant="ghost"
-                icon={<SkipForward />}
-                label="Pular tutorial"
-                onClick={() => navigate('/calibration-check')}
-              />
+        <div style={{ display: 'flex', gap: '1.5rem', marginTop: '1rem' }}>
+          <button
+            type="button"
+            onClick={isLast ? handlePrev : skipTutorial}
+            style={{
+              background: 'transparent',
+              color: 'var(--color-text-base)', opacity: 0.8,
+              border: 'none',
+              padding: '1.25rem 2rem',
+              borderRadius: '1.5rem',
+              fontSize: '1.25rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'color 0.2s',
+            }}
+            {...hoverAndFocus(
+              (el) => {
+                el.style.color = '#334155';
+              },
+              // Devolve string vazia, e não uma cor fixa, para o botão voltar ao
+              // `color` declarado no style acima (que acompanha o tema). Antes
+              // voltava para '#64748b' e a cor original nunca mais era
+              // recuperada depois do primeiro hover.
+              (el) => {
+                el.style.color = '';
+              }
             )}
-            {ultimo ? (
-              <GazeButton
-                size="lg"
-                variant="primary"
-                icon={<Crosshair />}
-                label="Ir para a calibração"
-                onClick={() => navigate('/calibration-check')}
-              />
-            ) : (
-              <GazeButton
-                size="lg"
-                variant="primary"
-                icon={<ArrowRight />}
-                label="Próximo"
-                onClick={proximo}
-              />
+          >
+            {isLast ? 'Voltar' : 'Pular tutorial'}
+          </button>
+          
+          <button
+            type="button"
+            onClick={handleNext}
+            style={{
+              background: '#1B54A8',
+              color: 'white',
+              border: 'none',
+              padding: '1.25rem 3.5rem',
+              borderRadius: '2rem',
+              fontSize: '1.4rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              boxShadow: '0 12px 24px rgba(27,84,168,0.25)',
+              transition: 'transform 0.2s, box-shadow 0.2s',
+            }}
+            {...hoverAndFocus(
+              (el) => {
+                el.style.transform = 'translateY(-2px)';
+                el.style.boxShadow = '0 16px 32px rgba(27,84,168,0.3)';
+              },
+              (el) => {
+                el.style.transform = 'translateY(0)';
+                el.style.boxShadow = '0 12px 24px rgba(27,84,168,0.25)';
+              }
             )}
-          </GazeGrid>
+            onMouseDown={(e) => e.currentTarget.style.transform = 'translateY(2px)'}
+          >
+            {isLast ? 'Começar Calibração' : 'Próximo'}
+            <ArrowRight size={26} />
+          </button>
         </div>
       </div>
-    </GazePageLayout>
+    </main>
   );
 };

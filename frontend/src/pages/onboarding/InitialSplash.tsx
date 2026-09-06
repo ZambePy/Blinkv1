@@ -1,145 +1,204 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowRight, Check, Lock, MousePointer2 } from 'lucide-react';
-import { GazeButton } from '../../components/ui/GazeButton';
-import { GazeGrid } from '../../components/ui/GazeGrid';
-import { ICON_URL } from '../../design/assets';
-import { setDevMode } from '../../devMode';
+import { Eye, ArrowRight } from 'lucide-react';
 
-/**
- * Boas-vindas: primeira tela do paciente.
- *
- * Duas escolhas grandes e nada mais no caminho do olhar. Os controles do
- * cuidador (área restrita e modo de desenvolvedor) ficam pequenos, no rodapé,
- * e fora do dwell.
- *
- * A íris (`ICON_URL`) vai sozinha, com o nome em texto: o wordmark do logo
- * completo é azul-marinho e some no tema escuro, que é o padrão do app.
- */
 export const InitialSplash: React.FC = () => {
   const navigate = useNavigate();
-
-  const comecar = () => {
-    setDevMode(false);
-    navigate('/tutorial');
-  };
-
-  const jaSeiUsar = () => {
-    setDevMode(false);
-    navigate('/calibration-check');
-  };
-
-  const abrirAreaDoCuidador = () => {
-    setDevMode(false);
-    navigate('/settings');
-  };
-
-  const entrarComoDesenvolvedor = () => {
-    setDevMode(true);
-    navigate('/menu');
-  };
+  const [imageError, setImageError] = useState(false);
 
   return (
     <main
       role="main"
       aria-labelledby="splash-title"
-      className="gaze-page gaze-page--bare"
       style={{
+        minHeight: '100vh',
+        background: 'var(--color-bg-base)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
-        padding: 'var(--gaze-page-pad)',
-        gap: 'var(--gaze-page-pad)',
+        justifyContent: 'center',
+        position: 'relative',
+        overflow: 'hidden',
+        padding: '2rem',
+        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       }}
     >
-      {/* Marca + frase do que o app faz */}
-      <section
+      <div
         className="animate-fade-in-up"
         style={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
+          gap: '2.5rem',
           textAlign: 'center',
-          gap: '0.75rem',
-          paddingTop: '1rem',
+          maxWidth: 600,
+          zIndex: 10,
         }}
       >
-        <img
-          src={ICON_URL}
-          alt=""
-          aria-hidden="true"
-          width={112}
-          height={112}
-          style={{ width: 112, height: 112, objectFit: 'contain' }}
-        />
-        <h1 id="splash-title" className="font-display" style={{ fontSize: 'var(--fs-56)' }}>
-          IrisFlow
-        </h1>
-        <p style={{ fontSize: 'var(--fs-24)', color: 'var(--text-2)', maxWidth: '28ch' }}>
-          Fale, escreva e peça ajuda usando só o olhar.
-        </p>
-      </section>
+        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+          {!imageError ? (
+            <img
+              src="/LOGO.png"
+              alt="IrisFlow"
+              style={{
+                width: '320px',
+                height: 'auto',
+                filter: 'drop-shadow(0 20px 40px rgba(27,84,168,0.12))',
+              }}
+              onError={() => setImageError(true)}
+            />
+          ) : (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '1rem',
+                color: '#1B54A8',
+              }}
+            >
+              <Eye size={48} color="#1B54A8" />
+              <span style={{ fontSize: '3rem', fontWeight: 900, letterSpacing: '0.02em' }}>
+                IrisFlow
+              </span>
+            </div>
+          )}
+        </div>
 
-      {/* Zona de descanso: o olhar pode parar aqui sem acionar nada */}
-      <div
-        data-no-dwell="true"
-        className="gaze-rest-zone"
-        aria-label="Zona de descanso: olhar aqui não aciona nada"
-        style={{ flex: '1 1 auto', width: 'min(100%, 960px)', minHeight: 96, height: 'auto' }}
-      >
-        <span>Zona de descanso</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
+          <h1
+            id="splash-title"
+            style={{
+              fontSize: '2.2rem',
+              color: 'var(--color-text-base)',
+              fontWeight: 800,
+              margin: 0,
+              lineHeight: 1.2,
+            }}
+          >
+            Tecnologia assistiva pelo olhar
+          </h1>
+          <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0, fontWeight: 500 }}>
+            Comunicação e autonomia sem barreiras.
+          </p>
+        </div>
+
+        <div className="animate-scale-in" style={{ animationDelay: '0.4s', marginTop: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
+          <button
+            type="button"
+            onClick={() => {
+              sessionStorage.removeItem('irisflow_dev_mode');
+              navigate('/tutorial');
+            }}
+            aria-label="Vamos começar?"
+            style={{
+              background: '#1B54A8',
+              color: 'white',
+              border: 'none',
+              padding: '1.4rem 3.5rem',
+              borderRadius: '2rem',
+              fontSize: '1.4rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '1rem',
+              boxShadow: '0 12px 32px rgba(27, 84, 168, 0.3)',
+              transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.transform = 'translateY(-4px)';
+              e.currentTarget.style.boxShadow = '0 16px 40px rgba(27, 84, 168, 0.4)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.3)';
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.transform = 'translateY(-4px)';
+              e.currentTarget.style.boxShadow = '0 16px 40px rgba(27, 84, 168, 0.4)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.transform = 'translateY(0)';
+              e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.3)';
+            }}
+            onMouseDown={(e) => {
+              e.currentTarget.style.transform = 'translateY(2px)';
+            }}
+          >
+            Vamos começar? <ArrowRight size={28} />
+          </button>
+
+          <button
+            type="button"
+            onClick={() => {
+              sessionStorage.setItem('irisflow_dev_mode', 'true');
+              navigate('/menu');
+            }}
+            style={{
+              background: 'rgba(255, 255, 255, 0.08)',
+              border: '2px solid rgba(27, 84, 168, 0.3)',
+              color: '#3b82f6',
+              padding: '1rem 2.5rem',
+              borderRadius: '1.5rem',
+              fontSize: '1.15rem',
+              fontWeight: 700,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+            onMouseOver={(e) => {
+              e.currentTarget.style.background = 'rgba(27, 84, 168, 0.15)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onMouseOut={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+            onFocus={(e) => {
+              e.currentTarget.style.background = 'rgba(27, 84, 168, 0.15)';
+              e.currentTarget.style.transform = 'translateY(-2px)';
+            }}
+            onBlur={(e) => {
+              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
+              e.currentTarget.style.transform = 'translateY(0)';
+            }}
+          >
+            Modo Desenvolvedor
+          </button>
+        </div>
       </div>
-
-      {/* As duas escolhas do paciente */}
-      <div style={{ width: 'min(100%, 960px)', height: 220, flex: '0 0 auto' }}>
-        <GazeGrid columns={2} rows={1} gap={40}>
-          <GazeButton
-            variant="primary"
-            size="xl"
-            icon={<ArrowRight />}
-            label="Começar"
-            aria-label="Começar: ver o tutorial"
-            onClick={comecar}
-          />
-          <GazeButton
-            variant="secondary"
-            size="xl"
-            icon={<Check />}
-            label="Já sei usar"
-            aria-label="Já sei usar: ir direto para a calibração"
-            onClick={jaSeiUsar}
-          />
-        </GazeGrid>
-      </div>
-
-      {/* Controles do cuidador: pequenos, mouse, sem dwell */}
-      <footer
+      
+      {/* Decorações visuais sutis */}
+      <div 
+        className="animate-float"
         style={{
-          display: 'flex',
-          gap: '0.75rem',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          paddingBottom: '0.5rem',
+          position: 'absolute',
+          top: '15%',
+          left: '10%',
+          width: '300px',
+          height: '300px',
+          background: 'radial-gradient(circle, rgba(27, 84, 168, 0.03) 0%, rgba(255,255,255,0) 70%)',
+          borderRadius: '50%',
+          zIndex: 1,
+          pointerEvents: 'none',
         }}
-      >
-        <button
-          type="button"
-          className="btn btn--ghost"
-          data-no-dwell="true"
-          onClick={abrirAreaDoCuidador}
-        >
-          <Lock size={16} aria-hidden="true" /> Área do cuidador
-        </button>
-        <button
-          type="button"
-          className="btn btn--ghost"
-          data-no-dwell="true"
-          onClick={entrarComoDesenvolvedor}
-          title="Esconde o cursor do olhar e desliga o dwell para operar com o mouse"
-        >
-          <MousePointer2 size={16} aria-hidden="true" /> Modo desenvolvedor
-        </button>
-      </footer>
+      />
+      <div 
+        className="animate-float"
+        style={{
+          position: 'absolute',
+          bottom: '10%',
+          right: '5%',
+          width: '400px',
+          height: '400px',
+          background: 'radial-gradient(circle, rgba(27, 84, 168, 0.04) 0%, rgba(255,255,255,0) 70%)',
+          borderRadius: '50%',
+          zIndex: 1,
+          animationDelay: '2s',
+          pointerEvents: 'none',
+        }}
+      />
     </main>
   );
 };
+
+

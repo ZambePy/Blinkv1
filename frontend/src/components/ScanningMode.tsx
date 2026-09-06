@@ -7,21 +7,44 @@ import {
 } from '@tracker/interaction/scanning';
 import { EXPERIMENT } from '@tracker/config/experiment';
 
-// Modo de varredura. A lógica está em `src/interaction/scanning.ts`, pura e
-// testada; aqui fica só o que é DOM: descobrir os botões, desenhar o destaque
-// e clicar.
+// -----------------------------------------------------------------------------
+// Modo de varredura.
 //
-// O relógio é um `setInterval` próprio, NÃO o fluxo de amostras de gaze: o
-// engine só emite enquanto `videoEl.currentTime` avança, e a varredura existe
-// justamente para quando esse fluxo para (câmera desconectada, aba suspensa,
-// `loopGuard`). Cronometrada por ele, nunca chegaria aos 3 s de "sem gaze".
-// As amostras apenas alimentam um ref com o que se sabe e quando se soube.
+// A lógica está em `src/interaction/scanning.ts`, pura e testada. Aqui fica só
+// O que é DOM: descobrir quais botões existem, desenhar o destaque, e clicar.
 //
-// Limite conhecido: com a câmera morta não há sinal de piscada, então a
-// varredura destaca mas não seleciona. Ainda é melhor que congelar em silêncio.
+// ── O relógio NÃO pode vir do fluxo de amostras ─────────────────────────────
 //
-// `DWELL_SELECTOR` é importado do `GazeContext` em vez de copiado: uma cópia
-// divergente faria a varredura destacar algo que o dwell não clica.
+// A primeira versão deste componente rodava `stepScanning` dentro do
+// `subscribe(...)` de gaze. Parece natural — e destrói a funcionalidade no caso
+// exato que ela existe para cobrir.
+//
+// O engine só emite amostra enquanto `videoEl.currentTime` avança. Câmera
+// desconectada, driver travado, aba suspensa, `loopGuard` disparando: o fluxo
+// de amostras **para**. Cronometrado por ele, o scanning nunca chega aos 3 s de
+// "sem gaze" — porque nem tempo ele consegue contar. O paciente fica com o
+// cursor congelado, sem varredura e sem aviso: a falha silenciosa que o Sprint
+// 7 inteiro existe para eliminar.
+//
+// O fallback de último recurso não pode compartilhar relógio com o sistema cuja
+// falha ele cobre. Aqui o relógio é um `setInterval` próprio, e as amostras
+// apenas ALIMENTAM um ref com o que se sabe e QUANDO se soube.
+//
+// Nota honesta sobre o limite disto: com a câmera realmente morta não há sinal
+// de piscada, então a varredura ativa e destaca mas não tem como ser
+// selecionada. Isso continua sendo melhor que congelar em silêncio — o
+// movimento na tela e o banner de status dizem ao cuidador que algo aconteceu.
+// Recuperar de câmera morta exige uma pessoa; o que não se pode é esconder o
+// fato.
+//
+// ── O seletor é o MESMO do dwell ────────────────────────────────────────────
+//
+// `DWELL_SELECTOR` é importado do `GazeContext` em vez de reescrito. Uma cópia
+// divergiria, e a divergência tem forma ruim: a varredura destacaria um
+// elemento que o dwell não considera clicável, o paciente selecionaria algo que
+// não responde, e ele não teria como saber se errou o alvo ou se o botão está
+// quebrado.
+// -----------------------------------------------------------------------------
 
 /** Passo do relógio próprio, em ms. */
 const TICK_MS = 100;
@@ -43,10 +66,18 @@ function itensNavegaveis(): HTMLElement[] {
     if (n.getAttribute('aria-disabled') === 'true') return false;
     if (n.dataset.noDwell === 'true') return false;
 
-    // Emergência fica FORA da varredura, pela mesma regra de `blinkClick.ts`:
-    // o ciclo percorre os botões sozinho, e uma piscada involuntária no
-    // instante em que passa pela emergência dispararia o botão sem escolha do
-    // paciente. O dwell longo continua sendo o caminho para a emergência.
+    // ⚠️ EMERGÊNCIA FORA DA VARREDURA.
+    //
+    // `blinkClick.ts` declara esta guarda como a única não-configurável do
+    // módulo: *"o custo de um falso positivo aqui é grande demais, e o dwell
+    // longo continua sendo o caminho para a emergência"*. A varredura
+    // selecionava por piscada e não aplicava a mesma regra — então a piscada
+    // acionava, pela varredura, exatamente o botão que ela tem proibição
+    // explícita de acionar.
+    //
+    // E aqui é pior que no cursor: a varredura percorre os botões sozinha.
+    // Basta uma piscada involuntária no instante em que o ciclo passa pela
+    // emergência. O paciente não escolheu o alvo — o relógio escolheu por ele.
     if (n.dataset.emergency === 'true') return false;
 
     // Um botão de 0×0 (colapsado, fora da tela, dentro de um `hidden`) não tem
@@ -108,14 +139,25 @@ export function ScanningMode(): React.ReactElement | null {
     const id = setInterval(() => {
       const now = performance.now();
 
-      // Nunca durante a calibração: na coleta `uncalibrated` é `true`, logo
-      // `gazeValido` é `false` e a varredura ligaria sozinha depois de 3 s,
-      // clicando os botões da própria tela de calibração. Mesma política que o
-      // `GazeContext` aplica ao dwell.
+      // ⚠️ NUNCA durante a calibração.
       //
-      // Fora da calibração, `uncalibrated` NÃO bloqueia a varredura, de
-      // propósito: o dwell bloqueia porque o ponto é o fallback do nariz, mas a
-      // varredura não usa posição — usa relógio e piscada.
+      // Durante a coleta o `uncalibrated` vale `true`, então `gazeValido` fica
+      // `false` e a varredura ligava sozinha depois de 3 s — passando a
+      // destacar e clicar os botões da PRÓPRIA tela de calibração enquanto o
+      // paciente olha para os pontos. Isso corrompe a coleta e, numa sessão de medição,
+      // corromperia em silêncio: o relatório registraria uma calibração
+      // concluída, com o modelo treinado sobre dados que uma piscada
+      // involuntária interrompeu.
+      //
+      // O `GazeContext` já aplica esta política ao dwell (só emergência é
+      // acionável durante a calibração); a varredura contradizia isso.
+      //
+      // Fora da calibração, `uncalibrated` NÃO bloqueia a varredura — e a
+      // diferença é deliberada. O `dwell` bloqueia tudo nesse estado porque o
+      // ponto emitido é o fallback do nariz, e clicar sobre um sinal que não
+      // segue o olhar é disparar botão por acaso. A varredura não usa a
+      // posição do olhar: ela usa um relógio e uma piscada. O motivo do
+      // bloqueio não se aplica a ela.
       if (stateRef.current === 'calibrating') {
         estadoRef.current = criarEstadoScanning();
         if (indiceRenderizadoRef.current !== null) {
@@ -134,9 +176,15 @@ export function ScanningMode(): React.ReactElement | null {
       const gazeValido = amostraViva && ultima.gazeValido;
       const piscando = amostraViva && ultima.piscando;
 
-      // A lista só é montada com a varredura ativa ou prestes a ativar:
-      // `querySelectorAll` + `getBoundingClientRect()` por nó força layout, e
-      // fazer isso a cada tick com a varredura desligada é custo puro.
+      // ⚠️ A LISTA só é consultada com a varredura ativa ou prestes a ativar.
+      //
+      // `querySelectorAll` no documento inteiro mais um
+      // `getBoundingClientRect()` por nó força layout. Fazer isso a cada quadro
+      // de gaze, inclusive com a varredura desligada, colocava um custo de
+      // layout no caminho quente — que já estoura o orçamento de 33 ms
+      // (`mediapipe` + `quality` + `crop` = 42,3 ms, medido em
+      // `docs/LATENCIA_L2CS.md`). Num sprint cujo objeto é MEDIR latência,
+      // instrumento que altera o que mede é o pior defeito possível.
       const ativoOuQuaseAtivo =
         estadoRef.current.ativoDesde !== null || !gazeValido;
       const itens = ativoOuQuaseAtivo ? itensNavegaveis() : [];
@@ -160,8 +208,9 @@ export function ScanningMode(): React.ReactElement | null {
       const alvo = itens[r.indiceDestacado];
       if (!alvo) return;
 
-      // Só re-renderiza quando o item MUDA: um `setDestaque(rect)` por tick
-      // criaria um objeto novo a cada vez, mesmo com o destaque parado.
+      // Só re-renderiza quando o item MUDA. Antes, um `setDestaque(rect)` por
+      // tick criava um objeto novo a cada vez e re-renderizava sempre, mesmo
+      // com o destaque parado no mesmo botão por 1,2 s.
       if (indiceRenderizadoRef.current !== r.indiceDestacado) {
         indiceRenderizadoRef.current = r.indiceDestacado;
         const rect = alvo.getBoundingClientRect();
@@ -206,12 +255,20 @@ export function ScanningMode(): React.ReactElement | null {
       <div
         aria-hidden="true"
         data-testid="scanning-highlight"
-        className="scan-highlight"
         style={{
+          position: 'fixed',
           left: destaque.left - 6,
           top: destaque.top - 6,
           width: destaque.width + 12,
           height: destaque.height + 12,
+          border: '4px solid rgba(250,250,250,0.95)',
+          // Anel duplo, mesma razão do cursor: nenhuma cor sozinha
+          // contrasta com todos os fundos, e o destaque some justamente sobre
+          // o botão cuja cor por acaso combine com ele.
+          boxShadow: '0 0 0 4px rgba(17,17,17,0.9), 0 0 24px rgba(0,0,0,0.5)',
+          borderRadius: 12,
+          pointerEvents: 'none',
+          zIndex: 9997,
         }}
       />
     </>

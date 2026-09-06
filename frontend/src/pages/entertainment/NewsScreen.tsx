@@ -1,97 +1,92 @@
-import React, { useEffect, useState } from 'react';
-import { Volume2 } from 'lucide-react';
-import { GazePageLayout } from '../../components/ui/GazePageLayout';
-import { GazeButton } from '../../components/ui/GazeButton';
-import { speak, stopSpeaking } from '../../utils/speech';
+import React from 'react';
+import { BackButton } from '../../components/ui/BackButton';
+import { Newspaper } from 'lucide-react';
+import { TTSButton } from '../../components/TTSButton';
 
-/** Notícias de demonstração: o app ainda não busca um jornal de verdade. */
 const NEWS_LIST = [
   {
     id: 1,
     title: 'Avanços na Medicina',
-    summary: 'Nova tecnologia de rastreamento ocular permite maior independência para pacientes em UTIs.',
+    summary: 'Nova tecnologia de eye-tracking permite maior independência para pacientes em UTIs.',
   },
   {
     id: 2,
     title: 'Clima para o Fim de Semana',
-    summary: 'Previsão de tempo ensolarado para o próximo fim de semana em toda a região sul e sudeste.',
+    summary:
+      'Previsão de tempo ensolarado para o próximo final de semana em toda a região sul e sudeste.',
   },
   {
     id: 3,
     title: 'Esportes',
-    summary: 'Time local vence o campeonato regional em partida decidida nos últimos minutos.',
+    summary:
+      'Time local vence o campeonato regional em partida emocionante decidida nos últimos minutos.',
   },
 ];
 
 export const NewsScreen: React.FC = () => {
-  const [lendo, setLendo] = useState<number | null>(null);
-
-  useEffect(() => () => stopSpeaking(), []);
-
-  const ouvir = (item: (typeof NEWS_LIST)[number]) => {
-    setLendo(item.id);
-    if (!speak(`${item.title}. ${item.summary}`, { onEnd: () => setLendo(null) })) setLendo(null);
-  };
-
   return (
-    <GazePageLayout backRoute="/menu" title="Jornal do Dia">
-      <h1 className="sr-only">Jornal do Dia</h1>
+    <main
+      role="main"
+      aria-labelledby="news-title"
+      style={{ minHeight: '100vh', backgroundColor: '#f1f5f9', padding: '2rem' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: '2rem', gap: '1rem' }}>
+        <BackButton />
+        <h1
+          id="news-title"
+          style={{
+            fontSize: '2rem',
+            color: 'var(--color-text-base)',
+            margin: 0,
+            fontWeight: 800,
+            display: 'flex',
+            alignItems: 'center',
+            gap: '0.5rem',
+          }}
+        >
+          <Newspaper aria-hidden="true" /> Jornal do Dia
+        </h1>
+      </div>
+
       <ol
-        aria-label="Notícias"
+        aria-label="Lista de notícias"
         style={{
-          listStyle: 'none',
-          margin: 0,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: '1.5rem',
+          maxWidth: 800,
+          margin: '0 auto',
           padding: 0,
-          display: 'grid',
-          gridTemplateRows: `repeat(${NEWS_LIST.length}, minmax(0, 1fr))`,
-          gap: 24,
-          height: '100%',
-          '--gaze-grid-gap': '24px',
-        } as React.CSSProperties}
+          listStyle: 'none',
+        }}
       >
-        {NEWS_LIST.map((item) => {
-          const ativa = lendo === item.id;
-          return (
-            <li key={item.id} style={{ display: 'flex', gap: 24, minHeight: 0 }}>
-              <article
-                aria-labelledby={`news-${item.id}-title`}
-                data-no-dwell="true"
-                style={{
-                  flex: 1,
-                  minWidth: 0,
-                  padding: '1.25rem 2rem',
-                  borderRadius: 'var(--r-lg)',
-                  border: `2px solid ${ativa ? 'var(--primary)' : 'var(--border)'}`,
-                  background: 'var(--surface)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'center',
-                  gap: '0.5rem',
-                  overflow: 'hidden',
-                }}
+        {NEWS_LIST.map((item) => (
+          <li key={item.id}>
+            <article
+              aria-labelledby={`news-${item.id}-title`}
+              style={{
+                background: 'var(--color-card-bg)',
+                padding: '2rem',
+                borderRadius: '1.5rem',
+                boxShadow: '0 4px 15px rgba(0,0,0,0.05)',
+              }}
+            >
+              <h2
+                id={`news-${item.id}-title`}
+                style={{ fontSize: '1.5rem', margin: '0 0 1rem 0', color: '#1e293b' }}
               >
-                <h2 id={`news-${item.id}-title`} style={{ fontSize: 'var(--fs-24)', color: 'var(--text)' }}>
-                  {item.title}
-                </h2>
-                <p style={{ fontSize: 'var(--fs-20)', color: 'var(--text-2)', lineHeight: 1.5 }}>
-                  {item.summary}
-                </p>
-              </article>
-              <GazeButton
-                onClick={() => ouvir(item)}
-                size="lg"
-                stacked
-                variant={ativa ? 'primary' : 'secondary'}
-                icon={<Volume2 color={ativa ? 'var(--on-primary)' : 'var(--primary)'} />}
-                label={ativa ? 'Lendo' : 'Ouvir'}
-                aria-label={`Ouvir: ${item.title}`}
-                aria-pressed={ativa}
-                style={{ width: 220, height: '100%' }}
-              />
-            </li>
-          );
-        })}
+                {item.title}
+              </h2>
+              <p style={{ fontSize: '1.25rem', color: 'var(--color-text-base)', opacity: 0.9, lineHeight: 1.6 }}>
+                {item.summary}
+              </p>
+              <div style={{ marginTop: '1.5rem', display: 'inline-block' }}>
+                <TTSButton text={`${item.title}. ${item.summary}`} />
+              </div>
+            </article>
+          </li>
+        ))}
       </ol>
-    </GazePageLayout>
+    </main>
   );
 };
