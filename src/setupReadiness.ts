@@ -207,23 +207,29 @@ import { CANTHAL_DISTANCE_CM } from './anthropometry';
 export const DISTANCIA_ALVO_CM = 60;
 
 /**
- * Faixa tolerada, com folga dos dois lados da faixa medida.
+ * Faixa aceita — fechada exatamente na faixa de medição, por escolha explícita.
  *
- * Fechar exatamente em 50–70 faria o aviso disparar a cada pequeno
- * deslocamento de quem está usando o app CORRETAMENTE — e um aviso que
- * aparece o tempo todo é um aviso que se aprende a ignorar.
+ * A largura desta faixa **não afeta a precisão**. O erro de landmark depende
+ * de onde a pessoa senta, não de onde a tolerância termina; alargar a faixa não
+ * piora medição nenhuma, só adia o aviso.
  *
- * O custo da folga é real e vale registrar: o erro de landmark escala com o
- * inverso do tamanho do rosto no frame, então a 80 cm o rosto é 25% menor que
- * a 60 cm e o erro cresce ~33%. Continua sendo `ok` porque a decisão de
- * trabalhar mais longe é do cuidador, não do software.
+ * O que ela governa é QUANDO avisar. Fechada em 50–70, o aviso funciona como
+ * disciplina de protocolo: sair da posição em que as medições foram feitas é
+ * sinalizado na hora, em vez de só depois de dez centímetros de deriva. Numa
+ * ferramenta cujo produto é um relatório de erro angular, sinalizar cedo vale
+ * mais que não incomodar.
+ *
+ * Para referência, o erro relativo ao alvo de 60 cm dentro e fora da faixa
+ * (escala linear com a distância):
+ *
+ *   50 cm  −17%      60 cm  0%      70 cm  +17%      80 cm  +33%
  */
-export const DISTANCIA_OK_MIN_CM = 45;
-export const DISTANCIA_OK_MAX_CM = 80;
+export const DISTANCIA_OK_MIN_CM = 50;
+export const DISTANCIA_OK_MAX_CM = 70;
 
-/** Margem de aviso em volta da faixa tolerada. Fora dela, `fail`. */
-const DISTANCIA_WARN_MIN_CM = 32;
-const DISTANCIA_WARN_MAX_CM = 110;
+/** Margem de aviso em volta da faixa aceita. Fora dela, `fail`. */
+const DISTANCIA_WARN_MIN_CM = 35;
+const DISTANCIA_WARN_MAX_CM = 95;
 
 /**
  * FOV usado para converter a faixa em `iodFraction` quando a câmera real não
