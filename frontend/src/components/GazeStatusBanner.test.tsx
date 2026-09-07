@@ -3,23 +3,14 @@ import { render, screen } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import React from 'react';
 import { GazeStatusBanner } from './GazeStatusBanner';
+import { mensagemPara } from '@tracker/distanceAdvisory';
 
 // -----------------------------------------------------------------------------
-// Remoção permanente dos avisos de calibração, a pedido.
+// O aceite pede que "o texto do banner diga a direção correta".
 //
-// Eram três — "Ainda não há calibração", "A calibração deixou de valer" e
-// "Distância diferente da calibração" — e apareciam em TODAS as telas, porque o
-// banner mora no `GazeProvider`, que envolve o app inteiro. Cobriam o topo do
-// login e do onboarding, telas que o cuidador opera com mouse e teclado e onde
-// não existe controle por olhar nenhum.
-//
-// O bloqueio que eles anunciavam continua valendo: sem calibração o dwell segue
-// desligado, inclusive para o botão de emergência. Isso é afirmado em
-// `GazeContext.dwell.test.tsx`. O que saiu foi o aviso, não a proteção.
-//
-// Os describes antigos ("o aviso de distância chega à tela" e "a ordem de
-// precedência") foram junto: um teste que afirma a existência de um banner que
-// não existe mais não protege nada — impede a mudança.
+// `distanceAdvisory.test.ts` cobre a máquina de estados e o texto. Este arquivo
+// cobre o que faltava: que o texto CHEGA à tela, e que a ordem de precedência
+// não o deixa aparecer quando há coisa mais grave acontecendo.
 // -----------------------------------------------------------------------------
 
 const semProblemas = {
@@ -28,56 +19,99 @@ const semProblemas = {
   calibrationInvalidated: null,
 };
 
-describe('avisos de calibração removidos', () => {
-  it('não mostra nada quando falta calibração', () => {
-    const { container } = render(<GazeStatusBanner {...semProblemas} state="uncalibrated" />);
-    expect(container.firstChild).toBeNull();
+describe('o aviso de distância chega à tela', () => {
+  it('perto demais: o banner manda AFASTAR', () => {
+    render(<GazeStatusBanner {...semProblemas} distanceAdvice={mensagemPara('perto')} />);
+    expect(screen.getByTestId('gaze-status-banner')).toBeInTheDocument();
+    expect(screen.getByText(/afaste-se/i)).toBeInTheDocument();
   });
 
-  it('não mostra nada quando a calibração deixou de valer', () => {
+  it('longe demais: o banner manda APROXIMAR', () => {
+    render(<GazeStatusBanner {...semProblemas} distanceAdvice={mensagemPara('longe')} />);
+    expect(screen.getByText(/aproxime-se/i)).toBeInTheDocument();
+  });
+
+  it('dentro da faixa: banner nenhum', () => {
     const { container } = render(
-      <GazeStatusBanner {...semProblemas} calibrationInvalidated="a tela mudou" />
+      <GazeStatusBanner {...semProblemas} distanceAdvice={mensagemPara('dentro')} />
     );
-    expect(container.firstChild).toBeNull();
+    expect(container).toBeEmptyDOMElement();
   });
 
-  it('não mostra nada quando a distância foge da calibração', () => {
-    const { container } = render(
-      <GazeStatusBanner {...semProblemas} distanceAdvice="você está mais perto" />
-    );
-    expect(container.firstChild).toBeNull();
-  });
-
-  it('nada aparece no caminho feliz', () => {
+  it('sem a prop, nada muda — a compatibilidade é preservada', () => {
     const { container } = render(<GazeStatusBanner {...semProblemas} />);
-    expect(container.firstChild).toBeNull();
+    expect(container).toBeEmptyDOMElement();
   });
 });
 
-describe('o que o banner ainda faz', () => {
-  it('avisa quando a câmera falha', () => {
-    // Sem isto, webcam desconectada = cursor sumido e nada clicável, sem uma
-    // palavra na tela. O usuário-alvo não tem como diagnosticar isso sozinho.
-    render(<GazeStatusBanner {...semProblemas} cameraError="Permissão negada." />);
-
-    expect(screen.getByTestId('gaze-status-banner')).toBeInTheDocument();
-    expect(screen.getByText(/câmera não está disponível/i)).toBeInTheDocument();
-  });
-
-  it('avisa quando o rastreamento perde o rosto', () => {
-    render(<GazeStatusBanner {...semProblemas} gazeLostMessage="Não estou te vendo" />);
-    expect(screen.getByTestId('gaze-status-banner')).toBeInTheDocument();
-  });
-
-  it('a falha de câmera vence a perda de rosto', () => {
-    // Sem câmera, dizer que o rosto sumiu responde a pergunta errada.
+describe('a ordem de precedência', () => {
+  it('erro de câmera VENCE o aviso de distância', () => {
+    // Sem câmera, a distância não importa — e empilhar dois banners num
+    // software assistivo é pior que mostrar só o mais grave.
     render(
       <GazeStatusBanner
         {...semProblemas}
-        cameraError="Permissão negada."
-        gazeLostMessage="Não estou te vendo"
+        cameraError="Dispositivo em uso."
+        distanceAdvice={mensagemPara('perto')}
       />
     );
     expect(screen.getByText(/câmera não está disponível/i)).toBeInTheDocument();
+    expect(screen.queryByText(/afaste-se/i)).not.toBeInTheDocument();
+  });
+
+  it('calibração invalidada VENCE o aviso de distância', () => {
+    render(
+      <GazeStatusBanner
+        {...semProblemas}
+        calibrationInvalidated="O pipeline mudou."
+        distanceAdvice={mensagemPara('longe')}
+      />
+    );
+    expect(screen.getByText(/calibração deixou de valer/i)).toBeInTheDocument();
+    expect(screen.queryByText(/aproxime-se/i)).not.toBeInTheDocument();
+  });
+
+  it('falta de calibração não aparece mais, e deixa o aviso de distância passar', () => {
+    // "Ainda não há calibração" foi removido a pedido: era o único banner que
+    // aparecia em TODAS as telas, inclusive no login e no onboarding, onde não
+    // há controle por olhar nenhum. Os outros continuam.
+    //
+    // Como ele saiu, deixou de vencer a precedência: quem estava atrás dele na
+    // fila agora chega à tela.
+    render(
+      <GazeStatusBanner
+        {...semProblemas}
+        state="uncalibrated"
+        distanceAdvice={mensagemPara('perto')}
+      />
+    );
+    expect(screen.queryByText(/ainda não há calibração/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/afaste-se/i)).toBeInTheDocument();
+  });
+
+  it('sozinha, a falta de calibração não produz banner nenhum', () => {
+    const { container } = render(<GazeStatusBanner {...semProblemas} state="uncalibrated" />);
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('o aviso de distância usa tom de AVISO, não de erro', () => {
+    // O sistema continua funcionando, só com precisão pior que a calibrada.
+    // Tratar isso como erro ensinaria o cuidador a ignorar banners vermelhos —
+    // e aí o banner que importa de verdade também seria ignorado.
+    // ⚠️ O React renderiza `style` como `rgb(...)`, não como hex — procurar
+    // por '78350f' no HTML nunca casa.
+    const aviso = render(
+      <GazeStatusBanner {...semProblemas} distanceAdvice={mensagemPara('perto')} />
+    );
+    const cardAviso = aviso.getByTestId('gaze-status-banner').firstElementChild as HTMLElement;
+    aviso.unmount();
+
+    const erro = render(<GazeStatusBanner {...semProblemas} cameraError="x" />);
+    const cardErro = erro.getByTestId('gaze-status-banner').firstElementChild as HTMLElement;
+
+    // Âmbar (#78350f) para aviso, vermelho (#7f1d1d) para erro.
+    expect(cardAviso.style.backgroundColor).toBe('rgb(120, 53, 15)');
+    expect(cardErro.style.backgroundColor).toBe('rgb(127, 29, 29)');
+    expect(cardAviso.style.backgroundColor).not.toBe(cardErro.style.backgroundColor);
   });
 });
