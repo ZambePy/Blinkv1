@@ -55,7 +55,7 @@ vi.mock('@tracker/tracker/engine', async (orig) => {
 
 vi.mock('./SettingsContext', () => ({
   useSettings: () => ({
-    settings: { dwellSpeed: 'normal', filterPreset: 'balanceado-v2', eyeDominance: 'both' },
+    settings: { dwellMs: 1500, filterPreset: 'balanceado-v2', eyeDominance: 'both' },
     updateSettings: vi.fn(),
   }),
 }));

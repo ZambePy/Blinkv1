@@ -31,7 +31,7 @@ const Sonda: React.FC = () => {
   renders++;
   return (
     <div>
-      <span data-testid="dwell">{settings.dwellSpeed}</span>
+      <span data-testid="dwell">{settings.dwellMs}</span>
       <span data-testid="diag">{settings.screenDiagonalIn}</span>
       <span data-testid="dist">{settings.viewingDistanceCm}</span>
       <button
@@ -63,29 +63,29 @@ describe('localStorage corrompido não derruba o boot', () => {
   it('JSON truncado cai nos defaults em vez de lançar', () => {
     // O caso real: a quota estoura no meio de um `setItem` e sobra JSON
     // parcial.
-    localStorage.setItem('irisflow_settings', '{"dwellSpeed":"fast","scree');
+    localStorage.setItem('irisflow_settings', '{"dwellMs":800,"scree');
     expect(() =>
       render(<SettingsProvider><Sonda /></SettingsProvider>),
     ).not.toThrow();
-    expect(screen.getByTestId('dwell').textContent).toBe('normal');
+    expect(screen.getByTestId('dwell').textContent).toBe('1500');
   });
 
   it('valor não-objeto cai nos defaults', () => {
     localStorage.setItem('irisflow_settings', '"apenas uma string"');
     render(<SettingsProvider><Sonda /></SettingsProvider>);
-    expect(screen.getByTestId('dwell').textContent).toBe('normal');
+    expect(screen.getByTestId('dwell').textContent).toBe('1500');
   });
 
   it('array cai nos defaults', () => {
     localStorage.setItem('irisflow_settings', '[1,2,3]');
     render(<SettingsProvider><Sonda /></SettingsProvider>);
-    expect(screen.getByTestId('dwell').textContent).toBe('normal');
+    expect(screen.getByTestId('dwell').textContent).toBe('1500');
   });
 
   it('configuração válida é carregada normalmente', () => {
-    localStorage.setItem('irisflow_settings', JSON.stringify({ dwellSpeed: 'fast', schemaVersion: 1 }));
+    localStorage.setItem('irisflow_settings', JSON.stringify({ dwellMs: 800, schemaVersion: 1 }));
     render(<SettingsProvider><Sonda /></SettingsProvider>);
-    expect(screen.getByTestId('dwell').textContent).toBe('fast');
+    expect(screen.getByTestId('dwell').textContent).toBe('800');
   });
 });
 
@@ -99,7 +99,7 @@ describe('o schema é versionado', () => {
       JSON.stringify({ dwellSpeed: 'fast', schemaVersion: 999 }),
     );
     render(<SettingsProvider><Sonda /></SettingsProvider>);
-    expect(screen.getByTestId('dwell').textContent).toBe('normal');
+    expect(screen.getByTestId('dwell').textContent).toBe('1500');
   });
 
   it('a versão é gravada junto ao salvar', () => {
@@ -109,11 +109,16 @@ describe('o schema é versionado', () => {
     expect(gravado.schemaVersion).toBe(1);
   });
 
-  it('configuração SEM versão (anterior a) ainda é aceita', () => {
+  it('configuração SEM versão (anterior a) ainda é aceita, e migra o dwell', () => {
     // Compatibilidade: quem já tinha configurações salvas não pode perdê-las.
+    //
+    // Este é o caso mais delicado da migração `dwellSpeed` → `dwellMs`: uma
+    // configuração salva antes do versionamento, com o enum antigo. Perder o
+    // "lento" aqui deixaria um paciente com ELA avançada em 1,5 s, sem
+    // conseguir clicar e sem ter como avisar ninguém.
     localStorage.setItem('irisflow_settings', JSON.stringify({ dwellSpeed: 'slow' }));
     render(<SettingsProvider><Sonda /></SettingsProvider>);
-    expect(screen.getByTestId('dwell').textContent).toBe('slow');
+    expect(screen.getByTestId('dwell').textContent).toBe('2500');
   });
 });
 

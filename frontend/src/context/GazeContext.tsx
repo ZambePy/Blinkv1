@@ -29,15 +29,15 @@ import { detectFlicker, inferPowerLineHz } from '@tracker/flickerDetector';
 import { AvisoDeDistancia } from '@tracker/distanceAdvisory';
 import { useSettings } from './SettingsContext';
 import { isDevMode, onDevModeChange } from '../devMode';
+import { limitarDwellMs } from '../dwellMs';
 
 export type { GazeEngine, GazeSample, EngineState, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
 
 // Dwell time by user preset (matches DwellButton's own table).
-const DWELL_MS_BY_SPEED: Record<'slow' | 'normal' | 'fast', number> = {
-  slow: 2500,
-  normal: 1500,
-  fast: 800,
-};
+// `DWELL_MS_BY_SPEED` morava aqui, convertendo o enum `dwellSpeed` em ms.
+// O tempo de permanência passou a ser um número nas configurações — três
+// degraus não cobrem a distância entre ELA avançada e boa fixação — e a
+// conversão deixou de existir. Ver `dwellMs.ts`.
 // Data-no-dwell="true" on any element that should opt out.
 export const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 
@@ -241,7 +241,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
   // Global dwell dispatcher state. Kept in refs to avoid re-renders — the loop
   // runs at 30 Hz and reads/writes these directly from the gaze callback.
-  const dwellMsRef = useRef<number>(DWELL_MS_BY_SPEED[settings.dwellSpeed]);
+  const dwellMsRef = useRef<number>(limitarDwellMs(settings.dwellMs));
   // Todo o estado do dwell vive num único objeto imutável, avançado pelo
   // redutor puro de `src/interaction/dwell.ts`. Refs soltos mutados em pontos
   // diferentes do callback saem de sincronia (dwell completando de olho fechado).
@@ -268,8 +268,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   }, []);
 
   useEffect(() => {
-    dwellMsRef.current = DWELL_MS_BY_SPEED[settings.dwellSpeed];
-  }, [settings.dwellSpeed]);
+    dwellMsRef.current = limitarDwellMs(settings.dwellMs);
+  }, [settings.dwellMs]);
 
   // Propaga a dominância ocular do usuário ao pipeline. Feito num useEffect
   // separado para reagir a mudanças em tempo real (SettingsScreen troca

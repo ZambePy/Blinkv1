@@ -46,14 +46,14 @@ vi.mock('@tracker/tracker/engine', async (orig) => {
 
 vi.mock('./SettingsContext', () => ({
   useSettings: () => ({
-    settings: { dwellSpeed: 'normal', filterPreset: 'balanceado-v2', eyeDominance: 'both' },
+    settings: { dwellMs: 1500, filterPreset: 'balanceado-v2', eyeDominance: 'both' },
     updateSettings: vi.fn(),
   }),
 }));
 
 import { GazeProvider } from './GazeContext';
 
-/** dwellSpeed 'normal' → 1500 ms no DWELL_MS_BY_SPEED do provider. */
+/** `dwellMs` vem direto das settings — nao ha mais conversao de enum. */
 const DWELL_MS = 1500;
 
 function amostra(over: Partial<GazeSample> = {}): GazeSample {

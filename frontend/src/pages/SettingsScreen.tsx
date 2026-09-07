@@ -51,6 +51,7 @@ import { applyUptimeToRunMetaIfDefault } from '../utils/autoTestMeta';
 import { proximoBloco } from '../registroDaSessao';
 import { getCalibrationTimestampMs } from '@tracker/calibration';
 import { hoverAndFocusBackground } from '../components/ui/hoverFocus';
+import { ControleDeDwell } from '../components/ui/ControleDeDwell';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -684,12 +685,6 @@ export const SettingsScreen: React.FC = () => {
     );
   }
 
-  const dwellOptions: { key: 'slow' | 'normal' | 'fast'; label: string; value: string }[] = [
-    { key: 'slow', label: t('settings.dwell.slow'), value: '2.5s' },
-    { key: 'normal', label: t('settings.dwell.normal'), value: '1.5s' },
-    { key: 'fast', label: t('settings.dwell.fast'), value: '0.8s' },
-  ];
-
   return (
     <CaregiverPageLayout title={t('settings.title')}>
       <div
@@ -829,38 +824,13 @@ export const SettingsScreen: React.FC = () => {
               {t('settings.dwell.title')}
             </h2>
           </div>
-          <div
-            role="radiogroup"
-            aria-labelledby="dwell-title"
-            style={{ display: 'flex', gap: '1rem' }}
-          >
-            {dwellOptions.map(({ key, label, value }) => {
-              const active = settings.dwellSpeed === key;
-              return (
-                <button
-                  key={key}
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => updateSettings({ dwellSpeed: key })}
-                  style={{
-                    flex: 1,
-                    padding: '1rem',
-                    borderRadius: '1rem',
-                    cursor: 'pointer',
-                    fontSize: '0.95rem',
-                    fontWeight: 700,
-                    border: '2px solid',
-                    background: active ? 'linear-gradient(135deg, #1B54A8, #2563eb)' : 'white',
-                    color: active ? 'white' : '#475569',
-                    borderColor: active ? '#1B54A8' : '#e2e8f0',
-                    boxShadow: active ? '0 4px 16px rgba(27,84,168,0.3)' : 'none',
-                  }}
-                >
-                  {label} ({value})
-                </button>
-              );
-            })}
-          </div>
+          {/* O MESMO controle que o tutorial usa. Dois controles para a
+              mesma grandeza e como limiares divergem: alguem ajusta a faixa
+              num e esquece o outro. */}
+          <ControleDeDwell
+            valorMs={settings.dwellMs}
+            aoMudar={(ms) => updateSettings({ dwellMs: ms })}
+          />
         </section>
 
         {/* Som */}

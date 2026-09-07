@@ -290,5 +290,16 @@
       "why": "Refaça ao mudar de sala, trocar a webcam ou reposicionar o monitor — o preparo antigo descreve um ambiente que não existe mais.",
       "button": "Refazer o preparo"
     }
+  },
+  "dwell": {
+    "label": "Tempo de permanência",
+    "hint": "Quanto tempo o olhar precisa ficar parado antes de virar clique.",
+    "seconds": "{{s}} s",
+    "valueText": "{{s}} segundos",
+    "presets": {
+      "lento": "Lento",
+      "normal": "Normal",
+      "rapido": "Rápido"
+    }
   }
 }

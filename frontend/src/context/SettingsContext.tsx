@@ -2,12 +2,20 @@ import React, { createContext, useContext, useState, useEffect, useCallback, use
 import { computeDisplayGeometry, pickPanelForDisplay } from '@tracker/displayGeometry';
 import { aplicarGeometriaDoUsuario } from '../design/gazeMetrics';
 import { setSessionGeometry } from '@tracker/calibration';
+import { DWELL_PADRAO_MS, dwellMsDoLegado, limitarDwellMs } from '../dwellMs';
 
+/** Formato antigo. Sobrevive só para a migração em `lerSettingsDoDisco`. */
 type DwellSpeed = 'slow' | 'normal' | 'fast';
 type Theme = 'light' | 'dark';
 
 interface Settings {
-  dwellSpeed: DwellSpeed;
+  /**
+   * Tempo de permanência até o clique, em ms.
+   *
+   * Era `dwellSpeed: 'slow' | 'normal' | 'fast'`. Três degraus não cobrem a
+   * distância entre ELA avançada e boa fixação; o valor migra na leitura.
+   */
+  dwellMs: number;
   soundEnabled: boolean;
   voiceGender: 'female' | 'male' | 'cloned';
   voiceProfileId?: string;
@@ -62,7 +70,7 @@ interface Settings {
 }
 
 const defaultSettings: Settings = {
-  dwellSpeed: 'normal',
+  dwellMs: DWELL_PADRAO_MS,
   soundEnabled: true,
   voiceGender: 'female',
   eyeDominance: 'both',
@@ -147,13 +155,32 @@ function lerSettingsDoDisco(): Partial<Settings> | null {
     if (obj.schemaVersion !== undefined && obj.schemaVersion !== SETTINGS_SCHEMA_VERSION) {
       console.warn(
         `[SettingsContext] configurações de schema v${obj.schemaVersion} ` +
-        `(atual: v${SETTINGS_SCHEMA_VERSION}) — usando os defaults.`,
+          `(atual: v${SETTINGS_SCHEMA_VERSION}) — usando os defaults.`
       );
       return null;
     }
+    // MIGRAÇÃO dwellSpeed → dwellMs.
+    //
+    // Feita aqui, e SEM subir `SETTINGS_SCHEMA_VERSION`: a checagem acima
+    // descarta tudo quando a versão diverge, o que apagaria exatamente a
+    // escolha que esta migração existe para preservar. Um paciente com ELA
+    // avançada configurado em "lento" voltaria a 1,5 s e ficaria sem conseguir
+    // clicar, sem ter como avisar ninguém.
+    const legado = (obj as { dwellSpeed?: DwellSpeed }).dwellSpeed;
+    if (typeof obj.dwellMs !== 'number' && typeof legado === 'string') {
+      obj.dwellMs = dwellMsDoLegado(legado);
+    }
+    if (typeof obj.dwellMs === 'number') {
+      // Storage editado à mão, ou vindo de uma versão com outra faixa.
+      obj.dwellMs = limitarDwellMs(obj.dwellMs);
+    }
+
     return obj;
   } catch (e) {
-    console.warn('[SettingsContext] configurações ilegíveis no localStorage — usando os defaults.', e);
+    console.warn(
+      '[SettingsContext] configurações ilegíveis no localStorage — usando os defaults.',
+      e
+    );
     return null;
   }
 }
@@ -161,7 +188,10 @@ function lerSettingsDoDisco(): Partial<Settings> | null {
 /** Grava sem nunca lançar. Quota estourada não pode derrubar a UI. */
 function gravarSettingsNoDisco(s: Settings): void {
   try {
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify({ ...s, schemaVersion: SETTINGS_SCHEMA_VERSION }));
+    localStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({ ...s, schemaVersion: SETTINGS_SCHEMA_VERSION })
+    );
   } catch (e) {
     // Quota excedida é o caso real: 5 perfis de calibração ocupam quase toda
     // a cota. Perder a persistência da configuração é ruim; derrubar a sessão
@@ -187,66 +217,76 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // centímetros inteiros, então erra por até ~0,4" — melhor que um hardcode
   // errado, pior que uma medição com fita.
   useEffect(() => {
-    const sys = (window as unknown as {
-      irisflowSystem?: {
-        getMonitorSizes?: () => Promise<{ widthCm: number; heightCm: number }[]>;
-        getDisplayInfo?: () => Promise<{
-          widthPx: number; heightPx: number; scaleFactor: number;
-        }>;
-      };
-    }).irisflowSystem;
-    if (!sys?.getMonitorSizes) return;   // browser puro / build web: sem IPC
+    const sys = (
+      window as unknown as {
+        irisflowSystem?: {
+          getMonitorSizes?: () => Promise<{ widthCm: number; heightCm: number }[]>;
+          getDisplayInfo?: () => Promise<{
+            widthPx: number;
+            heightPx: number;
+            scaleFactor: number;
+          }>;
+        };
+      }
+    ).irisflowSystem;
+    if (!sys?.getMonitorSizes) return; // browser puro / build web: sem IPC
     // Só lê o sistema depois do consentimento explícito.
     if (settings.systemAccessGranted !== true) return;
     let cancelled = false;
     // Lê tamanho físico E info do display juntos: a segunda serve para
     // escolher QUAL painel corresponde ao monitor em uso quando há mais de um.
-    void Promise.all([
-      sys.getMonitorSizes(),
-      sys.getDisplayInfo?.() ?? Promise.resolve(null),
-    ]).then(([sizes, info]) => {
-      if (cancelled) return;
-      setSettings((prev) => {
-        const scale = info?.scaleFactor ?? null;
-        if (prev.screenGeometrySource === 'manual') {
-          return scale !== null && scale !== prev.screenScaleFactor
-            ? { ...prev, screenScaleFactor: scale }
-            : prev;
-        }
-        const aspect = info && info.heightPx > 0 ? info.widthPx / info.heightPx : null;
-        const { panel, ambiguous } = pickPanelForDisplay(sizes ?? [], aspect);
-        const geo = computeDisplayGeometry(panel);
-        if (!geo) {
-          console.log('[display] EDID não utilizável; mantendo diagonal configurada.');
-          return scale !== null ? { ...prev, screenScaleFactor: scale } : prev;
-        }
-        if (ambiguous) {
-          console.warn(
-            '[display] mais de um monitor com a mesma proporção — a diagonal lida ' +
-            'pode ser do monitor errado. Se o número abaixo não bater com a sua tela, ' +
-            'corrija à mão em Configurações → Teste de precisão.',
+    void Promise.all([sys.getMonitorSizes(), sys.getDisplayInfo?.() ?? Promise.resolve(null)])
+      .then(([sizes, info]) => {
+        if (cancelled) return;
+        setSettings((prev) => {
+          const scale = info?.scaleFactor ?? null;
+          if (prev.screenGeometrySource === 'manual') {
+            return scale !== null && scale !== prev.screenScaleFactor
+              ? { ...prev, screenScaleFactor: scale }
+              : prev;
+          }
+          const aspect = info && info.heightPx > 0 ? info.widthPx / info.heightPx : null;
+          const { panel, ambiguous } = pickPanelForDisplay(sizes ?? [], aspect);
+          const geo = computeDisplayGeometry(panel);
+          if (!geo) {
+            console.log('[display] EDID não utilizável; mantendo diagonal configurada.');
+            return scale !== null ? { ...prev, screenScaleFactor: scale } : prev;
+          }
+          if (ambiguous) {
+            console.warn(
+              '[display] mais de um monitor com a mesma proporção — a diagonal lida ' +
+                'pode ser do monitor errado. Se o número abaixo não bater com a sua tela, ' +
+                'corrija à mão em Configurações → Teste de precisão.'
+            );
+          }
+          const rounded = Math.round(geo.diagonalIn * 10) / 10;
+          if (
+            Math.abs(rounded - prev.screenDiagonalIn) < 0.05 &&
+            prev.screenGeometrySource === 'auto' &&
+            scale === prev.screenScaleFactor
+          )
+            return prev;
+          console.log(
+            `[display] diagonal lida do sistema: ${rounded}" ` +
+              `(${geo.widthCm}×${geo.heightCm} cm). Anterior: ${prev.screenDiagonalIn}".` +
+              (scale && scale !== 1 ? ` Escala do Windows: ${(scale * 100).toFixed(0)}%.` : '')
           );
-        }
-        const rounded = Math.round(geo.diagonalIn * 10) / 10;
-        if (Math.abs(rounded - prev.screenDiagonalIn) < 0.05
-          && prev.screenGeometrySource === 'auto'
-          && scale === prev.screenScaleFactor) return prev;
-        console.log(
-          `[display] diagonal lida do sistema: ${rounded}" ` +
-          `(${geo.widthCm}×${geo.heightCm} cm). Anterior: ${prev.screenDiagonalIn}".` +
-          (scale && scale !== 1 ? ` Escala do Windows: ${(scale * 100).toFixed(0)}%.` : ''),
-        );
-        const next = {
-          ...prev,
-          screenDiagonalIn: rounded,
-          screenGeometrySource: 'auto' as const,
-          screenScaleFactor: scale,
-        };
-        gravarSettingsNoDisco(next);
-        return next;
+          const next = {
+            ...prev,
+            screenDiagonalIn: rounded,
+            screenGeometrySource: 'auto' as const,
+            screenScaleFactor: scale,
+          };
+          gravarSettingsNoDisco(next);
+          return next;
+        });
+      })
+      .catch(() => {
+        /* IPC indisponível: segue com o valor configurado */
       });
-    }).catch(() => { /* IPC indisponível: segue com o valor configurado */ });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [settings.systemAccessGranted]);
 
   // Aplica conforto visual no boot e a cada mudança relevante.
@@ -260,9 +300,11 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   useEffect(() => {
     const b = settings.monitorBrightness;
     if (b == null) return;
-    const api = (window as unknown as {
-      electronBrightness?: { set: (pct: number) => Promise<{ ok: boolean }> };
-    }).electronBrightness;
+    const api = (
+      window as unknown as {
+        electronBrightness?: { set: (pct: number) => Promise<{ ok: boolean }> };
+      }
+    ).electronBrightness;
     if (!api) return;
     api.set(b).catch((e) => {
       console.warn('[SettingsContext] falha ao aplicar brilho de monitor:', e);
@@ -296,11 +338,7 @@ export const SettingsProvider: React.FC<{ children: React.ReactNode }> = ({ chil
   // consumidores de `useSettings`, mesmo sem nenhuma configuração mudar.
   const value = useMemo(() => ({ settings, updateSettings }), [settings, updateSettings]);
 
-  return (
-    <SettingsContext.Provider value={value}>
-      {children}
-    </SettingsContext.Provider>
-  );
+  return <SettingsContext.Provider value={value}>{children}</SettingsContext.Provider>;
 };
 
 export const useSettings = () => useContext(SettingsContext);

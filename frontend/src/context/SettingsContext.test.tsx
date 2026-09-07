@@ -10,8 +10,7 @@ const wrapper = ({ children }: { children: React.ReactNode }) => (
 describe('SettingsContext', () => {
   it('inicia com defaults sensatos', () => {
     const { result } = renderHook(() => useSettings(), { wrapper });
-    expect(result.current.settings.dwellSpeed).toBe('normal');
-    expect(result.current.settings.dwellSpeed).toBe('normal');
+    expect(result.current.settings.dwellMs).toBe(1500);
     expect(result.current.settings.soundEnabled).toBe(true);
   });
 

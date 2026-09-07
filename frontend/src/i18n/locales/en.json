@@ -290,5 +290,16 @@
       "why": "Redo it when you change rooms, swap the webcam or move the monitor — the old setup describes an environment that no longer exists.",
       "button": "Redo setup"
     }
+  },
+  "dwell": {
+    "label": "Dwell time",
+    "hint": "How long the gaze must rest on something before it becomes a click.",
+    "seconds": "{{s}} s",
+    "valueText": "{{s}} seconds",
+    "presets": {
+      "lento": "Slow",
+      "normal": "Normal",
+      "rapido": "Fast"
+    }
   }
 }
