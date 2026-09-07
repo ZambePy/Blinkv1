@@ -550,6 +550,38 @@ export const CalibrationCheck: React.FC = () => {
   // Inicia calibração. `quick=true` reduz para 4 cantos e passa opts.quick
   // para o backend. `opticalCondition` grava o perfil sob a condição
   // escolhida.
+  /**
+   * Há um modelo treinado que dá para reaproveitar?
+   *
+   * Lido a cada render de propósito: `isCalibrated()` muda quando um perfil é
+   * ativado ou a calibração é invalidada em tempo de execução, e um valor
+   * memoizado ofereceria reaproveitar um modelo que já não existe.
+   */
+  const temCalibracaoSalva = calibration.isCalibrated();
+
+  /** "hoje", "há 3 dias" — o que decide se vale reaproveitar. */
+  const idadeDaCalibracao = (() => {
+    const ts = getCalibrationTimestampMs();
+    if (ts === null || !Number.isFinite(ts)) return 'sem data';
+    const dias = Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1000));
+    if (dias <= 0) return 'de hoje';
+    if (dias === 1) return 'de ontem';
+    return `há ${dias} dias`;
+  })();
+
+  /**
+   * Segue com o modelo que já existe, sem coletar ponto nenhum.
+   *
+   * Mesmo destino do "seguir" da tela de resultado — tutorial na primeira vez,
+   * menu depois. Não passa pelo resultado: não houve calibração nova para
+   * julgar, e mostrar o veredito do modelo antigo aqui daria a entender que
+   * algo foi medido agora.
+   */
+  const seguirComCalibracaoSalva = () => {
+    const destino = perfilAtual && !tutorialConcluido(perfilAtual.id) ? '/tutorial' : '/menu';
+    navigate(destino, { replace: true });
+  };
+
   const handleStart = (quick: boolean = false) => {
     if (!l2csReady) return;
 
@@ -676,7 +708,22 @@ export const CalibrationCheck: React.FC = () => {
           height: '100vh',
           background: BG,
           color: TEXT_PRIMARY,
-          overflow: 'hidden',
+          // A PREPARAÇÃO ROLA; A COLETA NÃO.
+          //
+          // Era `hidden` sempre, e o conteúdo desta tela — título, painel de
+          // prontidão com nove itens, instruções, seletor de condição óptica,
+          // botões — passa de uma tela em 1080. O botão de começar ficava
+          // inalcançável, e a tela cujo único propósito é sair dela virava um
+          // beco. A rolagem por olhar também não salvava: ela procura um
+          // ancestral rolável, e `hidden` garante que não existe nenhum.
+          //
+          // Nos outros estágios continua `hidden`, e isso não é preciosismo:
+          // durante a coleta os alvos são posicionados em coordenadas de
+          // viewport. Rolar ali deslocaria o alvo em relação ao ponto medido e
+          // corromperia a calibração EM SILÊNCIO — sem erro, só com números
+          // piores, que ninguém diagnostica lendo o relatório depois.
+          overflowY: stage === 'tutorial' ? 'auto' : 'hidden',
+          overflowX: 'hidden',
           userSelect: 'none',
           display: 'flex',
           flexDirection: 'column',
@@ -696,9 +743,16 @@ export const CalibrationCheck: React.FC = () => {
             style={{
               flex: 1,
               display: 'flex',
-              alignItems: 'center',
+              // `alignItems: center` cortava o TOPO quando o conteúdo passava
+              // da altura do pai — e o pedaço cortado fica inalcançável mesmo
+              // com a rolagem ligada, porque o transbordo sobra para ANTES do
+              // início do contêiner. Com `flex-start` o conteúdo cresce para
+              // baixo, que é onde a rolagem alcança.
+              alignItems: 'flex-start',
               justifyContent: 'center',
-              padding: '2rem',
+              // O topo extra é o respiro do botão de voltar, que flutua em
+              // `top: 2rem` e cobriria a primeira linha.
+              padding: '5rem 2rem 2rem',
             }}
           >
             <div
@@ -976,6 +1030,38 @@ export const CalibrationCheck: React.FC = () => {
                   </>
                 )}
               </button>
+
+              {/* Reaproveitar a calibração salva.
+                  Refazer nove pontos é um a dois minutos de fixação para quem
+                  tem ELA, e nem sempre há o que ganhar: se a posição não mudou,
+                  o modelo de ontem vale.
+                  A IDADE vai junto de propósito. "Salva" sozinho não ajuda a
+                  decidir; uma calibração de semanas atrás, feita com o paciente
+                  noutra posição, é pior que refazer — e só a data denuncia
+                  isso. */}
+              {temCalibracaoSalva && (
+                <button
+                  type="button"
+                  onClick={seguirComCalibracaoSalva}
+                  data-dwell-ms="2000"
+                  data-testid="usar-calibracao-salva"
+                  style={{
+                    background: 'transparent',
+                    color: TEXT_PRIMARY,
+                    border: `1px solid ${ACCENT}`,
+                    padding: '0.85rem 2rem',
+                    borderRadius: '2rem',
+                    fontSize: '1rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.6rem',
+                  }}
+                >
+                  Usar a calibração salva ({idadeDaCalibracao})
+                </button>
+              )}
 
               {l2csReady && (
                 <button
