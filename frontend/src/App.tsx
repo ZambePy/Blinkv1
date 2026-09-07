@@ -2,6 +2,9 @@ import React, { Suspense, lazy } from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
 import { GazeProvider } from './context/GazeContext';
 import { AuthProvider } from './context/AuthContext';
+import { LicenseProvider } from './context/LicenseContext';
+import { ProtectedRoute } from './components/ui/ProtectedRoute';
+import { GraceBanner } from './components/ui/GraceBanner';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
 import { ReminderProvider } from './context/ReminderContext';
@@ -35,6 +38,9 @@ const GamesMenu = lazyNamed(() => import('./pages/GamesMenu'), 'GamesMenu');
 const BubblePopGame = lazyNamed(() => import('./pages/BubblePopGame'), 'BubblePopGame');
 const TutorialScreen = lazyNamed(() => import('./pages/help/TutorialScreen'), 'TutorialScreen');
 const ProfileSelect = lazyNamed(() => import('./pages/auth/ProfileSelect'), 'ProfileSelect');
+const IntroScreen = lazyNamed(() => import('./pages/onboarding/IntroScreen'), 'IntroScreen');
+const ConsentScreen = lazyNamed(() => import('./pages/onboarding/ConsentScreen'), 'ConsentScreen');
+const ActivatedScreen = lazyNamed(() => import('./pages/auth/ActivatedScreen'), 'ActivatedScreen');
 const CalibrationCheck = lazyNamed(
   () => import('./pages/onboarding/CalibrationCheck'),
   'CalibrationCheck'
@@ -96,9 +102,10 @@ const RouteFallback: React.FC = () => (
   </div>
 );
 
-const Protected: React.FC<{ children: React.ReactNode }> = ({ children }) => (
-  <>{children}</>
-);
+// O `Protected` que morava aqui era `({ children }) => <>{children}</>`: toda
+// rota "protegida" era publica, e bastava digitar a URL para chegar ao menu sem
+// licenca, sem consentimento e sem perfil. O portao de verdade esta em
+// `components/ui/ProtectedRoute`, com a ordem das verificacoes sob teste.
 
 /**
  * Router da aplicação.
@@ -123,252 +130,258 @@ export const AppRouter = HashRouter;
 
 function App() {
   return (
-    <AuthProvider>
-      <SettingsProvider>
-        <ToastProvider>
-          <GazeProvider>
-            <ReminderProvider>
-              <AppRouter>
-                <EmergencyProvider>
-                  <DebugHUD />
-                  <PreflightPanel />
-                  <FatigueIndicator />
-                  <Suspense fallback={<RouteFallback />}>
-                    <Routes>
-                  {/* Onboarding — públicas */}
-                  <Route path="/" element={<InitialSplash />} />
-                  <Route path="/login" element={<LoginScreen />} />
-                  <Route path="/tutorial" element={<TutorialScreen />} />
-                  <Route path="/profiles" element={<ProfileSelect />} />
-                  <Route
-                    path="/calibration-check"
-                    element={
-                      <Protected>
-                        <CalibrationCheck />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/welcome"
-                    element={
-                      <Protected>
-                        <WelcomeScreen />
-                      </Protected>
-                    }
-                  />
+    <LicenseProvider>
+      <AuthProvider>
+        <SettingsProvider>
+          <ToastProvider>
+            <GazeProvider>
+              <ReminderProvider>
+                <AppRouter>
+                  <EmergencyProvider>
+                    <GraceBanner />
+                    <DebugHUD />
+                    <PreflightPanel />
+                    <FatigueIndicator />
+                    <Suspense fallback={<RouteFallback />}>
+                      <Routes>
+                        {/* Onboarding — públicas */}
+                        <Route path="/" element={<InitialSplash />} />
+                        <Route path="/intro" element={<IntroScreen />} />
+                        <Route path="/login" element={<LoginScreen />} />
+                        <Route path="/activated" element={<ActivatedScreen />} />
+                        <Route path="/consent" element={<ConsentScreen />} />
+                        <Route path="/tutorial" element={<TutorialScreen />} />
+                        <Route path="/profiles" element={<ProfileSelect />} />
+                        <Route
+                          path="/calibration-check"
+                          element={
+                            <ProtectedRoute>
+                              <CalibrationCheck />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/welcome"
+                          element={
+                            <ProtectedRoute>
+                              <WelcomeScreen />
+                            </ProtectedRoute>
+                          }
+                        />
 
-                  {/* Menu Principal */}
-                  <Route
-                    path="/menu"
-                    element={
-                      <Protected>
-                        <MainMenu />
-                      </Protected>
-                    }
-                  />
+                        {/* Menu Principal */}
+                        <Route
+                          path="/menu"
+                          element={
+                            <ProtectedRoute>
+                              <MainMenu />
+                            </ProtectedRoute>
+                          }
+                        />
 
-                  {/* Modo Descanso */}
-                  <Route
-                    path="/rest"
-                    element={
-                      <Protected>
-                        <RestScreen />
-                      </Protected>
-                    }
-                  />
+                        {/* Modo Descanso */}
+                        <Route
+                          path="/rest"
+                          element={
+                            <ProtectedRoute>
+                              <RestScreen />
+                            </ProtectedRoute>
+                          }
+                        />
 
-                  {/* Comunicação */}
-                  <Route
-                    path="/keyboard"
-                    element={
-                      <Protected>
-                        <KeyboardScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/phrases"
-                    element={
-                      <Protected>
-                        <QuickPhrasesScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/pictograms"
-                    element={
-                      <Protected>
-                        <PictogramScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/chatbot"
-                    element={
-                      <Protected>
-                        <ChatbotScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/emergency"
-                    element={
-                      <Protected>
-                        <EmergencyEscalation />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/options"
-                    element={
-                      <Protected>
-                        <MyOptionsScreen />
-                      </Protected>
-                    }
-                  />
+                        {/* Comunicação */}
+                        <Route
+                          path="/keyboard"
+                          element={
+                            <ProtectedRoute>
+                              <KeyboardScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/phrases"
+                          element={
+                            <ProtectedRoute>
+                              <QuickPhrasesScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/pictograms"
+                          element={
+                            <ProtectedRoute>
+                              <PictogramScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/chatbot"
+                          element={
+                            <ProtectedRoute>
+                              <ChatbotScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/emergency"
+                          element={
+                            <ProtectedRoute>
+                              <EmergencyEscalation />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/options"
+                          element={
+                            <ProtectedRoute>
+                              <MyOptionsScreen />
+                            </ProtectedRoute>
+                          }
+                        />
 
-                  {/* Saúde e Cuidador */}
-                  <Route
-                    path="/caregiver"
-                    element={
-                      <Protected>
-                        <CaregiverDashboard />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/caregiver/guide"
-                    element={
-                      <Protected>
-                        <CaregiverGuide />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/meditation"
-                    element={
-                      <Protected>
-                        <MeditationScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/iamok"
-                    element={
-                      <Protected>
-                        <IAmOkScreen />
-                      </Protected>
-                    }
-                  />
+                        {/* Saúde e Cuidador */}
+                        <Route
+                          path="/caregiver"
+                          element={
+                            <ProtectedRoute>
+                              <CaregiverDashboard />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/caregiver/guide"
+                          element={
+                            <ProtectedRoute>
+                              <CaregiverGuide />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/meditation"
+                          element={
+                            <ProtectedRoute>
+                              <MeditationScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/iamok"
+                          element={
+                            <ProtectedRoute>
+                              <IAmOkScreen />
+                            </ProtectedRoute>
+                          }
+                        />
 
-                  {/* Lazer */}
-                  <Route
-                    path="/games"
-                    element={
-                      <Protected>
-                        <GamesMenu />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/games/bubble"
-                    element={
-                      <Protected>
-                        <BubblePopGame />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/games/follow"
-                    element={
-                      <Protected>
-                        <FollowTarget />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/games/memory"
-                    element={
-                      <Protected>
-                        <MemoryGame />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/drawing"
-                    element={
-                      <Protected>
-                        <DrawingGame />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/gallery"
-                    element={
-                      <Protected>
-                        <GalleryScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/photo"
-                    element={
-                      <Protected>
-                        <PhotoCaptureScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/camera"
-                    element={
-                      <Protected>
-                        <PhotoCaptureScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/games/photo"
-                    element={
-                      <Protected>
-                        <PhotoCaptureScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/news"
-                    element={
-                      <Protected>
-                        <NewsScreen />
-                      </Protected>
-                    }
-                  />
+                        {/* Lazer */}
+                        <Route
+                          path="/games"
+                          element={
+                            <ProtectedRoute>
+                              <GamesMenu />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/games/bubble"
+                          element={
+                            <ProtectedRoute>
+                              <BubblePopGame />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/games/follow"
+                          element={
+                            <ProtectedRoute>
+                              <FollowTarget />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/games/memory"
+                          element={
+                            <ProtectedRoute>
+                              <MemoryGame />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/drawing"
+                          element={
+                            <ProtectedRoute>
+                              <DrawingGame />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/gallery"
+                          element={
+                            <ProtectedRoute>
+                              <GalleryScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/photo"
+                          element={
+                            <ProtectedRoute>
+                              <PhotoCaptureScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/camera"
+                          element={
+                            <ProtectedRoute>
+                              <PhotoCaptureScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/games/photo"
+                          element={
+                            <ProtectedRoute>
+                              <PhotoCaptureScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/news"
+                          element={
+                            <ProtectedRoute>
+                              <NewsScreen />
+                            </ProtectedRoute>
+                          }
+                        />
 
-                  {/* Sistema */}
-                  <Route
-                    path="/settings"
-                    element={
-                      <Protected>
-                        <SettingsScreen />
-                      </Protected>
-                    }
-                  />
-                  <Route
-                    path="/virtual-mouse"
-                    element={
-                      <Protected>
-                        <VirtualMouseScreen />
-                      </Protected>
-                    }
-                  />
-                </Routes>
-              </Suspense>
-              </EmergencyProvider>
-            </AppRouter>
-          </ReminderProvider>
-        </GazeProvider>
-      </ToastProvider>
-    </SettingsProvider>
-  </AuthProvider>
+                        {/* Sistema */}
+                        <Route
+                          path="/settings"
+                          element={
+                            <ProtectedRoute>
+                              <SettingsScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/virtual-mouse"
+                          element={
+                            <ProtectedRoute>
+                              <VirtualMouseScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                      </Routes>
+                    </Suspense>
+                  </EmergencyProvider>
+                </AppRouter>
+              </ReminderProvider>
+            </GazeProvider>
+          </ToastProvider>
+        </SettingsProvider>
+      </AuthProvider>
+    </LicenseProvider>
   );
 }
 

@@ -310,3 +310,41 @@ Registradas de propósito, não são descuidos:
    existir.
 4. **`services/license/index.ts` só tem uma implementação.** Assumido: é o ponto
    de troca projetado (D2), não um módulo órfão.
+
+---
+
+## 10. Desvios da implementação
+
+Cinco pontos em que o código ficou diferente do desenho acima. Registrados aqui
+porque o spec é o documento de referência, e um spec que mente é pior que
+nenhum.
+
+1. **`transferToken` no contrato (§4.1).** O desenho tinha
+   `transferDevice(token, device)`, mas em `device-limit` o login *falhou* —
+   não existe token de sessão. A falha passou a carregar um `transferToken` de
+   curta duração. Sem ele, ou `transferDevice` pediria a senha de novo, ou
+   aceitaria transferir o vínculo de quem só conhece um `deviceId`.
+
+2. **Links externos não funcionam no app empacotado.** O `electron/main.ts`
+   nega toda abertura de janela (`setWindowOpenHandler` → `deny`) e filtra
+   `will-navigate`. Os links "Gerenciar assinatura", "Esqueci minha senha" e
+   "Criar conta" são âncoras corretas, mas **não abrem nada** no Electron. A
+   tela mostra a URL como texto selecionável ao lado, para não virar botão
+   morto. A correção é `shell.openExternal` no processo principal — fora do
+   escopo, que proibia tocar no back.
+
+3. **O teto de 2,5 s do splash saiu.** Um teto na tela significaria navegar sem
+   saber o estado da licença, e não há destino correto nessa situação. O limite
+   de tempo pertence à camada de serviço (`apiFetch` já tem `timeoutMs`), onde
+   um estouro vira `unreachable` e o período de tolerância decide. O splash
+   ficou só com o piso de 900 ms, contra o efeito de piscar.
+
+4. **`GraceBanner` como componente.** O §4.3 falava em "aviso discreto" sem
+   nomear onde. Virou `components/ui/GraceBanner.tsx`, montado uma vez no
+   `App.tsx`, com `pointer-events: none` para não atravessar a comunicação do
+   paciente.
+
+5. **Modo Desenvolvedor pelo módulo `devMode`.** O splash antigo gravava
+   `irisflow_dev_mode` direto no `sessionStorage`, o que não dispara o evento
+   que o `GazeContext` escuta — o cursor de gaze continuava ligado no modo
+   desenvolvedor. Agora usa `setDevMode()`, que já existia.

@@ -93,5 +93,114 @@
       "other": "OUTRA URGÊNCIA"
     },
     "triggerAria": "Disparar alerta de urgência: {{label}}"
+  },
+  "onboarding": {
+    "splash": {
+      "verifying": "Verificando licença…",
+      "devMode": "Modo Desenvolvedor"
+    },
+    "intro": {
+      "title": "Comunicação e autonomia pelo olhar",
+      "tagline": "O IrisFlow transforma o movimento dos olhos em fala, escrita e controle do computador — sem toque, sem voz e sem mover a cabeça.",
+      "patientTitle": "Para quem usa",
+      "patientBody": "Navega e se comunica olhando para a tela. Nada precisa ser digitado nem apertado.",
+      "caregiverTitle": "Para quem acompanha",
+      "caregiverBody": "Configura o app, acompanha o uso e recebe os alertas. Esta parte inicial é sua.",
+      "language": "Idioma",
+      "start": "Começar"
+    }
+  },
+  "login": {
+    "title": "Entrar na sua conta",
+    "subtitle": "Use o mesmo e-mail e senha do site.",
+    "email": "E-mail",
+    "emailPlaceholder": "voce@exemplo.com",
+    "password": "Senha",
+    "submit": "Entrar",
+    "submitting": "Entrando…",
+    "forgot": "Esqueci minha senha",
+    "createAccount": "Ainda não tem conta? Criar no site",
+    "emptyFields": "Informe o e-mail e a senha.",
+    "errors": {
+      "invalid-credentials": "E-mail ou senha incorretos.",
+      "no-subscription": "Esta conta não tem uma assinatura ativa.",
+      "device-limit": "Sua assinatura já está ativa em outro computador.",
+      "offline": "Sem conexão com a internet.",
+      "server-down": "Nosso servidor não respondeu.",
+      "rate-limited": "Tentativas demais. Aguarde antes de tentar de novo."
+    },
+    "cta": {
+      "manage": "Gerenciar assinatura no site",
+      "transfer": "Usar neste computador",
+      "retry": "Tentar de novo",
+      "retryIn": "Tentar de novo em {{seconds}}s"
+    },
+    "lastAttempt": "Última tentativa às {{time}}."
+  },
+  "license": {
+    "activated": {
+      "title": "Tudo pronto",
+      "boundHere": "Este computador foi vinculado à sua conta.",
+      "plan": "Plano",
+      "validUntil": "Válida até {{date}}",
+      "noExpiry": "Sem data de expiração",
+      "devices": "{{used}} de {{limit}} dispositivos",
+      "device": "Dispositivo",
+      "continue": "Continuar"
+    },
+    "transfer": {
+      "title": "Transferir para este computador",
+      "explain": "Seu plano permite {{limit}} computador por vez. Ativar aqui vai desconectar o aparelho abaixo.",
+      "boundSince": "Vinculado desde {{date}}",
+      "confirm": "Transferir para este computador",
+      "cancel": "Cancelar",
+      "working": "Transferindo…"
+    },
+    "grace": {
+      "banner": "Sem conexão. Licença verificada pela última vez em {{date}}."
+    },
+    "blocked": {
+      "title": "Não foi possível validar sua licença",
+      "expired": "Sua assinatura venceu.",
+      "revoked": "Sua assinatura não está mais ativa.",
+      "device-unbound": "Esta licença está vinculada a outro computador.",
+      "invalid-token": "Sua sessão expirou.",
+      "grace-expired": "O app ficou sem internet por tempo demais. Conecte-se uma vez para continuar usando.",
+      "action": "Entrar de novo"
+    }
+  },
+  "consent": {
+    "title": "Privacidade",
+    "lead": "Antes de cadastrar o paciente, saiba o que acontece com os dados.",
+    "localTitle": "Fica neste computador",
+    "localBody": "As imagens da câmera, a calibração do olhar e os dados do paciente nunca saem daqui. Nenhum vídeo é enviado.",
+    "remoteTitle": "Vai ao servidor",
+    "remoteBody": "Apenas o seu login: e-mail, senha e a checagem de que a assinatura está ativa.",
+    "checkbox": "Li e concordo com o tratamento de dados descrito acima.",
+    "continue": "Concordar e continuar"
+  },
+  "profiles": {
+    "title": "Quem vai usar o IrisFlow?",
+    "subtitle": "Cada paciente tem a própria calibração e o próprio vocabulário.",
+    "empty": "Nenhum perfil ainda. Crie o primeiro.",
+    "new": "Novo paciente",
+    "start": "Iniciar sessão",
+    "remove": "Remover",
+    "form": {
+      "title": "Novo paciente",
+      "name": "Nome",
+      "namePlaceholder": "Como a pessoa é chamada",
+      "nameRequired": "O nome é obrigatório.",
+      "age": "Idade",
+      "optional": "opcional",
+      "condition": "Condição",
+      "conditionPlaceholder": "ELA, AVC, paralisia cerebral…",
+      "photo": "Foto",
+      "choosePhoto": "Escolher foto",
+      "removePhoto": "Remover foto",
+      "photoHint": "A foto fica só neste computador.",
+      "save": "Criar perfil",
+      "cancel": "Cancelar"
+    }
   }
 }

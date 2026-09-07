@@ -1,10 +1,21 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { env } from '../config/env';
+import {
+  listarPerfis,
+  criarPerfil,
+  removerPerfil,
+  type NovoPerfil,
+  type PerfilLocal,
+} from '../services/local/profiles';
 
 export interface Profile {
   id: string;
   name: string;
+  /** Data URL da foto. Local, como todo o resto do perfil. */
   avatar?: string;
+  age?: number;
+  condition?: string;
+  createdAt?: string;
 }
 
 interface AuthContextData {
@@ -13,6 +24,8 @@ interface AuthContextData {
   isCaregiver: boolean;
   authToken: string | null;
   selectProfile: (p: Profile) => void;
+  createProfile: (dados: NovoPerfil) => Profile;
+  removeProfile: (id: string) => void;
   loginCaregiver: (pin: string) => boolean;
   logout: () => void;
 }
@@ -56,29 +69,30 @@ const loadCaregiverSession = (): CaregiverSession => {
   }
 };
 
-const mockProfiles: Profile[] = [
-  {
-    id: 'p1',
-    name: 'Paciente A',
-    avatar: 'https://ui-avatars.com/api/?name=Paciente+A&background=1B54A8&color=fff',
-  },
-  {
-    id: 'p2',
-    name: 'Paciente B',
-    avatar: 'https://ui-avatars.com/api/?name=Paciente+B&background=6D28D9&color=fff',
-  },
-  {
-    id: 'p3',
-    name: 'Paciente C',
-    avatar: 'https://ui-avatars.com/api/?name=Paciente+C&background=059669&color=fff',
-  },
-];
+/**
+ * Os perfis vêm do armazenamento local (`services/local/profiles`), nunca do
+ * servidor: nome, idade, condição e foto de um paciente com ELA são dado de
+ * saúde, e o termo de privacidade promete que não saem desta máquina.
+ *
+ * Antes havia três perfis fictícios cravados aqui ("Paciente A/B/C"). Num
+ * produto clínico isso leva o cuidador a calibrar no perfil errado e perder a
+ * sessão inteira do paciente.
+ */
+const paraProfile = (p: PerfilLocal): Profile => ({
+  id: p.id,
+  name: p.name,
+  createdAt: p.createdAt,
+  ...(p.age !== undefined ? { age: p.age } : {}),
+  ...(p.condition !== undefined ? { condition: p.condition } : {}),
+  ...(p.avatarDataUrl !== undefined ? { avatar: p.avatarDataUrl } : {}),
+});
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [currentProfile, setCurrentProfile] = useState<Profile | null>(
     () => loadProfile().currentProfile
   );
   const [caregiver, setCaregiver] = useState<CaregiverSession>(loadCaregiverSession);
+  const [profiles, setProfiles] = useState<Profile[]>(() => listarPerfis().map(paraProfile));
   const { isCaregiver, authToken } = caregiver;
 
   useEffect(() => {
@@ -103,6 +117,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const selectProfile = (p: Profile) => setCurrentProfile(p);
 
+  const createProfile = useCallback((dados: NovoPerfil): Profile => {
+    const criado = paraProfile(criarPerfil(dados));
+    setProfiles((antes) => [...antes, criado]);
+    return criado;
+  }, []);
+
+  const removeProfile = useCallback((id: string) => {
+    removerPerfil(id);
+    setProfiles((antes) => antes.filter((p) => p.id !== id));
+    // Um perfil removido não pode continuar selecionado: a calibração
+    // carregada ficaria sem dono e o app apontaria para algo que não existe.
+    setCurrentProfile((atual) => (atual?.id === id ? null : atual));
+  }, []);
+
   const loginCaregiver = (pin: string) => {
     // TEMPORÁRIO: PIN vem de env var. Substituir por autenticação no backend.
     if (pin === env.caregiverPin) {
@@ -122,10 +150,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     <AuthContext.Provider
       value={{
         currentProfile,
-        profiles: mockProfiles,
+        profiles,
         isCaregiver,
         authToken,
         selectProfile,
+        createProfile,
+        removeProfile,
         loginCaregiver,
         logout,
       }}

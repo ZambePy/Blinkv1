@@ -46,6 +46,61 @@ describe('AuthContext', () => {
     expect(result.current.authToken).not.toBeNull();
   });
 
+  it('não inventa perfis: começa com a lista vazia', () => {
+    // Antes existiam "Paciente A/B/C" cravados no código. Num produto clínico,
+    // perfil fictício leva o cuidador a calibrar no perfil errado.
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    expect(result.current.profiles).toEqual([]);
+  });
+
+  it('cria um perfil, que aparece na lista e sobrevive a um novo boot', () => {
+    const { result, unmount } = renderHook(() => useAuth(), { wrapper });
+
+    act(() => {
+      result.current.createProfile({ name: 'Joana', age: 58, condition: 'ELA' });
+    });
+
+    expect(result.current.profiles).toHaveLength(1);
+    expect(result.current.profiles[0].name).toBe('Joana');
+    expect(result.current.profiles[0].age).toBe(58);
+
+    unmount();
+    const segundoBoot = renderHook(() => useAuth(), { wrapper });
+    expect(segundoBoot.result.current.profiles).toHaveLength(1);
+  });
+
+  it('remove um perfil da lista', () => {
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    act(() => {
+      result.current.createProfile({ name: 'Joana' });
+      result.current.createProfile({ name: 'Carlos' });
+    });
+
+    act(() => {
+      result.current.removeProfile(result.current.profiles[0].id);
+    });
+
+    expect(result.current.profiles).toHaveLength(1);
+    expect(result.current.profiles[0].name).toBe('Carlos');
+  });
+
+  it('remover o perfil em uso limpa a seleção', () => {
+    // Sem isto o app seguiria apontando para um perfil que não existe mais, e
+    // a calibração carregada não teria dono.
+    const { result } = renderHook(() => useAuth(), { wrapper });
+    act(() => {
+      const p = result.current.createProfile({ name: 'Joana' });
+      result.current.selectProfile(p);
+    });
+    expect(result.current.currentProfile?.name).toBe('Joana');
+
+    act(() => {
+      result.current.removeProfile(result.current.profiles[0].id);
+    });
+
+    expect(result.current.currentProfile).toBeNull();
+  });
+
   it('logout limpa perfil, cuidador e token', () => {
     const { result } = renderHook(() => useAuth(), { wrapper });
     act(() => {

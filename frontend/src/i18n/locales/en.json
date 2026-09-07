@@ -93,5 +93,114 @@
       "other": "OTHER EMERGENCY"
     },
     "triggerAria": "Trigger emergency alert: {{label}}"
+  },
+  "onboarding": {
+    "splash": {
+      "verifying": "Checking your licence…",
+      "devMode": "Developer Mode"
+    },
+    "intro": {
+      "title": "Communication and independence through gaze",
+      "tagline": "IrisFlow turns eye movement into speech, writing and computer control — no touch, no voice, no head movement.",
+      "patientTitle": "For the person using it",
+      "patientBody": "Navigates and communicates by looking at the screen. Nothing needs to be typed or pressed.",
+      "caregiverTitle": "For the caregiver",
+      "caregiverBody": "Sets up the app, follows usage and receives alerts. This first part is yours.",
+      "language": "Language",
+      "start": "Get started"
+    }
+  },
+  "login": {
+    "title": "Sign in to your account",
+    "subtitle": "Use the same email and password as on the website.",
+    "email": "Email",
+    "emailPlaceholder": "you@example.com",
+    "password": "Password",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "forgot": "I forgot my password",
+    "createAccount": "No account yet? Create one on the website",
+    "emptyFields": "Enter your email and password.",
+    "errors": {
+      "invalid-credentials": "Incorrect email or password.",
+      "no-subscription": "This account has no active subscription.",
+      "device-limit": "Your subscription is already active on another computer.",
+      "offline": "No internet connection.",
+      "server-down": "Our server did not respond.",
+      "rate-limited": "Too many attempts. Please wait before trying again."
+    },
+    "cta": {
+      "manage": "Manage subscription on the website",
+      "transfer": "Use on this computer",
+      "retry": "Try again",
+      "retryIn": "Try again in {{seconds}}s"
+    },
+    "lastAttempt": "Last attempt at {{time}}."
+  },
+  "license": {
+    "activated": {
+      "title": "You're all set",
+      "boundHere": "This computer has been linked to your account.",
+      "plan": "Plan",
+      "validUntil": "Valid until {{date}}",
+      "noExpiry": "No expiry date",
+      "devices": "{{used}} of {{limit}} devices",
+      "device": "Device",
+      "continue": "Continue"
+    },
+    "transfer": {
+      "title": "Move activation to this computer",
+      "explain": "Your plan allows {{limit}} computer at a time. Activating here will disconnect the device below.",
+      "boundSince": "Linked since {{date}}",
+      "confirm": "Move to this computer",
+      "cancel": "Cancel",
+      "working": "Moving…"
+    },
+    "grace": {
+      "banner": "Offline. Licence last verified on {{date}}."
+    },
+    "blocked": {
+      "title": "We couldn't validate your licence",
+      "expired": "Your subscription has expired.",
+      "revoked": "Your subscription is no longer active.",
+      "device-unbound": "This licence is linked to another computer.",
+      "invalid-token": "Your session has expired.",
+      "grace-expired": "The app has been offline for too long. Connect once to keep using it.",
+      "action": "Sign in again"
+    }
+  },
+  "consent": {
+    "title": "Privacy",
+    "lead": "Before you add the patient, here is what happens to the data.",
+    "localTitle": "Stays on this computer",
+    "localBody": "Camera images, gaze calibration and patient details never leave this machine. No video is uploaded.",
+    "remoteTitle": "Goes to the server",
+    "remoteBody": "Only your sign-in: email, password and the check that your subscription is active.",
+    "checkbox": "I have read and agree to the data handling described above.",
+    "continue": "Agree and continue"
+  },
+  "profiles": {
+    "title": "Who will be using IrisFlow?",
+    "subtitle": "Each patient has their own calibration and vocabulary.",
+    "empty": "No profiles yet. Create the first one.",
+    "new": "New patient",
+    "start": "Start session",
+    "remove": "Remove",
+    "form": {
+      "title": "New patient",
+      "name": "Name",
+      "namePlaceholder": "What the person is called",
+      "nameRequired": "A name is required.",
+      "age": "Age",
+      "optional": "optional",
+      "condition": "Condition",
+      "conditionPlaceholder": "ALS, stroke, cerebral palsy…",
+      "photo": "Photo",
+      "choosePhoto": "Choose photo",
+      "removePhoto": "Remove photo",
+      "photoHint": "The photo stays on this computer only.",
+      "save": "Create profile",
+      "cancel": "Cancel"
+    }
   }
 }

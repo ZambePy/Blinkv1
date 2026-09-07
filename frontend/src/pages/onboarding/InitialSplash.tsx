@@ -1,10 +1,67 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Eye, ArrowRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { Eye } from 'lucide-react';
+import { useLicense } from '../../context/LicenseContext';
+import { useAuth } from '../../context/AuthContext';
+import { temConsentimentoValido } from '../../services/local/consent';
+import { setDevMode } from '../../devMode';
+import { destinoDoBoot, INTRO_SEEN_KEY } from './bootDestination';
+
+/**
+ * Splash de abertura: verifica a licença e decide para onde ir.
+ *
+ * Deixou de ser uma tela de marketing com um botão "Vamos começar?" que pulava
+ * direto para o tutorial — sem login, sem licença, sem perfil. Agora ela não
+ * pede nada: só informa o que está fazendo e sai do caminho.
+ *
+ * A decisão de destino mora em `bootDestination`, testada isoladamente.
+ */
+
+/** Piso de exibição. Sem ele o splash pisca e some, o que lê como falha. */
+const TEMPO_MINIMO_MS = 900;
+
+const introFoiVisto = (): boolean => {
+  try {
+    return localStorage.getItem(INTRO_SEEN_KEY) === 'true';
+  } catch {
+    return false;
+  }
+};
 
 export const InitialSplash: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
-  const [imageError, setImageError] = useState(false);
+  const { status } = useLicense();
+  const { currentProfile } = useAuth();
+  const [logoQuebrada, setLogoQuebrada] = useState(false);
+  const [pisoCumprido, setPisoCumprido] = useState(false);
+  const montadoEm = useRef(Date.now());
+
+  useEffect(() => {
+    const restante = Math.max(0, TEMPO_MINIMO_MS - (Date.now() - montadoEm.current));
+    const timer = setTimeout(() => setPisoCumprido(true), restante);
+    return () => clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (!pisoCumprido) return;
+    const destino = destinoDoBoot({
+      status,
+      introVisto: introFoiVisto(),
+      temConsentimento: temConsentimentoValido(),
+      temPerfil: currentProfile !== null,
+    });
+    if (destino) navigate(destino, { replace: true });
+  }, [pisoCumprido, status, currentProfile, navigate]);
+
+  const entrarEmModoDev = () => {
+    // Pelo módulo `devMode`, não gravando no sessionStorage à mão: o setter
+    // dispara o evento que o `GazeContext` escuta para desligar o cursor de
+    // gaze. Gravando direto, o cursor continuava ligado no modo desenvolvedor.
+    setDevMode(true);
+    navigate('/menu', { replace: true });
+  };
 
   return (
     <main
@@ -17,10 +74,10 @@ export const InitialSplash: React.FC = () => {
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
+        gap: '2.5rem',
+        padding: '2rem',
         position: 'relative',
         overflow: 'hidden',
-        padding: '2rem',
-        fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
       }}
     >
       <div
@@ -29,176 +86,103 @@ export const InitialSplash: React.FC = () => {
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
-          gap: '2.5rem',
-          textAlign: 'center',
-          maxWidth: 600,
+          gap: '2rem',
           zIndex: 10,
         }}
       >
-        <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
-          {!imageError ? (
-            <img
-              src="/LOGO.png"
-              alt="IrisFlow"
-              style={{
-                width: '320px',
-                height: 'auto',
-                filter: 'drop-shadow(0 20px 40px rgba(27,84,168,0.12))',
-              }}
-              onError={() => setImageError(true)}
-            />
-          ) : (
+        {!logoQuebrada ? (
+          <img
+            src="/LOGO.png"
+            alt="IrisFlow"
+            style={{
+              width: 300,
+              height: 'auto',
+              filter: 'drop-shadow(0 20px 40px rgba(27,84,168,0.12))',
+            }}
+            onError={() => setLogoQuebrada(true)}
+          />
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', color: '#1B54A8' }}>
+            <Eye size={44} color="#1B54A8" aria-hidden="true" />
+            <span style={{ fontSize: '2.75rem', fontWeight: 900, letterSpacing: '0.02em' }}>
+              IrisFlow
+            </span>
+          </div>
+        )}
+
+        <h1
+          id="splash-title"
+          className="sr-only"
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            overflow: 'hidden',
+            clip: 'rect(0 0 0 0)',
+          }}
+        >
+          IrisFlow
+        </h1>
+
+        <div
+          role="status"
+          aria-live="polite"
+          style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              width: 220,
+              height: 4,
+              borderRadius: 999,
+              background: 'rgba(27,84,168,0.12)',
+              overflow: 'hidden',
+              position: 'relative',
+            }}
+          >
             <div
               style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '1rem',
-                color: '#1B54A8',
+                position: 'absolute',
+                inset: 0,
+                width: '40%',
+                borderRadius: 999,
+                background: 'linear-gradient(90deg, #1B54A8, #2563eb)',
+                animation: 'splashSlide 1.2s ease-in-out infinite',
               }}
-            >
-              <Eye size={48} color="#1B54A8" />
-              <span style={{ fontSize: '3rem', fontWeight: 900, letterSpacing: '0.02em' }}>
-                IrisFlow
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '1rem' }}>
-          <h1
-            id="splash-title"
-            style={{
-              fontSize: '2.2rem',
-              color: 'var(--color-text-base)',
-              fontWeight: 800,
-              margin: 0,
-              lineHeight: 1.2,
-            }}
-          >
-            Tecnologia assistiva pelo olhar
-          </h1>
-          <p style={{ color: 'var(--color-text-base)', opacity: 0.8, fontSize: '1.25rem', margin: 0, fontWeight: 500 }}>
-            Comunicação e autonomia sem barreiras.
-          </p>
-        </div>
-
-        <div className="animate-scale-in" style={{ animationDelay: '0.4s', marginTop: '2rem', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.25rem' }}>
-          <button
-            type="button"
-            onClick={() => {
-              sessionStorage.removeItem('irisflow_dev_mode');
-              navigate('/tutorial');
-            }}
-            aria-label="Vamos começar?"
-            style={{
-              background: '#1B54A8',
-              color: 'white',
-              border: 'none',
-              padding: '1.4rem 3.5rem',
-              borderRadius: '2rem',
-              fontSize: '1.4rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '1rem',
-              boxShadow: '0 12px 32px rgba(27, 84, 168, 0.3)',
-              transition: 'transform 0.2s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.2s',
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 16px 40px rgba(27, 84, 168, 0.4)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.3)';
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.transform = 'translateY(-4px)';
-              e.currentTarget.style.boxShadow = '0 16px 40px rgba(27, 84, 168, 0.4)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.transform = 'translateY(0)';
-              e.currentTarget.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.3)';
-            }}
-            onMouseDown={(e) => {
-              e.currentTarget.style.transform = 'translateY(2px)';
-            }}
-          >
-            Vamos começar? <ArrowRight size={28} />
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              sessionStorage.setItem('irisflow_dev_mode', 'true');
-              navigate('/menu');
-            }}
-            style={{
-              background: 'rgba(255, 255, 255, 0.08)',
-              border: '2px solid rgba(27, 84, 168, 0.3)',
-              color: '#3b82f6',
-              padding: '1rem 2.5rem',
-              borderRadius: '1.5rem',
-              fontSize: '1.15rem',
-              fontWeight: 700,
-              cursor: 'pointer',
-              transition: 'all 0.2s',
-            }}
-            onMouseOver={(e) => {
-              e.currentTarget.style.background = 'rgba(27, 84, 168, 0.15)';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onMouseOut={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-            onFocus={(e) => {
-              e.currentTarget.style.background = 'rgba(27, 84, 168, 0.15)';
-              e.currentTarget.style.transform = 'translateY(-2px)';
-            }}
-            onBlur={(e) => {
-              e.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)';
-              e.currentTarget.style.transform = 'translateY(0)';
-            }}
-          >
-            Modo Desenvolvedor
-          </button>
+            />
+          </div>
+          <span style={{ fontSize: '1rem', fontWeight: 700, color: '#1B54A8', opacity: 0.9 }}>
+            {t('onboarding.splash.verifying')}
+          </span>
         </div>
       </div>
-      
-      {/* Decorações visuais sutis */}
-      <div 
-        className="animate-float"
+
+      <button
+        type="button"
+        onClick={entrarEmModoDev}
         style={{
           position: 'absolute',
-          top: '15%',
-          left: '10%',
-          width: '300px',
-          height: '300px',
-          background: 'radial-gradient(circle, rgba(27, 84, 168, 0.03) 0%, rgba(255,255,255,0) 70%)',
-          borderRadius: '50%',
-          zIndex: 1,
-          pointerEvents: 'none',
+          bottom: '1.5rem',
+          right: '1.5rem',
+          background: 'transparent',
+          border: '1px solid rgba(27,84,168,0.25)',
+          color: '#3b82f6',
+          padding: '0.5rem 1.1rem',
+          borderRadius: '999px',
+          fontSize: '0.8rem',
+          fontWeight: 700,
+          cursor: 'pointer',
+          opacity: 0.65,
+          zIndex: 20,
         }}
-      />
-      <div 
-        className="animate-float"
-        style={{
-          position: 'absolute',
-          bottom: '10%',
-          right: '5%',
-          width: '400px',
-          height: '400px',
-          background: 'radial-gradient(circle, rgba(27, 84, 168, 0.04) 0%, rgba(255,255,255,0) 70%)',
-          borderRadius: '50%',
-          zIndex: 1,
-          animationDelay: '2s',
-          pointerEvents: 'none',
-        }}
-      />
+      >
+        {t('onboarding.splash.devMode')}
+      </button>
+
+      <style>{`@keyframes splashSlide {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(250%); }
+      }`}</style>
     </main>
   );
 };
-
-
