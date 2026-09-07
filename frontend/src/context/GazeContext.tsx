@@ -9,8 +9,23 @@ import React, {
 } from 'react';
 import type { ReactNode } from 'react';
 import { createGazeEngine } from '@tracker/tracker/engine';
-import type { GazeEngine, GazeSample, EngineState, CalibrationApi, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
-import { stepDwell, createDwellState, DEFAULT_DWELL_CONFIG, type DwellTarget } from '@tracker/interaction/dwell';
+import type {
+  GazeEngine,
+  GazeSample,
+  EngineState,
+  CalibrationApi,
+  L2CSStatus,
+  RecordingApi,
+  EngineDiagnostics,
+} from '@tracker/tracker/engine';
+import {
+  stepDwell,
+  createDwellState,
+  DEFAULT_DWELL_CONFIG,
+  type DwellTarget,
+} from '@tracker/interaction/dwell';
+import { velocidadeDaBorda, estadoInicialDeBorda } from '@tracker/interaction/edgeScroll';
+import { rolarSobOOlhar } from '../rolarSobOOlhar';
 import { estiloDoCursor, limitarTamanho } from '@tracker/interaction/cursorStyle';
 import { geometriaDoAnel } from '@tracker/interaction/dwellRing';
 import { GazeFallback } from '@tracker/interaction/gazeFallback';
@@ -22,8 +37,11 @@ import { ScanningMode } from '../components/ScanningMode';
 import type { FilterPreset, FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import {
-  planTuningStep, planStabilizationStep,
-  type CameraCapabilities, type CameraState, type TuningStep,
+  planTuningStep,
+  planStabilizationStep,
+  type CameraCapabilities,
+  type CameraState,
+  type TuningStep,
 } from '@tracker/cameraTuner';
 import { detectFlicker, inferPowerLineHz } from '@tracker/flickerDetector';
 import { AvisoDeDistancia } from '@tracker/distanceAdvisory';
@@ -31,7 +49,14 @@ import { useSettings } from './SettingsContext';
 import { isDevMode, onDevModeChange } from '../devMode';
 import { limitarDwellMs } from '../dwellMs';
 
-export type { GazeEngine, GazeSample, EngineState, L2CSStatus, RecordingApi, EngineDiagnostics } from '@tracker/tracker/engine';
+export type {
+  GazeEngine,
+  GazeSample,
+  EngineState,
+  L2CSStatus,
+  RecordingApi,
+  EngineDiagnostics,
+} from '@tracker/tracker/engine';
 
 // Dwell time by user preset (matches DwellButton's own table).
 // `DWELL_MS_BY_SPEED` morava aqui, convertendo o enum `dwellSpeed` em ms.
@@ -168,7 +193,9 @@ async function openCameraWithFallback(): Promise<MediaStream> {
     try {
       const stream = await navigator.mediaDevices.getUserMedia(constraints);
       const t = stream.getVideoTracks()[0]?.getSettings();
-      console.log(`[IrisFlow] câmera aberta (pedido: ${rotulo}) → ${t?.width}×${t?.height} @ ${t?.frameRate ?? '?'}fps`);
+      console.log(
+        `[IrisFlow] câmera aberta (pedido: ${rotulo}) → ${t?.width}×${t?.height} @ ${t?.frameRate ?? '?'}fps`
+      );
       return stream;
     } catch (e) {
       ultimoErro = e;
@@ -185,13 +212,13 @@ async function openCameraWithFallback(): Promise<MediaStream> {
     nome === 'NotAllowedError' || nome === 'SecurityError'
       ? 'Permissão de câmera negada. Autorize o acesso nas configurações do navegador e recarregue.'
       : nome === 'NotFoundError' || nome === 'DevicesNotFoundError'
-      ? 'Nenhuma câmera encontrada. Conecte a webcam e recarregue.'
-      : nome === 'NotReadableError' || nome === 'TrackStartError'
-      ? 'A câmera existe mas não pôde ser iniciada — quase sempre porque OUTRO PROGRAMA está usando ela ' +
-        '(OBS, Teams, Zoom, Meet, ou outra aba deste navegador). Feche o outro programa e recarregue.'
-      : nome === 'OverconstrainedError'
-      ? 'A câmera não suporta nenhum dos formatos solicitados.'
-      : `Falha ao abrir a câmera (${nome}).`;
+        ? 'Nenhuma câmera encontrada. Conecte a webcam e recarregue.'
+        : nome === 'NotReadableError' || nome === 'TrackStartError'
+          ? 'A câmera existe mas não pôde ser iniciada — quase sempre porque OUTRO PROGRAMA está usando ela ' +
+            '(OBS, Teams, Zoom, Meet, ou outra aba deste navegador). Feche o outro programa e recarregue.'
+          : nome === 'OverconstrainedError'
+            ? 'A câmera não suporta nenhum dos formatos solicitados.'
+            : `Falha ao abrir a câmera (${nome}).`;
 
   console.error(`[IrisFlow] ${causa}`);
   throw new Error(causa, { cause: ultimoErro });
@@ -246,6 +273,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   // redutor puro de `src/interaction/dwell.ts`. Refs soltos mutados em pontos
   // diferentes do callback saem de sincronia (dwell completando de olho fechado).
   const dwellStateRef = useRef(createDwellState());
+  /** Estado da rolagem por borda: em qual faixa o olhar está e desde quando. */
+  const bordaRef = useRef(estadoInicialDeBorda());
+  /** Instante da última amostra, para converter velocidade em deslocamento. */
+  const ultimaRolagemMsRef = useRef(0);
   // Gaze perdido: segura a última posição válida por 2 s, depois esconde e avisa.
   const fallbackRef = useRef(new GazeFallback());
   const [gazeLostMessage, setGazeLostMessage] = useState<string | null>(null);
@@ -314,180 +345,213 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
    * o driver assentar. `applyConstraints` pode rejeitar o lote inteiro se
    * qualquer chave for inválida, então cada passo vai isolado num try.
    */
-  const autoTuneCamera = useCallback(async (
-    stream: MediaStream,
-    engine: GazeEngine,
-    isCancelled: () => boolean,
-  ): Promise<void> => {
-    const track = stream.getVideoTracks()[0];
-    if (!track || typeof track.getCapabilities !== 'function') return;
+  const autoTuneCamera = useCallback(
+    async (stream: MediaStream, engine: GazeEngine, isCancelled: () => boolean): Promise<void> => {
+      const track = stream.getVideoTracks()[0];
+      if (!track || typeof track.getCapabilities !== 'function') return;
 
-    let rawCaps: Record<string, unknown> = {};
-    try {
-      rawCaps = track.getCapabilities() as unknown as Record<string, unknown>;
-    } catch {
-      return;
-    }
-
-    // Fotografa o estado original antes de mexer: `applyConstraints` altera o
-    // dispositivo, não só a nossa view dele — em vários drivers o zoom e o
-    // brilho que deixamos aqui aparecem no Teams depois. Devolvemos ao sair.
-    try {
-      const st = track.getSettings() as unknown as Record<string, unknown>;
-      const keys = ['zoom', 'brightness', 'contrast', 'exposureMode', 'whiteBalanceMode', 'focusMode', 'powerLineFrequency'];
-      const snap: Record<string, number | string> = {};
-      for (const k of keys) {
-        const v = st[k];
-        if (typeof v === 'number' || typeof v === 'string') snap[k] = v;
+      let rawCaps: Record<string, unknown> = {};
+      try {
+        rawCaps = track.getCapabilities() as unknown as Record<string, unknown>;
+      } catch {
+        return;
       }
-      originalCameraSettingsRef.current = snap;
-      console.log('[camera] estado original da câmera guardado para restauração:', snap);
-    } catch { /* getSettings indisponível: não há o que restaurar */ }
 
-    // Usa a MAIOR resolução que a câmera oferece, até o teto.
-    //
-    // O `getUserMedia` pede 1920×1080 como `ideal`, mas o browser negocia e
-    // pode entregar menos. Aqui, já com as capabilities na mão, sabemos o
-    // máximo real e pedimos explicitamente.
-    //
-    // Teto em 1920: o custo do FaceLandmarker cresce com o número de pixels e
-    // o loop precisa sustentar 30 fps. Acima disso trocaríamos precisão de
-    // landmark por frames perdidos — e frame perdido também é erro.
-    const MAX_USEFUL_WIDTH = 1920;
-    const wCap = rawCaps.width as { max?: number } | undefined;
-    const hCap = rawCaps.height as { max?: number } | undefined;
-    if (typeof wCap?.max === 'number' && typeof hCap?.max === 'number') {
-      const cur = track.getSettings().width ?? 0;
-      const targetW = Math.min(wCap.max, MAX_USEFUL_WIDTH);
-      if (targetW > cur) {
-        const targetH = Math.round((targetW * hCap.max) / wCap.max);
-        try {
-          await track.applyConstraints({ width: { ideal: targetW }, height: { ideal: targetH } });
-          console.log(`[camera] resolução ${cur} → ${track.getSettings().width} (máx do driver: ${wCap.max})`);
-        } catch (e) {
-          console.warn('[camera] não foi possível subir a resolução:', e);
-        }
-      }
-      if (wCap.max > MAX_USEFUL_WIDTH) {
-        console.log(
-          `[camera] câmera suporta até ${wCap.max}px de largura; usando ${MAX_USEFUL_WIDTH} ` +
-          `para o FaceLandmarker sustentar 30 fps.`,
-        );
-      }
-    }
-    const asRange = (v: unknown) =>
-      v && typeof v === 'object' && 'min' in (v as object) && 'max' in (v as object)
-        ? (v as { min: number; max: number; step?: number })
-        : undefined;
-    const caps: CameraCapabilities = {
-      zoom: asRange(rawCaps.zoom),
-      brightness: asRange(rawCaps.brightness),
-      contrast: asRange(rawCaps.contrast),
-      exposureMode: Array.isArray(rawCaps.exposureMode) ? rawCaps.exposureMode as string[] : undefined,
-      focusMode: Array.isArray(rawCaps.focusMode) ? rawCaps.focusMode as string[] : undefined,
-      whiteBalanceMode: Array.isArray(rawCaps.whiteBalanceMode) ? rawCaps.whiteBalanceMode as string[] : undefined,
-      powerLineFrequency: Array.isArray(rawCaps.powerLineFrequency) ? rawCaps.powerLineFrequency as number[] : undefined,
-    };
-    console.log('[camera] capabilities da câmera:', {
-      zoom: caps.zoom, brightness: caps.brightness,
-      exposureMode: caps.exposureMode, whiteBalanceMode: caps.whiteBalanceMode,
-    });
-
-    const settle = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-    // O auto-exposure precisa de ~2 s para convergir; medir antes disso
-    // ajustaria o brilho contra um valor que ainda está mudando sozinho.
-    await settle(2000);
-
-    const MAX_ITER = 14;
-    let ultimoBrilho: number | undefined;
-    let convergiu = false;
-    for (let i = 0; i < MAX_ITER; i++) {
-      if (isCancelled()) return;
-      const d = engine.getDiagnostics();
-      if (!d) { await settle(300); continue; }
-
-      const iodFraction = d.video.width > 0 ? d.framing.iodPx / d.video.width : 0;
-      let state: CameraState = {};
+      // Fotografa o estado original antes de mexer: `applyConstraints` altera o
+      // dispositivo, não só a nossa view dele — em vários drivers o zoom e o
+      // brilho que deixamos aqui aparecem no Teams depois. Devolvemos ao sair.
       try {
         const st = track.getSettings() as unknown as Record<string, unknown>;
-        state = {
-          zoom: typeof st.zoom === 'number' ? st.zoom : undefined,
-          brightness: typeof st.brightness === 'number' ? st.brightness : undefined,
-          contrast: typeof st.contrast === 'number' ? st.contrast : undefined,
-        };
-      } catch { /* getSettings indisponível: o planner usa os defaults da faixa */ }
+        const keys = [
+          'zoom',
+          'brightness',
+          'contrast',
+          'exposureMode',
+          'whiteBalanceMode',
+          'focusMode',
+          'powerLineFrequency',
+        ];
+        const snap: Record<string, number | string> = {};
+        for (const k of keys) {
+          const v = st[k];
+          if (typeof v === 'number' || typeof v === 'string') snap[k] = v;
+        }
+        originalCameraSettingsRef.current = snap;
+        console.log('[camera] estado original da câmera guardado para restauração:', snap);
+      } catch {
+        /* getSettings indisponível: não há o que restaurar */
+      }
 
-      const step = planTuningStep(caps, state, {
-        hasFace: d.framing.hasFace,
-        iodFraction,
-        brightness: d.quality.brightness,
-        contrast: d.quality.contrast,
+      // Usa a MAIOR resolução que a câmera oferece, até o teto.
+      //
+      // O `getUserMedia` pede 1920×1080 como `ideal`, mas o browser negocia e
+      // pode entregar menos. Aqui, já com as capabilities na mão, sabemos o
+      // máximo real e pedimos explicitamente.
+      //
+      // Teto em 1920: o custo do FaceLandmarker cresce com o número de pixels e
+      // o loop precisa sustentar 30 fps. Acima disso trocaríamos precisão de
+      // landmark por frames perdidos — e frame perdido também é erro.
+      const MAX_USEFUL_WIDTH = 1920;
+      const wCap = rawCaps.width as { max?: number } | undefined;
+      const hCap = rawCaps.height as { max?: number } | undefined;
+      if (typeof wCap?.max === 'number' && typeof hCap?.max === 'number') {
+        const cur = track.getSettings().width ?? 0;
+        const targetW = Math.min(wCap.max, MAX_USEFUL_WIDTH);
+        if (targetW > cur) {
+          const targetH = Math.round((targetW * hCap.max) / wCap.max);
+          try {
+            await track.applyConstraints({ width: { ideal: targetW }, height: { ideal: targetH } });
+            console.log(
+              `[camera] resolução ${cur} → ${track.getSettings().width} (máx do driver: ${wCap.max})`
+            );
+          } catch (e) {
+            console.warn('[camera] não foi possível subir a resolução:', e);
+          }
+        }
+        if (wCap.max > MAX_USEFUL_WIDTH) {
+          console.log(
+            `[camera] câmera suporta até ${wCap.max}px de largura; usando ${MAX_USEFUL_WIDTH} ` +
+              `para o FaceLandmarker sustentar 30 fps.`
+          );
+        }
+      }
+      const asRange = (v: unknown) =>
+        v && typeof v === 'object' && 'min' in (v as object) && 'max' in (v as object)
+          ? (v as { min: number; max: number; step?: number })
+          : undefined;
+      const caps: CameraCapabilities = {
+        zoom: asRange(rawCaps.zoom),
+        brightness: asRange(rawCaps.brightness),
+        contrast: asRange(rawCaps.contrast),
+        exposureMode: Array.isArray(rawCaps.exposureMode)
+          ? (rawCaps.exposureMode as string[])
+          : undefined,
+        focusMode: Array.isArray(rawCaps.focusMode) ? (rawCaps.focusMode as string[]) : undefined,
+        whiteBalanceMode: Array.isArray(rawCaps.whiteBalanceMode)
+          ? (rawCaps.whiteBalanceMode as string[])
+          : undefined,
+        powerLineFrequency: Array.isArray(rawCaps.powerLineFrequency)
+          ? (rawCaps.powerLineFrequency as number[])
+          : undefined,
+      };
+      console.log('[camera] capabilities da câmera:', {
+        zoom: caps.zoom,
+        brightness: caps.brightness,
+        exposureMode: caps.exposureMode,
+        whiteBalanceMode: caps.whiteBalanceMode,
       });
-      cameraTuningRef.current = step;
-      ultimoBrilho = d.quality.brightness;
-      convergiu = step.converged;
 
-      if (step.converged || Object.keys(step.constraints).length === 0) {
-        if (step.reasons.length) console.log('[camera]', step.reasons.join(' | '));
-        if (step.physicalAdvice) console.warn('[camera] ação física necessária:', step.physicalAdvice);
-        break;
+      const settle = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+      // O auto-exposure precisa de ~2 s para convergir; medir antes disso
+      // ajustaria o brilho contra um valor que ainda está mudando sozinho.
+      await settle(2000);
+
+      const MAX_ITER = 14;
+      let ultimoBrilho: number | undefined;
+      let convergiu = false;
+      for (let i = 0; i < MAX_ITER; i++) {
+        if (isCancelled()) return;
+        const d = engine.getDiagnostics();
+        if (!d) {
+          await settle(300);
+          continue;
+        }
+
+        const iodFraction = d.video.width > 0 ? d.framing.iodPx / d.video.width : 0;
+        let state: CameraState = {};
+        try {
+          const st = track.getSettings() as unknown as Record<string, unknown>;
+          state = {
+            zoom: typeof st.zoom === 'number' ? st.zoom : undefined,
+            brightness: typeof st.brightness === 'number' ? st.brightness : undefined,
+            contrast: typeof st.contrast === 'number' ? st.contrast : undefined,
+          };
+        } catch {
+          /* getSettings indisponível: o planner usa os defaults da faixa */
+        }
+
+        const step = planTuningStep(caps, state, {
+          hasFace: d.framing.hasFace,
+          iodFraction,
+          brightness: d.quality.brightness,
+          contrast: d.quality.contrast,
+        });
+        cameraTuningRef.current = step;
+        ultimoBrilho = d.quality.brightness;
+        convergiu = step.converged;
+
+        if (step.converged || Object.keys(step.constraints).length === 0) {
+          if (step.reasons.length) console.log('[camera]', step.reasons.join(' | '));
+          if (step.physicalAdvice)
+            console.warn('[camera] ação física necessária:', step.physicalAdvice);
+          break;
+        }
+
+        console.log('[camera]', step.reasons.join(' | '));
+        try {
+          await track.applyConstraints(step.constraints as MediaTrackConstraints);
+        } catch (e) {
+          // Driver recusou. Insistir na mesma constraint só gastaria iterações.
+          console.warn('[camera] applyConstraints rejeitado, ajuste interrompido:', e);
+          break;
+        }
+        await settle(450);
       }
 
-      console.log('[camera]', step.reasons.join(' | '));
-      try {
-        await track.applyConstraints(step.constraints as MediaTrackConstraints);
-      } catch (e) {
-        // Driver recusou. Insistir na mesma constraint só gastaria iterações.
-        console.warn('[camera] applyConstraints rejeitado, ajuste interrompido:', e);
-        break;
+      if (isCancelled()) return;
+      // Cintilação: mede a série de brilho na cadência de frame e, se houver
+      // batimento compatível com 50/60 Hz, corrige na origem pelo driver.
+      let powerLineHz: 50 | 60 | null = null;
+      const dFinal = engine.getDiagnostics();
+      if (dFinal && dFinal.brightnessHistoryFps > 0) {
+        const flick = detectFlicker(dFinal.brightnessHistory, dFinal.brightnessHistoryFps);
+        if (flick.detected) {
+          powerLineHz = inferPowerLineHz(flick.dominantHz, dFinal.brightnessHistoryFps);
+          console.warn(
+            `[camera] cintilação de ${flick.dominantHz.toFixed(1)} Hz ` +
+              `(${(flick.relativeAmplitude * 100).toFixed(1)}% do brilho)` +
+              (powerLineHz ? ` → rede de ${powerLineHz} Hz` : ' → origem não elétrica')
+          );
+        }
       }
-      await settle(450);
-    }
 
-    if (isCancelled()) return;
-    // Cintilação: mede a série de brilho na cadência de frame e, se houver
-    // batimento compatível com 50/60 Hz, corrige na origem pelo driver.
-    let powerLineHz: 50 | 60 | null = null;
-    const dFinal = engine.getDiagnostics();
-    if (dFinal && dFinal.brightnessHistoryFps > 0) {
-      const flick = detectFlicker(dFinal.brightnessHistory, dFinal.brightnessHistoryFps);
-      if (flick.detected) {
-        powerLineHz = inferPowerLineHz(flick.dominantHz, dFinal.brightnessHistoryFps);
-        console.warn(
-          `[camera] cintilação de ${flick.dominantHz.toFixed(1)} Hz ` +
-          `(${(flick.relativeAmplitude * 100).toFixed(1)}% do brilho)` +
-          (powerLineHz ? ` → rede de ${powerLineHz} Hz` : ' → origem não elétrica'),
+      // Travar exposição/balanço/foco só faz sentido com a imagem boa: travar
+      // uma imagem escura porque o zoom bateu no limite congelaria o problema
+      // pelo resto da sessão. Sem brilho medido, a exposição segue automática.
+      const imagemBoa =
+        typeof ultimoBrilho === 'number' && ultimoBrilho >= 0.25 && ultimoBrilho <= 0.75;
+      const stab = planStabilizationStep(caps, powerLineHz);
+      const constraints: Record<string, unknown> = {};
+      if (stab.constraints.powerLineFrequency !== undefined) {
+        constraints.powerLineFrequency = stab.constraints.powerLineFrequency;
+      }
+      if (convergiu || imagemBoa) {
+        for (const k of ['exposureMode', 'whiteBalanceMode', 'focusMode'] as const) {
+          if (stab.constraints[k] !== undefined) constraints[k] = stab.constraints[k];
+        }
+      } else if (ultimoBrilho !== undefined) {
+        console.log(
+          `[camera] brilho ${ultimoBrilho.toFixed(2)} fora da faixa — exposição segue automática.`
         );
       }
-    }
-
-    // Travar exposição/balanço/foco só faz sentido com a imagem boa: travar
-    // uma imagem escura porque o zoom bateu no limite congelaria o problema
-    // pelo resto da sessão. Sem brilho medido, a exposição segue automática.
-    const imagemBoa = typeof ultimoBrilho === 'number' && ultimoBrilho >= 0.25 && ultimoBrilho <= 0.75;
-    const stab = planStabilizationStep(caps, powerLineHz);
-    const constraints: Record<string, unknown> = {};
-    if (stab.constraints.powerLineFrequency !== undefined) {
-      constraints.powerLineFrequency = stab.constraints.powerLineFrequency;
-    }
-    if (convergiu || imagemBoa) {
-      for (const k of ['exposureMode', 'whiteBalanceMode', 'focusMode'] as const) {
-        if (stab.constraints[k] !== undefined) constraints[k] = stab.constraints[k];
+      if (Object.keys(constraints).length > 0) {
+        try {
+          await track.applyConstraints(constraints as MediaTrackConstraints);
+          console.log(
+            '[camera] estabilização:',
+            Object.entries(constraints)
+              .map(([k, v]) => `${k} → ${v}`)
+              .join(' | ')
+          );
+        } catch (e) {
+          console.warn('[camera] estabilização rejeitada (exposição segue automática):', e);
+        }
+      } else if (stab.physicalAdvice) {
+        console.warn('[camera]', stab.physicalAdvice);
       }
-    } else if (ultimoBrilho !== undefined) {
-      console.log(`[camera] brilho ${ultimoBrilho.toFixed(2)} fora da faixa — exposição segue automática.`);
-    }
-    if (Object.keys(constraints).length > 0) {
-      try {
-        await track.applyConstraints(constraints as MediaTrackConstraints);
-        console.log('[camera] estabilização:', Object.entries(constraints).map(([k, v]) => `${k} → ${v}`).join(' | '));
-      } catch (e) {
-        console.warn('[camera] estabilização rejeitada (exposição segue automática):', e);
-      }
-    } else if (stab.physicalAdvice) {
-      console.warn('[camera]', stab.physicalAdvice);
-    }
-  }, []);
+    },
+    []
+  );
 
   useEffect(() => {
     // React StrictMode em dev roda useEffect duas vezes (mount → cleanup → mount).
@@ -501,8 +565,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // de calibração esperando um callback que nunca chegaria. Falha visível.
       console.error('[IrisFlow] GazeProvider duplicado — este provider fica sem engine.');
       setCameraError(
-        'O rastreamento não pôde iniciar porque já existe outra instância ativa. '
-        + 'Feche as outras janelas do app e recarregue.',
+        'O rastreamento não pôde iniciar porque já existe outra instância ativa. ' +
+          'Feche as outras janelas do app e recarregue.'
       );
       return;
     }
@@ -595,7 +659,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       if (cancelled) return;
       setCalibrationInvalidated(
         'A calibração salva não vale para esta versão do rastreador. ' +
-        'Refaça a calibração para voltar a usar o olhar.',
+          'Refaça a calibração para voltar a usar o olhar.'
       );
     });
 
@@ -610,7 +674,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // Lido fora do caminho quente e atualizado por evento quando a tela
     // inicial alterna o modo.
     let devMode = isDevMode();
-    const unsubDevMode = onDevModeChange((on) => { devMode = on; });
+    const unsubDevMode = onDevModeChange((on) => {
+      devMode = on;
+    });
 
     let cbInvocations = 0;
     const unsubGaze = engine.subscribe((sample) => {
@@ -644,8 +710,9 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // de socorro fica visível durante os 1–2 minutos e não pode ficar
       // inoperante nesse tempo.
       const alvoDuranteCalibracao = engineIsCalibrating
-        ? ((document.elementFromPoint(sample.x, sample.y) as Element | null)
-            ?.closest('[data-emergency="true"]') as HTMLElement | null)
+        ? ((document.elementFromPoint(sample.x, sample.y) as Element | null)?.closest(
+            '[data-emergency="true"]'
+          ) as HTMLElement | null)
         : null;
 
       if (engineIsCalibrating && !alvoDuranteCalibracao) {
@@ -700,7 +767,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           {
             ...DEFAULT_DWELL_CONFIG,
             dwellMs: dwellMsRef.current,
-          },
+          }
         );
         dwellStateRef.current = outcome.state;
 
@@ -719,15 +786,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         // (`uncalibrated`), em `degraded` (só emergência/recuperação, com dwell
         // mais longo) e em alvos desabilitados.
         const piscadaPermitida =
-          sample.uncalibrated !== true
-          && !isDegraded
-          && target?.isDisabled !== true;
+          sample.uncalibrated !== true && !isDegraded && target?.isDisabled !== true;
 
         if (EXPERIMENT.blinkClick) {
           const rb = stepBlinkClick(blinkClickRef.current, {
-            piscando: !sample.hasFace || sample.eyeState === undefined
-              ? null
-              : sample.eyeState === 'closed',
+            piscando:
+              !sample.hasFace || sample.eyeState === undefined
+                ? null
+                : sample.eyeState === 'closed',
             nowMs: now,
             // `null` quando o estado proíbe: o relógio de estabilidade não
             // deve acumular sobre um alvo que não poderia ser clicado.
@@ -773,6 +839,50 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           } catch (err) {
             console.error('[IrisFlow] handler de clique por dwell lançou:', err);
           }
+        }
+
+        // ── Rolagem pelas bordas ────────────────────────────────────────
+        //
+        // Quem não usa as mãos também não usa a roda do mouse: sem isto,
+        // qualquer conteúdo mais alto que a tela fica inalcançável a partir
+        // do primeiro rolar.
+        //
+        // A condição que importa é `target === null`: **só rola quando não há
+        // nada clicável sob o olhar**. É isso que impede a faixa de roubar o
+        // botão de emergência, que fica exatamente numa borda (`top: 2rem` no
+        // uso normal, `bottom: 1.5rem` durante a medição). Uma lista de
+        // exceções por posição envelheceria no primeiro botão novo perto de
+        // uma borda; esta regra protege por construção.
+        //
+        // As outras duas guardas são as mesmas da piscada, pelo mesmo motivo:
+        // sem calibração o ponto é o fallback do nariz, e em `degraded` a
+        // posição não é confiável o bastante para mover a tela sozinha.
+        const podeRolar = target === null && sample.uncalibrated !== true && !isDegraded;
+
+        // O relógio é o do FLUXO DE AMOSTRAS, não o de parede — mesma razão
+        // que o dwell documenta acima. Com `performance.now()`, uma pausa na
+        // emissão (piscada, rosto perdido, quadro dropado) deixaria os 300 ms
+        // "passarem" sozinhos, e a primeira amostra depois da pausa rolaria de
+        // imediato: exatamente o olhar de relance que o atraso existe para
+        // ignorar.
+        const relogio = Number.isFinite(sample.timestamp) ? sample.timestamp : now;
+
+        if (podeRolar) {
+          const r = velocidadeDaBorda(bordaRef.current, sample.y, window.innerHeight, relogio);
+          bordaRef.current = r.estado;
+          if (r.velocidadePxS !== 0) {
+            rolarSobOOlhar(
+              sample.x,
+              sample.y,
+              r.velocidadePxS,
+              relogio - ultimaRolagemMsRef.current
+            );
+          }
+          ultimaRolagemMsRef.current = relogio;
+        } else {
+          // Sair do estado zera o prazo: voltar à borda recomeça os 300 ms.
+          bordaRef.current = estadoInicialDeBorda();
+          ultimaRolagemMsRef.current = relogio;
         }
       }
 
@@ -870,8 +980,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               dwellPct,
             });
 
-            cursorRef.current.style.transform =
-              `translate3d(${fb.posicao.x - est.offsetPx}px, ${fb.posicao.y - est.offsetPx}px, 0) scale(${est.escala})`;
+            cursorRef.current.style.transform = `translate3d(${fb.posicao.x - est.offsetPx}px, ${fb.posicao.y - est.offsetPx}px, 0) scale(${est.escala})`;
             cursorRef.current.style.opacity =
               fb.estado === 'segurando' ? '0.5' : sample.hasFace ? '1' : '0.35';
             cursorRef.current.style.background = est.preenchimento;
@@ -880,9 +989,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // translúcido de antes sumia sobre o botão de emergência — que é
             // o pior alvo possível para o cursor sumir.
             cursorRef.current.style.boxShadow = est.anel;
-            cursorRef.current.style.border = est.tracejado
-              ? '2px dashed rgba(234,179,8,0.9)'
-              : '';
+            cursorRef.current.style.border = est.tracejado ? '2px dashed rgba(234,179,8,0.9)' : '';
 
             // Anel de progresso do dwell.
             if (anelRef.current) {
@@ -890,8 +997,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
               if (hitTarget) {
                 const g = geometriaDoAnel(est.tamanhoPx, dwellPct);
                 anelRef.current.setAttribute('stroke-dashoffset', String(g.offset));
-                svg.style.transform =
-                  `translate3d(${fb.posicao.x - g.centro}px, ${fb.posicao.y - g.centro}px, 0)`;
+                svg.style.transform = `translate3d(${fb.posicao.x - g.centro}px, ${fb.posicao.y - g.centro}px, 0)`;
                 svg.style.opacity = '1';
               } else {
                 svg.style.opacity = '0';
@@ -904,7 +1010,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       }
       if (cbInvocations === 0 || cbInvocations === 30) {
         console.log(
-          `[IrisFlow] gaze callback #${cbInvocations} — x=${sample.x.toFixed(0)} y=${sample.y.toFixed(0)} hasFace=${sample.hasFace} cursor=${!!cursorRef.current}`,
+          `[IrisFlow] gaze callback #${cbInvocations} — x=${sample.x.toFixed(0)} y=${sample.y.toFixed(0)} hasFace=${sample.hasFace} cursor=${!!cursorRef.current}`
         );
       }
       cbInvocations++;
@@ -975,16 +1081,24 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         await new Promise<void>((resolve, reject) => {
           // O evento pode já ter passado se o quadro chegou antes de chegarmos
           // aqui; `readyState` é o estado, o evento é só a notificação dele.
-          if (video.readyState >= 2) { resolve(); return; }
+          if (video.readyState >= 2) {
+            resolve();
+            return;
+          }
           const timer = window.setTimeout(() => {
             video.removeEventListener('loadeddata', aoCarregar);
-            reject(new Error(
-              'A câmera foi aberta mas não entregou nenhum quadro em 10 segundos. ' +
-              'Feche outros programas que usem a webcam (Teams, Zoom, OBS), ' +
-              'desconecte e reconecte a câmera, e recarregue.',
-            ));
+            reject(
+              new Error(
+                'A câmera foi aberta mas não entregou nenhum quadro em 10 segundos. ' +
+                  'Feche outros programas que usem a webcam (Teams, Zoom, OBS), ' +
+                  'desconecte e reconecte a câmera, e recarregue.'
+              )
+            );
           }, LOADEDDATA_TIMEOUT_MS);
-          function aoCarregar() { window.clearTimeout(timer); resolve(); }
+          function aoCarregar() {
+            window.clearTimeout(timer);
+            resolve();
+          }
           video.addEventListener('loadeddata', aoCarregar, { once: true });
         });
         // Alguns browsers em Electron não iniciam o playback sozinhos mesmo com
@@ -995,7 +1109,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           console.warn('[IrisFlow] video.play() falhou:', e);
         }
         console.log(
-          `[IrisFlow] loadeddata OK — video ${video.videoWidth}x${video.videoHeight}, paused=${video.paused}, currentTime=${video.currentTime}`,
+          `[IrisFlow] loadeddata OK — video ${video.videoWidth}x${video.videoHeight}, paused=${video.paused}, currentTime=${video.currentTime}`
         );
 
         // A resolução obtida é preditor DIRETO do erro final; não fica só num
@@ -1004,10 +1118,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         if (video.videoWidth > 0 && video.videoWidth < 1920) {
           console.warn(
             `[IrisFlow] ⚠ câmera negociou ${video.videoWidth}x${video.videoHeight}, abaixo de 1920x1080. ` +
-            `O erro de rastreamento escala com o inverso da densidade de pixels no rosto: ` +
-            `a ${video.videoWidth}px de largura, espere ~${(1920 / video.videoWidth).toFixed(1)}× mais erro ` +
-            `de landmark do que a 1080p. Verifique se a webcam suporta Full HD e se nenhum outro ` +
-            `app está segurando o dispositivo numa resolução menor.`,
+              `O erro de rastreamento escala com o inverso da densidade de pixels no rosto: ` +
+              `a ${video.videoWidth}px de largura, espere ~${(1920 / video.videoWidth).toFixed(1)}× mais erro ` +
+              `de landmark do que a 1080p. Verifique se a webcam suporta Full HD e se nenhum outro ` +
+              `app está segurando o dispositivo numa resolução menor.`
           );
         }
 
@@ -1020,7 +1134,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           return;
         }
         await engine.start(video);
-        engine.setScreenGeometry(settingsRef.current.screenDiagonalIn, settingsRef.current.viewingDistanceCm);
+        engine.setScreenGeometry(
+          settingsRef.current.screenDiagonalIn,
+          settingsRef.current.viewingDistanceCm
+        );
         console.log('[IrisFlow] engine.start() concluído; loop rAF em execução.');
 
         // ── Hooks de console para diagnóstico e medição de latência ────────
@@ -1054,14 +1171,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             // `engine.ts` faz o `× 100` na origem. Não multiplicar de novo.
             console.log(
               `[latencia] fps=${d.fpsRender.toFixed(1)} l2cs=${d.l2cs.hz.toFixed(1)} Hz ` +
-              `inferência=${d.l2cs.latencyMs.toFixed(0)} ms stale=${d.l2cs.stalePct.toFixed(1)}% ` +
-              `crop=${EXPERIMENT.l2csInputSize}² ep=${d.l2cs.executionProvider ?? '?'}`,
+                `inferência=${d.l2cs.latencyMs.toFixed(0)} ms stale=${d.l2cs.stalePct.toFixed(1)}% ` +
+                `crop=${EXPERIMENT.l2csInputSize}² ep=${d.l2cs.executionProvider ?? '?'}`
             );
             if (d.l2cs.stalePct > 50) {
               console.warn(
                 `[latencia] ${d.l2cs.stalePct.toFixed(0)}% das leituras do L2CS estão OBSOLETAS ` +
-                `(inferência ${d.l2cs.latencyMs.toFixed(0)} ms contra tolerância de ${d.l2cs.staleMs.toFixed(0)} ms). ` +
-                'O bloco angular está sendo zerado — as features [4] e [5] do vetor não carregam sinal.',
+                  `(inferência ${d.l2cs.latencyMs.toFixed(0)} ms contra tolerância de ${d.l2cs.staleMs.toFixed(0)} ms). ` +
+                  'O bloco angular está sendo zerado — as features [4] e [5] do vetor não carregam sinal.'
               );
             }
             return linhas;
@@ -1076,9 +1193,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           //
           //   __irisflowPreflight()
           //   __irisflowPreflight({ filterMode: 'kalmanEma', l2csInputSize: 224 })
-          w.__irisflowPreflight = async (
-            condicaoEsperada?: Record<string, unknown>,
-          ) => {
+          w.__irisflowPreflight = async (condicaoEsperada?: Record<string, unknown>) => {
             const d = engineRef.current?.getDiagnostics();
             if (!d) {
               console.warn('[preflight] engine não está rodando.');
@@ -1127,15 +1242,20 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             });
 
             const icone = { ok: '✅', atencao: '⚠️', bloqueio: '⛔' } as const;
-            console.table(itens.map((i) => ({
-              '': icone[i.nivel], item: i.item, detalhe: i.detalhe, ação: i.acao ?? '',
-            })));
+            console.table(
+              itens.map((i) => ({
+                '': icone[i.nivel],
+                item: i.item,
+                detalhe: i.detalhe,
+                ação: i.acao ?? '',
+              }))
+            );
             if (podeComecar(itens)) {
               console.log('[preflight] ✅ PODE COMEÇAR.');
             } else {
               console.warn(
-                '[preflight] ⛔ NÃO COMECE — os itens marcados produziriam dado que '
-                + 'será descartado. Resolva-os e rode de novo.',
+                '[preflight] ⛔ NÃO COMECE — os itens marcados produziriam dado que ' +
+                  'será descartado. Resolva-os e rode de novo.'
               );
             }
             return itens;
@@ -1143,8 +1263,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
           console.log(
             '[IrisFlow] console: __irisflowPreflight() ANTES de medir · ' +
-            '__irisflowLatencia() para a tabela de estágios · ' +
-            '__irisflowDiag() para o diagnóstico completo.',
+              '__irisflowLatencia() para a tabela de estágios · ' +
+              '__irisflowDiag() para o diagnóstico completo.'
           );
         }
 
@@ -1160,7 +1280,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           setCameraError(
             err instanceof Error && err.message
               ? err.message
-              : 'Falha ao inicializar a câmera. Recarregue a página.',
+              : 'Falha ao inicializar a câmera. Recarregue a página.'
           );
         }
       }
@@ -1199,8 +1319,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
 
       // A stream vem do ref (ver `streamRef`); o `??` é rede de segurança para
       // o caso de ela ter sido trocada no <video> por outro caminho.
-      const stream = streamRef.current
-        ?? (videoRef.current?.srcObject as MediaStream | null);
+      const stream = streamRef.current ?? (videoRef.current?.srcObject as MediaStream | null);
 
       // Devolve a câmera como estava ANTES de `track.stop()`: zoom e brilho
       // aplicados por `applyConstraints` persistem no dispositivo em vários
@@ -1210,7 +1329,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       const track0 = stream?.getVideoTracks()[0];
       if (original && track0 && Object.keys(original).length > 0) {
         try {
-          void track0.applyConstraints(original as MediaTrackConstraints)
+          void track0
+            .applyConstraints(original as MediaTrackConstraints)
             .then(() => console.log('[camera] câmera restaurada ao estado original.'))
             .catch((e) => console.warn('[camera] restauração da câmera falhou:', e));
         } catch (e) {
@@ -1240,14 +1360,19 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       startCalibrationMode: (opts) => engineRef.current?.calibration.startCalibrationMode(opts),
       getCalibrationTargets: () => engineRef.current?.calibration.getCalibrationTargets() ?? [],
       getCalibrationMode: () => engineRef.current?.calibration.getCalibrationMode() ?? null,
-      startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
+      startCollectingPoint: (x, y, onDone) =>
+        engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
       // Sem engine não há treino — mas devolver em silêncio deixa a tela
       // esperando um callback que nunca vem. A falha é dita.
       completeCalibration: (onComplete) => {
         const eng = engineRef.current;
         if (!eng) {
           console.error('[IrisFlow] completeCalibration sem engine ativo.');
-          onComplete?.({ ok: false, reason: 'engine_indisponivel', detail: 'O rastreamento não está ativo.' });
+          onComplete?.({
+            ok: false,
+            reason: 'engine_indisponivel',
+            detail: 'O rastreamento não está ativo.',
+          });
           return;
         }
         eng.calibration.completeCalibration(onComplete);
@@ -1268,18 +1393,22 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setEyeDominance: (d) => engineRef.current?.calibration.setEyeDominance(d),
       setCameraFovDeg: (fov) => engineRef.current?.calibration.setCameraFovDeg(fov),
       getCalibrationDistancesCm: () =>
-        engineRef.current?.calibration.getCalibrationDistancesCm()
-        ?? { cameraCm: null, screenCm: null },
+        engineRef.current?.calibration.getCalibrationDistancesCm() ?? {
+          cameraCm: null,
+          screenCm: null,
+        },
       setCalibrationDistancesCm: (cameraCm, screenCm) =>
         engineRef.current?.calibration.setCalibrationDistancesCm(cameraCm, screenCm),
       getCurrentCameraDistanceCm: () =>
         engineRef.current?.calibration.getCurrentCameraDistanceCm() ?? null,
       getDistanceRange: () => engineRef.current?.calibration.getDistanceRange() ?? null,
       onInvalidated: (cb) => engineRef.current?.calibration.onInvalidated(cb) ?? (() => {}),
-      getRecentBlinkRatePerMinute: (windowMs) => engineRef.current?.calibration.getRecentBlinkRatePerMinute(windowMs) ?? 0,
-      getActiveOpticalCondition: () => engineRef.current?.calibration.getActiveOpticalCondition() ?? 'desconhecido',
+      getRecentBlinkRatePerMinute: (windowMs) =>
+        engineRef.current?.calibration.getRecentBlinkRatePerMinute(windowMs) ?? 0,
+      getActiveOpticalCondition: () =>
+        engineRef.current?.calibration.getActiveOpticalCondition() ?? 'desconhecido',
     }),
-    [],
+    []
   );
 
   const recording = useMemo<RecordingApi>(
@@ -1287,12 +1416,11 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       start: () => engineRef.current?.recording.start(),
       stop: () => engineRef.current?.recording.stop(),
       isActive: () => engineRef.current?.recording.isActive() ?? false,
-      getStats: () =>
-        engineRef.current?.recording.getStats() ?? { frames: 0, dropped: 0 },
+      getStats: () => engineRef.current?.recording.getStats() ?? { frames: 0, dropped: 0 },
       exportAsJSONL: () => engineRef.current?.recording.exportAsJSONL() ?? '',
       clear: () => engineRef.current?.recording.clear(),
     }),
-    [],
+    []
   );
 
   // Aviso de distância a 2 Hz, não por quadro: a distância muda na escala de
@@ -1301,7 +1429,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   useEffect(() => {
     const id = setInterval(() => {
       const faixa = engineRef.current?.calibration.getDistanceRange?.() ?? null;
-      const calibradaCm = engineRef.current?.calibration.getCalibrationDistancesCm().screenCm ?? null;
+      const calibradaCm =
+        engineRef.current?.calibration.getCalibrationDistancesCm().screenCm ?? null;
       const r = avisoDistanciaRef.current.avaliar(faixa?.screenDistanceNowCm ?? null, calibradaCm);
       setDistanceAdvice((anterior) => (anterior === r.mensagem ? anterior : r.mensagem));
     }, 500);
@@ -1315,7 +1444,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       l2csStatus,
       calibration,
       recording,
-      setFilterPreset: (preset: FilterPreset | FilterPresetV2) => engineRef.current?.setFilterPreset(preset),
+      setFilterPreset: (preset: FilterPreset | FilterPresetV2) =>
+        engineRef.current?.setFilterPreset(preset),
       getDiagnostics: () => engineRef.current?.getDiagnostics() ?? null,
       getCameraStream: () => (videoRef.current?.srcObject as MediaStream | null) ?? null,
       getCameraTuning: () => cameraTuningRef.current,
@@ -1334,7 +1464,19 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // `isDwelling` deliberadamente FORA das deps — ver o comentário acima e
     // `DwellContext`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [subscribe, state, l2csStatus, calibration, recording, isComposing, setIsComposing, isDegraded, cameraError, calibrationInvalidated, gazeLostMessage],
+    [
+      subscribe,
+      state,
+      l2csStatus,
+      calibration,
+      recording,
+      isComposing,
+      setIsComposing,
+      isDegraded,
+      cameraError,
+      calibrationInvalidated,
+      gazeLostMessage,
+    ]
   );
 
   return (
@@ -1355,9 +1497,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       <ScanningMode />
       {/* `isDwelling` num provider próprio: uma alternância de dwell só
           invalida este contexto, não os consumidores de `useGaze()`. */}
-      <DwellContext.Provider value={isDwelling}>
-        {children}
-      </DwellContext.Provider>
+      <DwellContext.Provider value={isDwelling}>{children}</DwellContext.Provider>
     </GazeContext.Provider>
   );
 };
