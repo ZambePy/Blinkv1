@@ -199,6 +199,72 @@ export interface RidgeTrainOptions {
   /** Peso de cada amostra nas equacoes normais. Ausente = todas iguais.
    *  Ver o bloco em `trainRidgeModel`. */
   sampleWeights?: number[] | null;
+  /**
+   * Equações normais (Φᵀ W Φ e Φᵀ W y) já calculadas, pelo MESMO motivo da
+   * `penaltyMatrix` acima: elas não dependem de λ, só a regularização somada à
+   * diagonal depende.
+   *
+   * Sem reusá-las, cada tentativa de λ refaz a Gram inteira — O(m·d²), que
+   * domina o custo. Medido com 644 amostras e 27 dims: a busca de λ levava
+   * 1346 ms dos 1537 ms da calibração completa, e é o congelamento que o
+   * operador vê no fim do último alvo.
+   *
+   * Precisa ter sido calculada com os MESMOS `features`, `targets` e
+   * `sampleWeights` — quem passa isto é o CV, que já mantém um cache por fold.
+   */
+  normalEquations?: NormalEquations | null;
+}
+
+/** Φᵀ W Φ e Φᵀ W y, a parte das equações normais que independe de λ. */
+export interface NormalEquations {
+  /** Gram (nf × nf), com o termo de bias na posição 0 e SEM regularização. */
+  S: number[][];
+  bX: number[];
+  bY: number[];
+  /** Número de amostras — entra na escala da regularização (`λ·m`). */
+  m: number;
+  /** Dimensão com bias: `features[0].length + 1`. */
+  nf: number;
+}
+
+/**
+ * Calcula Φᵀ W Φ e Φᵀ W y uma vez, para serem reusados em todos os λ.
+ *
+ * A ordem das somas é a mesma de `trainRidgeModel`, então o resultado é
+ * bit-idêntico ao caminho sem reuso — o que é o contrato: acelerar não pode
+ * mudar o modelo, senão os relatórios antigos deixam de ser comparáveis.
+ */
+export function computeNormalEquations(
+  features: number[][],
+  targets: { screenX: number; screenY: number }[],
+  sampleWeights?: number[] | null,
+): NormalEquations | null {
+  const m = features.length;
+  if (m === 0) return null;
+  const nf = features[0].length + 1;
+  const Phi = features.map((f) => [1.0, ...f]);
+  const w = sampleWeights ?? null;
+  const somaW = w ? w.reduce((a, b) => a + b, 0) : m;
+  const peso = (k: number) => (w ? (w[k] * m) / somaW : 1);
+
+  const S = Array.from({ length: nf }, (_, i) =>
+    Array.from({ length: nf }, (_, j) => {
+      let s = 0;
+      for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * Phi[k][j];
+      return s;
+    }),
+  );
+  const bX = Array.from({ length: nf }, (_, i) => {
+    let s = 0;
+    for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * targets[k].screenX;
+    return s;
+  });
+  const bY = Array.from({ length: nf }, (_, i) => {
+    let s = 0;
+    for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * targets[k].screenY;
+    return s;
+  });
+  return { S, bX, bY, m, nf };
 }
 
 export function trainRidgeModel(
@@ -227,9 +293,6 @@ export function trainRidgeModel(
   const rawFeatures = features[0].length;
   const nf = rawFeatures + 1; // +1 para o Bias term
 
-  // Prepara matriz Phi com Bias
-  const Phi = features.map(f => [1.0, ...f]);
-
   // Penalidade Σ_W (branqueada) quando o caller agrupou por alvo. Se o
   // caller já a calculou (caminho do CV), reusa em vez de recomputar.
   const P = options?.penaltyMatrix !== undefined
@@ -239,17 +302,20 @@ export function trainRidgeModel(
       : null;
   const penalty: 'isotropic' | 'within-target' = P ? 'within-target' : 'isotropic';
 
-  const w = options?.sampleWeights ?? null;
-  const somaW = w ? w.reduce((a, b) => a + b, 0) : m;
-  const peso = (k: number) => (w ? (w[k] * m) / somaW : 1);
+  // Φᵀ W Φ e Φᵀ W y: a parte cara e que NÃO depende de λ. O CV passa isto
+  // pronto (uma vez por fold) em vez de deixar cada tentativa de λ refazer a
+  // Gram inteira — ver `RidgeTrainOptions.normalEquations`.
+  const ne = options?.normalEquations
+    ?? computeNormalEquations(features, targets, options?.sampleWeights ?? null);
+  // `computeNormalEquations` só devolve `null` com m === 0, tratado acima.
+  const { S, bX, bY } = ne as NormalEquations;
 
-  // A_x e A_y com os respectivos lambdas de cada eixo
+  // A_x e A_y: a Gram mais a regularização do eixo. Só esta parte varia com λ.
   const buildMatrixA = (lam: number) => {
     const reg = lam * m;
     return Array.from({ length: nf }, (_, i) =>
       Array.from({ length: nf }, (_, j) => {
-        let s = 0;
-        for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * Phi[k][j];
+        const s = S[i][j];
         if (i === 0 || j === 0) return s;
         if (P) return s + reg * P[i - 1][j - 1];
         return s + (i === j ? reg : 0);
@@ -259,19 +325,6 @@ export function trainRidgeModel(
 
   const AX = buildMatrixA(lamX);
   const AY = lamX === lamY ? AX : buildMatrixA(lamY);
-
-  // b = Φᵀy  (para screenX e screenY separadamente)
-  const bX = Array.from({ length: nf }, (_, i) => {
-    let s = 0;
-    for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * targets[k].screenX;
-    return s;
-  });
-
-  const bY = Array.from({ length: nf }, (_, i) => {
-    let s = 0;
-    for (let k = 0; k < m; k++) s += peso(k) * Phi[k][i] * targets[k].screenY;
-    return s;
-  });
 
   // Acumula colunas quase-singulares das duas solvidas.
   const nearSingularX: number[] = [];
@@ -559,6 +612,9 @@ export class RidgeRegressor {
       trainTargets: { screenX: number; screenY: number }[];
       penaltyMatrix: number[][] | null;
       pesos: number[] | null;
+      /** Φᵀ W Φ e Φᵀ W y do fold. Não dependem de λ — mesma razão da
+       *  `penaltyMatrix`, e é a parte que domina o custo. */
+      normalEquations: NormalEquations | null;
     }>();
 
     for (const lambda of lambdas) {
@@ -596,13 +652,20 @@ export class RidgeRegressor {
         const pesosFold = cached
           ? cached.pesos
           : (RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(trainGroups) : null);
-        if (!cached) {
-          foldCache.set(key, { stats, zTrain, zTest, trainTargets, penaltyMatrix, pesos: pesosFold });
-        }
         const foldTargets = cached ? cached.trainTargets : trainTargets;
+        const normalEquations = cached
+          ? cached.normalEquations
+          : computeNormalEquations(zTrain, foldTargets, pesosFold);
+        if (!cached) {
+          foldCache.set(key, {
+            stats, zTrain, zTest, trainTargets, penaltyMatrix, pesos: pesosFold, normalEquations,
+          });
+        }
 
         try {
-          const model = trainRidgeModel(zTrain, foldTargets, lambda, { penaltyMatrix, sampleWeights: pesosFold });
+          const model = trainRidgeModel(zTrain, foldTargets, lambda, {
+            penaltyMatrix, sampleWeights: pesosFold, normalEquations,
+          });
           let sqX = 0;
           let sqY = 0;
           for (let i = 0; i < zTest.length; i++) {
