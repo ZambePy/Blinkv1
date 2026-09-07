@@ -49,6 +49,9 @@ export interface QualityFeatures {
   occlusionEstimate?: number;
   irisVisibilityPercentage?: number;
   specularRatio?: number;
+  /** Quanto a mancha de brilho fica parada entre quadros. 1 = imóvel
+   *  (assinatura de óculos, inócua); baixo = reflexo se movendo. */
+  specularStability?: number;
 }
 
 export interface AdvancedFrameFeatures {

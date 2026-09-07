@@ -130,6 +130,8 @@ export const SetupWizard: React.FC = () => {
   // `ReadinessPanel` documenta.
   const diagRef = useRef(getDiagnostics);
   diagRef.current = getDiagnostics;
+  const settingsRef = useRef(settings);
+  settingsRef.current = settings;
 
   useEffect(() => {
     if (passo !== 'posicionamento' && passo !== 'iluminacao') return;
@@ -141,7 +143,12 @@ export const SetupWizard: React.FC = () => {
       const snap = snapshotFromDiagnostics(d, lerViewport());
       if (!snap) return;
 
-      const relatorio = evaluateReadiness(snap, {});
+      // O FOV precisa CHEGAR aqui, senao a checagem de distancia nao tem como
+      // devolver centimetros e cai na fracao do frame — que foi o que escondeu
+      // por tanto tempo que o alvo pedia 32 cm.
+      const relatorio = evaluateReadiness(snap, {
+        horizontalFovDeg: settingsRef.current.cameraHorizontalFovDeg,
+      });
       setChecks(relatorio.checks);
 
       const posicao = relatorio.checks.filter((c) => IDS_DE_POSICAO.includes(c.id));

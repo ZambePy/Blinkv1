@@ -86,14 +86,26 @@ export interface TuningTarget {
 }
 
 /**
- * Alvo de densidade do rosto no frame.
+ * Alvo de densidade do rosto no frame — **derivado da faixa de uso**, não
+ * escolhido aqui.
  *
- * A gravação que produziu 115 px de erro tinha 0,099. Como o erro escala com o
- * inverso desta fração, 0,20 corresponde a ~2× menos erro de landmark. Não vai
- * mais alto porque acima de ~0,32 o rosto começa a encostar nas bordas quando
- * o paciente se mexe, e perder o rosto custa mais que ganhar densidade.
+ * Este módulo declarava `0.20` por conta própria, e `setupReadiness` declarava
+ * o mesmo `0.20` com um comentário avisando que os dois precisavam concordar.
+ * Concordavam entre si e discordavam do usuário: 0,20 corresponde a sentar a
+ * ~32 cm da webcam. A tela mandava aproximar e o zoom perseguia o mesmo alvo
+ * apertado — os dois empurrando para uma distância que ninguém usa.
+ *
+ * A fonte da verdade passou a ser a faixa em centímetros
+ * (`DISTANCIA_OK_MIN_CM`–`DISTANCIA_OK_MAX_CM`), medida em uso real. Duas
+ * constantes iguais por coincidência voltam a divergir no primeiro ajuste; uma
+ * derivada da outra não tem como.
+ *
+ * O raciocínio original continua valendo e é o que define a faixa: o erro
+ * escala com o inverso da densidade, e acima de ~0,32 o rosto encosta nas
+ * bordas quando o paciente se mexe.
  */
-export const TARGET_IOD_FRACTION = 0.20;
+export { TARGET_IOD_FRACTION } from './setupReadiness';
+import { TARGET_IOD_FRACTION } from './setupReadiness';
 
 /** Alvo de brilho no crop ocular. Medido 0,236 nas duas gravações reais. */
 export const TARGET_BRIGHTNESS = 0.45;

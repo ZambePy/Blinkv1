@@ -276,6 +276,9 @@ export interface EngineDiagnostics {
     faceCenter: { x: number; y: number };
     /** Fração do crop ocular saturada. `undefined` = não medido neste quadro. */
     specularRatio?: number;
+    /** Quanto a mancha de brilho fica parada entre quadros. 1 = imóvel
+     *  (assinatura de óculos, inócua); baixo = reflexo se movendo. */
+    specularStability?: number;
     /** Distância entre os cantos externos dos olhos em PIXELS DE
      *  VÍDEO. Diferente de `iod`, que é normalizado (e anisotrópico, porque x
      *  divide por largura e y por altura). A avaliação de setup precisa da
@@ -521,6 +524,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let latestIod = 0;
   let latestFaceCenter = { x: 0.5, y: 0.5 };
   let latestSpecularRatio: number | undefined;
+  let latestSpecularStability: number | undefined;
   let latestIodPx = 0;
   let latestQuality: EngineDiagnostics["quality"] = {};
   // Anel de brilho na cadência de frame, para o detector de
@@ -603,6 +607,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     latestIodPx = 0;
     latestFaceCenter = { x: 0.5, y: 0.5 };
     latestSpecularRatio = undefined;
+    latestSpecularStability = undefined;
     latestQuality = {};
     l2csFramesSubmitted = 0;
     l2csFramesValid = 0;
@@ -810,6 +815,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         latestIod = 0;
         latestFaceCenter = { x: 0.5, y: 0.5 };
         latestSpecularRatio = undefined;
+        latestSpecularStability = undefined;
         latestIodPx = 0;
         // Face perdida zera o timer de degradação; sem rosto o problema
         // é 'no_face', não 'degraded'. Quando o rosto voltar, começa uma nova
@@ -952,6 +958,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           // `undefined` é propagado, nunca convertido em zero: o analisador não
           // fabrica medição quando não consegue medir, e a UI mostra "não medido".
           latestSpecularRatio = cropQuality.specularRatio;
+          latestSpecularStability = cropQuality.specularStability;
           latestQuality = {
             brightness: cropQuality.brightnessEstimate,
             contrast: cropQuality.contrastEstimate,
@@ -1495,6 +1502,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           iod: latestIod,
           faceCenter: latestFaceCenter,
           specularRatio: latestSpecularRatio,
+          specularStability: latestSpecularStability,
           iodPx: latestIodPx,
         },
         quality: latestQuality,

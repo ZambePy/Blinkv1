@@ -57,6 +57,13 @@ export interface ReadinessSnapshot {
   contrast: number;
   detectorConfidence: number;
   specularRatio: number;
+  /**
+   * Quanto a mancha de brilho fica PARADA entre quadros (Jaccard, 0..1).
+   *
+   * É o que separa assinatura de óculos de reflexo nocivo. Ver o bloco da
+   * checagem `glasses` para por que a persistência sozinha não servia.
+   */
+  specularStability?: number;
   /** Fração dos frames da janela com reflexo acima do limiar. Só o agregado
    *  preenche. Distingue reflexo PERSISTENTE de lente (que atrapalha a sessão
    *  inteira) de brilho passageiro — um pisca-pisca não deve acusar óculos. */
@@ -148,6 +155,10 @@ const SPECULAR_WARN = 0.02;
 // lente parada na frente do olho, não um brilho de passagem.
 const SPECULAR_PERSISTENCE = 0.30;
 
+/** Abaixo disto a mancha se moveu o bastante para atrapalhar. Espelha
+ *  `ESPECULAR_ESTAVEL_MIN` do `qualityAnalyzer`, que produz a medida. */
+const ESPECULAR_ESTAVEL_MIN = 0.6;
+
 // A webcam do posto de referência faz 1920×1080 e o app pedia 720p. Ver
 // `getUserMedia` em GazeContext.
 const RESOLUTION_WARN_WIDTH = 1920;
@@ -166,10 +177,64 @@ const VIEWPORT_COVERAGE_WARN = 0.92;
 export { CANTHAL_DISTANCE_CM } from './anthropometry';
 import { CANTHAL_DISTANCE_CM } from './anthropometry';
 
-/** Densidade-alvo do rosto no frame. Espelha `TARGET_IOD_FRACTION` do
- *  `cameraTuner` — os dois precisam concordar, senão a tela pede uma coisa
- *  e o ajuste automático persegue outra. */
-export const TARGET_IOD_FRACTION = 0.20;
+/**
+ * FAIXA DE USO, EM CENTÍMETROS — a fonte da verdade da distância.
+ *
+ * Antes o critério vivia em `iodFraction` (fração da largura do frame ocupada
+ * pelo rosto), com a faixa boa entre 0,13 e 0,32. Convertendo para centímetros
+ * com o FOV de referência e a distância cantal de 9,0 cm:
+ *
+ *   iodFraction 0,32 (limite "perto demais")  →  20 cm
+ *   iodFraction 0,20 (o ALVO perseguido)      →  32 cm
+ *   iodFraction 0,13 (limite "longe demais")  →  50 cm
+ *
+ * A janela inteira de aprovação era 20–50 cm. Quem usa o app a 50–70 cm — a
+ * distância confortável medida em uso real — ficava fora dela sempre, e a tela
+ * mandava aproximar. O alvo de 0,20 significava, literalmente, sentar a 32 cm
+ * da webcam.
+ *
+ * O erro passou despercebido porque o número em centímetros nunca chegava à
+ * tela: nenhum chamador de produção passava `horizontalFovDeg`.
+ */
+export const DISTANCIA_OK_MIN_CM = 50;
+export const DISTANCIA_OK_MAX_CM = 70;
+export const DISTANCIA_ALVO_CM = (DISTANCIA_OK_MIN_CM + DISTANCIA_OK_MAX_CM) / 2;
+
+/** Margem de aviso em volta da faixa boa. Fora dela, `fail`. */
+const DISTANCIA_WARN_MIN_CM = 35;
+const DISTANCIA_WARN_MAX_CM = 95;
+
+/**
+ * FOV usado para converter a faixa em `iodFraction` quando a câmera real não
+ * informa o seu. É o mesmo default de `settings.cameraHorizontalFovDeg`.
+ */
+export const FOV_DE_REFERENCIA_DEG = 69.7;
+
+/**
+ * Fração do frame que o rosto ocupa a uma dada distância. Inversa exata de
+ * `estimateDistanceCm`.
+ *
+ * Existe para que a faixa em centímetros e o alvo do zoom automático não sejam
+ * dois números escolhidos à parte: um é derivado do outro.
+ */
+export function iodFractionParaDistancia(
+  distanciaCm: number,
+  horizontalFovDeg: number = FOV_DE_REFERENCIA_DEG,
+  canthalDistanceCm: number = CANTHAL_DISTANCE_CM,
+): number {
+  const frameWidthCm = 2 * distanciaCm * Math.tan((horizontalFovDeg / 2) * (Math.PI / 180));
+  return frameWidthCm > 0 ? canthalDistanceCm / frameWidthCm : 0;
+}
+
+/**
+ * Densidade-alvo do rosto no frame, DERIVADA da distância-alvo.
+ *
+ * O `cameraTuner` persegue este número com o zoom. Enquanto ele era um 0,20
+ * escolhido à parte, o zoom mirava 32 cm enquanto a tela pedia 60 — exatamente
+ * a divergência que o comentário original deste bloco alertava e que ninguém
+ * tinha checado em centímetros.
+ */
+export const TARGET_IOD_FRACTION = iodFractionParaDistancia(DISTANCIA_ALVO_CM);
 
 /**
  * Distância em que o rosto atinge o tamanho-alvo no frame.
@@ -309,22 +374,60 @@ export function evaluateReadiness(
   if (snap.hasFace) {
     // ── distância / tamanho do rosto no frame ──────────────────────────────
     {
-      const status = band(
-        iodFraction,
-        IOD_FRACTION_FAIL_LOW, IOD_FRACTION_WARN_LOW,
-        IOD_FRACTION_WARN_HIGH, IOD_FRACTION_FAIL_HIGH,
-      );
-      const ideal = idealDistanceCm(horizontalFovDeg);
-      const dist = estimatedDistanceCm !== null ? ` (~${estimatedDistanceCm.toFixed(0)} cm)` : '';
-      const alvo = ideal !== null ? ` Posicione a câmera a ~${ideal.toFixed(0)} cm do rosto.` : '';
+      // COM FOV: banda em centímetros, que é a grandeza que o cuidador
+      // consegue ajustar e conferir com uma fita métrica.
+      //
+      // SEM FOV: cai na fração do frame. Não é equivalente, e é de propósito —
+      // inventar centímetros a partir de um FOV desconhecido alimentaria a
+      // conversão do erro para graus com um número que ninguém mediu.
+      const emCm = estimatedDistanceCm !== null;
+
+      // Banda sobre o valor ARREDONDADO, que é o mesmo que a mensagem exibe.
+      //
+      // Sem isto a tela pode dizer "50 cm" e no mesmo fôlego acusar "perto
+      // demais", porque o valor cru era 49,999999999999986 — a ida-e-volta
+      // px→cm carrega ~1e-14 de erro de ponto flutuante. Um veredito que
+      // contradiz o número ao lado dele é pior que veredito nenhum: o cuidador
+      // ajusta a posição tentando satisfazer uma regra invisível.
+      const cmExibido = emCm ? Math.round(estimatedDistanceCm) : 0;
+
+      const status = emCm
+        ? band(
+            cmExibido,
+            DISTANCIA_WARN_MIN_CM, DISTANCIA_OK_MIN_CM,
+            DISTANCIA_OK_MAX_CM, DISTANCIA_WARN_MAX_CM,
+          )
+        : band(
+            iodFraction,
+            IOD_FRACTION_FAIL_LOW, IOD_FRACTION_WARN_LOW,
+            IOD_FRACTION_WARN_HIGH, IOD_FRACTION_FAIL_HIGH,
+          );
+
+      const faixa = `${DISTANCIA_OK_MIN_CM}–${DISTANCIA_OK_MAX_CM} cm`;
+      const perto = emCm
+        ? cmExibido < DISTANCIA_OK_MIN_CM
+        : iodFraction > IOD_FRACTION_WARN_HIGH;
+      const longe = emCm
+        ? cmExibido > DISTANCIA_OK_MAX_CM
+        : iodFraction < IOD_FRACTION_WARN_LOW;
+
+      const medido = emCm ? `${cmExibido} cm` : null;
+
       checks.push({
-        id: 'distance', status, value: iodFraction,
-        message:
-          iodFraction < IOD_FRACTION_WARN_LOW
-            ? `Rosto pequeno no frame${dist}. Aproxime a CÂMERA do rosto — não a tela.${alvo}`
-            : iodFraction > IOD_FRACTION_WARN_HIGH
-            ? `Rosto muito grande no frame${dist}. Afaste um pouco a câmera.${alvo}`
-            : `Rosto bem dimensionado no frame${dist}.`,
+        id: 'distance',
+        status,
+        value: emCm ? estimatedDistanceCm : iodFraction,
+        message: emCm
+          ? perto
+            ? `Perto demais: ${medido}. Afaste-se até a faixa de ${faixa}.`
+            : longe
+            ? `Longe demais: ${medido}. Aproxime-se até a faixa de ${faixa}.`
+            : `Distância boa: ${medido}, dentro da faixa de ${faixa}.`
+          : longe
+          ? 'Rosto pequeno no frame. Aproxime a CÂMERA do rosto — não a tela.'
+          : perto
+          ? 'Rosto muito grande no frame. Afaste um pouco a câmera.'
+          : 'Rosto bem dimensionado no frame.',
       });
     }
 
@@ -394,19 +497,55 @@ export function evaluateReadiness(
 
     // ── reflexo (óculos) ───────────────────────────────────────────────────
     {
-      // Persistência distingue lente de brilho passageiro. Sem a janela
-      // (chamada com um frame só), cai no critério instantâneo antigo.
+      // O QUE SEPARA ÓCULOS DE REFLEXO NOCIVO É O MOVIMENTO, NÃO A PRESENÇA.
+      //
+      // Antes o veredito saía de `specularPersistence` — a fração de quadros
+      // com brilho alto. Para separar reflexo de ruído passageiro aquilo
+      // funciona. Para separar óculos de reflexo nocivo está invertido: o
+      // brilho fixo de uma lente aparece em TODOS os quadros, marca
+      // persistência ≈ 1,0 e dispara o aviso sempre — que era exatamente o
+      // falso positivo relatado. O usuário calibrava apesar do aviso e o erro
+      // saía normal, porque uma mancha parada não atrapalha: o detector
+      // enxerga em volta dela a sessão inteira.
+      //
+      // Uma mancha que se MOVE é outra coisa — algo entrando e saindo do olho,
+      // e é isso que faz o landmark da borda da íris escorregar.
       const persist = snap.specularPersistence;
-      const persistente = persist !== undefined
+      const estab = snap.specularStability;
+
+      const haBrilho = persist !== undefined
         ? persist > SPECULAR_PERSISTENCE
         : snap.specularRatio > SPECULAR_WARN;
-      const status: CheckStatus = persistente ? 'warn' : 'ok';
+
+      // Sem a medida de estabilidade, cai no critério antigo: um snapshot de
+      // código que ainda não preenche o campo não pode desligar a checagem.
+      const parado = estab !== undefined && estab >= ESPECULAR_ESTAVEL_MIN;
+      const incomoda = haBrilho && !parado;
+
+      // Brilho móvel acusa mesmo com persistência baixa: um reflexo que entra e
+      // sai é pouco persistente e muito nocivo — o caso que o critério antigo
+      // deixava passar.
+      const movelIntermitente =
+        estab !== undefined &&
+        estab < ESPECULAR_ESTAVEL_MIN &&
+        snap.specularRatio > SPECULAR_WARN;
+
+      const status: CheckStatus = incomoda || movelIntermitente ? 'warn' : 'ok';
+
+      const temBrilho = snap.specularRatio > SPECULAR_WARN || (persist ?? 0) > 0;
+
       checks.push({
-        id: 'glasses', status, value: persist ?? snap.specularRatio,
-        message: status === 'ok'
-          ? 'Sem reflexo persistente nos olhos.'
-          : `Reflexo em ${persist !== undefined ? `${(persist * 100).toFixed(0)}% dos frames` : 'cena'} — ` +
-            'assinatura de lente de óculos. Incline a tela ~10° para baixo ou reduza luzes atrás de você.',
+        id: 'glasses',
+        status,
+        value: estab ?? persist ?? snap.specularRatio,
+        message:
+          status === 'warn'
+            ? 'Reflexo se movendo sobre os olhos. Incline a tela ~10° para baixo ' +
+              'ou reduza luzes e janelas atrás de você.'
+            : parado && temBrilho
+              ? 'Reflexo fixo de lente de óculos — reconhecido e inofensivo: ' +
+                'por ficar parado, o rastreamento enxerga em volta dele.'
+              : 'Sem reflexo atrapalhando os olhos.',
       });
     }
 

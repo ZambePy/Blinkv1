@@ -224,12 +224,21 @@ describe('idealDistanceCm — "onde eu me sento?"', () => {
     expect(iod / videoWidth).toBeCloseTo(TARGET_IOD_FRACTION, 6);
   });
 
-  it('a mensagem de distância cita o alvo quando o FOV é conhecido', () => {
+  it('a mensagem de distância cita centímetros e a faixa quando o FOV é conhecido', () => {
+    // A mensagem mudou de propósito. Antes dizia "Posicione a CÂMERA a ~N cm",
+    // porque o critério era o tamanho do rosto no frame e a saída era mexer na
+    // webcam. Agora o critério é a distância da PESSOA, numa faixa medida em
+    // uso real (50–70 cm), e a mensagem diz onde ela está e para onde ir.
     const s = goodSnapshot({ iod: 127, videoWidth: 1280 });
     const semFov = evaluateReadiness(s).checks.find((c) => c.id === 'distance')!;
     const comFov = evaluateReadiness(s, { horizontalFovDeg: 90 }).checks.find((c) => c.id === 'distance')!;
-    expect(semFov.message).not.toMatch(/Posicione a câmera/);
-    expect(comFov.message).toMatch(/Posicione a câmera a ~\d+ cm/);
+
+    // Sem FOV não há centímetro para prometer.
+    expect(semFov.message).not.toMatch(/\d+\s*cm/);
+
+    expect(comFov.message).toMatch(/\d+\s*cm/);
+    expect(comFov.message).toMatch(/50/);
+    expect(comFov.message).toMatch(/70/);
   });
 });
 
@@ -284,11 +293,19 @@ describe('reflexo — persistência distingue lente de brilho passageiro', () =>
     expect(evaluateReadiness(s).measured.glassesLikely).toBe(false);
   });
 
-  it('reflexo na maioria dos frames acusa lente', () => {
+  it('reflexo na maioria dos frames acusa, quando não se sabe se está parado', () => {
+    // A MENSAGEM mudou de propósito. Antes dizia "assinatura de lente de
+    // óculos" como MOTIVO do aviso; hoje a assinatura de óculos é justamente o
+    // caso inócuo — ela é fixa, e o rastreamento enxerga em volta dela. O que
+    // merece aviso é reflexo que se MOVE.
+    //
+    // Sem a medida de estabilidade o critério antigo continua valendo, e é
+    // isso que este teste protege: um snapshot de código que ainda não
+    // preenche o campo não pode desligar a checagem.
     const s = goodSnapshot({ specularRatio: 0.05, specularPersistence: 0.65 });
     const c = evaluateReadiness(s).checks.find((x) => x.id === 'glasses')!;
     expect(c.status).toBe('warn');
-    expect(c.message).toMatch(/65% dos frames/);
+    expect(c.message).toMatch(/incline|luz|janela/i);
   });
 
   it('a agregação calcula a persistência por contagem, não por mediana', () => {

@@ -9,6 +9,7 @@ export const FramingIndicator: React.FC = () => {
     iod: number;
     faceCenter: { x: number; y: number };
     specularRatio?: number;
+    specularStability?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -61,11 +62,27 @@ export const FramingIndicator: React.FC = () => {
   const centerText = isCentered ? 'Alinhamento OK' : 'Centralize o rosto';
   const centerColor = isCentered ? '#22c55e' : '#eab308';
 
-  // 3. Reflexo (specularRatio)
-  // threshold: 0.02
-  // O reflexo especular pode não ter sido medido neste quadro.
+  // 3. Reflexo — só o que SE MOVE.
+  //
+  // A regra aqui era `specular > 0.02` quadro a quadro, sem janela nenhuma. Os
+  // outros consumidores do mesmo sinal exigem persistência: `calibration.ts`
+  // pede reflexo em >30% dos quadros do ponto, e documenta que "um único frame
+  // com specular alto é ruído (piscada de luz, cursor branco cruzando o crop)".
+  // Este componente ficou órfão desde que foi escrito, então ninguém tinha
+  // percebido que ele ignorava a regra do projeto.
+  //
+  // Além disso, presença de brilho não é o discriminador certo: uma mancha
+  // PARADA é a assinatura do próprio óculos, e o rastreamento enxerga em volta
+  // dela a sessão inteira — era o falso positivo relatado, em que o aviso
+  // aparecia e a calibração saía com erro normal. O que atrapalha é a mancha
+  // que se move.
   const specular = metrics.specularRatio;
-  const hasSpecularReflection = specular !== undefined && specular > 0.02;
+  const estabilidade = metrics.specularStability;
+  const hasSpecularReflection =
+    specular !== undefined &&
+    specular > 0.02 &&
+    estabilidade !== undefined &&
+    estabilidade < 0.6;
 
   return (
     <div style={containerStyle} className="framing-indicator-card">

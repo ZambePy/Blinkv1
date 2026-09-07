@@ -18,10 +18,26 @@ const CAPS_COMPLETA: CameraCapabilities = {
   focusMode: ['continuous'],
 };
 
+/**
+ * Rosto pequeno demais, ANCORADO NO ALVO.
+ *
+ * Era `0.099` — o valor real da gravação que deu 115 px de erro. Quando o alvo
+ * era 0,20 (≈32 cm), 0,099 era "pequeno demais" e servia de fixture.
+ *
+ * Com o alvo derivado da faixa de uso real (50–70 cm), 0,099 corresponde a
+ * ~65 cm: DENTRO da faixa, praticamente no alvo. Aquela gravação não estava
+ * longe demais — o alvo é que estava perto demais. Manter o número absoluto
+ * faria estes testes afirmarem "pequeno" sobre uma medida boa.
+ *
+ * Metade do alvo (~120 cm) é pequeno demais sob qualquer critério, e continua
+ * sendo se a faixa for reajustada.
+ */
+const IOD_PEQUENO_DEMAIS = TARGET_IOD_FRACTION * 0.5;
+
 const medido = (over: Partial<TuningMeasurement> = {}): TuningMeasurement => ({
   hasFace: true,
-  iodFraction: 0.099,   // o valor real da gravação que deu 115 px
-  brightness: 0.236,    // idem
+  iodFraction: IOD_PEQUENO_DEMAIS,
+  brightness: 0.236,    // valor real da gravação que deu 115 px
   contrast: 0.094,      // idem
   ...over,
 });
@@ -49,7 +65,7 @@ describe('planTuningStep — malha fechada do zoom', () => {
   });
 
   it('respeita o passo máximo por iteração (não salta para o alvo de uma vez)', () => {
-    // 0,099 → 0,20 pediria zoom 2,02×. O amortecimento limita a +25%.
+    // Metade do alvo pediria zoom 2×. O amortecimento limita a +25%.
     const s = planTuningStep(CAPS_COMPLETA, { zoom: 1 }, medido());
     expect(s.constraints.zoom).toBeLessThanOrEqual(1.25 + 1e-9);
   });
@@ -57,7 +73,7 @@ describe('planTuningStep — malha fechada do zoom', () => {
   it('converge iterando — a malha alcança o alvo em poucos passos', () => {
     // Simula o driver: zoom escala linearmente o tamanho do rosto no frame.
     let zoom = 1;
-    const iodBase = 0.099;
+    const iodBase = IOD_PEQUENO_DEMAIS;
     let passos = 0;
     for (; passos < 30; passos++) {
       const m = noAlvo({ iodFraction: iodBase * zoom });
@@ -83,7 +99,7 @@ describe('planTuningStep — malha fechada do zoom', () => {
 
   it('snap ao step do driver', () => {
     const caps: CameraCapabilities = { zoom: { min: 1, max: 4, step: 0.5 } };
-    const s = planTuningStep(caps, { zoom: 1 }, noAlvo({ iodFraction: 0.099 }));
+    const s = planTuningStep(caps, { zoom: 1 }, noAlvo({ iodFraction: IOD_PEQUENO_DEMAIS }));
     expect([1, 1.5].includes(s.constraints.zoom as number)).toBe(true);
   });
 });

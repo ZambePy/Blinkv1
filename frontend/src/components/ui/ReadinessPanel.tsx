@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useGaze } from '../../context/GazeContext';
+import { useSettings } from '../../context/SettingsContext';
 import { evaluateReadiness, type ReadinessReport } from '@tracker/setupReadiness';
 import { snapshotFromDiagnostics, lerViewport } from '@tracker/setupReadinessAdapter';
 import { guardarProntidao } from '../../ultimaProntidao';
@@ -34,6 +35,7 @@ export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void
   onReadyChange,
 }) => {
   const { getDiagnostics } = useGaze();
+  const { settings } = useSettings();
   const [report, setReport] = useState<ReadinessReport | null>(null);
   const [medindo, setMedindo] = useState(true);
 
@@ -48,6 +50,8 @@ export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void
   diagRef.current = getDiagnostics;
   const readyCbRef = useRef(onReadyChange);
   readyCbRef.current = onReadyChange;
+  const fovRef = useRef(settings.cameraHorizontalFovDeg);
+  fovRef.current = settings.cameraHorizontalFovDeg;
   useEffect(() => {
     // 2 Hz: a avaliação é barata, mas atualizar a 30 Hz faria os textos
     // piscarem e ninguém consegue ler.
@@ -60,7 +64,13 @@ export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void
         return;
       }
       setMedindo(false);
-      const r = evaluateReadiness(snap);
+      // Sem o FOV a checagem de distancia nao devolve centimetros e cai na
+      // fracao do frame. `cameraHorizontalFovDeg` ja vem preenchido por
+      // padrao — os centimetros eram calculaveis o tempo todo e simplesmente
+      // nao chegavam a esta tela.
+      const r = evaluateReadiness(snap, {
+        horizontalFovDeg: fovRef.current,
+      });
       setReport(r);
       // O relatório de precisão lê daqui para gravar iluminação, postura e
       // óculos MEDIDOS em vez dos valores hardcoded que saíam antes.

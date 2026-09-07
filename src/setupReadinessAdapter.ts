@@ -54,6 +54,7 @@ export function snapshotFromDiagnostics(
     contrast,
     detectorConfidence,
     specularRatio,
+    specularStability: d.framing.specularStability,
     viewportWidth: viewport.viewportWidth,
     viewportHeight: viewport.viewportHeight,
     screenWidth: viewport.screenWidth,

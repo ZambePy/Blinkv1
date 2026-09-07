@@ -71,10 +71,66 @@ const LANDMARK_JITTER_SCALE = 20;
 // positivos em pele muito clara aparecerem em campo.
 const SPECULAR_LUMINANCE = 0.95;
 
+/**
+ * Quanto a mancha de brilho FICA PARADA entre dois quadros — a medida que
+ * separa assinatura de óculos de reflexo que atrapalha.
+ *
+ * ## Por que `specularPersistence` não servia
+ *
+ * A persistência (fração de quadros com brilho alto) foi criada para separar
+ * reflexo de ruído passageiro, e faz isso bem. Para separar óculos de reflexo
+ * nocivo, porém, ela está **invertida**: um brilho fixo na armação ou na lente
+ * aparece em TODOS os quadros, marca persistência ≈ 1,0 e dispara o aviso
+ * sempre. Era o falso positivo relatado — o sistema acusava reflexo, a
+ * calibração era feita assim mesmo, e o erro saía normal.
+ *
+ * ## O que de fato distingue
+ *
+ * Uma mancha **parada** é o próprio óculos: o detector aprende a enxergar em
+ * volta dela e o landmark não escorrega. Uma mancha que **se move** é algo
+ * entrando e saindo do olho — janela, luminária, tela refletida — e é isso que
+ * estraga a borda da íris.
+ *
+ * Devolve a razão de Jaccard entre as duas máscaras: 1 = imóvel, 0 = não se
+ * sobrepõem.
+ *
+ * Sem brilho nenhum devolve 1 (não há mancha, logo nada instável) e sem quadro
+ * anterior devolve 1 (um quadro só não mostra movimento). Os dois defaults
+ * apontam para "não avisar": um falso positivo no primeiro quadro reapareceria
+ * a cada boot.
+ */
+export const ESPECULAR_ESTAVEL_MIN = 0.6;
+
+export function estabilidadeEspecular(
+  atual: Uint8Array,
+  anterior: Uint8Array | null,
+): number {
+  // O crop periocular muda de tamanho conforme a bbox do rosto; comparar
+  // tamanhos diferentes não diz nada sobre movimento.
+  if (!anterior || anterior.length !== atual.length) return 1;
+
+  let intersecao = 0;
+  let uniao = 0;
+  for (let i = 0; i < atual.length; i++) {
+    const a = atual[i] !== 0;
+    const b = anterior[i] !== 0;
+    if (a && b) intersecao++;
+    if (a || b) uniao++;
+  }
+
+  // Nenhum pixel saturado nos dois quadros: não há mancha para chamar de
+  // instável.
+  return uniao === 0 ? 1 : intersecao / uniao;
+}
+
 export class EyeQualityAnalyzer {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private lastLandmarks: Point3D[] | null = null;
+  /** Máscara de brilho do quadro corrente. Reusada; só cresce. */
+  private specularMask: Uint8Array | null = null;
+  /** Máscara do quadro anterior, para medir se a mancha se move. */
+  private specularMaskAnterior: Uint8Array | null = null;
 
   /**
    * Solta o canvas em resolução plena de vídeo.
@@ -127,8 +183,6 @@ export class EyeQualityAnalyzer {
       this.canvas = document.createElement('canvas');
       this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
     }
-    if (this.canvas.width !== vw) this.canvas.width = vw;
-    if (this.canvas.height !== vh) this.canvas.height = vh;
     if (!this.ctx) {
       // Sem contexto 2d nada foi medido. Devolver constantes plausíveis
       // afirmaria confiança máxima e passaria nos critérios do gate de
@@ -187,8 +241,24 @@ export class EyeQualityAnalyzer {
     this.lastLandmarks = landmarks;
 
     try {
-      this.ctx.drawImage(video, 0, 0, vw, vh);
-      const imageData = this.ctx.getImageData(cropX, cropY, cropW, cropH);
+      // Desenha SÓ a região periocular, não o quadro inteiro.
+      //
+      // O código anterior copiava 1920×1080 (~2 M pixels) para o canvas a cada
+      // quadro e depois lia um retângulo de ~200×80. A cópia era ~100× maior
+      // que o dado usado, e acontecia 30 vezes por segundo no thread
+      // principal — parte do custo que aparecia como `quality ~10-12 ms` no
+      // HUD e derrubava o fps quando algo mais disputava a CPU.
+      //
+      // O mapeamento é 1:1 (mesmo tamanho na origem e no destino), então não
+      // há reamostragem: os pixels lidos são os mesmos de antes.
+      //
+      // O canvas só CRESCE. Reatribuir width/height realoca o buffer e limpa o
+      // conteúdo; com a bbox variando alguns pixels por quadro, redimensionar
+      // sempre traria de volta parte do custo que estamos removendo.
+      if (this.canvas.width < cropW) this.canvas.width = cropW;
+      if (this.canvas.height < cropH) this.canvas.height = cropH;
+      this.ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+      const imageData = this.ctx.getImageData(0, 0, cropW, cropH);
       const data = imageData.data;
       const N = cropW * cropH;
       if (N === 0) {
@@ -203,6 +273,16 @@ export class EyeQualityAnalyzer {
       // Contagem de pixels quase-saturados feita no mesmo loop (custo zero).
       // specularRatio = fração acima de SPECULAR_LUMINANCE.
       let specularCount = 0;
+      // Máscara de brilho do quadro, para comparar com a do quadro anterior.
+      // Sai de graça: o `if` que conta já existe, e o buffer só cresce — pelo
+      // mesmo motivo do canvas, realocar a cada quadro traria de volta o custo
+      // que a otimização do crop removeu.
+      if (!this.specularMask || this.specularMask.length < N) {
+        this.specularMask = new Uint8Array(N);
+      }
+      const mask = this.specularMask;
+      mask.fill(0, 0, N);
+
       for (let i = 0; i < N; i++) {
         const r = data[i * 4];
         const g = data[i * 4 + 1];
@@ -211,10 +291,24 @@ export class EyeQualityAnalyzer {
         const l = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255;
         lum[i] = l;
         sum += l;
-        if (l > SPECULAR_LUMINANCE) specularCount++;
+        if (l > SPECULAR_LUMINANCE) {
+          specularCount++;
+          mask[i] = 1;
+        }
       }
       const brightnessEstimate = sum / N;
       const specularRatio = specularCount / N;
+
+      // Estabilidade: mancha parada = assinatura do próprio óculos (o detector
+      // enxerga em volta dela); mancha que se move = reflexo entrando e saindo
+      // do olho, que é o que estraga a borda da íris.
+      const atual = mask.subarray(0, N);
+      const specularStability = estabilidadeEspecular(atual, this.specularMaskAnterior);
+      // Cópia, e não referência: `mask` é reusada no próximo quadro.
+      if (!this.specularMaskAnterior || this.specularMaskAnterior.length !== N) {
+        this.specularMaskAnterior = new Uint8Array(N);
+      }
+      this.specularMaskAnterior.set(atual);
       let varSum = 0;
       for (let i = 0; i < N; i++) {
         const d = lum[i] - brightnessEstimate;
@@ -248,7 +342,14 @@ export class EyeQualityAnalyzer {
         blurEstimate = blurFromVariance(lapVar, vw, vh);
       }
 
-      return { detectorConfidence, brightnessEstimate, contrastEstimate, blurEstimate, specularRatio };
+      return {
+        detectorConfidence,
+        brightnessEstimate,
+        contrastEstimate,
+        blurEstimate,
+        specularRatio,
+        specularStability,
+      };
     } catch (_) {
       // Canvas taint (raro, mas possível com camera stream cross-origin) — devolve confidence apenas.
       return { detectorConfidence };
