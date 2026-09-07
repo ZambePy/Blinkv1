@@ -202,5 +202,82 @@
       "save": "Criar perfil",
       "cancel": "Cancelar"
     }
+  },
+  "setup": {
+    "title": "Preparo do ambiente",
+    "stepOf": "Passo {{atual}} de {{total}}",
+    "back": "Voltar",
+    "next": "Continuar",
+    "finish": "Concluir preparo",
+    "skip": "Pular por enquanto",
+    "steps": {
+      "permissao": "Câmera",
+      "camera": "Dispositivo",
+      "posicionamento": "Posição",
+      "iluminacao": "Luz",
+      "monitor": "Monitor"
+    },
+    "permissao": {
+      "title": "O IrisFlow precisa da câmera",
+      "why": "A câmera é o que permite ao paciente controlar o computador com o olhar. Ela fica ligada durante o uso.",
+      "privacy": "A imagem nunca sai deste computador. Nada é gravado nem enviado — o vídeo é processado aqui e descartado quadro a quadro.",
+      "patient": "O paciente não precisa fazer nada agora. Este preparo é seu.",
+      "grant": "Permitir o uso da câmera",
+      "granted": "Câmera liberada.",
+      "checking": "Abrindo a câmera…",
+      "deniedTitle": "O Windows está bloqueando a câmera",
+      "deniedBody": "A permissão não é do IrisFlow, é do sistema. Abra as Configurações do Windows no caminho abaixo, ligue o acesso à câmera e volte aqui.",
+      "deniedPath": "Configurações → Privacidade e segurança → Câmera",
+      "retry": "Tentar de novo"
+    },
+    "camera": {
+      "title": "Qual câmera usar",
+      "lead": "Se houver mais de uma, escolha a que fica de frente para o paciente.",
+      "measuring": "Medindo o que esta câmera entrega…",
+      "resolution": "Resolução",
+      "fps": "Quadros por segundo",
+      "declared": "a câmera declara {{fps}}",
+      "none": "Nenhuma câmera encontrada. Conecte uma webcam e tente de novo.",
+      "reload": "Procurar de novo",
+      "fpsBoa": "Taxa boa. O rastreamento roda como foi projetado.",
+      "fpsBaixa": "Taxa baixa. Vai funcionar, com precisão um pouco pior — o sistema foi ajustado para 30 quadros por segundo.",
+      "fpsRuim": "Taxa muito baixa. Dá para usar, mas o olhar vai responder devagar. Uma webcam melhor resolveria.",
+      "neverBlocks": "Isto é um aviso, não um impedimento: você pode continuar com qualquer câmera."
+    },
+    "posicionamento": {
+      "title": "Posição do paciente",
+      "lead": "Ajuste antes de calibrar. O que for corrigido agora não precisa ser corrigido em cada uso.",
+      "distance": "Distância até a tela",
+      "distanceUnknown": "medindo…",
+      "screenHeight": "Altura da tela",
+      "screenHeightHint": "O topo da tela na altura dos olhos, ou pouco abaixo. Não dá para medir isto pela câmera — é conferência sua.",
+      "holdTitle": "Segure a posição",
+      "holdBody": "O botão libera depois de {{segundos}} segundos seguidos com tudo em verde.",
+      "holding": "Segurando… {{segundos}}s",
+      "lost": "Saiu da posição. A contagem recomeça.",
+      "ready": "Posição estável."
+    },
+    "iluminacao": {
+      "title": "Luz do ambiente",
+      "lead": "A luz certa vale mais que uma webcam cara.",
+      "luxLabel": "Luz ambiente medida (lux)",
+      "luxOptional": "opcional",
+      "luxPlaceholder": "ex.: 320",
+      "luxWhy": "Se você tiver um luxímetro (há aplicativos de celular), anote aqui. A verificação automática mede o brilho do olho depois do ajuste automático da webcam, então ela aprova até uma sala escura — só o valor medido torna a sessão comparável com outra.",
+      "luxSkip": "Sem medidor? Deixe em branco e siga."
+    },
+    "monitor": {
+      "title": "Tamanho do monitor",
+      "lead": "É deste número que sai a conversão de pixels para graus no relatório de precisão.",
+      "fromEdid": "Lido do monitor: {{polegadas}} polegadas.",
+      "fromEdidConfirm": "Confere?",
+      "noEdid": "O sistema não informou o tamanho deste monitor.",
+      "noEdidWhy": "Sem o valor real, o erro angular do relatório vira estimativa. Meça a diagonal da área de imagem — canto a canto, sem a moldura.",
+      "diagonalLabel": "Diagonal em polegadas",
+      "diagonalPlaceholder": "ex.: 23.6",
+      "invalid": "Informe um número entre 10 e 60.",
+      "manual": "Corrigir à mão",
+      "useEdid": "Usar o valor lido"
+    }
   }
 }

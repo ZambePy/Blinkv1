@@ -202,5 +202,82 @@
       "save": "Create profile",
       "cancel": "Cancel"
     }
+  },
+  "setup": {
+    "title": "Environment setup",
+    "stepOf": "Step {{atual}} of {{total}}",
+    "back": "Back",
+    "next": "Continue",
+    "finish": "Finish setup",
+    "skip": "Skip for now",
+    "steps": {
+      "permissao": "Camera",
+      "camera": "Device",
+      "posicionamento": "Position",
+      "iluminacao": "Light",
+      "monitor": "Monitor"
+    },
+    "permissao": {
+      "title": "IrisFlow needs your camera",
+      "why": "The camera is what lets the patient control the computer with their eyes. It stays on while the app is in use.",
+      "privacy": "The image never leaves this computer. Nothing is recorded or uploaded — video is processed here and discarded frame by frame.",
+      "patient": "The patient doesn't need to do anything yet. This setup is for you.",
+      "grant": "Allow camera access",
+      "granted": "Camera ready.",
+      "checking": "Opening the camera…",
+      "deniedTitle": "Windows is blocking the camera",
+      "deniedBody": "This permission belongs to the system, not to IrisFlow. Open Windows Settings at the path below, turn camera access on, and come back.",
+      "deniedPath": "Settings → Privacy & security → Camera",
+      "retry": "Try again"
+    },
+    "camera": {
+      "title": "Which camera to use",
+      "lead": "If there is more than one, pick the one facing the patient.",
+      "measuring": "Measuring what this camera delivers…",
+      "resolution": "Resolution",
+      "fps": "Frames per second",
+      "declared": "the camera claims {{fps}}",
+      "none": "No camera found. Connect a webcam and try again.",
+      "reload": "Search again",
+      "fpsBoa": "Good rate. Tracking runs as designed.",
+      "fpsBaixa": "Low rate. It will work, with slightly worse accuracy — the system is tuned for 30 frames per second.",
+      "fpsRuim": "Very low rate. Usable, but gaze will respond slowly. A better webcam would fix this.",
+      "neverBlocks": "This is a warning, not a blocker: you can continue with any camera."
+    },
+    "posicionamento": {
+      "title": "Patient position",
+      "lead": "Get this right before calibrating. What you fix now you won't fix at every session.",
+      "distance": "Distance to the screen",
+      "distanceUnknown": "measuring…",
+      "screenHeight": "Screen height",
+      "screenHeightHint": "Top of the screen at eye level, or slightly below. The camera can't measure this — it's yours to check.",
+      "holdTitle": "Hold the position",
+      "holdBody": "The button unlocks after {{segundos}} seconds with everything green.",
+      "holding": "Holding… {{segundos}}s",
+      "lost": "Position lost. The count starts over.",
+      "ready": "Position stable."
+    },
+    "iluminacao": {
+      "title": "Room lighting",
+      "lead": "The right light is worth more than an expensive webcam.",
+      "luxLabel": "Measured ambient light (lux)",
+      "luxOptional": "optional",
+      "luxPlaceholder": "e.g. 320",
+      "luxWhy": "If you have a lux meter (phone apps work), note it here. The automatic check measures eye brightness after the webcam's auto-exposure, so it will pass even a dark room — only a measured value makes this session comparable to another.",
+      "luxSkip": "No meter? Leave it blank and carry on."
+    },
+    "monitor": {
+      "title": "Monitor size",
+      "lead": "This number is what converts pixels into degrees in the accuracy report.",
+      "fromEdid": "Read from the monitor: {{polegadas}} inches.",
+      "fromEdidConfirm": "Is that right?",
+      "noEdid": "The system did not report this monitor's size.",
+      "noEdidWhy": "Without the real value, the report's angular error becomes an estimate. Measure the diagonal of the image area — corner to corner, excluding the bezel.",
+      "diagonalLabel": "Diagonal in inches",
+      "diagonalPlaceholder": "e.g. 23.6",
+      "invalid": "Enter a number between 10 and 60.",
+      "manual": "Correct by hand",
+      "useEdid": "Use the value read"
+    }
   }
 }
