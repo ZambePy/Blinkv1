@@ -4,7 +4,8 @@ import { buildContextKeyFrom } from './calibration';
 // A chave de contexto do perfil salvo precisa usar o VIEWPORT (onde o modelo
 // foi treinado), não a resolução do monitor, e codificar toda flag que muda o
 // vetor de features ou o alvo (`polynomialFeatures`, `geometricPoseCompensation`,
-// `expandFactor`); caso contrário um perfil incompatível carrega em silêncio.
+// `expandFactor`, `l2csInputSize`); caso contrário um perfil incompatível
+// carrega em silêncio.
 
 /** Contexto de referência: viewport 1280×800, flags de produção. */
 const BASE = {
@@ -15,6 +16,7 @@ const BASE = {
   polynomialFeatures: true,
   geometricPoseCompensation: true,
   expandFactor: 1.4,
+  l2csInputSize: 448,
 } as const;
 
 describe('a chave do perfil usa o viewport, não a resolução do monitor', () => {
@@ -64,6 +66,16 @@ describe('a chave codifica todas as flags que mudam o vetor ou o alvo', () => {
       .not.toBe(buildContextKeyFrom({ ...BASE, expandFactor: 1.6 }));
   });
 
+  it('l2csInputSize entra na chave — invisível como o expandFactor', () => {
+    // 224 e 448 são o mesmo modelo com outra resolução de entrada: o bloco
+    // angular sai com VALORES diferentes para o mesmo rosto, e a dimensão do
+    // vetor não muda (`FEATURE_VECTOR_ID` continua 'irisCore+l2cs:6'). Sem
+    // estar na chave, um perfil treinado em `?l2cs=448` carrega numa sessão
+    // aberta em `?l2cs=224` sem nenhum erro e prediz deslocado.
+    expect(buildContextKeyFrom({ ...BASE }))
+      .not.toBe(buildContextKeyFrom({ ...BASE, l2csInputSize: 224 }));
+  });
+
   it('featureVectorId continua na chave', () => {
     expect(buildContextKeyFrom({ ...BASE }))
       .not.toBe(buildContextKeyFrom({ ...BASE, featureVectorId: 'irisCore:4' }));
@@ -88,6 +100,7 @@ describe('nenhuma flag do vetor pode ser esquecida em silêncio', () => {
       { polynomialFeatures: false },
       { geometricPoseCompensation: false },
       { expandFactor: 1.5 },
+      { l2csInputSize: 224 },
     ];
     for (const v of variacoes) {
       expect(

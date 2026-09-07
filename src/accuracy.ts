@@ -9,11 +9,11 @@
 import {
   mapGaze, getCalibrationTargets,
   getCalibrationFitDiagnostics, getDistanceRange, getCalibrationDistancesCm,
+  getCurrentCameraDistanceCm, getCalibrationTimestampMs,
 } from './calibration';
 import { REGRESSOR_MODE } from './gazeRegressor';
 import { experimentSnapshot } from './config/experiment';
-import { ACCLIMATION_MS, COLLECTION_MS } from './accuracyProtocol';
-import { esperarPintura } from './aguardarPintura';
+import { ACCLIMATION_MS, COLLECTION_MS, MIN_VALID_SAMPLE_RATIO, quadrosEsperados } from './accuracyProtocol';
 import { ACTIVE_FEATURE_SET, l2csSlotsInSet } from './extractor';
 
 /** Amostras mínimas para um ponto contar como medido. Abaixo disto a média do
@@ -97,6 +97,23 @@ export interface AccuracyResult {
   /** Diferença entre a pose média da CALIBRAÇÃO e a pose média do TESTE, em
    *  graus. É o número que explica um viés uniforme. */
   poseDeltaCalibToTestDeg?: { yaw: number; pitch: number; roll: number };
+  /** BCEA(68%) média dos pontos interiores, em px² e em graus². */
+  bceaPx2: number | null;
+  bceaDeg2: number | null;
+  /** Fração de amostras válidas na janela útil, média dos pontos medidos. */
+  fracaoDeAmostrasValidas: number | null;
+  /** Pontos cuja fração ficou abaixo do mínimo do protocolo. */
+  pontosComPoucaAmostra: string[];
+  /**
+   * Lado mínimo de um alvo quadrado que acomoda o erro deste usuário,
+   * `2 · (offset + 2σ)` (Feit et al., 2017) — a medição virando requisito de
+   * interface. Em px e em graus.
+   */
+  alvoMinimoPx: number | null;
+  alvoMinimoDeg: number | null;
+  /** Distância olho→CÂMERA medida durante o teste (mediana e faixa), em cm.
+   *  Não é a olho→tela de `meta.distanciaCm`, que é digitada. */
+  distanciaMedidaCm: { mediana: number; min: number; max: number } | null;
 }
 
 /** Condição da sessão, preenchida pela UI e gravada junto do resultado. */
@@ -110,6 +127,28 @@ export interface RunMeta {
   observacoes?: string;
   /** Distância olho→tela em cm, usada para converter px em graus. */
   distanciaCm: number;
+  /**
+   * Iluminância do ambiente em lux. **Fora do protocolo desde 2026-09-06.**
+   *
+   * O campo permanece no schema porque relatórios antigos podem trazê-lo, e
+   * porque a limitação que ele documenta continua real: sem lux, uma sessão
+   * nossa não é reproduzível por terceiros, e o binário `iluminacao` não
+   * cobre a lacuna — ele mede o recorte do olho DEPOIS da exposição
+   * automática, então aprova uma sala escura. Ver a seção "Limitações
+   * assumidas" do `docs/MEDICOES.md`.
+   */
+  luxAmbiente?: number | null;
+  /**
+   * Ordinal da rodada contra a MESMA calibração: 1 = logo após treinar,
+   * 2 = repetição ~10 min depois sem recalibrar, 3+ = as seguintes.
+   *
+   * Derivado do instante do treino (`getCalibrationTimestampMs`), não
+   * digitado. Ausente quando não há calibração ativa — um teste sem modelo
+   * não pertence a bloco nenhum. O número passou de `1 | 2` para `number`
+   * porque uma terceira rodada acontece na prática, e gravá-la como "2"
+   * corromperia justamente a comparação que os blocos existem para fazer.
+   */
+  blocoDeMedicao?: number;
   /** Diagonal física do monitor em polegadas. */
   telaPolegadas: number;
   /** De onde veio `telaPolegadas`: `default` é o hardcode de 23,6″. */
@@ -253,6 +292,69 @@ export function geometriaFoiMedida(source: ScreenGeometrySource | null | undefin
  * tela a `distPx` de distância. Usa os vetores reais (não `atan(erro/d)`), então
  * o mesmo erro em px vale menos graus na periferia, como deve.
  */
+/**
+ * BCEA — área da elipse que contém `p` das amostras (68% por convenção).
+ *
+ * Complementa o desvio-padrão porque enxerga a FORMA da dispersão: o erro
+ * vertical do pipeline é sistematicamente maior que o horizontal, e uma única
+ * medida escalar de dispersão esconde isso. Fórmula usual da literatura de
+ * qualidade de dado: `BCEA = 2 k π σx σy √(1 − ρ²)`, com `k = −ln(1 − p)`.
+ */
+export function bcea(
+  xs: readonly number[],
+  ys: readonly number[],
+  p = 0.68,
+): number | null {
+  const n = Math.min(xs.length, ys.length);
+  if (n < 3) return null;
+  let mx = 0, my = 0;
+  for (let i = 0; i < n; i++) { mx += xs[i]; my += ys[i]; }
+  mx /= n; my /= n;
+  let sxx = 0, syy = 0, sxy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx, dy = ys[i] - my;
+    sxx += dx * dx; syy += dy * dy; sxy += dx * dy;
+  }
+  const varX = sxx / (n - 1), varY = syy / (n - 1);
+  const sdX = Math.sqrt(varX), sdY = Math.sqrt(varY);
+  if (!(sdX > 0) || !(sdY > 0)) return 0;
+  const rho = Math.max(-1, Math.min(1, (sxy / (n - 1)) / (sdX * sdY)));
+  const k = -Math.log(1 - p);
+  const area = 2 * k * Math.PI * sdX * sdY * Math.sqrt(Math.max(0, 1 - rho * rho));
+  return Number.isFinite(area) ? area : null;
+}
+
+/**
+ * Tamanho mínimo de alvo que acomoda o erro medido deste usuário:
+ * `S = 2 · (offset + 2σ)` (Feit et al., CHI 2017).
+ *
+ * É a tradução direta da medição em requisito de interface — e o número que
+ * de fato importa para quem depende do dwell para se comunicar.
+ */
+export function tamanhoMinimoDeAlvo(offset: number | null, sigma: number | null): number | null {
+  if (offset === null || sigma === null) return null;
+  if (!Number.isFinite(offset) || !Number.isFinite(sigma)) return null;
+  return 2 * (offset + 2 * sigma);
+}
+
+/** Embaralha uma lista de forma determinística a partir de uma semente. */
+export function embaralharComSemente<T>(itens: readonly T[], semente: number): T[] {
+  const out = itens.slice();
+  let s = semente >>> 0;
+  const rnd = () => {
+    // xorshift32: determinístico e suficiente para ordenar 13 pontos.
+    s ^= s << 13; s >>>= 0;
+    s ^= s >> 17;
+    s ^= s << 5; s >>>= 0;
+    return s / 4294967296;
+  };
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(rnd() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
 export function erroAngularDeg(
   alvo: { x: number; y: number },
   pred: { x: number; y: number },
@@ -286,7 +388,13 @@ interface PointDiagnostic {
   sdY: number;
   s2sRMS: number;
   jitterFilteredRMS?: number;
+  /** Área da elipse de 68% das amostras, em px². */
+  bceaPx2?: number;
   nSamples: number;
+  /** Quadros esperados na janela útil, pela taxa efetiva medida no ponto. */
+  nEsperado?: number;
+  /** Fração de amostras válidas: `nSamples / nEsperado`. */
+  fracaoValida?: number;
   name: string;
   samplesError: number[];
   meanPose?: { yaw: number; pitch: number; roll: number };
@@ -309,7 +417,8 @@ const VALIDATION_POINTS = [
 ];
 
 // Quatro cantos a 5/95: extrapolação em X, onde a UI de fato põe botões. Só
-// quatro porque cada ponto custa ~1,7 s a um paciente com fadiga limitante.
+// quatro porque cada ponto custa ~2,3 s (COLLECTION_MS + a pausa de 300 ms) a
+// um paciente com fadiga limitante.
 const EDGE_POINTS = [
   { name: 'B1', screenX: 0.05, screenY: 0.05 },
   { name: 'B2', screenX: 0.95, screenY: 0.05 },
@@ -325,6 +434,16 @@ const ALL_VALIDATION_POINTS = [
 /** Distância olho–tela assumida quando a UI não informa geometria (60 cm a 96 dpi). */
 const ASSUMED_DIST_PX = 2268;
 
+/**
+ * Quanto tempo sem um quadro antes de considerar a cadeia de `requestAnimationFrame`
+ * parada. A coleta vive dentro dela; se ela morre — uma exceção num quadro, a
+ * aba perdendo o compositor, o worker travando o thread — o teste ficava preso
+ * numa tela preta para sempre, sem nada a fazer além de recarregar o app.
+ */
+const STALL_MS = 3000;
+/** Quantas paradas seguidas antes de encerrar o teste com o que já foi medido. */
+const STALL_MAX = 3;
+
 let currentFeaturesLeft: number[] = [];
 let currentFeaturesRight: number[] = [];
 let currentPose: { yaw: number; pitch: number; roll: number } | undefined;
@@ -337,32 +456,6 @@ let currentFiltered: { x: number; y: number; seq: number } | null = null;
 export let isAccuracyTesting = false;
 
 let currentValidationTarget: { xPx: number; yPx: number; label: string } | null = null;
-
-/** Overlay do teste em curso, para o abort conseguir removê-lo. */
-let activeAccuracyOverlay: HTMLDivElement | null = null;
-
-/**
- * Encerra um teste de precisão em curso sem produzir relatório.
- *
- * `isAccuracyTesting` só voltava a `false` na conclusão bem-sucedida. Sair da
- * tela no meio deixava a flag ligada para o resto da sessão, e com ela
- * `medicaoEmAndamento()` — que esconde o HUD de debug e o painel de preflight.
- * O operador perdia o preflight justamente entre uma rodada de medição e a
- * seguinte, que é quando o protocolo exige conferi-lo. Mesmo modo de falha que
- * o `isCalibrating` preso, que já tinha abort no unmount.
- *
- * Idempotente: chamar sem teste em curso não faz nada.
- */
-export function abortAccuracyTest(): void {
-  if (!isAccuracyTesting) return;
-  // Os laços de `runNextPoint`/`collect` leem esta flag e param de reagendar.
-  isAccuracyTesting = false;
-  currentValidationTarget = null;
-  document.getElementById('accuracy-dot')?.remove();
-  activeAccuracyOverlay?.remove();
-  activeAccuracyOverlay = null;
-  console.warn('[accuracy] teste interrompido — nenhum relatório gerado.');
-}
 
 export function getCurrentTargetPx(): { xPx: number; yPx: number; label: string } | null {
   return currentValidationTarget;
@@ -405,29 +498,97 @@ export function startAccuracyTest(
       `pontos mede memorização, não generalização.`,
     );
   }
+  // Ordem sorteada: em ordem fixa o participante antecipa o próximo alvo e a
+  // sacada antecipatória se mistura ao efeito de excentricidade. A semente vai
+  // no relatório para a rodada ser reproduzível.
+  const sementeDaOrdem = (Date.now() ^ (Math.random() * 0xffffffff)) >>> 0;
+  const pontosDaRodada = embaralharComSemente(ALL_VALIDATION_POINTS, sementeDaOrdem);
+
   const overlay = createAccuracyOverlay();
-  activeAccuracyOverlay = overlay;
   let pointIndex = 0;
   const pointErrors: number[] = [];
   const diagnostics: PointDiagnostic[] = [];
   let poseBaseline: { yaw: number; pitch: number; roll: number } | null = null;
 
+  // Vigia da cadeia de quadros. `setInterval` continua sendo entregue quando o
+  // rAF para, então é ele quem percebe a parada e devolve o controle.
+  let ultimoTickMs = performance.now();
+  let quadrosComErro = 0;
+  /** Distância olho→CÂMERA medida a cada amostra aceita (é o que
+   *  `getCurrentCameraDistanceCm` estima, a partir da distância cantal em px e
+   *  do FOV). Grandeza DIFERENTE da olho→tela digitada pelo cuidador, que é a
+   *  que converte px em graus — ver `distanceCompensation.ts`. Vai ao relatório
+   *  como testemunha de quanto a pessoa se moveu, não para confirmar a outra. */
+  const distanciasDoTeste: number[] = [];
+  let paradas = 0;
+  let quadroPendente: (() => void) | null = null;
+  let encerrado = false;
+
+  /** Só o agendamento MAIS RECENTE pode rodar. O vigia reagenda um quadro que
+   *  o navegador ainda não entregou; quando ele volta a entregar (rAF apenas
+   *  atrasado, não morto — GC longo, aba que volta do segundo plano), os DOIS
+   *  callbacks disparam e o mesmo `collect` roda duas vezes, abrindo duas
+   *  cadeias de coleta sobre o mesmo `pointIndex`: pontos duplicados no
+   *  relatório, pontos pulados na tela. */
+  let quadroAtual = 0;
+  function agendarQuadro(fn: () => void) {
+    quadroPendente = fn;
+    const meuQuadro = ++quadroAtual;
+    requestAnimationFrame(() => {
+      if (encerrado || meuQuadro !== quadroAtual) return;
+      quadroPendente = null;
+      fn();
+    });
+  }
+
+  const vigia = setInterval(() => {
+    if (encerrado) { clearInterval(vigia); return; }
+    const parado = performance.now() - ultimoTickMs;
+    if (parado < STALL_MS) return;
+    paradas++;
+    ultimoTickMs = performance.now();
+    console.warn(
+      `[accuracy] sem quadros há ${Math.round(parado)} ms (parada ${paradas}/${STALL_MAX}).`,
+    );
+    if (paradas >= STALL_MAX || !quadroPendente) {
+      encerrarPorFalha('o navegador parou de entregar quadros durante o teste');
+      return;
+    }
+    // Uma tentativa de retomar: o quadro pendente é reagendado. Por
+    // `agendarQuadro` de propósito — é ele quem invalida o agendamento
+    // anterior e mantém `quadroPendente` preenchido, para a parada seguinte
+    // ainda contar como parada (e não como "não há o que retomar").
+    agendarQuadro(quadroPendente);
+  }, 1000);
+
+  /** Encerra o teste com o que foi medido até aqui, dizendo por quê. */
+  function encerrarPorFalha(motivo: string) {
+    if (encerrado) return;
+    console.error(`[accuracy] teste interrompido: ${motivo}`);
+    finalizar(motivo);
+  }
+
+  function finalizar(motivoDeAborto?: string) {
+    if (encerrado) return;
+    encerrado = true;
+    clearInterval(vigia);
+    isAccuracyTesting = false;
+    currentValidationTarget = null;
+    finishTest(overlay, pointErrors, diagnostics, onComplete, meta, runtime, poseBaseline, overlap, distanciasDoTeste, sementeDaOrdem, motivoDeAborto);
+  }
+
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
   function runNextPoint() {
-    // Interrompido (ver `abortAccuracyTest`): não reagenda nem gera relatório.
-    if (!isAccuracyTesting) return;
-    if (pointIndex >= ALL_VALIDATION_POINTS.length) {
-      isAccuracyTesting = false;
-      currentValidationTarget = null;
-      activeAccuracyOverlay = null;
-      finishTest(overlay, pointErrors, diagnostics, onComplete, meta, runtime, poseBaseline, overlap);
+    if (encerrado) return;
+    if (pointIndex >= pontosDaRodada.length) {
+      finalizar();
       return;
     }
 
-    const vp = ALL_VALIDATION_POINTS[pointIndex];
-    showValidationDot(overlay, vp, pointIndex, vw, vh);
+    const vp = pontosDaRodada[pointIndex];
+    showValidationDot(overlay, vp, pointIndex, vw, vh, pontosDaRodada.length);
 
     const startTime = performance.now();
     const predictedX: number[] = [];
@@ -449,8 +610,8 @@ export function startAccuracyTest(
     let lastSeenSeq = currentFrameSeq;
 
     function collect() {
-      if (!isAccuracyTesting) return;
-      const elapsed = performance.now() - startTime;
+      ultimoTickMs = performance.now();
+      const elapsed = ultimoTickMs - startTime;
       const frameNovo = currentFrameSeq !== lastSeenSeq;
 
       if (!poseBaseline && currentPose) poseBaseline = { ...currentPose };
@@ -464,13 +625,25 @@ export function startAccuracyTest(
         }
         // Sem `perEyeWeight` de propósito: o teste mede o modelo treinado, não
         // a heurística de fusão por EAR do cursor.
-        const gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
+        //
+        // O try/catch não é decoração: `mapGaze` lança quando o vetor e o
+        // modelo divergem em dimensão, e uma exceção aqui interrompia a cadeia
+        // de rAF — o teste congelava na tela preta, sem relatório e sem volta.
+        let gaze: { x: number; y: number } | null = null;
+        try {
+          gaze = mapGaze(currentFeaturesLeft, currentFeaturesRight);
+        } catch (e) {
+          quadrosComErro++;
+          if (quadrosComErro === 1) console.error('[accuracy] mapGaze lançou durante o teste:', e);
+        }
         if (gaze) {
           const agora = performance.now();
           if (predictedX.length === 0) primeiraAmostraMs = agora;
           ultimaAmostraMs = agora;
           predictedX.push(gaze.x);
           predictedY.push(gaze.y);
+          const dist = getCurrentCameraDistanceCm();
+          if (dist !== null && Number.isFinite(dist)) distanciasDoTeste.push(dist);
           if (currentFiltered && currentFiltered.seq === currentFrameSeq) {
             filteredX.push(currentFiltered.x);
             filteredY.push(currentFiltered.y);
@@ -479,7 +652,7 @@ export function startAccuracyTest(
       }
 
       if (elapsed < COLLECTION_MS) {
-        requestAnimationFrame(collect);
+        agendarQuadro(collect);
         return;
       }
 
@@ -528,6 +701,8 @@ export function startAccuracyTest(
         d.sdY = Math.sqrt(sumSqY / Math.max(1, n - 1));
         d.s2sRMS = n > 1 ? Math.sqrt(sumS2S / (n - 1)) : 0;
 
+        d.bceaPx2 = bcea(predictedX, predictedY) ?? undefined;
+
         if (filteredX.length >= MIN_SAMPLES_PER_POINT) {
           const mfx = filteredX.reduce((s, v) => s + v, 0) / filteredX.length;
           const mfy = filteredY.reduce((s, v) => s + v, 0) / filteredY.length;
@@ -539,8 +714,26 @@ export function startAccuracyTest(
         console.warn(`[accuracy] ${vp.name}: só ${n} amostra(s) (mínimo ${MIN_SAMPLES_PER_POINT}) — ponto não medido.`);
       }
 
-      (d as PointDiagnostic & { windowMs?: number }).windowMs =
-        n > 1 ? ultimaAmostraMs - primeiraAmostraMs : 0;
+      const janelaMs = n > 1 ? ultimaAmostraMs - primeiraAmostraMs : 0;
+      (d as PointDiagnostic & { windowMs?: number }).windowMs = janelaMs;
+
+      // Perda de amostras: quantos quadros a janela útil deveria ter rendido,
+      // à taxa que a própria janela mediu, contra o que chegou. Abaixo de 80%
+      // a dispersão do ponto foi estimada sobre menos da metade do esperado.
+      if (n > 1 && janelaMs > 0) {
+        const taxaHz = ((n - 1) * 1000) / janelaMs;
+        const esperado = quadrosEsperados(taxaHz);
+        if (esperado > 0) {
+          d.nEsperado = esperado;
+          d.fracaoValida = Math.min(1, n / esperado);
+          if (d.fracaoValida < MIN_VALID_SAMPLE_RATIO) {
+            console.warn(
+              `[accuracy] ${vp.name}: ${n}/${esperado} amostras ` +
+              `(${(d.fracaoValida * 100).toFixed(0)}% < ${(MIN_VALID_SAMPLE_RATIO * 100).toFixed(0)}%).`,
+            );
+          }
+        }
+      }
 
       pointErrors.push(d.error);
       diagnostics.push(d);
@@ -548,7 +741,7 @@ export function startAccuracyTest(
       setTimeout(runNextPoint, 300);
     }
 
-    requestAnimationFrame(collect);
+    agendarQuadro(collect);
   }
 
   // 1,5 s de preparação: o usuário acabou de sair da calibração e precisa
@@ -575,6 +768,7 @@ function showValidationDot(
   index: number,
   vw: number,
   vh: number,
+  total: number,
 ) {
   const old = document.getElementById('accuracy-dot');
   if (old) old.remove();
@@ -588,11 +782,13 @@ function showValidationDot(
   dot.setAttribute('data-calibration-target', '');
   dot.style.left = `${fracaoDaTelaParaPx(vp.screenX, vw)}px`;
   dot.style.top = `${fracaoDaTelaParaPx(vp.screenY, vh)}px`;
-  dot.innerHTML = `<div class="dot-inner"></div>`;
+  // Alvo bullseye + crosshair: mede-se dispersão de fixação e microssacada
+  // menores com ele do que com um círculo simples (Thaler et al., 2013).
+  dot.innerHTML = '<div class="dot-cross"></div><div class="dot-inner"></div>';
 
   const instr = overlay.querySelector('.accuracy-instruction') as HTMLElement;
   if (instr) {
-    instr.innerHTML = `Teste de Precisão &nbsp;<span class="highlight">${index + 1}/${ALL_VALIDATION_POINTS.length}</span> — olhe para o ponto`;
+    instr.innerHTML = `Teste de Precisão &nbsp;<span class="highlight">${index + 1}/${total}</span> — olhe para o ponto`;
   }
 
   overlay.appendChild(dot);
@@ -704,33 +900,15 @@ function finishTest(
   runtime?: RuntimeInfo,
   poseBaseline?: { yaw: number; pitch: number; roll: number } | null,
   validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[],
+  /** Série de distâncias olho→câmera medidas durante o teste, em cm. */
+  distanciasDoTeste: readonly number[] = [],
+  /** Semente da ordem sorteada dos alvos — é o que torna a rodada reproduzível. */
+  sementeDaOrdem = 0,
+  /** Preenchido quando o teste terminou antes da hora. Vai para o painel e para o JSON. */
+  motivoDeAborto?: string,
 ) {
-  // O diagnóstico de ajuste (leave-one-target-out, ~9 s numa grade de 9 alvos)
-  // é calculado sob demanda, e o relatório é o primeiro a pedir. Removendo o
-  // overlay antes disso, a tela ficava PRETA e travada entre o último alvo e o
-  // resumo — indistinguível, para quem olha, do travamento que este fluxo
-  // acabou de deixar de ter. Mostra o estado, deixa pintar, e só então paga.
-  const instrucao = overlay.querySelector('.accuracy-instruction');
-  if (instrucao) instrucao.textContent = 'Calculando resultados…';
-  document.getElementById('accuracy-dot')?.remove();
+  overlay.remove();
 
-  esperarPintura(() => {
-    // Memoizado: a leitura lá dentro de `montarRelatorio` sai de graça.
-    getCalibrationFitDiagnostics();
-    overlay.remove();
-    montarRelatorio(pointErrors, diagnostics, onComplete, meta, runtime, poseBaseline, validationOverlap);
-  });
-}
-
-function montarRelatorio(
-  pointErrors: number[],
-  diagnostics: PointDiagnostic[],
-  onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
-  meta?: RunMeta,
-  runtime?: RuntimeInfo,
-  poseBaseline?: { yaw: number; pitch: number; roll: number } | null,
-  validationOverlap?: { validationPoint: string; calibX: number; calibY: number }[],
-) {
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
 
@@ -758,6 +936,14 @@ function montarRelatorio(
   const medidos = diagnostics.filter((d) => Number.isFinite(d.error));
   const interiores = medidos.filter((d) => !d.isEdge);
 
+  // POPULAÇÕES, e por que são duas (docs/MEDICOES.md §2 "Populações" e §7):
+  // acurácia (erro, viés, graus, BCEA) usa só os INTERIORES, porque as bordas
+  // sofrem softClamp e geometria plana em sentidos opostos. Precisão
+  // (jitter/SD/S2S) usa TODOS os pontos medidos: o tremor de fixação não é
+  // distorcido pelo clamp, e a dispersão na periferia é justamente o que
+  // dimensiona um botão de canto. Não unificar as duas é deliberado — o único
+  // número que combina as duas populações é `alvoMinimoPx` (offset interior +
+  // σ de todos), e está declarado assim na §8.
   const meanErrorDeg = media(interiores.map((d) => d.errorDeg).filter(Number.isFinite));
   const jitterRMS = media(medidos.map((d) => d.jitterRMS).filter(Number.isFinite));
   const precisionSdX = media(medidos.map((d) => d.sdX).filter(Number.isFinite));
@@ -837,6 +1023,48 @@ function montarRelatorio(
     );
   }
 
+  // ── Métricas que a literatura de qualidade de dado pede junto ────────────
+  const interioresMedidos = diagnostics.filter((d) => !d.isEdge && Number.isFinite(d.error));
+  const mediaDe = (vals: number[]) =>
+    vals.length > 0 ? vals.reduce((s2, v) => s2 + v, 0) / vals.length : null;
+
+  const bceaPx2 = mediaDe(
+    interioresMedidos.map((d) => d.bceaPx2).filter((v): v is number => typeof v === 'number'),
+  );
+  // px² → graus²: cada eixo divide por (px por grau).
+  const pxPorGrau = distPx * Math.PI / 180;
+  const bceaDeg2 = bceaPx2 !== null && pxPorGrau > 0 ? bceaPx2 / (pxPorGrau * pxPorGrau) : null;
+
+  const fracoes = diagnostics
+    .map((d) => d.fracaoValida)
+    .filter((v): v is number => typeof v === 'number');
+  const fracaoDeAmostrasValidas = mediaDe(fracoes);
+  const pontosComPoucaAmostra = diagnostics
+    .filter((d) => typeof d.fracaoValida === 'number' && d.fracaoValida < MIN_VALID_SAMPLE_RATIO)
+    .map((d) => d.name);
+
+  // Sigma para o tamanho de alvo: o eixo pior manda, porque o alvo precisa
+  // acomodar os dois. É o mesmo raciocínio de Feit et al. ao recomendar alvos
+  // mais altos que largos.
+  const sigmaPior = precisionSdX !== null && precisionSdY !== null
+    ? Math.max(precisionSdX, precisionSdY)
+    : jitterRMS;
+  const alvoMinimoPx = tamanhoMinimoDeAlvo(meanError, sigmaPior);
+  const alvoMinimoDeg = alvoMinimoPx !== null && pxPorGrau > 0 ? alvoMinimoPx / pxPorGrau : null;
+
+  const distancias = distanciasDoTeste.filter((v) => Number.isFinite(v)).sort((a, b) => a - b);
+  const distanciaMedidaCm = distancias.length > 0
+    ? {
+        // Mediana de verdade: com N par, `distancias[N>>1]` devolve o MAIOR dos
+        // dois valores centrais, não a média deles — um campo chamado "mediana"
+        // que não é a mediana. `percentileLinear` é a mesma convenção usada em
+        // `medianError`/`sampleMedianError` aqui e em `medianaDeDistancias`.
+        mediana: percentileLinear(distancias, 0.5),
+        min: distancias[0],
+        max: distancias[distancias.length - 1],
+      }
+    : null;
+
   const result: AccuracyResult = {
     meanError,
     medianError: agg.medianError,
@@ -869,6 +1097,13 @@ function montarRelatorio(
     sampleP90Error: agg.sampleP90Error,
     hitRateByRadius: agg.hitRateByRadius,
     sampleRateHz,
+    bceaPx2,
+    bceaDeg2,
+    fracaoDeAmostrasValidas,
+    pontosComPoucaAmostra,
+    alvoMinimoPx,
+    alvoMinimoDeg,
+    distanciaMedidaCm,
     poseDrift,
     poseDeltaCalibToTestDeg,
     affine,
@@ -895,6 +1130,23 @@ function montarRelatorio(
 
   const jsonReport = JSON.stringify({
     schema: 'irisflow.accuracy-report/2',
+    // Quando presente, o teste não chegou ao fim: o relatório é parcial.
+    abortado: motivoDeAborto ?? null,
+    protocolo: {
+      // Minutos entre o fim do treino e o fim deste teste. É o eixo em que a
+      // deriva aparece, e é medido — não digitado.
+      minutosDesdeCalibracao: (() => {
+        const t = getCalibrationTimestampMs();
+        return t === null ? null : Math.round((Date.now() - t) / 60_000);
+      })(),
+      pontos: diagnostics.length,
+      coletaMs: COLLECTION_MS,
+      acomodacaoMs: ACCLIMATION_MS,
+      janelaUtilMs: COLLECTION_MS - ACCLIMATION_MS,
+      fracaoMinimaDeAmostras: MIN_VALID_SAMPLE_RATIO,
+      ordem: 'sorteada',
+      sementeDaOrdem,
+    },
     timestamp: new Date().toISOString(),
     resolution: `${vw}x${vh}`,
     meta: meta ?? null,
@@ -965,6 +1217,14 @@ function montarRelatorio(
     `precisão: jitter=${px(jitterRMS)} (${deg(precisionDeg)}) s2s=${px(precisionS2S)} filtrado=${px(jitterFilteredRMS)} | ` +
     `${score} (${agg.pontosMedidos} medidos, ${agg.pontosNaoMedidos} sem amostra, ${sampleRateHz?.toFixed(1) ?? '—'} Hz)`,
   );
+  console.log(
+    `[accuracy] qualidade: BCEA68=${bceaDeg2 === null ? '—' : `${bceaDeg2.toFixed(2)}°²`} | ` +
+    `amostras válidas=${fracaoDeAmostrasValidas === null ? '—' : `${(fracaoDeAmostrasValidas * 100).toFixed(0)}%`}` +
+    `${pontosComPoucaAmostra.length > 0 ? ` (abaixo do mínimo: ${pontosComPoucaAmostra.join(', ')})` : ''} | ` +
+    `alvo mínimo=${alvoMinimoPx === null ? '—' : `${Math.round(alvoMinimoPx)}px`}` +
+    `${alvoMinimoDeg === null ? '' : ` (${alvoMinimoDeg.toFixed(1)}°)`} | ` +
+    `distância medida=${distanciaMedidaCm === null ? '—' : `${distanciaMedidaCm.mediana.toFixed(0)} cm (${distanciaMedidaCm.min.toFixed(0)}–${distanciaMedidaCm.max.toFixed(0)})`}`,
+  );
   for (const d of diagnostics) {
     const medido = Number.isFinite(d.error);
     console.log(
@@ -976,13 +1236,14 @@ function montarRelatorio(
   }
   console.log(`[accuracy] === FIM ===`);
 
-  showDiagnosticOverlay(diagnostics, result, onComplete);
+  showDiagnosticOverlay(diagnostics, result, onComplete, motivoDeAborto);
 }
 
 function showDiagnosticOverlay(
   diagnostics: PointDiagnostic[],
   result: AccuracyResult,
   onComplete?: (result: AccuracyResult, action: 'continue' | 'redo') => void,
+  motivoDeAborto?: string,
 ) {
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;
@@ -1093,6 +1354,12 @@ function showDiagnosticOverlay(
       );
     }
   }
+  if (motivoDeAborto) {
+    avisos.unshift(
+      `O teste foi interrompido: ${motivoDeAborto}. As medidas abaixo cobrem só os pontos ` +
+      'que deram tempo de medir — não use este relatório como resultado da sessão.',
+    );
+  }
   const avisosHtml = avisos.length > 0
     ? `<div class="diagnostic-advice">
          <strong>O que explica o resultado</strong>
@@ -1136,6 +1403,13 @@ function showDiagnosticOverlay(
 
       <div class="diagnostic-hitrate">
         Acerto em alvo de 150 px: <strong style="color:${scoreColor}">${hit150 === null || hit150 === undefined ? 'não medido' : `${hit150.toFixed(0)}%`}</strong>
+      </div>
+
+      <div class="diagnostic-hitrate">
+        Alvo mínimo recomendado para este usuário:
+        <strong style="color:${scoreColor}">${result.alvoMinimoPx === null ? 'não medido' : `${Math.round(result.alvoMinimoPx)} px`}</strong>${result.alvoMinimoDeg === null ? '' : ` (${result.alvoMinimoDeg.toFixed(1)}°)`}
+        · amostras válidas <strong>${result.fracaoDeAmostrasValidas === null ? '—' : `${(result.fracaoDeAmostrasValidas * 100).toFixed(0)}%`}</strong>
+        · distância <strong>${result.distanciaMedidaCm === null ? '—' : `${result.distanciaMedidaCm.mediana.toFixed(0)} cm`}</strong>
       </div>
 
       ${avisosHtml}

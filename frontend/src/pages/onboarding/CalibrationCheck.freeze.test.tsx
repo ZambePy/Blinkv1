@@ -34,7 +34,10 @@ vi.mock('@tracker/accuracy', () => ({
   startAccuracyTest: (...a: unknown[]) => startAccuracyTest(...a),
   abortAccuracyTest: vi.fn(),
 }));
-vi.mock('../../utils/autoTestMeta', () => ({ buildAutoTestMeta: () => ({}) }));
+vi.mock('../../utils/autoTestMeta', () => ({
+  buildAutoTestMeta: () => ({}),
+  montarMetaDeMedicao: () => ({}),
+}));
 
 vi.mock('../../context/GazeContext', () => ({
   useGaze: () => ({

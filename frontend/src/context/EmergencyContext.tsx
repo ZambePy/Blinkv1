@@ -234,7 +234,13 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         >
           <GazeButton
             emergency
-            width={medindo ? 132 : 200}
+            /* 132 px não cabiam o conteúdo: "Emergência" em 1,25rem/700
+               mede ~132 px SOZINHA, e com o ícone de 24 px mais o gap o
+               texto vazava ~18 px para cada lado da borda arredondada —
+               fora da área de acerto do dwell, que segue a caixa do
+               botão. 176 px cabe sem mudar a tipografia; quando ainda
+               assim cobrir um alvo, o `fabOculto` esconde o botão. */
+            width={medindo ? 176 : 200}
             height={medindo ? 52 : 64}
             onClick={startEmergencyCountdown}
             data-dwell-ms={isDegraded ? 3600 : 2000}

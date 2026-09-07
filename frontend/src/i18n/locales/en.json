@@ -69,6 +69,9 @@
       "title": "Settings Backup",
       "export": "Export Backup (JSON)"
     },
+    "dashboardLink": {
+      "button": "Open Care Dashboard"
+    },
     "logout": "Sign out",
     "returnToMenu": "Back to Menu",
     "language": {

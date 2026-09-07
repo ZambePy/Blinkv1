@@ -5,6 +5,8 @@
 import type { RunMeta } from '@tracker/accuracy';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { ReadinessReport } from '@tracker/setupReadiness';
+import { ultimaProntidao, idadeDaProntidaoMin } from '../ultimaProntidao';
+import { proximoBloco } from '../registroDaSessao';
 
 export interface AutoTestMetaInput {
   /** Tempo em ms desde o `engine.start()` bem-sucedido. Origem:
@@ -99,4 +101,50 @@ export function readinessMetaFrom(r: ReadinessReport | null): Partial<RunMeta> {
       (m.estimatedDistanceCm !== null ? `, distância medida≈${m.estimatedDistanceCm.toFixed(0)}cm` : ', distância não medida') +
       `, avisos=${r.checks.filter((c) => c.status !== 'ok').map((c) => c.id).join('|') || 'nenhum'})`,
   };
+}
+
+/**
+ * Monta o `RunMeta` completo de uma rodada de medição.
+ *
+ * Junta três fontes que antes não se falavam:
+ *
+ *   1. a condição da sessão (uptime, condição óptica, geometria da tela);
+ *   2. a PRONTIDÃO MEDIDA — iluminação, postura e reflexo de óculos saíam
+ *      hardcoded como `'boa'`/`'parada'`/dropdown em todo relatório, inclusive
+ *      nas sessões ruins;
+ *   3. o registro da sessão — o número do bloco, derivado do instante do
+ *      treino em vez de anotado à mão.
+ *
+ * Síncrona de propósito: o caminho pós-calibração monta o meta dentro de um
+ * `try/catch` que transforma falha em diálogo na tela, e um `await` escaparia
+ * desse catch.
+ *
+ * **Incrementa a contagem de blocos** — chamar uma vez por rodada, no início.
+ */
+export function montarMetaDeMedicao(
+  input: AutoTestMetaInput & { calibTs: number | null },
+): RunMeta {
+  const meta = buildAutoTestMeta(input);
+
+  const bloco = proximoBloco(input.calibTs);
+  if (bloco !== null) meta.blocoDeMedicao = bloco;
+
+  const prontidao = ultimaProntidao();
+  if (prontidao) {
+    const medido = readinessMetaFrom(prontidao);
+    const idade = idadeDaProntidaoMin();
+    Object.assign(meta, medido);
+    meta.observacoes =
+      `${medido.observacoes ?? ''} [prontidão medida há ${(idade ?? 0).toFixed(1)} min]`;
+  } else {
+    // Sem medição, os campos binários do schema continuam com o default — mas
+    // o relatório passa a DIZER isso. Antes, `iluminacao: 'boa'` era gravado
+    // com a mesma cara de um valor medido, e depois não havia como separar as
+    // sessões em que alguém verificou das em que ninguém verificou.
+    meta.observacoes =
+      `${meta.observacoes ?? ''} [prontidão não medida: iluminação e postura ` +
+      `são o DEFAULT do schema, não uma medição]`;
+  }
+
+  return meta;
 }

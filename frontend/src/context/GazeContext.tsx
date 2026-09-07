@@ -15,6 +15,7 @@ import { estiloDoCursor, limitarTamanho } from '@tracker/interaction/cursorStyle
 import { geometriaDoAnel } from '@tracker/interaction/dwellRing';
 import { GazeFallback } from '@tracker/interaction/gazeFallback';
 import { preflight, podeComecar } from '@tracker/diagnostics/preflight';
+import { isAccuracyTesting } from '@tracker/accuracy';
 import { stepBlinkClick, criarEstadoBlinkClick } from '@tracker/interaction/blinkClick';
 import { GazeStatusBanner } from '../components/GazeStatusBanner';
 import { ScanningMode } from '../components/ScanningMode';
@@ -495,7 +496,14 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     // é inofensivo — StrictMode não faz double-invoke fora de dev.
     // Ver `provedorAtivo` para o motivo de ser um contador de módulo.
     if (provedorAtivo > 0) {
-      console.log('[IrisFlow] GazeProvider effect ignorado — já existe um provider ativo.');
+      // Este provider fica sem engine: toda chamada de calibração vira no-op.
+      // Silenciar isso deixava o app vivo por fora e morto por dentro — a tela
+      // de calibração esperando um callback que nunca chegaria. Falha visível.
+      console.error('[IrisFlow] GazeProvider duplicado — este provider fica sem engine.');
+      setCameraError(
+        'O rastreamento não pôde iniciar porque já existe outra instância ativa. '
+        + 'Feche as outras janelas do app e recarregue.',
+      );
       return;
     }
     provedorAtivo++;
@@ -781,7 +789,17 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const isInCalibration = engineRef.current?.getState() === 'calibrating';
         const isCalibrated = engineRef.current?.calibration.isCalibrated() ?? false;
 
-        if (isInCalibration || !isCalibrated) {
+        // O caso (3) do comentário acima estava documentado e NÃO
+        // implementado: `isAccuracyTesting` não era lido em lugar nenhum deste
+        // arquivo, e o cursor ficava visível durante toda a medição. O
+        // participante enxerga o ponto vermelho, tenta corrigi-lo, e o erro
+        // medido passa a ser o do loop de perseguição, não o do modelo.
+        // A flag do operador vale SÓ para o teste de precisão. Na calibração
+        // o cursor continua escondido em qualquer caso: lá a pessoa precisa
+        // fixar o alvo, e um ponto se mexendo ao lado é justamente o que
+        // estraga a fixação que se está tentando coletar.
+        const escondePeloTeste = isAccuracyTesting && !EXPERIMENT.cursorNoTesteDePrecisao;
+        if (isInCalibration || !isCalibrated || escondePeloTeste) {
           // Hard-hide: move offscreen + opacity 0
           cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
           cursorRef.current.style.opacity = '0';
@@ -947,8 +965,27 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         }
         video.srcObject = stream;
         console.log('[IrisFlow] stream obtido, aguardando loadeddata...');
-        await new Promise<void>((resolve) => {
-          video.addEventListener('loadeddata', () => resolve(), { once: true });
+        // Espera LIMITADA. Sem o teto, uma câmera que abre mas nunca entrega
+        // quadro (driver Windows travado, dispositivo tomado por outro app
+        // depois do getUserMedia) deixava este await pendente para sempre:
+        // `engine.start()` nunca acontecia, o `l2csStatus` ficava em 'loading'
+        // e a tela de calibração exibia "Carregando…" com o botão desabilitado
+        // pelo resto da sessão — sem erro, sem console para o cuidador ler.
+        const LOADEDDATA_TIMEOUT_MS = 10000;
+        await new Promise<void>((resolve, reject) => {
+          // O evento pode já ter passado se o quadro chegou antes de chegarmos
+          // aqui; `readyState` é o estado, o evento é só a notificação dele.
+          if (video.readyState >= 2) { resolve(); return; }
+          const timer = window.setTimeout(() => {
+            video.removeEventListener('loadeddata', aoCarregar);
+            reject(new Error(
+              'A câmera foi aberta mas não entregou nenhum quadro em 10 segundos. ' +
+              'Feche outros programas que usem a webcam (Teams, Zoom, OBS), ' +
+              'desconecte e reconecte a câmera, e recarregue.',
+            ));
+          }, LOADEDDATA_TIMEOUT_MS);
+          function aoCarregar() { window.clearTimeout(timer); resolve(); }
+          video.addEventListener('loadeddata', aoCarregar, { once: true });
         });
         // Alguns browsers em Electron não iniciam o playback sozinhos mesmo com
         // muted+autoplay quando o elemento é adicionado dinamicamente. Force.
@@ -1204,11 +1241,21 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       getCalibrationTargets: () => engineRef.current?.calibration.getCalibrationTargets() ?? [],
       getCalibrationMode: () => engineRef.current?.calibration.getCalibrationMode() ?? null,
       startCollectingPoint: (x, y, onDone) => engineRef.current?.calibration.startCollectingPoint(x, y, onDone),
-      completeCalibration: (onComplete) => engineRef.current?.calibration.completeCalibration(onComplete),
+      // Sem engine não há treino — mas devolver em silêncio deixa a tela
+      // esperando um callback que nunca vem. A falha é dita.
+      completeCalibration: (onComplete) => {
+        const eng = engineRef.current;
+        if (!eng) {
+          console.error('[IrisFlow] completeCalibration sem engine ativo.');
+          onComplete?.({ ok: false, reason: 'engine_indisponivel', detail: 'O rastreamento não está ativo.' });
+          return;
+        }
+        eng.calibration.completeCalibration(onComplete);
+      },
       // Deriva de pose da calibração recém-treinada, para a tela poder avisar
       // em vez de deixar o usuário seguir com um modelo contaminado.
       getPoseDriftVerdict: () => engineRef.current?.calibration.getPoseDriftVerdict() ?? null,
-      // Diagnóstico do ajuste. CARO: a primeira chamada roda o LOO (~9 s).
+      // Diagnóstico do ajuste. CARO: roda o leave-one-target-out (~9 s).
       // Quem só quer os alvos pulados usa `getTargetsSkipped`.
       getCalibrationFitDiagnostics: () =>
         engineRef.current?.calibration.getCalibrationFitDiagnostics() ?? null,

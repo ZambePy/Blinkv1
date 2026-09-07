@@ -44,6 +44,9 @@ export class StandardScaler {
   public transform(data: number[][]): number[][] {
     if (!this.isFitted) return data;
     const numSamples = data.length;
+    // Sem esta guarda, `data[0].length` lança em lista vazia — e o `fit` já
+    // trata esse caso, então a assimetria seria só uma armadilha.
+    if (numSamples === 0) return [];
     const numFeatures = data[0].length;
 
     const scaled = new Array(numSamples);

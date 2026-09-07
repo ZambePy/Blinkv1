@@ -169,10 +169,6 @@ export interface CalibrationApi {
   /**
    * Diagnóstico do ajuste da última calibração — erro de treino, LOO, λ e os
    * alvos que ficaram de fora. `null` antes de qualquer treino.
-   *
-   * CARO: a primeira chamada dispara o leave-one-target-out (~9 s com uma
-   * grade de 9 alvos). Quem só precisa dos alvos pulados deve usar
-   * `getTargetsSkipped()`.
    */
   getCalibrationFitDiagnostics(): import('../calibration').CalibrationFitDiagnostics | null;
   /** Alvos planejados que não entraram no treino. Barato. */
@@ -758,6 +754,16 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       // Outro `start()`/`stop()` aconteceu durante o await: não pisar no ciclo
       // de vida novo.
       if (geracao !== startGeneration || !running) return;
+      // `initMediaPipe()` pode RESOLVER sem publicar o detector (o ramo
+      // `disposed`, ou uma promessa compartilhada de um `start()` que abortou).
+      // Sem esta checagem o código seguia para `setState('tracking')` e
+      // `requestAnimationFrame(loop)` — e `loop()` sai pela guarda
+      // `!faceLandmarker` SEM se reagendar. Resultado: estado 'tracking',
+      // cursor congelado e nenhuma mensagem, que é exatamente o modo de falha
+      // que o loopGuard existe para tornar impossível.
+      if (!faceLandmarker) {
+        throw new Error('initMediaPipe() resolveu sem publicar o FaceLandmarker.');
+      }
       resetLoopErrorState();
       setState('tracking');
       // Enquanto `faceLandmarker` era null o `loop()` saiu sem se reagendar,
@@ -964,8 +970,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             brightnessHistory.shift();
             brightnessHistoryTs.shift();
           }
-          // A pose viaja no `quality` para que `feedRawData` possa rejeitar
-          // amostras de calibração cuja cabeça se afastou do baseline do ponto.
+          // A pose viaja no `quality` para a calibração registrar a postura
+          // mediana de cada alvo. Ela não rejeita amostra nenhuma: a deriva é
+          // medida ao fim da coleta e vira aviso, e a compensação geométrica
+          // corrige o que sobra.
           const face = extractorResult.advancedFeatures?.face;
           const quality = {
             ...(extractorResult.advancedFeatures?.quality ?? {}),

@@ -40,6 +40,16 @@ export interface EntradaPreflight {
   origemGeometria: 'default' | 'manual' | 'auto' | string;
   distanciaCm: number;
 
+  /**
+   * FOV horizontal da câmera, em graus, quando calibrado.
+   *
+   * `null` significa que `result.distanciaMedidaCm` sairá `null` no relatório
+   * — e essa é a única testemunha de que a pessoa não se moveu durante o
+   * teste. A ausência não invalida a sessão, mas descobri-la só depois de
+   * medir custa a sessão inteira.
+   */
+  fovCameraDeg?: number | null;
+
   /** Viewport atual e resolução da tela — para detectar janela não maximizada. */
   viewportPx: { w: number; h: number };
   telaPx: { w: number; h: number };
@@ -177,6 +187,22 @@ export function preflight(e: EntradaPreflight): ItemPreflight[] {
   } else {
     add('geometria', 'ok',
       `diagonal ${e.telaPolegadas}" (${e.origemGeometria}) a ${e.distanciaCm} cm`);
+  }
+
+  // ── Distância medida ───────────────────────────────────────────────────
+  //
+  // Atenção, não bloqueio: a sessão continua válida sem isto, só perde a
+  // testemunha de movimento. Existe porque a descoberta natural desse
+  // `null` acontece ao ler o relatório — depois da sessão inteira.
+  if (e.fovCameraDeg === undefined) {
+    // Chamador antigo, que não informa o FOV. Não inventa veredito.
+  } else if (e.fovCameraDeg === null) {
+    add('distância medida', 'atencao', 'FOV da câmera não calibrado',
+      'O relatório sairá com `distanciaMedidaCm: null` e a sessão fica sem a '
+      + 'testemunha de que a pessoa não se moveu. Configurações → Campo de '
+      + 'visão da câmera → Calibrar.');
+  } else {
+    add('distância medida', 'ok', `FOV ${e.fovCameraDeg.toFixed(1)}°`);
   }
 
   // ── Viewport ───────────────────────────────────────────────────────────

@@ -5,14 +5,14 @@ import { useGaze } from '../../context/GazeContext';
 import { useSettings } from '../../context/SettingsContext';
 import { BackButton } from '../../components/ui/BackButton';
 import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hoverFocus';
-import { startAccuracyTest, abortAccuracyTest } from '@tracker/accuracy';
-import { esperarPintura } from '@tracker/aguardarPintura';
-import { buildAutoTestMeta } from '../../utils/autoTestMeta';
-import { buildRuntimeInfo } from '../../utils/runtimeInfo';
+import { startAccuracyTest, type RuntimeInfo } from '@tracker/accuracy';
+import { montarMetaDeMedicao } from '../../utils/autoTestMeta';
+import { getCalibrationTimestampMs } from '@tracker/calibration';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { VeredictoDeriva } from '@tracker/calibration';
 import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
 import { getResumoDoPonto } from '@tracker/calibration';
+import { esperarPintura } from '@tracker/aguardarPintura';
 import { ReadinessPanel } from '../../components/ui/ReadinessPanel';
 
 interface CalibrationPointUI { x: number; y: number; name: string; }
@@ -58,6 +58,7 @@ const humanMessage: Record<string, string> = {
   singular_matrix: 'Não foi possível treinar o modelo (matriz singular). A causa mais comum é reflexo constante nos óculos ou desvio extremo do olhar.',
   insufficient_samples: 'Amostras insuficientes coletadas. Certifique-se de que seu rosto está visível e centralizado durante toda a calibração.',
   degenerate_features: 'Os dados coletados não variaram o suficiente. A causa mais comum é reflexo nos óculos travando a detecção ou olhar fixo fora dos pontos.',
+  engine_indisponivel: 'O rastreamento não está ativo. Volte ao menu e entre de novo nesta tela.',
   unknown: 'Erro desconhecido durante o treinamento do modelo. Por favor, tente novamente.',
 };
 
@@ -96,6 +97,9 @@ export const CalibrationCheck: React.FC = () => {
   // Alvos que a coleta desistiu de medir. Um modelo treinado sem a linha de
   // baixo prediz a linha de baixo por extrapolação, e a tela precisa dizer.
   const [alvosPulados, setAlvosPulados] = useState(0);
+  // Motivo pelo qual o teste de precisão não começou. Enquanto era `null` e a
+  // tela ficava em 'testing', qualquer falha virava um spinner eterno.
+  const [falhaDoTeste, setFalhaDoTeste] = useState<string | null>(null);
 
   // Distância efetiva escolhida no início desta calibração. Congelada aqui
   // para a grade e o relatório usarem exatamente o mesmo número.
@@ -235,10 +239,6 @@ export const CalibrationCheck: React.FC = () => {
       // completar uma calibração inteira. Abortar não descarta o modelo
       // anterior — só encerra a sessão em curso.
       calibration.abort?.();
-      // Mesmo motivo, para o teste de precisão: sem isto `isAccuracyTesting`
-      // ficava presa em `true` e o painel de preflight sumia pelo resto da
-      // sessão. Idempotente quando não há teste em curso.
-      abortAccuracyTest();
       // Sair da tela no meio de uma gravação auto-iniciada: descarta pra não
       // deixar JSONL parcial em lugar nenhum.
       finalizeAutoRecordingRef.current(false);
@@ -280,12 +280,45 @@ export const CalibrationCheck: React.FC = () => {
     setTimeout(() => { navigate('/menu'); }, 800);
   };
 
+  // O teste de precisão desenha seu próprio overlay por cima desta tela. Se
+  // ele não aparecer, alguma coisa falhou entre o fim do treino e o início do
+  // teste — e sem este vigia o operador só via o spinner girando.
+  //
+  // As dependências são SÓ `stage` e `falhaDoTeste`. `getDiagnostics` nasce de
+  // novo a cada vez que o `useMemo` do GazeContext refaz o valor — o que
+  // acontece a cada transição de estado do engine (`tracking`↔`no_face`↔…),
+  // várias vezes por minuto. Com ele nas deps, o efeito era desmontado e
+  // remontado a cada re-render, o `clearTimeout` cancelava o vigia antes dos
+  // 6 s e ele NUNCA disparava: o operador ficava com o spinner eterno e sem
+  // nenhuma mensagem. Os dois valores usados dentro do timer vêm de refs.
+  const diagRef = useRef(getDiagnostics);
+  diagRef.current = getDiagnostics;
+  const calibRef = useRef(calibration);
+  calibRef.current = calibration;
+  useEffect(() => {
+    if (stage !== 'testing' || falhaDoTeste) return;
+    const id = setTimeout(() => {
+      if (!isMounted.current) return;
+      if (document.getElementById('accuracy-overlay')) return;
+      const estado = diagRef.current() ? 'ativo' : 'sem diagnóstico';
+      setFalhaDoTeste(
+        `O teste de precisão não abriu em 6 segundos (rastreamento ${estado}, ` +
+        `modelo ${calibRef.current.isCalibrated() ? 'treinado' : 'NÃO treinado'}). ` +
+        'Veja o console para o erro completo.',
+      );
+    }, 6000);
+    return () => clearTimeout(id);
+  }, [stage, falhaDoTeste]);
+
   const runAccuracyTestThenExit = () => {
-    const meta = buildAutoTestMeta({
+    const meta = montarMetaDeMedicao({
       sessionUptimeMs: getSessionUptimeMs(),
       opticalCondition: calibration.getActiveOpticalCondition?.() ?? 'desconhecido',
       distanciaCm: sessionDistanceRef.current ?? settings.viewingDistanceCm,
       telaPolegadas: settings.screenDiagonalIn,
+      // Instante do treino em uso: é dele que sai o número do bloco, sem
+      // ninguém precisar lembrar de anotar qual rodada é qual.
+      calibTs: getCalibrationTimestampMs(),
       // a procedência da diagonal. `'default'` significa o hardcode de
       // 23,6″, e o relatório precisa dizer isso em vez de afirmar que mediu.
       screenGeometrySource: settings.screenGeometrySource,
@@ -294,7 +327,17 @@ export const CalibrationCheck: React.FC = () => {
 
     // Sem isto o relatório não sabe em que provider o L2CS rodou nem qual
     // filtro governava — e duas condições viram um número só.
-    const runtime = buildRuntimeInfo(getDiagnostics());
+    const d = getDiagnostics();
+    const runtime: RuntimeInfo | undefined = d ? {
+      l2csExecutionProvider: d.l2cs?.executionProvider ?? null,
+      l2csFallback: d.l2cs?.fallback,
+      l2csLatencyMs: d.l2cs?.latencyMs,
+      l2csStalePct: d.l2cs?.stalePct,
+      filterEffective: d.filtro?.efetivo,
+      filterPreset: d.filtro?.preset ?? null,
+      fpsRender: d.fpsRender,
+      video: d.video ? { width: d.video.width, height: d.video.height } : undefined,
+    } : undefined;
 
     startAccuracyTest((_result, action) => {
       if (!isMounted.current) return;
@@ -329,41 +372,53 @@ export const CalibrationCheck: React.FC = () => {
       // Dois rAF garantem que a pintura aconteceu: o primeiro roda antes do
       // quadro que mostra a tela nova, o segundo já depois dele.
       esperarPintura(() => {
-        if (!isMounted.current) return;
-        calibration.completeCalibration?.((outcome) => {
-          if (!outcome || outcome.ok !== false) {
-            // a deriva de pose já era medida e só ia para o console. Se a
-            // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
-            // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
-            // decidir, em vez de seguir para o teste com um ajuste contaminado.
-            const veredito = calibration.getPoseDriftVerdict?.() ?? null;
-            // `getTargetsSkipped` e não `getCalibrationFitDiagnostics`: o
-            // segundo dispara o leave-one-target-out (~9 s de main thread
-            // travado) e aqui só se quer a contagem de alvos pulados.
-            const pulados = calibration.getTargetsSkipped?.()?.length ?? 0;
-            if ((veredito || pulados > 0) && isMounted.current) {
-              if (veredito) console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
-              if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
-              setDriftVerdict(veredito);
-              setAlvosPulados(pulados);
-              setStage('drift-warning');
-              return;
-            }
-            console.log('[React] Calibração concluída — disparando teste de precisão automático');
-            setTimeout(() => { if (isMounted.current) runAccuracyTestThenExit(); }, 400);
-          } else {
-            if (isMounted.current) {
-              const reason = outcome.reason || 'unknown';
-              const msg = humanMessage[reason] || humanMessage.unknown;
-              console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
-              // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
-              // Descarta em vez de exportar; próxima tentativa recomeça limpa.
-              finalizeAutoRecordingRef.current(false);
-              setErrorMessage(msg);
-              setStage('tutorial');
-            }
+      if (!isMounted.current) return;
+      calibration.completeCalibration?.((outcome) => {
+        if (!outcome || outcome.ok !== false) {
+          // a deriva de pose já era medida e só ia para o console. Se a
+          // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
+          // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
+          // decidir, em vez de seguir para o teste com um ajuste contaminado.
+          const veredito = calibration.getPoseDriftVerdict?.() ?? null;
+          // `getTargetsSkipped` e não `getCalibrationFitDiagnostics`: o
+          // segundo dispara o leave-one-target-out (~9 s de main thread
+          // travado) e aqui só se quer a contagem de alvos pulados.
+          const pulados = calibration.getTargetsSkipped?.()?.length ?? 0;
+          if ((veredito || pulados > 0) && isMounted.current) {
+            if (veredito) console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
+            if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
+            setDriftVerdict(veredito);
+            setAlvosPulados(pulados);
+            setStage('drift-warning');
+            return;
           }
-        });
+          console.log('[React] Calibração concluída — disparando teste de precisão automático');
+          setTimeout(() => {
+            if (!isMounted.current) return;
+            // Dentro de um `setTimeout` uma exceção não tem quem a pegue: a
+            // tela ficaria no spinner de "Iniciando teste de precisão" para
+            // sempre, sem nada dito ao operador.
+            try {
+              runAccuracyTestThenExit();
+            } catch (e) {
+              console.error('[React] falha ao iniciar o teste de precisão:', e);
+              finalizeAutoRecordingRef.current(false);
+              setFalhaDoTeste(e instanceof Error ? e.message : String(e));
+            }
+          }, 400);
+        } else {
+          if (isMounted.current) {
+            const reason = outcome.reason || 'unknown';
+            const msg = humanMessage[reason] || humanMessage.unknown;
+            console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
+            // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
+            // Descarta em vez de exportar; próxima tentativa recomeça limpa.
+            finalizeAutoRecordingRef.current(false);
+            setErrorMessage(msg);
+            setStage('tutorial');
+          }
+        }
+      });
       });
       return;
     }
@@ -407,11 +462,31 @@ export const CalibrationCheck: React.FC = () => {
           // efeito nenhum.
           const r = getResumoDoPonto();
           const detalhe = `${r.aceitos}/${r.necessario} amostras`;
+          const pitch = r.pitchAbsMedioDeg !== null
+            ? `, |pitch| ${r.pitchAbsMedioDeg.toFixed(0)}°` : '';
+          // As três causas de bloco zerado eram uma mensagem só, e ela culpava
+          // o olhar do paciente. Duas delas são do MODELO — mandar a pessoa
+          // parar de se mexer não muda nenhuma das duas. Os números vão junto
+          // porque é por eles que se decide se o limiar está mal calibrado.
+          const m = r.l2csPorMotivo;
+          const dominante =
+            m.confianca >= m.implausivel && m.confianca >= m.stale ? 'confianca'
+            : m.implausivel >= m.stale ? 'implausivel'
+            : 'stale';
+          const msgL2cs =
+            dominante === 'confianca'
+              ? `Modelo de olhar sem confiança neste ponto (${detalhe}; confiança média ` +
+                `${r.confiancaMedia !== null ? r.confiancaMedia.toFixed(3) : '?'} < ` +
+                `${r.confiancaMinima}${pitch}). Tentando novamente...`
+              : dominante === 'implausivel'
+                ? `Ângulo de olhar fora da faixa aceita (${detalhe}${pitch}). ` +
+                  `Tentando novamente...`
+                : `O sistema perdeu o olhar por um instante (${detalhe}). Tentando novamente...`;
           setErrorMessage(
             r.porQualidade >= r.porL2cs && r.porQualidade > 0
               ? `Imagem ruim neste ponto (${detalhe}) — verifique iluminação e reflexo nos óculos. Tentando novamente...`
               : r.porL2cs > 0
-                ? `O sistema perdeu o olhar por um instante (${detalhe}). Tentando novamente...`
+                ? msgL2cs
                 : `Poucas amostras neste ponto (${detalhe}) — o rosto pode ter saído do enquadramento. Tentando novamente...`,
           );
           setTimeout(() => { if (isMounted.current) startNextPoint(step); }, 1500);
@@ -915,7 +990,54 @@ export const CalibrationCheck: React.FC = () => {
         )}
 
         {/* ─── TESTING ─────────────────────────────────────────────────── */}
-        {stage === 'testing' && (
+        {stage === 'testing' && falhaDoTeste && (
+          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+            <div
+              role="alertdialog"
+              aria-label="Falha ao iniciar o teste de precisão"
+              style={{
+                display: 'flex', flexDirection: 'column', alignItems: 'center',
+                textAlign: 'center', gap: '1.25rem', maxWidth: 620,
+              }}
+            >
+              <AlertTriangle size={48} color="#f59e0b" aria-hidden="true" />
+              <h2 style={{ fontSize: '1.5rem', fontWeight: 800, margin: 0, color: TEXT_PRIMARY }}>
+                O teste de precisão não começou
+              </h2>
+              <p style={{ color: TEXT_DIM, fontSize: '1.02rem', margin: 0, lineHeight: 1.6 }}>
+                {falhaDoTeste} A calibração foi treinada e continua valendo — só a
+                medição não rodou.
+              </p>
+              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+                <button
+                  type="button"
+                  onClick={() => { setFalhaDoTeste(null); runAccuracyTestThenExit(); }}
+                  style={{
+                    background: ACCENT, color: '#fff', border: 'none',
+                    padding: '1rem 2.4rem', borderRadius: '2rem',
+                    fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
+                  }}
+                >
+                  Tentar de novo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => navigate('/menu')}
+                  style={{
+                    background: 'transparent', color: TEXT_DIM,
+                    border: '1px solid rgba(255,255,255,0.25)',
+                    padding: '1rem 2.4rem', borderRadius: '2rem',
+                    fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer',
+                  }}
+                >
+                  Ir para o menu
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {stage === 'testing' && !falhaDoTeste && (
           <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
             <div style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center',
@@ -993,13 +1115,19 @@ export const CalibrationCheck: React.FC = () => {
                 </div>
               </div>
 
+              {/* Estes dois botões são a ÚNICA saída deste diálogo. Com
+                  `data-no-dwell` o dispatcher os marcava como desabilitados e
+                  um usuário gaze-only ficava preso aqui para sempre — a mesma
+                  perda de autonomia que motivou tirar o atributo do botão de
+                  começar (ver acima). Em vez de bloquear, dwell LONGO: refazer
+                  a calibração por acidente custa 1–2 min de sessão. */}
               <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
                 {/* Recalibrar vem primeiro: é a ação que corrige o problema. */}
                 <button
                   type="button"
-                  data-no-dwell="true"
+                  data-dwell-ms="2500"
                   data-testid="drift-recalibrar"
-                  onClick={() => { setDriftVerdict(null); handleStart(false); }}
+                  onClick={() => { setDriftVerdict(null); setAlvosPulados(0); handleStart(false); }}
                   style={{
                     background: ACCENT, color: '#fff', border: 'none',
                     padding: '1rem 2.4rem', borderRadius: '2rem',
@@ -1012,9 +1140,20 @@ export const CalibrationCheck: React.FC = () => {
                     repetir a coleta custa fadiga real. Mas é escolha informada. */}
                 <button
                   type="button"
-                  data-no-dwell="true"
+                  data-dwell-ms="2500"
                   data-testid="drift-continuar"
-                  onClick={() => { setStage('testing'); runAccuracyTestThenExit(); }}
+                  onClick={() => {
+                    setStage('testing');
+                    // Mesma proteção do caminho automático: sem ela uma exceção
+                    // aqui deixava o spinner girando sem nada dito ao operador.
+                    try {
+                      runAccuracyTestThenExit();
+                    } catch (e) {
+                      console.error('[React] falha ao iniciar o teste de precisão:', e);
+                      finalizeAutoRecordingRef.current(false);
+                      setFalhaDoTeste(e instanceof Error ? e.message : String(e));
+                    }
+                  }}
                   style={{
                     background: 'transparent', color: TEXT_PRIMARY,
                     border: '1px solid rgba(255,255,255,0.35)',

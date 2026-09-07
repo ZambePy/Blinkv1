@@ -7,6 +7,7 @@ import { preflight, podeComecar, type ItemPreflight } from '@tracker/diagnostics
 import { EXPERIMENT } from '@tracker/config/experiment';
 import { medicaoEmAndamento } from '../medicaoEmAndamento';
 import { snapshotDe, itensDeProntidao } from '../readinessDoDiagnostico';
+import { guardarProntidao } from '../ultimaProntidao';
 import type { ReadinessSnapshot } from '@tracker/setupReadiness';
 
 // -----------------------------------------------------------------------------
@@ -68,7 +69,11 @@ export const PreflightPanel: React.FC = () => {
     await new Promise((r) => setTimeout(r, 1500));
     clearInterval(coleta);
 
-    const prontidao = itensDeProntidao(janela, settings.cameraHorizontalFovDeg ?? null).itens;
+    const avaliacao = itensDeProntidao(janela, settings.cameraHorizontalFovDeg ?? null);
+    const prontidao = avaliacao.itens;
+    // Mesma razão do `ReadinessPanel`: o relatório de precisão lê daqui para
+    // gravar iluminação, postura e óculos medidos.
+    if (avaliacao.relatorio) guardarProntidao(avaliacao.relatorio);
     setItens([
       ...preflight({
         estadoEngine: state,
@@ -76,6 +81,7 @@ export const PreflightPanel: React.FC = () => {
         telaPolegadas: settings.screenDiagonalIn,
         origemGeometria: settings.screenGeometrySource ?? 'default',
         distanciaCm: settings.viewingDistanceCm,
+        fovCameraDeg: settings.cameraHorizontalFovDeg ?? null,
         viewportPx: {
           w: document.documentElement.clientWidth,
           h: document.documentElement.clientHeight,

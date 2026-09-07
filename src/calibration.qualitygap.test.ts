@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   clearCalibration, startCalibrationMode, startCollectingPoint, feedRawData,
-  consumeLastSampleDecision,
+  consumeLastSampleDecision, getResumoDoPonto,
 } from './calibration';
 
 // A ausência de medida de qualidade não pode passar como medida boa: comparar
@@ -40,7 +40,12 @@ describe('gate de qualidade — ausência vs. medida ruim', () => {
     expect(decisaoCom(COMPLETA)?.accepted).toBe(true);
   });
 
-  it('cada critério medido e ruim rejeita', () => {
+  // O gate de qualidade foi REMOVIDO da calibração: nenhum quadro é mais
+  // descartado por imagem ruim, e nenhum alvo é refeito por causa disso. O
+  // critério continua sendo AVALIADO, porque a contagem é o que permite medir
+  // depois quanta amostra ruim entrou no treino — o que muda é que ela não
+  // rejeita mais.
+  it('cada critério medido e ruim é CONTADO, mas aceito', () => {
     const ruins: [string, Record<string, unknown>][] = [
       ['íris quase oculta', { irisVisibilityPercentage: 0.2 }],
       ['landmarks instáveis', { detectorConfidence: 0.3 }],
@@ -51,8 +56,8 @@ describe('gate de qualidade — ausência vs. medida ruim', () => {
     ];
     for (const [nome, campo] of ruins) {
       const d = decisaoCom({ ...COMPLETA, ...campo });
-      expect(d?.accepted, nome).toBe(false);
-      expect(d?.reason, nome).toBe('quality');
+      expect(d?.accepted, nome).toBe(true);
+      expect(getResumoDoPonto().porQualidade, nome).toBeGreaterThan(0);
     }
   });
 
@@ -80,11 +85,13 @@ describe('gate de qualidade — ausência vs. medida ruim', () => {
   });
 
   it('medida parcial usa o que existe e ignora o que falta', () => {
-    // Brilho ausente, contraste presente e ruim → rejeita pelo contraste.
-    const d = decisaoCom({ detectorConfidence: 0.99, contrastEstimate: 0.01 });
-    expect(d?.reason).toBe('quality');
-    // Brilho ausente, resto bom → aceita, sem inventar um brilho.
+    // Brilho ausente, contraste presente e ruim → contabiliza pelo contraste
+    // (sem rejeitar; ver a nota acima).
+    expect(decisaoCom({ detectorConfidence: 0.99, contrastEstimate: 0.01 })?.accepted).toBe(true);
+    expect(getResumoDoPonto().porQualidade).toBeGreaterThan(0);
+    // Brilho ausente, resto bom → aceita, sem inventar um brilho, e sem contar.
     expect(decisaoCom({ detectorConfidence: 0.99, contrastEstimate: 0.09 })?.accepted).toBe(true);
+    expect(getResumoDoPonto().porQualidade).toBe(0);
   });
 
   it('NaN conta como não medido, não como zero', () => {

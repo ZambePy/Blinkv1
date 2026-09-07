@@ -39,6 +39,21 @@ export interface ExperimentConfig {
   cursorSizePx: number;
   /** Anel de progresso do dwell desenhado ao redor do cursor. */
   dwellRingOnCursor: boolean;
+  /**
+   * Mantém o cursor visível DURANTE o teste de precisão.
+   *
+   * Desligada por default, e o default não é conservadorismo: vendo o cursor,
+   * a pessoa tenta corrigi-lo e o número medido passa a ser o do loop de
+   * perseguição, não o do modelo. Uma rodada com isto ligado **não é
+   * comparável** com uma rodada sem — nem entre blocos da mesma sessão.
+   *
+   * Existe porque o operador precisa de um jeito de ver, ao vivo, se o cursor
+   * acompanha o alvo: um erro de 3° e um mapeamento invertido produzem
+   * relatórios parecidos e telas completamente diferentes. Use para
+   * diagnóstico, não para medir; a flag vai no `pipeline.experiment` do
+   * relatório, então a rodada fica marcada.
+   */
+  cursorNoTesteDePrecisao: boolean;
   /** Piscada longa como clique. Desligado por default: piscar é involuntário. */
   blinkClick: boolean;
   /** Varredura automática após alguns segundos sem gaze. */
@@ -58,6 +73,7 @@ export const DEFAULTS: ExperimentConfig = {
   filterMode: 'oneEuro',
   cursorSizePx: 48,
   dwellRingOnCursor: false,
+  cursorNoTesteDePrecisao: false,
   blinkClick: false,
   scanningMode: false,
   gazeLostFallback: true,

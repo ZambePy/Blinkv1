@@ -69,6 +69,33 @@ export function aplicarSessaoDaUrl(
     else console.warn(`[sessão] ?filtro=${filtro} inválido — aceitos: ${FILTROS.join(', ')}.`);
   }
 
+  // Cursor visível durante o teste de precisão. Diagnóstico do operador, não
+  // condição de medida: a rodada deixa de ser comparável (ver a nota da flag
+  // em `config/experiment.ts`). Aceita `1`/`0` para poder ser DESligada pela
+  // mesma URL que ligou — a flag mora no localStorage e sobrevive ao reload.
+  const cursorNoTeste = p.get('cursorNoTeste');
+  if (cursorNoTeste !== null) {
+    if (cursorNoTeste === '1' || cursorNoTeste === '0') {
+      exp.cursorNoTesteDePrecisao = cursorNoTeste === '1';
+    } else {
+      console.warn(`[sessão] ?cursorNoTeste=${cursorNoTeste} inválido — aceitos: 1, 0.`);
+    }
+  }
+
+  // Compensação de translação lateral da cabeça (M4 do plano de medição).
+  // Ganhou parâmetro de URL pelo mesmo motivo dos outros: a alternativa era
+  // `__irisflowExp.set` no console seguido de reload, e esquecer o reload roda
+  // a condição anterior inteira sob o rótulo da nova — o erro mais provável do
+  // dia de medição, e o que a checagem de condição do preflight não pega.
+  const compTranslacao = p.get('compTranslacao');
+  if (compTranslacao !== null) {
+    if (compTranslacao === '1' || compTranslacao === '0') {
+      exp.lateralTranslationCompensation = compTranslacao === '1';
+    } else {
+      console.warn(`[sessão] ?compTranslacao=${compTranslacao} inválido — aceitos: 1, 0.`);
+    }
+  }
+
   if (JSON.stringify(exp) !== expAntes) {
     localStorage.setItem(CHAVE_EXP, JSON.stringify(exp));
     mudou = true;

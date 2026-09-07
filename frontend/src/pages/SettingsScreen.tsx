@@ -47,6 +47,8 @@ import { buildRuntimeInfo } from '../utils/runtimeInfo';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { applyUptimeToRunMetaIfDefault } from '../utils/autoTestMeta';
+import { proximoBloco } from '../registroDaSessao';
+import { getCalibrationTimestampMs } from '@tracker/calibration';
 import { hoverAndFocusBackground } from '../components/ui/hoverFocus';
 
 const cardStyle: React.CSSProperties = {
@@ -341,6 +343,14 @@ export const SettingsScreen: React.FC = () => {
       },
       getSessionUptimeMs(),
     );
+    // O bloco entra aqui também — este é o caminho do BLOCO 2, e sem ele a
+    // rodada de 10 minutos chegaria ao JSON sem nada que a identificasse como
+    // tal. Iluminação e postura NÃO são sobrescritas aqui: nesta tela o
+    // operador as escolheu à mão, e escolha humana vence medição automática
+    // (mesma regra do "Sessão (min)" acima).
+    const bloco = proximoBloco(getCalibrationTimestampMs());
+    if (bloco !== null) metaWithUptime.blocoDeMedicao = bloco;
+
     setAccuracyRunning(true);
     startAccuracyTest((r) => {
       setAccuracyRunning(false);

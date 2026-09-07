@@ -65,6 +65,17 @@ export default defineConfig({
   // apontaria para a raiz do disco.
   base: './',
   plugins: [react(), saveAccuracyReportPlugin(), cspMetaPlugin()],
+  // Carimbo do build, desenhado num canto da tela de calibração.
+  //
+  // Três rodadas de depuração foram gastas com o navegador servindo um bundle
+  // antigo em cache: o sintoma é idêntico ao do bug que se está caçando, e
+  // nada na tela distingue os dois. Com o carimbo, uma foto já responde
+  // "é o código novo?".
+  define: {
+    __BUILD_ID__: JSON.stringify(
+      new Date().toISOString().slice(5, 16).replace('T', ' '),
+    ),
+  },
   envPrefix: 'VITE_',
   resolve: {
     alias: {

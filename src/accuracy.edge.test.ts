@@ -48,7 +48,7 @@ describe('anel de borda — extrapolação de verdade', () => {
   });
 
   it('são 4 cantos, não o anel de 8 — custo de fadiga', () => {
-    // Cada ponto custa 1,7 s. Nove pontos ≈ 15 s, treze ≈ 22 s, dezessete ≈ 29 s.
+    // Cada ponto custa 2,3 s. Nove pontos ≈ 21 s, treze ≈ 30 s, dezessete ≈ 39 s.
     // Fadiga degrada a própria medição que se quer fazer.
     expect(cantos).toHaveLength(4);
   });

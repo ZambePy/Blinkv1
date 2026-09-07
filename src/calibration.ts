@@ -8,6 +8,7 @@ import { StandardScaler } from './scaler';
 import type { RidgeModel } from './ridge';
 import { trainRidgeModel, predictRidge, targetGroupKey, RidgeRegressor } from './ridge';
 import { l2csSlotsInSet } from './extractor';
+import { ultimoDiagnosticoDoBloco, L2CS_CONFIDENCE_MIN } from './l2cs/block';
 
 /** Posições do bloco angular dentro do vetor projetado (vazio sem L2CS). */
 const L2CS_SLOTS: readonly number[] = l2csSlotsInSet();
@@ -172,8 +173,8 @@ export const MIN_ACCEPTED_SAMPLES = 15;
 /**
  * Frames de pose necessários para o baseline de sessão ser reportável.
  *
- * ~1 s a 30 fps. O baseline NÃO gateia nada (ver `POSE_DRIFT_YAW_MAX`); serve
- * de referência para medir a deriva da sessão e mostrá-la ao operador.
+ * ~1 s a 30 fps. O baseline não rejeita amostra nenhuma: serve de referência
+ * para medir a deriva da sessão e mostrá-la ao operador ao fim da coleta.
  */
 export const SESSION_POSE_BASELINE_MIN_SAMPLES = 20;
 
@@ -348,6 +349,26 @@ let qualityGapWarned = false;
 
 let profile: CalibrationPoint[] = [];
 export let isCalibrating = false;
+
+/**
+ * Quando o modelo em uso terminou de treinar (epoch ms). A deriva do olhar
+ * cresce com o tempo desde a calibração — a literatura mede ~0,23° em 6–19 min
+ * — então o relatório precisa dizer há quanto tempo o modelo estava de pé.
+ */
+let treinadoEmMs: number | null = null;
+
+/** Instante do último treino bem-sucedido, ou `null` se ainda não houve. */
+export function getCalibrationTimestampMs(): number | null {
+  return treinadoEmMs;
+}
+
+/** Instante do treino gravado no perfil. `null` quando a data não é utilizável
+ *  — melhor não afirmar nada do que afirmar um número inventado. */
+function treinoDoPerfilMs(createdAt: string | undefined): number | null {
+  if (typeof createdAt !== 'string') return null;
+  const t = Date.parse(createdAt);
+  return Number.isFinite(t) ? t : null;
+}
 let isCollecting = false;
 let collectionStartTime = 0;
 let collectedFeaturesLeft: number[][] = [];
@@ -366,7 +387,32 @@ export interface ResumoDoPonto {
   porQualidade: number;
   porL2cs: number;
   necessario: number;
+  /** Quebra de `porL2cs` por causa. As três produziam sete zeros idênticos e
+   *  eram reportadas como "o sistema perdeu o olhar" — só uma delas é isso. */
+  l2csPorMotivo: { stale: number; implausivel: number; confianca: number };
+  /** Confiança média das amostras contadas por confiança, e limiar em uso. */
+  confiancaMedia: number | null;
+  confiancaMinima: number;
+  /** |pitch| médio das contadas, em graus. Alto = olhar para baixo, que é
+   *  onde a pálpebra cobre a íris e a softmax achata. */
+  pitchAbsMedioDeg: number | null;
 }
+
+interface RejeicoesL2cs {
+  stale: number;
+  implausivel: number;
+  confianca: number;
+  somaConf: number;
+  nConf: number;
+  somaPitchAbs: number;
+  nPitch: number;
+}
+
+function zerarRejeicoesL2cs(): RejeicoesL2cs {
+  return { stale: 0, implausivel: 0, confianca: 0, somaConf: 0, nConf: 0, somaPitchAbs: 0, nPitch: 0 };
+}
+
+let l2csRej: RejeicoesL2cs = zerarRejeicoesL2cs();
 
 /**
  * Por que o último ponto terminou como terminou. Permite à UI distinguir pose,
@@ -379,6 +425,14 @@ export function getResumoDoPonto(): ResumoDoPonto {
     porQualidade: qualityRejects,
     porL2cs: l2csRejects,
     necessario: MIN_ACCEPTED_SAMPLES,
+    l2csPorMotivo: {
+      stale: l2csRej.stale,
+      implausivel: l2csRej.implausivel,
+      confianca: l2csRej.confianca,
+    },
+    confiancaMedia: l2csRej.nConf > 0 ? l2csRej.somaConf / l2csRej.nConf : null,
+    confiancaMinima: L2CS_CONFIDENCE_MIN,
+    pitchAbsMedioDeg: l2csRej.nPitch > 0 ? l2csRej.somaPitchAbs / l2csRej.nPitch : null,
   };
 }
 
@@ -734,6 +788,7 @@ export function abortCalibration(): void {
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   l2csRejects = 0;
+  l2csRej = zerarRejeicoesL2cs();
   qualityRejects = 0;
   sessionBaselinePose = null;
   sessionPoseSamples = [];
@@ -756,6 +811,10 @@ export function clearCalibration() {
   specularWarningsIssued = 0;
   pendingProfileMeta = null;
   currentCalibrationTargets = null;
+  // O instante do treino descreve o modelo; sem modelo ele não descreve nada.
+  // Mantê-lo faria `minutosDesdeCalibracao` do relatório contar o tempo desde
+  // uma calibração que já foi descartada.
+  treinadoEmMs = null;
   // A referência do modelo descartado não pode sobreviver a ele.
   restoreReferenceStateFromProfile(null);
 }
@@ -838,6 +897,11 @@ export interface CalibrationContext {
   polynomialFeatures: boolean;
   geometricPoseCompensation: boolean;
   expandFactor: number;
+  /** Lado do recorte entregue ao L2CS. Mesma classe de falha do
+   *  `expandFactor`: 224 e 448 produzem tan(yaw)/tan(pitch) DIFERENTES para o
+   *  mesmo rosto, sem mudar a dimensão do vetor — um perfil treinado em 448
+   *  carregaria numa sessão em 224 sem erro nenhum e prediria deslocado. */
+  l2csInputSize: number;
 }
 
 export function buildContextKeyFrom(ctx: CalibrationContext): string {
@@ -845,6 +909,7 @@ export function buildContextKeyFrom(ctx: CalibrationContext): string {
     ctx.polynomialFeatures ? 'poly' : '',
     ctx.geometricPoseCompensation ? 'posecomp' : '',
     `xf${ctx.expandFactor}`,
+    `l2cs${ctx.l2csInputSize}`,
   ].filter(Boolean).join(',');
   return `${ctx.viewportW}x${ctx.viewportH}_${ctx.featureVectorId}_v${ctx.formatVersion}_${expKey}`;
 }
@@ -859,6 +924,7 @@ function buildContextKey(): string {
     polynomialFeatures: EXPERIMENT.polynomialFeatures,
     geometricPoseCompensation: EXPERIMENT.geometricPoseCompensation,
     expandFactor: EXPERIMENT.expandFactor,
+    l2csInputSize: EXPERIMENT.l2csInputSize,
   });
 }
 
@@ -938,6 +1004,9 @@ export function loadProfile(): boolean {
     featureScalerRight.setParams(best.scalerParamsRight.means, best.scalerParamsRight.stds);
     // O filtro acima garante que `best.reference` existe.
     restoreReferenceStateFromProfile(best.reference ?? null);
+    // O modelo em uso é o deste perfil, treinado quando o perfil foi criado —
+    // não agora. `minutosDesdeCalibracao` mede a deriva desde o TREINO.
+    treinadoEmMs = treinoDoPerfilMs(best.meta.createdAt);
     console.log(
       `[calib] perfil restaurado: ${best.meta.label} (${best.meta.opticalCondition}), ` +
       `${age > PROFILES_MAX_AGE_MS ? '>24h' : 'válido'} — ` +
@@ -952,6 +1021,7 @@ export function loadProfile(): boolean {
     // Estado parcial é pior que nenhum: um modelo que falhou ao carregar não
     // pode deixar a referência do perfil anterior em pé.
     restoreReferenceStateFromProfile(null);
+    treinadoEmMs = null;
     return false;
   }
 }
@@ -1207,15 +1277,14 @@ export function startCalibrationMode(
   profile = [];
   regressorLeft = null;
   regressorRight = null;
+  // Os regressores acabaram de ser descartados: o instante do treino deles não
+  // pode sobreviver a eles (`completeCalibration` grava o novo).
+  treinadoEmMs = null;
   varianceFloorBreaches = 0;
   varianceCeilBreaches = 0;
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
   specularWarningsIssued = 0;
-  // Sem isto, uma calibração que FALHA deixa em pé o diagnóstico da anterior, e
-  // o relatório seguinte descreve um ajuste que não é o dele.
-  lastFitDiagnostics = null;
-  pendingFitInputs = null;
 
   // Modo ativo. Consulta pública via getCalibrationTargets() para a UI
   // renderizar 4 cantos (quick) ou grade 3×3 (full). Comportamento default
@@ -1291,6 +1360,7 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   collectedQualities = [];
   pointCompleteCallback = onDone;
   l2csRejects = 0;
+  l2csRej = zerarRejeicoesL2cs();
   qualityRejects = 0;
   currentPointSpecularHits = 0;
   currentPointFramesAccepted = 0;
@@ -1400,6 +1470,28 @@ export function countDeadFeatures(
   return { deadCount: deadIndices.length, totalDims: numDims, deadIndices };
 }
 
+/**
+ * Alimenta a coleta do alvo em curso.
+ *
+ * **Os gates de amostra foram REMOVIDOS.** Nenhum quadro é mais descartado por
+ * qualidade de imagem nem por bloco angular zerado; um alvo não é mais refeito
+ * por causa deles. Decisão do operador, tomada depois que a linha de baixo da
+ * grade passou a falhar de forma sistemática e a calibração ficou impossível
+ * de completar.
+ *
+ * O que se perde: amostras com o bloco L2CS zerado entram no treino, e depois
+ * do `StandardScaler` um zero vira z-score grande dizendo "olhando para o
+ * centro". O modelo fica pior perto de onde o bloco zera.
+ *
+ * O que se ganha, e por que provavelmente compensa neste caso: com os gates
+ * ligados, os alvos de baixo esgotavam as tentativas e eram PULADOS — o modelo
+ * treinava sem a linha inferior inteira e a prediz por extrapolação, que é o
+ * modo de falha pior. E as quatro dimensões de íris (as do núcleo do sinal)
+ * continuam válidas nessas amostras; só o bloco angular está zerado.
+ *
+ * As contagens continuam sendo feitas e vão para o console e para
+ * `l2csValidFraction` no relatório — dá para medir o estrago depois.
+ */
 export function feedRawData(featuresLeft: number[], featuresRight: number[], quality?: any | null) {
   if (!isCalibrating || !isCollecting) {
     // A janela entre `startCalibrationMode` e o primeiro alvo (a UI espera
@@ -1457,20 +1549,26 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
       (medido(quality.contrastEstimate) && quality.contrastEstimate < 0.02) ||
       (medido(quality.blurEstimate) && quality.blurEstimate > 0.85)
     ) {
+      // CONTA, mas NÃO rejeita mais. Ver a nota em `feedRawData` sobre a
+      // remoção dos gates de amostra na calibração.
       qualityRejects++;
-      lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'quality' };
-      return;
     }
   }
 
   // Bloco angular inválido (L2CS stale ou implausível) chega como zeros. Um
   // zero não é "sem informação" depois do StandardScaler: vira um z-score
-  // grande que diz "olhar para o centro" num alvo periférico. Quando o
-  // conjunto ativo carrega o bloco, a amostra é rejeitada.
+  // grande que diz "olhar para o centro" num alvo periférico.
   if (L2CS_SLOTS.length > 0 && L2CS_SLOTS.every((i) => featuresLeft[i] === 0 && featuresRight[i] === 0)) {
+    // CONTA, mas NÃO rejeita mais. A quebra por causa continua alimentando o
+    // console e o relatório (`l2csValidFraction`), que é o que permite saber
+    // depois quanta amostra entrou com o bloco angular zerado.
     l2csRejects++;
-    lastDecision = { accepted: false, elapsedMs: elapsed, reason: 'l2cs_invalid' };
-    return;
+    const diag = ultimoDiagnosticoDoBloco();
+    if (diag.motivo === 'implausivel') l2csRej.implausivel++;
+    else if (diag.motivo === 'confianca') l2csRej.confianca++;
+    else l2csRej.stale++;
+    if (diag.confidence !== null) { l2csRej.somaConf += diag.confidence; l2csRej.nConf++; }
+    if (diag.motivo !== 'stale') { l2csRej.somaPitchAbs += Math.abs(diag.pitchDeg); l2csRej.nPitch++; }
   }
 
   collectedFeaturesLeft.push(featuresLeft);
@@ -1507,16 +1605,20 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
 
 function processStaticPoint() {
   console.log(
-    `[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length} | rejeitados: qualidade=${qualityRejects} l2cs=${l2csRejects}`,
+    `[calib] processStaticPoint — amostras: ${collectedFeaturesLeft.length} | contados: qualidade=${qualityRejects} ` +
+    `l2cs=${l2csRejects} (stale=${l2csRej.stale} implausível=${l2csRej.implausivel} confiança=${l2csRej.confianca}` +
+    `${l2csRej.nConf > 0 ? `, conf. média=${(l2csRej.somaConf / l2csRej.nConf).toFixed(3)} < ${L2CS_CONFIDENCE_MIN}` : ''}` +
+    `${l2csRej.nPitch > 0 ? `, |pitch| médio=${(l2csRej.somaPitchAbs / l2csRej.nPitch).toFixed(1)}°` : ''})`,
   );
 
-  // Sem nenhuma amostra (rosto ausente, tudo rejeitado pelo gate): falha para
-  // a UI repetir o ponto.
   if (collectedFeaturesLeft.length === 0) {
-    console.warn('[calib] ✗ Nenhuma amostra coletada — rosto ausente ou qualidade insuficiente.');
+    // NÃO refaz mais. Sem amostra não há o que treinar neste alvo, mas repetir
+    // não produz amostra nenhuma quando a causa é do pipeline — só prende o
+    // paciente no mesmo ponto. Segue, e o alvo aparece em `targetsSkipped`.
+    console.warn('[calib] ⚠ Nenhuma amostra coletada neste alvo — seguindo sem ele.');
     const cb = pointCompleteCallback;
     pointCompleteCallback = null;
-    if (cb) cb(false);
+    if (cb) cb(true);
     return;
   }
 
@@ -1573,18 +1675,19 @@ function processStaticPoint() {
     );
   }
 
-  // Ponto com poucas amostras é REFEITO, não aceito de qualquer jeito (ver
-  // `MIN_ACCEPTED_SAMPLES`). A UI trata `success: false` com retry.
+  // REJEIÇÃO DO PONTO REMOVIDA.
+  //
+  // Antes, um alvo com menos de `MIN_ACCEPTED_SAMPLES` era refeito, e após
+  // esgotar as tentativas era PULADO. Na prática isso derrubava a linha
+  // inferior da grade inteira e o modelo passava a extrapolar aquela região —
+  // pior que treinar com poucas amostras dela. O mínimo continua sendo
+  // REPORTADO, porque é o que permite ver depois quais alvos entraram fracos.
   if (collectedFeaturesLeft.length < MIN_ACCEPTED_SAMPLES) {
     console.warn(
-      `[calib] ✗ Ponto com ${collectedFeaturesLeft.length} amostras ` +
-      `(mínimo ${MIN_ACCEPTED_SAMPLES}) — refazendo. ` +
-      `Rejeitados por qualidade: ${qualityRejects}, por L2CS inválido: ${l2csRejects}.`,
+      `[calib] ⚠ Ponto com ${collectedFeaturesLeft.length} amostras ` +
+      `(abaixo do mínimo de referência ${MIN_ACCEPTED_SAMPLES}) — ACEITO assim mesmo. ` +
+      `Contados: qualidade=${qualityRejects}, bloco L2CS zerado=${l2csRejects}.`,
     );
-    const cbFew = pointCompleteCallback;
-    pointCompleteCallback = null;
-    if (cbFew) cbFew(false);
-    return;
   }
 
   // A contabilização acontece AQUI, depois do gate de amostras mínimas, para
@@ -1715,46 +1818,6 @@ export interface CalibrationFitDiagnostics {
 
 let lastFitDiagnostics: CalibrationFitDiagnostics | null = null;
 
-/**
- * Entradas do diagnóstico de ajuste, guardadas no treino para a conta rodar
- * DEPOIS do teste de precisão.
- *
- * O diagnóstico custa ~9 s com as 606 amostras que uma calibração de 9 alvos
- * coleta (o LOO refaz a busca das 25 λ dentro de cada fold, para cada olho:
- * 3.600 solves). Rodando dentro de `completeCalibration`, esse tempo é main
- * thread travado entre "calibração terminou" e o teste começar — logo depois
- * de mandar o paciente não se mexer, e sem nada na tela indicando vida.
- *
- * Ele é diagnóstico PURO: não entra no modelo treinado, e o primeiro
- * consumidor real é o relatório, no fim do teste. Então adiamos a conta, sem
- * mudar uma vírgula dela. `reliability` vai junto porque é o único estado que
- * ela lê e que muda a cada quadro — congelá-lo aqui é o que garante que o
- * número adiado seja idêntico ao número imediato.
- */
-/**
- * Estado mutável do módulo, congelado no fim do treino.
- *
- * Tudo aqui é lido por `computeFitDiagnostics` e muda depois do treino:
- * `reliability` a cada quadro, `planejados` e `poseDrift` quando
- * `abortCalibration()` roda (a tela chama no unmount). Congelar é o que faz o
- * número adiado ser idêntico ao número imediato.
- */
-export interface FitSnapshot {
-  reliability: { left: number; right: number } | null;
-  planejados: readonly { x: number; y: number }[];
-  poseDrift: SessionPoseDrift | null;
-  lambda: LambdaDiagnostics | null;
-}
-
-let pendingFitInputs: {
-  featuresLeft: number[][];
-  featuresRight: number[][];
-  targets: { screenX: number; screenY: number }[];
-  profile: readonly CalibrationPoint[];
-  viewport: { w: number; h: number };
-  congelado: FitSnapshot;
-} | null = null;
-
 /** Alvos planejados que não entraram no treino. Barato de propósito: a tela
  *  precisa disto imediatamente após o treino, e não pode pagar o LOO. */
 export function getTargetsSkipped(): { x: number; y: number }[] {
@@ -1776,15 +1839,6 @@ function calcularTargetsSkipped(
 }
 
 export function getCalibrationFitDiagnostics(): CalibrationFitDiagnostics | null {
-  if (lastFitDiagnostics) return lastFitDiagnostics;
-  const inp = pendingFitInputs;
-  if (!inp) return null;
-  // Uma vez só: a conta é cara e o resultado é imutável para este treino.
-  pendingFitInputs = null;
-  lastFitDiagnostics = computeFitDiagnostics(
-    inp.featuresLeft, inp.featuresRight, inp.targets, inp.profile, inp.viewport, inp.congelado,
-  );
-  logarDiagnosticoDeAjuste(lastFitDiagnostics);
   return lastFitDiagnostics;
 }
 
@@ -1876,13 +1930,21 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   const scaledFeaturesLeft  = featureScalerLeft.transform(expandedFeaturesLeft);
   const scaledFeaturesRight = featureScalerRight.transform(expandedFeaturesRight);
 
+  // Grupo = ALVO NOMINAL, não o alvo compensado. Com a compensação de pose
+  // cada amostra ganha coordenada própria; agrupar por ela quebraria o
+  // leave-one-target-out (viraria leave-one-sample-out), desligaria a
+  // penalidade anisotrópica por falta de grupo com 2+ amostras e faria o
+  // treino custar ~50 s por olho em vez de ~0,2 s.
+  const gruposDeAlvo = trainingProfile.map((p) =>
+    targetGroupKey({ screenX: p.screenX, screenY: p.screenY }));
+
   const targetsX = trainTargets.map(t => t.screenX);
   const targetsY = trainTargets.map(t => t.screenY);
 
   regressorLeft = createRegressor();
-  regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY);
+  regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY, gruposDeAlvo);
   regressorRight = createRegressor();
-  regressorRight.train(scaledFeaturesRight, targetsX, targetsY);
+  regressorRight.train(scaledFeaturesRight, targetsX, targetsY, gruposDeAlvo);
 
   // Peso por olho pelo inverso da variância do resíduo de treino. Com olhos
   // igualmente bons dá ~0,5/0,5; um olho ruim deixa de arrastar a média.
@@ -1934,29 +1996,11 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     }),
   );
 
-  // Só guarda as entradas. A conta (e o log dela) sai no primeiro
-  // `getCalibrationFitDiagnostics()`, que na prática é o relatório no fim do
-  // teste de precisão. Ver a nota em `pendingFitInputs`.
-  lastFitDiagnostics = null;
-  pendingFitInputs = {
-    featuresLeft: trainFeaturesLeft,
-    featuresRight: trainFeaturesRight,
-    targets: trainTargets,
-    profile: trainingProfile,
-    viewport: { w: vw, h: vh },
-    congelado: {
-      reliability: eyeReliability ? { ...eyeReliability } : null,
-      planejados: [...(currentCalibrationTargets ?? [])],
-      poseDrift: getSessionPoseDrift(),
-      lambda: getLambdaDiagnostics(),
-    },
-  };
-
-  return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
-}
-
-/** Log do diagnóstico de ajuste. Sai junto com a conta, que é adiada. */
-function logarDiagnosticoDeAjuste(d: CalibrationFitDiagnostics): void {
+  lastFitDiagnostics = computeFitDiagnostics(
+    trainFeaturesLeft, trainFeaturesRight, trainTargets, trainingProfile,
+    { w: vw, h: vh },
+  );
+  const d = lastFitDiagnostics;
   console.log(
     `[calib] ajuste — treino=${d.trainErrorPx.toFixed(0)}px | LOO=${d.looErrorPx.toFixed(0)}px | ` +
     `λ=${d.lambda ? `${d.lambda.left}/${d.lambda.right}` : '?'} | dims=${d.dimsPerEye} | ` +
@@ -1982,6 +2026,8 @@ function logarDiagnosticoDeAjuste(d: CalibrationFitDiagnostics): void {
     const veredito = avaliarDerivaDePose(pd);
     if (veredito) console.warn(`[calib] ⚠️ ${veredito.mensagem}`);
   }
+
+  return { deadFeaturesLeftPct: ratioL, deadFeaturesRightPct: ratioR };
 }
 
 /**
@@ -1999,26 +2045,13 @@ export function computeFitDiagnostics(
   targets: { screenX: number; screenY: number }[],
   profile?: readonly CalibrationPoint[],
   viewport?: { w: number; h: number },
-  /**
-   * Estado do treino congelado. Omitido, lê os valores VIVOS do módulo.
-   *
-   * A conta é adiada para depois do teste de precisão (ver
-   * `getCalibrationFitDiagnostics`), e tudo o que ela lê de estado mutável tem
-   * de vir congelado — senão o número muda só por causa de QUANDO ela roda.
-   * `eyeReliability` muda a cada quadro; `currentCalibrationTargets` e
-   * `sessionPoseByTarget` são ZERADOS por `abortCalibration()`, que a tela
-   * chama no unmount. Sem congelar, um relatório gerado pela tela de
-   * Configurações sairia com `targetsPlanned: 0` e sem deriva de pose.
-   */
-  congelado?: FitSnapshot,
 ): CalibrationFitDiagnostics {
   const n = featuresLeft.length;
   const vw = viewport?.w ?? (typeof document !== 'undefined' ? document.documentElement.clientWidth : 1920);
   const vh = viewport?.h ?? (typeof document !== 'undefined' ? document.documentElement.clientHeight : 1080);
   const errPx = (dx: number, dy: number) => Math.hypot(dx * vw, dy * vh);
-  const rel = congelado ? congelado.reliability : eyeReliability;
-  const wL = rel ? Math.max(MIN_EYE_WEIGHT, rel.left) : 1;
-  const wR = rel ? Math.max(MIN_EYE_WEIGHT, rel.right) : 1;
+  const wL = eyeReliability ? Math.max(MIN_EYE_WEIGHT, eyeReliability.left) : 1;
+  const wR = eyeReliability ? Math.max(MIN_EYE_WEIGHT, eyeReliability.right) : 1;
   const fundir = (a: { x: number; y: number }, b: { x: number; y: number }) => ({
     x: (a.x * wL + b.x * wR) / (wL + wR),
     y: (a.y * wL + b.y * wR) / (wL + wR),
@@ -2033,14 +2066,35 @@ export function computeFitDiagnostics(
     predictRidge(mr, sr.transformSingle(maybeExpandSingle(fr))),
   );
 
+  // O grupo de cada amostra é o alvo NOMINAL. Com alvos compensados por pose,
+  // `targets[i]` é único por amostra e tanto o LOO daqui quanto a validação
+  // cruzada de dentro do Ridge virariam leave-one-sample-out.
+  const chaveDoAlvo = (i: number) => (profile && profile[i]
+    ? targetGroupKey({ screenX: profile[i].screenX, screenY: profile[i].screenY })
+    : targetGroupKey(targets[i]));
+
+  const modeloL = regressorLeft ? ridgeModelFromRegressor(regressorLeft) : null;
+  const modeloR = regressorRight ? ridgeModelFromRegressor(regressorRight) : null;
+  const lambdaDe = (m: RidgeModel | null) =>
+    m && typeof m.lambdaX === 'number' && typeof m.lambdaY === 'number'
+      ? { x: m.lambdaX, y: m.lambdaY }
+      : undefined;
+  const lambdaL = lambdaDe(modeloL);
+  const lambdaR = lambdaDe(modeloR);
+
   const fitPair = (idx: number[]) => {
     const fl = maybeExpand(idx.map((i) => featuresLeft[i]));
     const fr = maybeExpand(idx.map((i) => featuresRight[i]));
     const tg = idx.map((i) => targets[i]);
     const sl = new StandardScaler(); sl.fit(fl);
     const sr = new StandardScaler(); sr.fit(fr);
-    const rl = new RidgeRegressor(); rl.train(sl.transform(fl), tg.map(t => t.screenX), tg.map(t => t.screenY));
-    const rr = new RidgeRegressor(); rr.train(sr.transform(fr), tg.map(t => t.screenX), tg.map(t => t.screenY));
+    const grupos = idx.map(chaveDoAlvo);
+    // λ do modelo já treinado: o LOO aqui mede a generalização DELE. Refazer a
+    // busca a cada dobra mediria outro modelo e custaria 9× o treino inteiro.
+    const rl = new RidgeRegressor();
+    rl.train(sl.transform(fl), tg.map(t => t.screenX), tg.map(t => t.screenY), grupos, lambdaL);
+    const rr = new RidgeRegressor();
+    rr.train(sr.transform(fr), tg.map(t => t.screenX), tg.map(t => t.screenY), grupos, lambdaR);
     return { sl, sr, ml: rl.getModel() as RidgeModel, mr: rr.getModel() as RidgeModel };
   };
 
@@ -2059,7 +2113,7 @@ export function computeFitDiagnostics(
 
   const byTarget = new Map<string, number[]>();
   for (let i = 0; i < n; i++) {
-    const k = targetGroupKey(targets[i]);
+    const k = chaveDoAlvo(i);
     const arr = byTarget.get(k);
     if (arr) arr.push(i); else byTarget.set(k, [i]);
   }
@@ -2072,7 +2126,7 @@ export function computeFitDiagnostics(
     for (const k of keys) {
       const test = byTarget.get(k)!;
       const train: number[] = [];
-      for (let i = 0; i < n; i++) if (targetGroupKey(targets[i]) !== k) train.push(i);
+      for (let i = 0; i < n; i++) if (chaveDoAlvo(i) !== k) train.push(i);
       try {
         const f = fitPair(train);
         let s = 0;
@@ -2121,10 +2175,15 @@ export function computeFitDiagnostics(
     l2csValidFraction = l2csValid / n;
   }
 
-  const planejados = congelado ? congelado.planejados : (currentCalibrationTargets ?? []);
-  const targetsSkipped = calcularTargetsSkipped(profile, planejados);
+  // Alvos da grade que não treinaram. Comparação pela chave ORIGINAL do alvo
+  // (o `profile` guarda o alvo nominal; `targets` pode estar compensado).
+  const planejados = currentCalibrationTargets ?? [];
+  const treinados = new Set((profile ?? []).map((p) => targetGroupKey({ screenX: p.screenX, screenY: p.screenY })));
+  const targetsSkipped = planejados
+    .filter((t) => !treinados.has(targetGroupKey({ screenX: t.x, screenY: t.y })))
+    .map((t) => ({ x: t.x, y: t.y }));
 
-  const lam = congelado ? congelado.lambda : getLambdaDiagnostics();
+  const lam = getLambdaDiagnostics();
 
   return {
     trainErrorPx,
@@ -2132,7 +2191,7 @@ export function computeFitDiagnostics(
     looByTarget,
     poseMean,
     poseStd,
-    poseDrift: congelado ? congelado.poseDrift : getSessionPoseDrift(),
+    poseDrift: getSessionPoseDrift(),
     gridDiagnosis: diagnosticarGrade(looByTarget),
     l2csValidFraction,
     samplesPerTarget,
@@ -2377,6 +2436,7 @@ export type CalibrationOutcome =
         | 'singular_matrix'          // solveLinear lançou mesmo após escalonamento λ
         | 'insufficient_samples'     // profile vazio ou < 3 alvos únicos
         | 'degenerate_features'      // preflight (>30% features mortas)
+        | 'engine_indisponivel'      // a tela pediu treino sem engine ativo
         | 'unknown';
       detail: string;
     };
@@ -2436,6 +2496,14 @@ export function completeCalibration(
     // na calibração seguinte.
     persistActiveProfileToRegistry(summary);
     saveProfile();
+    // O instante do treino NÃO é `Date.now()` aqui: é o `createdAt` do perfil
+    // que acabou de ser gravado (`persistActiveProfileToRegistry` o define).
+    //
+    // Os dois diferem pelos milissegundos entre uma linha e outra, e essa
+    // diferença tem consequência: `blocoDeMedicao` é derivado deste instante,
+    // e o caminho de RESTAURAÇÃO (app reaberto) só tem o `createdAt` para ler.
+    // Com duas fontes, fechar e reabrir o app fazia o bloco 2 se apresentar
+    // como bloco 1 contra o mesmo modelo.
     outcome = { ok: true };
   } catch (e) {
     const failure = classifyTrainingError(e, profile.length);
@@ -2541,6 +2609,12 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
     },
   };
   profileRegistry.save(stored);
+  // Fonte ÚNICA do instante do treino. O caminho de restauração (app reaberto)
+  // só tem `meta.createdAt` para ler, então o caminho de treino usa o mesmo
+  // campo — senão os dois divergem por alguns milissegundos e a contagem de
+  // blocos, que é indexada por este número, recomeça do 1 sem que nada tenha
+  // sido recalibrado.
+  treinadoEmMs = treinoDoPerfilMs(meta.createdAt);
   console.log(
     `[calib] Perfil salvo no registry: id=${meta.id} condição=${meta.opticalCondition} ` +
     `label='${meta.label}' amostras=${profile.length}`,
@@ -2574,6 +2648,10 @@ export function switchActiveProfile(id: string): CalibrationProfileMeta | null {
   // perfil anterior enviesaria a fusão binocular num modelo que nunca a
   // produziu. Um perfil sem `reference` zera tudo.
   restoreReferenceStateFromProfile(stored.reference ?? null);
+  // O instante do treino acompanha a troca pelo mesmo motivo: manter o da
+  // calibração anterior faria o relatório dizer "2 min desde a calibração"
+  // sobre um modelo treinado horas antes.
+  treinadoEmMs = treinoDoPerfilMs(stored.meta.createdAt);
   if (!stored.reference) {
     console.warn(
       `[calib] perfil '${stored.meta.id}' não traz estado de referência ` +
@@ -2607,6 +2685,7 @@ export function deleteCalibrationProfile(id: string): boolean {
     regressorLeft = null;
     regressorRight = null;
     restoreReferenceStateFromProfile(null);
+    treinadoEmMs = null;
   }
   if (ok) saveProfile();
   return ok;

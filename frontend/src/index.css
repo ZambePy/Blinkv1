@@ -13,8 +13,10 @@
   --color-card-border: rgba(255, 255, 255, 0.9);
   --color-card-shadow: rgba(27, 84, 168, 0.08);
 
-  /* Fonte */
-  --font-family-sans: 'Boldonse', system-ui, -apple-system, sans-serif;
+  /* Fontes. Boldonse é display (a marca): pesada e larga, ela estoura
+     botões de largura fixa e cansa em texto corrido. Corpo em system-ui. */
+  --font-family-sans: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-family-display: 'Boldonse', system-ui, -apple-system, sans-serif;
 
   /* Animações */
   --animate-fade-in-up: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) both;
@@ -83,7 +85,7 @@ body,
 #root {
   height: 100%;
   width: 100%;
-  font-family: 'Boldonse', system-ui, -apple-system, sans-serif;
+  font-family: var(--font-family-sans);
   background-color: var(--color-bg-base);
   color: var(--color-text-base);
   -webkit-font-smoothing: antialiased;
@@ -464,15 +466,57 @@ select:focus-visible,
   border: 2px solid rgba(56, 189, 248, 0.4);
   animation: accuracyRingPulse 1.6s ease-in-out infinite;
 }
+/* Crosshair do alvo de fixação: bullseye + cruz reduz a dispersão da fixação
+   e a taxa de microssacadas frente a um círculo simples (Thaler et al., 2013). */
+.accuracy-dot .dot-cross {
+  position: absolute;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+.accuracy-dot .dot-cross::before,
+.accuracy-dot .dot-cross::after {
+  content: '';
+  position: absolute;
+  background: rgba(56, 189, 248, 0.75);
+}
+.accuracy-dot .dot-cross::before {
+  left: 50%;
+  top: 0;
+  width: 2px;
+  height: 100%;
+  transform: translateX(-50%);
+}
+.accuracy-dot .dot-cross::after {
+  top: 50%;
+  left: 0;
+  height: 2px;
+  width: 100%;
+  transform: translateY(-50%);
+}
+
 .accuracy-dot .dot-inner {
+  position: relative;
   width: 26px;
   height: 26px;
   border-radius: 50%;
   background: #38bdf8;
+  /* Ponto escuro no centro: é ele que dá o lugar exato para fixar. */
+  border: 6px solid #38bdf8;
+  box-sizing: border-box;
   box-shadow:
     0 0 24px rgba(56, 189, 248, 0.9),
     0 0 60px rgba(56, 189, 248, 0.5);
   animation: accuracyDotPulse 1.2s ease-in-out infinite alternate;
+}
+.accuracy-dot .dot-inner::after {
+  content: '';
+  position: absolute;
+  left: 50%; top: 50%;
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: #0b1220;
+  transform: translate(-50%, -50%);
 }
 @keyframes accuracyRingPulse {
   0%, 100% { transform: scale(0.85); opacity: 0.9; }
@@ -577,6 +621,7 @@ select:focus-visible,
   text-align: center;
   background: rgba(255, 255, 255, 0.04);
 }
+.diag-point-card.diag-none { border-style: dashed; border-color: rgba(255, 255, 255, 0.18); opacity: 0.6; }
 .diag-point-card.diag-ok   { border-color: rgba(34, 197, 94, 0.45); }
 .diag-point-card.diag-warn { border-color: rgba(255, 204, 0, 0.45); }
 .diag-point-card.diag-bad  { border-color: rgba(239, 68, 68, 0.45); }
@@ -599,6 +644,69 @@ select:focus-visible,
   font-size: 0.85rem;
   font-weight: 700;
   color: #ffffff;
+}
+
+/* Blocos que `src/accuracy.ts` desenha no relatório e que ficaram sem regra
+   quando este arquivo voltou ao design antigo: o aviso, a linha de acerto e —
+   o que importa — os DOIS BOTÕES que encerram o teste. Sem eles o `preflight`
+   do Tailwind deixa `<button>` sem fundo, sem borda e do tamanho do texto: a
+   única saída da tela de relatório virava um texto cinza de 14 px. */
+.diagnostic-advice {
+  padding: 0.9rem 1.1rem;
+  margin-bottom: 1.25rem;
+  border-radius: 0.75rem;
+  border-left: 3px solid #f59e0b;
+  background: rgba(255, 255, 255, 0.05);
+  color: #e2e8f0;
+  font-size: 0.95rem;
+  line-height: 1.5;
+}
+.diagnostic-advice strong { display: block; margin-bottom: 0.4rem; color: #ffffff; }
+.diagnostic-advice p { margin: 0.25rem 0 0; }
+
+.diagnostic-hitrate {
+  margin-bottom: 0.75rem;
+  color: #cbd5e1;
+  font-size: 0.9rem;
+  text-align: center;
+}
+
+.diagnostic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 1rem;
+}
+.diagnostic-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  min-width: 200px;
+  min-height: 64px;
+  padding: 0.75rem 1.5rem;
+  border-radius: 2rem;
+  border: 2px solid #1b54a8;
+  background: #1b54a8;
+  color: #ffffff;
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.diagnostic-btn:hover,
+.diagnostic-btn:focus-visible {
+  box-shadow: 0 0 0 6px rgba(27, 84, 168, 0.3);
+}
+.diagnostic-btn.secondary {
+  background: transparent;
+  border-color: rgba(255, 255, 255, 0.35);
+  color: #ffffff;
+}
+.diagnostic-btn.secondary:hover {
+  border-color: #ffffff;
+  box-shadow: 0 0 0 6px rgba(255, 255, 255, 0.15);
 }
 
 /* Cores qualitativas do score (usadas no bloco de resumo persistido) */
@@ -908,4 +1016,9 @@ select:focus-visible,
   .kb-landing {
     animation: none;
   }
+}
+
+/* A marca aparece nos títulos e no wordmark, não no texto que o paciente lê. */
+.font-display {
+  font-family: var(--font-family-display);
 }

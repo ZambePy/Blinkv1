@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useGaze } from '../../context/GazeContext';
 import { evaluateReadiness, type ReadinessReport } from '@tracker/setupReadiness';
 import { snapshotFromDiagnostics, lerViewport } from '@tracker/setupReadinessAdapter';
+import { guardarProntidao } from '../../ultimaProntidao';
 
 /**
  * Painel de prontidão do posto de uso.
@@ -36,11 +37,22 @@ export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void
   const [report, setReport] = useState<ReadinessReport | null>(null);
   const [medindo, setMedindo] = useState(true);
 
+  // `getDiagnostics` e `onReadyChange` vivem em refs, FORA das deps: a
+  // identidade de `getDiagnostics` é refeita pelo `useMemo` do GazeContext a
+  // cada transição de estado do engine. Nas deps, cada uma dessas transições
+  // destruía e recriava o intervalo — e numa sessão com o rosto entrando e
+  // saindo o painel nunca completava um ciclo, ficando em "Medindo as
+  // condições…" para sempre, justamente na tela onde o cuidador decide se
+  // pode começar.
+  const diagRef = useRef(getDiagnostics);
+  diagRef.current = getDiagnostics;
+  const readyCbRef = useRef(onReadyChange);
+  readyCbRef.current = onReadyChange;
   useEffect(() => {
     // 2 Hz: a avaliação é barata, mas atualizar a 30 Hz faria os textos
     // piscarem e ninguém consegue ler.
     const id = setInterval(() => {
-      const d = getDiagnostics();
+      const d = diagRef.current();
       if (!d) return;
       const snap = snapshotFromDiagnostics(d, lerViewport());
       if (!snap) {
@@ -50,10 +62,13 @@ export const ReadinessPanel: React.FC<{ onReadyChange?: (ready: boolean) => void
       setMedindo(false);
       const r = evaluateReadiness(snap);
       setReport(r);
-      onReadyChange?.(r.canStart);
+      // O relatório de precisão lê daqui para gravar iluminação, postura e
+      // óculos MEDIDOS em vez dos valores hardcoded que saíam antes.
+      guardarProntidao(r);
+      readyCbRef.current?.(r.canStart);
     }, 500);
     return () => clearInterval(id);
-  }, [getDiagnostics, onReadyChange]);
+  }, []);
 
   if (medindo || !report) {
     return (

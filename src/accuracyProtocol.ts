@@ -31,10 +31,28 @@ export const ACCLIMATION_MS = 600;
 /**
  * Duração total da coleta por alvo, em ms — acomodação + janela útil.
  *
- * Mantido em 1400 ao subir a acomodação: a janela útil cai de 1000 para 800 ms
- * (~24 amostras a 30 Hz), o que sobra depois da estabilização, e não acrescenta
- * tempo de sessão. Para um usuário com ELA, alongar a coleta é fadiga real, não
- * inconveniente — se um dia for preciso mais amostra útil, o custo de subir
- * este número é 13 alvos × Δ, e a conta tem de ser feita explicitamente.
+ * 2000 ms é o valor do método de teste do Tobii e o que a literatura de
+ * qualidade de dado converge a usar; com a acomodação de 600 ms sobram 1400 ms
+ * úteis, ~42 amostras a 30 Hz. Com os 800 ms anteriores eram ~24 — pouco para
+ * um desvio-padrão estável, e desvio-padrão é metade do que este teste mede.
+ *
+ * O custo é 13 alvos × 600 ms = 7,8 s a mais por rodada. Para um usuário com
+ * ELA fadiga é real, então o teto da sessão inteira (calibração + duas
+ * rodadas) continua sendo os 20 minutos que a literatura de ELA usa.
  */
-export const COLLECTION_MS = 1400;
+export const COLLECTION_MS = 2000;
+
+/**
+ * Fração mínima de amostras válidas na janela útil para o ponto valer.
+ *
+ * 80% é o critério do Tobii e o mais citado. Abaixo disso o ponto entra no
+ * relatório como medido-com-ressalva: o número existe, mas a dispersão foi
+ * estimada sobre menos da metade dos quadros esperados.
+ */
+export const MIN_VALID_SAMPLE_RATIO = 0.8;
+
+/** Quadros esperados na janela útil, dada a taxa efetiva de amostragem. */
+export function quadrosEsperados(taxaHz: number): number {
+  if (!Number.isFinite(taxaHz) || taxaHz <= 0) return 0;
+  return Math.round((COLLECTION_MS - ACCLIMATION_MS) * taxaHz / 1000);
+}

@@ -69,6 +69,9 @@
       "title": "Backup de Configurações",
       "export": "Exportar Backup (JSON)"
     },
+    "dashboardLink": {
+      "button": "Abrir Painel de Acompanhamento"
+    },
     "logout": "Sair",
     "returnToMenu": "Voltar ao Menu",
     "language": {

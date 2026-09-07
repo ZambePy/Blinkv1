@@ -38,37 +38,70 @@ por disciplina de código.
 Webcam (getUserMedia, até 1920×1080)
   │
   ├─ Ajuste da câmera em malha fechada ─ zoom / brilho / contraste / exposição,
-  │     guiado pelo tamanho do rosto no quadro; só trava exposição depois de convergir
+  │     guiado pelo tamanho do rosto no quadro. Roda uma vez, na abertura da
+  │     câmera (até 14 iterações); ao convergir — e só com o brilho dentro da
+  │     faixa boa — trava exposição, balanço de branco e foco em manual
   │
   ├─ MediaPipe FaceLandmarker ─ 478 landmarks 3D + matriz de pose da cabeça
   │
-  ├─ L2CS-Net (ONNX, Web Worker) ─ yaw / pitch do olhar a cada 100 ms
-  │     WebGPU quando disponível, WASM como reserva; o provider efetivo e a
-  │     idade de cada leitura vão para os diagnósticos e para o relatório
+  ├─ L2CS-Net (ONNX, Web Worker) ─ yaw / pitch do olhar, com no máximo uma
+  │     submissão a cada 100 ms e uma inferência em voo por vez: 100 ms é o
+  │     teto da cadência, e em WASM quem manda é a latência da rede. Nos
+  │     quadros sem leitura nova o último ângulo é reusado; passada a
+  │     tolerância de idade (400 ms a 2,5 s, derivada da latência medida) a
+  │     leitura vira inválida e o bloco angular entra zerado.
+  │     WebGPU quando disponível, WASM como reserva; o provider efetivo, a
+  │     latência e a fração de leituras obsoletas vão para os diagnósticos e
+  │     para o relatório
   │
-  ├─ Vetor de features por olho ─ 4 dimensões de íris + 2 do L2CS
-  │     expansão polinomial (grau 2) → StandardScaler → Ridge por olho
+  ├─ Vetor de features por olho ─ 4 dimensões de íris + 2 do L2CS = 6
+  │     expansão polinomial (grau 2) → 27 dimensões por olho → StandardScaler
+  │     → Ridge por olho, com λ por eixo e penalidade branqueada pelo ruído
+  │     intra-fixação. Sem L2CS (`?ep=off`) são 4 dimensões → 14
   │
-  ├─ Fusão binocular ─ ponderada pela abertura de cada olho e pela
-  │     confiabilidade medida no treino
+  ├─ Fusão binocular ─ ponderada pela abertura de cada olho, pela
+  │     confiabilidade medida no treino e pela dominância ocular configurada
   │
-  ├─ Compensação de cabeça ─ distância (escala) e pose (d·tan Δ),
-  │     aplicada na inferência e nos alvos de treino
+  ├─ Compensação de cabeça ─ na saída, depois da fusão: primeiro a distância
+  │     (escala em torno do centro da tela), depois a pose (d·tan Δ). A de
+  │     translação lateral existe e vem por último, desligada por padrão
+  │     (`lateralTranslationCompensation`). Só a de pose também é aplicada aos
+  │     ALVOS de treino; a de distância é exclusiva da inferência
+  │
+  ├─ softClamp ─ Hermite cúbico nos 2 % de cada borda, para o ponto caber na
+  │     tela sem salto de velocidade. É a última etapa dentro de `mapGaze`,
+  │     depois das compensações
   │
   ├─ Filtro temporal ─ One Euro (produção); Kalman e Kalman+EMA disponíveis
-  │     para comparação (`filterMode`)
+  │     para comparação (`filterMode`). Vem depois de tudo isso, no engine
   │
   └─ Interação ─ dwell, cursor, emergência, varredura opcional, fallback
         quando o olhar se perde
 ```
 
 A **calibração** apresenta 9 alvos (ou 4 no modo rápido) posicionados por um
-orçamento de excentricidade angular (≤ 16°), descarta os primeiros 600 ms de
-cada alvo, rejeita amostras com imagem ruim ou leitura do L2CS inválida e
-treina o Ridge com λ escolhido por validação cruzada leave-one-target-out. Ao
-fim, um **teste de precisão** de 13 pontos mede acurácia e precisão e grava
-um relatório JSON com as condições da sessão. O protocolo, as métricas e a
-leitura do relatório estão em [`docs/MEDICOES.md`](docs/MEDICOES.md).
+orçamento de excentricidade angular (≤ 16°). Cada alvo descarta os primeiros
+600 ms — sacada e acomodação — e coleta em seguida uma janela útil que cresce
+com a excentricidade, de 1680 ms no centro a 2800 ms nos cantos. Amostras com
+imagem ruim ou leitura do L2CS inválida são rejeitadas; um alvo que retenha
+menos de 15 amostras é refeito. O Ridge é treinado por olho, com λ escolhido
+por eixo em validação cruzada leave-one-target-out — cada fold deixa de fora
+um alvo inteiro, não uma amostra.
+
+Ao fim, um **teste de precisão** de 13 pontos (grade 3×3 interior mais 4
+bordas) mede a qualidade do modelo. Os alvos aparecem em **ordem sorteada**,
+com a semente gravada no relatório; cada um coleta 2000 ms, dos quais os
+primeiros 600 ms de sacada e acomodação são descartados — sobram **1400 ms
+úteis**, ~42 amostras a 30 Hz. Um ponto que receba menos de 80 % dos quadros
+esperados é marcado, não removido; abaixo de 8 amostras ele entra no relatório
+como não medido. As métricas saem da predição crua, antes do filtro temporal —
+a dispersão do cursor filtrado é reportada à parte. O relatório JSON traz
+acurácia (erro médio em px e em graus, viés por eixo), as três medidas de
+precisão que a literatura pede juntas (desvio-padrão por eixo, RMS
+amostra-a-amostra e BCEA de 68 %), perda de dados, taxa de acerto por raio de
+alvo, a distância medida durante o teste e o **tamanho mínimo de botão** que o
+erro daquela pessoa exige. O protocolo completo, o significado de cada
+métrica, o checklist de relato e as referências estão em [`docs/MEDICOES.md`](docs/MEDICOES.md).
 
 ---
 

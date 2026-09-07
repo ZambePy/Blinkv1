@@ -83,7 +83,14 @@ const defaultSettings: Settings = {
   viewingDistanceCm: 60,
   screenGeometrySource: 'default',
   systemAccessGranted: null,
-  cameraHorizontalFovDeg: null,
+  // 69,7° — valor nominal da webcam 1080p de referência, fixado em vez de
+  // derivado. O passo "Calibrar campo de visão" saiu do protocolo pelo
+  // orçamento de tempo do projeto: ele custava um minuto de preparo por
+  // sessão e só alimenta `distanciaMedidaCm`, que é testemunha de movimento,
+  // não entrada do erro angular. O botão continua na tela para quem quiser
+  // derivar o valor da própria câmera; o default apenas deixa de ser `null`,
+  // que era o que fazia toda sessão sair sem a testemunha.
+  cameraHorizontalFovDeg: 69.7,
   screenScaleFactor: null,
 };
 

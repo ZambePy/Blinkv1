@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
-import { buildAutoTestMeta, opticalConditionToOculos, applyUptimeToRunMetaIfDefault , readinessMetaFrom } from './autoTestMeta';
+import { describe, it, expect, beforeEach } from 'vitest';
+import {
+  buildAutoTestMeta, opticalConditionToOculos, applyUptimeToRunMetaIfDefault,
+  readinessMetaFrom, montarMetaDeMedicao,
+} from './autoTestMeta';
 import type { RunMeta } from '@tracker/accuracy';
 import type { ReadinessReport } from '@tracker/setupReadiness';
+import { guardarProntidao, limparProntidao } from '../ultimaProntidao';
 
 describe('buildAutoTestMeta', () => {
   const base = {
@@ -259,5 +263,62 @@ describe('readinessMetaFrom', () => {
 
   it('sem avisos, observacoes diz explicitamente "nenhum"', () => {
     expect(readinessMetaFrom(build()).observacoes).toContain('nenhum');
+  });
+});
+
+/**
+ * Montagem completa do `RunMeta`: o que antes era anotado à mão (e não era)
+ * passa a entrar sozinho. Ver `docs/MEDICOES.md` §12.
+ */
+describe('montarMetaDeMedicao', () => {
+  const base = {
+    sessionUptimeMs: 60_000,
+    opticalCondition: 'sem_oculos' as const,
+    distanciaCm: 60,
+    telaPolegadas: 23.6,
+    screenGeometrySource: 'manual' as const,
+    dateISO: '2026-09-06',
+  };
+
+  beforeEach(() => {
+    limparProntidao();
+    localStorage.clear();
+  });
+
+  it('grava o bloco derivado do instante do treino, sem ninguém digitar', () => {
+    expect(montarMetaDeMedicao({ ...base, calibTs: 111 }).blocoDeMedicao).toBe(1);
+    expect(montarMetaDeMedicao({ ...base, calibTs: 111 }).blocoDeMedicao).toBe(2);
+    // Recalibrou: instante novo, contagem recomeça.
+    expect(montarMetaDeMedicao({ ...base, calibTs: 222 }).blocoDeMedicao).toBe(1);
+  });
+
+  it('sem calibração ativa não atribui bloco', () => {
+    expect(montarMetaDeMedicao({ ...base, calibTs: null }).blocoDeMedicao).toBeUndefined();
+  });
+
+  it('iluminação e postura vêm da prontidão MEDIDA quando ela existe', () => {
+    guardarProntidao({
+      checks: [
+        { id: 'lighting', status: 'warn', value: 0.05, message: '' },
+        { id: 'contrast', status: 'ok', value: 0.2, message: '' },
+        { id: 'headPose', status: 'warn', value: 0.4, message: '' },
+      ],
+      canStart: false,
+      blockedHard: false,
+      measured: {
+        iodFraction: 0.18, estimatedDistanceCm: null,
+        brightness: 0.05, contrast: 0.2, glassesLikely: true,
+      },
+    });
+    const m = montarMetaDeMedicao({ ...base, calibTs: 1 });
+    expect(m.iluminacao).toBe('ruim');
+    expect(m.movimentoCabeca).toBe('livre');
+    // Óculos passa a vir do reflexo medido, não do dropdown do cuidador.
+    expect(m.oculos).toBe(true);
+  });
+
+  it('sem prontidão recente, NÃO afirma "boa" em silêncio', () => {
+    const m = montarMetaDeMedicao({ ...base, calibTs: 1 });
+    expect(m.observacoes).toContain('prontidão não medida');
   });
 });

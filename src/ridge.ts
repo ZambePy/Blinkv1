@@ -3,7 +3,8 @@
 //
 // ─── Regularização branqueada pelo ruído intra-fixação ──────────────────────
 //
-// Com dezenas de dims por olho e apenas 9 alvos distintos, sobram direções
+// Com 27 dims por olho depois da expansão polinomial e apenas 9 alvos
+// distintos, sobram direções
 // que NENHUM alvo restringe. Com `+λI` (penalidade isotrópica) o Ridge
 // preenche essas direções com o jitter de fixação e a deriva lenta de
 // pose/landmark, que ficam ALIASADOS com a identidade do alvo (cada alvo é
@@ -19,7 +20,7 @@
 //
 // que penaliza forte as direções sem informação de olhar e deixa livres as
 // direções que separam alvos. É o mesmo branqueamento por covariância de ruído
-// da LDA regularizada. Custo: uma acumulação 45×45 por olho (~ms).
+// da LDA regularizada. Custo: uma acumulação 27×27 por olho (~ms).
 //
 // O fator `m` (nº de amostras) escala λ junto com ΦᵀΦ: sem ele, λ significa
 // coisas diferentes conforme quantos frames a coleta conseguiu reter (500
@@ -462,12 +463,33 @@ export class RidgeRegressor {
     return groups.map((g) => 1 / (conta.get(g) ?? 1));
   }
 
-  train(features: number[][], targetsX: number[], targetsY: number[]): void {
+  /**
+   * @param gruposDeAlvo Chave do ALVO NOMINAL de cada amostra. Precisa vir de
+   * fora quando os alvos de treino foram compensados por pose: aí cada amostra
+   * tem coordenada própria, e derivar o grupo delas transformaria o
+   * leave-one-target-out em leave-one-SAMPLE-out — λ otimista, penalidade
+   * anisotrópica desligada por falta de grupo com 2+ amostras, e um custo de
+   * treino proporcional ao número de amostras em vez de alvos.
+   */
+  train(
+    features: number[][],
+    targetsX: number[],
+    targetsY: number[],
+    gruposDeAlvo?: readonly string[],
+    /** λ já escolhido. Pula a validação cruzada — usado pelo diagnóstico de
+     *  ajuste, que mede a generalização do modelo TREINADO, não a de um
+     *  modelo reajustado a cada dobra. */
+    lambdaFixo?: { x: number; y: number },
+  ): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
-    const groups = targets.map(targetGroupKey);
-    const bestLambdas = RidgeRegressor.lambdaOverride != null
-      ? { x: RidgeRegressor.lambdaOverride, y: RidgeRegressor.lambdaOverride }
-      : this.selectLambdaCV(features, targets, LAMBDA_GRID, groups);
+    const groups = gruposDeAlvo && gruposDeAlvo.length === targets.length
+      ? [...gruposDeAlvo]
+      : targets.map(targetGroupKey);
+    const bestLambdas = lambdaFixo
+      ? lambdaFixo
+      : RidgeRegressor.lambdaOverride != null
+        ? { x: RidgeRegressor.lambdaOverride, y: RidgeRegressor.lambdaOverride }
+        : this.selectLambdaCV(features, targets, LAMBDA_GRID, groups);
     const pesos = RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(groups) : null;
 
     const MAX_ESCALATIONS = 3;

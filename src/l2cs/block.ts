@@ -65,6 +65,32 @@ export function isGazePlausible(yaw: number, pitch: number): boolean {
  */
 export const L2CS_CONFIDENCE_MIN = 0.15;
 
+/**
+ * Por que o último bloco angular saiu zerado, e com que números.
+ *
+ * As três causas — leitura obsoleta, ângulo implausível e confiança baixa —
+ * eram indistinguíveis para quem consome o vetor: todas viram sete zeros. A
+ * calibração então contava tudo como um contador só e a tela dizia "o sistema
+ * perdeu o olhar" mesmo quando a leitura chegou na hora e o problema era a
+ * distribuição difusa da softmax. Culpar o olhar do paciente por um limiar do
+ * modelo manda a pessoa se mexer, o que só piora.
+ */
+export interface DiagnosticoBloco {
+  motivo: 'stale' | 'implausivel' | 'confianca' | null;
+  yawDeg: number;
+  pitchDeg: number;
+  confidence: number | null;
+}
+
+let ultimoDiag: DiagnosticoBloco = { motivo: null, yawDeg: 0, pitchDeg: 0, confidence: null };
+
+/** Diagnóstico do último `buildL2CSBlock`. Válido para o quadro corrente. */
+export function ultimoDiagnosticoDoBloco(): DiagnosticoBloco {
+  return ultimoDiag;
+}
+
+const GRAUS = 180 / Math.PI;
+
 export function buildL2CSBlock(
   yaw: number,
   pitch: number,
@@ -75,22 +101,31 @@ export function buildL2CSBlock(
    *  ausência transformaria todo dado histórico em lixo. */
   confidence?: number,
 ): number[] {
+  const conf = typeof confidence === 'number' ? confidence : null;
+  const anotar = (motivo: DiagnosticoBloco['motivo']) => {
+    ultimoDiag = { motivo, yawDeg: yaw * GRAUS, pitchDeg: pitch * GRAUS, confidence: conf };
+  };
+
   // Ângulo implausível é tratado como inválido, não como extremo.
   if (valid && !isGazePlausible(yaw, pitch)) {
+    anotar('implausivel');
     return [0, 0, 0, 0, 0, 0, 0];
   }
   // Gate de confiança, independente da plausibilidade acima: aquela pega o
   // ângulo impossível, esta pega a distribuição sem informação que produziu
   // um ângulo possível.
-  if (valid && typeof confidence === 'number' && confidence < L2CS_CONFIDENCE_MIN) {
+  if (valid && conf !== null && conf < L2CS_CONFIDENCE_MIN) {
+    anotar('confianca');
     return [0, 0, 0, 0, 0, 0, 0];
   }
   // Degradação graciosa — quando o L2CS ainda não emitiu resultado, ou o cache
   // está stale, o Ridge continua operando com o comportamento pré-L2CS (as
   // dimensões novas ficam constantes em zero, não contribuem para a predição).
   if (!valid) {
+    anotar('stale');
     return [0, 0, 0, 0, 0, 0, 0];
   }
+  anotar(null);
 
   const y = clamp(yaw, -CLAMP_RAD, CLAMP_RAD);
   const p = clamp(pitch, -CLAMP_RAD, CLAMP_RAD);

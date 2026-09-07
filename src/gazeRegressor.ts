@@ -2,7 +2,18 @@ import type { RidgeModel } from './ridge';
 import { RidgeRegressor } from './ridge';
 
 export interface GazeRegressor {
-  train(features: number[][], targetsX: number[], targetsY: number[]): void;
+  /**
+   * @param gruposDeAlvo Chave do alvo nominal de cada amostra. Obrigatório
+   * quando os alvos passados já vêm compensados por pose — sem ela o
+   * agrupamento por coordenada dá um grupo por amostra.
+   */
+  train(
+    features: number[][],
+    targetsX: number[],
+    targetsY: number[],
+    gruposDeAlvo?: readonly string[],
+    lambdaFixo?: { x: number; y: number },
+  ): void;
   predict(features: number[]): { x: number; y: number };
 }
 
