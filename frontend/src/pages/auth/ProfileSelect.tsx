@@ -103,7 +103,7 @@ export const ProfileSelect: React.FC = () => {
       aria-labelledby="profiles-title"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+        background: 'var(--settings-bg)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -157,7 +157,7 @@ export const ProfileSelect: React.FC = () => {
           <div
             className="glass-card"
             style={{
-              background: 'rgba(255,255,255,0.95)',
+              background: 'var(--color-card-bg)',
               borderRadius: '1.6rem',
               padding: '2rem',
               display: 'flex',
@@ -213,7 +213,7 @@ export const ProfileSelect: React.FC = () => {
                       height: 64,
                       borderRadius: '50%',
                       objectFit: 'cover',
-                      border: '2px solid #fff',
+                      border: '2px solid var(--color-card-border)',
                     }}
                   />
                 )}
@@ -249,11 +249,11 @@ export const ProfileSelect: React.FC = () => {
                   display: 'flex',
                   alignItems: 'center',
                   gap: '0.55rem',
-                  background: '#fef2f2',
-                  border: '1px solid #fecaca',
+                  background: 'var(--tint-danger-bg)',
+                  border: '1px solid var(--tint-danger-border)',
                   padding: '0.8rem 1rem',
                   borderRadius: '0.85rem',
-                  color: '#991b1b',
+                  color: 'var(--tint-danger-text)',
                   fontSize: '0.9rem',
                 }}
               >
@@ -293,7 +293,7 @@ export const ProfileSelect: React.FC = () => {
                     onClick={() => escolher(p)}
                     className="glass-card"
                     style={{
-                      background: 'rgba(255,255,255,0.94)',
+                      background: 'var(--color-card-bg)',
                       borderRadius: '1.6rem',
                       padding: '2rem 1.25rem',
                       display: 'flex',
@@ -316,7 +316,7 @@ export const ProfileSelect: React.FC = () => {
                           height: 84,
                           borderRadius: '50%',
                           objectFit: 'cover',
-                          border: '3px solid #fff',
+                          border: '3px solid var(--color-card-border)',
                         }}
                       />
                     ) : (
@@ -371,8 +371,8 @@ export const ProfileSelect: React.FC = () => {
                       position: 'absolute',
                       top: 10,
                       right: 10,
-                      background: 'rgba(255,255,255,0.9)',
-                      border: '1px solid #e2e8f0',
+                      background: 'var(--color-card-bg)',
+                      border: '1px solid var(--color-card-border)',
                       borderRadius: '50%',
                       width: 32,
                       height: 32,
@@ -439,9 +439,9 @@ const CampoTexto: React.FC<{
       onChange={(e) => aoMudar(e.target.value)}
       placeholder={placeholder}
       style={{
-        border: '1px solid #cbd5e1',
+        border: '1px solid var(--field-border)',
         borderRadius: '0.9rem',
-        background: 'var(--color-bg-base)',
+        background: 'var(--field-bg)',
         padding: '0.85rem 1rem',
         fontSize: '1rem',
         outline: 'none',

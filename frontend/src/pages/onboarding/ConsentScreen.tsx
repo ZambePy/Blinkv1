@@ -34,7 +34,7 @@ export const ConsentScreen: React.FC = () => {
       aria-labelledby="consent-title"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+        background: 'var(--settings-bg)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -44,7 +44,7 @@ export const ConsentScreen: React.FC = () => {
       <div
         className="glass-card animate-scale-in"
         style={{
-          background: 'rgba(255,255,255,0.94)',
+          background: 'var(--color-card-bg)',
           padding: '2.75rem 2.5rem',
           borderRadius: '2rem',
           boxShadow: '0 20px 40px -10px rgba(27,84,168,0.12)',
@@ -92,16 +92,16 @@ export const ConsentScreen: React.FC = () => {
           <Bloco
             icone={<MonitorSmartphone size={22} color="#15803d" aria-hidden="true" />}
             cor="#15803d"
-            fundo="#f0fdf4"
-            borda="#bbf7d0"
+            fundo="var(--tint-ok-bg)"
+            borda="var(--tint-ok-border)"
             titulo={t('consent.localTitle')}
             corpo={t('consent.localBody')}
           />
           <Bloco
             icone={<Cloud size={22} color="#1B54A8" aria-hidden="true" />}
             cor="#1B54A8"
-            fundo="#eff6ff"
-            borda="#bfdbfe"
+            fundo="var(--tint-info-bg)"
+            borda="var(--tint-info-border)"
             titulo={t('consent.remoteTitle')}
             corpo={t('consent.remoteBody')}
           />
@@ -114,8 +114,8 @@ export const ConsentScreen: React.FC = () => {
             gap: '0.85rem',
             padding: '1rem 1.15rem',
             borderRadius: '1rem',
-            border: `2px solid ${aceito ? '#1B54A8' : '#e2e8f0'}`,
-            background: aceito ? 'rgba(27,84,168,0.06)' : 'transparent',
+            border: `2px solid ${aceito ? 'var(--color-primary)' : 'var(--color-card-border)'}`,
+            background: aceito ? 'var(--tint-info-bg)' : 'transparent',
             cursor: 'pointer',
             transition: 'border-color 0.2s, background 0.2s',
           }}

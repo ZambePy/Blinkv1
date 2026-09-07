@@ -71,8 +71,8 @@ export const ActivatedScreen: React.FC = () => {
               gap: '0.85rem',
               padding: '1rem 1.15rem',
               borderRadius: '1rem',
-              background: '#fffbeb',
-              border: '1px solid #fde68a',
+              background: 'var(--tint-warn-bg)',
+              border: '1px solid var(--tint-warn-border)',
             }}
           >
             <Monitor size={22} color="#b45309" aria-hidden="true" style={{ flexShrink: 0 }} />
@@ -157,13 +157,20 @@ export const ActivatedScreen: React.FC = () => {
           gap: '0.7rem',
           padding: '0.95rem 1.1rem',
           borderRadius: '1rem',
-          background: '#f0fdf4',
-          border: '1px solid #bbf7d0',
+          background: 'var(--tint-ok-bg)',
+          border: '1px solid var(--tint-ok-border)',
           width: '100%',
         }}
       >
         <Monitor size={20} color="#15803d" aria-hidden="true" style={{ flexShrink: 0 }} />
-        <span style={{ fontSize: '0.95rem', lineHeight: 1.5, color: '#166534', fontWeight: 600 }}>
+        <span
+          style={{
+            fontSize: '0.95rem',
+            lineHeight: 1.5,
+            color: 'var(--tint-ok-text)',
+            fontWeight: 600,
+          }}
+        >
           {t('license.activated.boundHere')}
         </span>
       </div>
@@ -184,11 +191,11 @@ const alertaStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'flex-start',
   gap: '0.55rem',
-  background: '#fef2f2',
-  border: '1px solid #fecaca',
+  background: 'var(--tint-danger-bg)',
+  border: '1px solid var(--tint-danger-border)',
   padding: '0.85rem 1rem',
   borderRadius: '0.9rem',
-  color: '#991b1b',
+  color: 'var(--tint-danger-text)',
   fontSize: '0.92rem',
 };
 
@@ -211,7 +218,7 @@ const Moldura: React.FC<{ titulo: string; icone: React.ReactNode; children: Reac
     aria-labelledby="activated-title"
     style={{
       minHeight: '100vh',
-      background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+      background: 'var(--settings-bg)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'center',
@@ -221,7 +228,7 @@ const Moldura: React.FC<{ titulo: string; icone: React.ReactNode; children: Reac
     <div
       className="glass-card animate-scale-in"
       style={{
-        background: 'rgba(255,255,255,0.94)',
+        background: 'var(--color-card-bg)',
         padding: '2.75rem 2.5rem',
         borderRadius: '2rem',
         boxShadow: '0 20px 40px -10px rgba(27,84,168,0.12)',

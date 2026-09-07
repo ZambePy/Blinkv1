@@ -89,7 +89,9 @@ body,
   background-color: var(--color-bg-base);
   color: var(--color-text-base);
   -webkit-font-smoothing: antialiased;
-  transition: background-color 0.4s ease, color 0.4s ease;
+  transition:
+    background-color 0.4s ease,
+    color 0.4s ease;
 }
 
 /* Variáveis base (light mode) — disponíveis como CSS custom properties normais */
@@ -102,18 +104,56 @@ body,
   --color-primary: #1b54a8;
   --color-primary-light: #e8f0fb;
   --settings-bg: linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%);
+
+  /* Caixas de estado (sucesso / atencao / erro / informacao).
+     Existem como token porque as tintas claras que estavam cravadas nas telas
+     de onboarding ficavam ilegiveis no tema escuro — que e o PADRAO do app. */
+  --tint-ok-bg: #f0fdf4;
+  --tint-ok-border: #bbf7d0;
+  --tint-ok-text: #166534;
+  --tint-warn-bg: #fffbeb;
+  --tint-warn-border: #fde68a;
+  --tint-warn-text: #92400e;
+  --tint-danger-bg: #fef2f2;
+  --tint-danger-border: #fecaca;
+  --tint-danger-text: #991b1b;
+  --tint-info-bg: #eff6ff;
+  --tint-info-border: #bfdbfe;
+  --tint-info-text: #1e40af;
+
+  /* Campos de formulario. */
+  --field-bg: #ffffff;
+  --field-border: #cbd5e1;
 }
 
 /* Modo escuro (via classe no html) */
 html.dark {
   --color-bg-base: #0f172a;
   --color-text-base: #f8fafc;
-  --color-card-bg: rgba(30, 41, 59, 0.90);
+  --color-card-bg: rgba(30, 41, 59, 0.9);
   --color-card-border: rgba(255, 255, 255, 0.12);
   --color-card-shadow: rgba(0, 0, 0, 0.4);
   --color-primary-light: #1e293b;
   --color-primary: #3b82f6;
   --settings-bg: linear-gradient(160deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+
+  /* Mesmas familias de cor, rebaixadas: fundo translucido sobre o card escuro
+     e texto claro o bastante para contraste AA. */
+  --tint-ok-bg: rgba(22, 163, 74, 0.14);
+  --tint-ok-border: rgba(74, 222, 128, 0.35);
+  --tint-ok-text: #86efac;
+  --tint-warn-bg: rgba(217, 119, 6, 0.16);
+  --tint-warn-border: rgba(251, 191, 36, 0.35);
+  --tint-warn-text: #fcd34d;
+  --tint-danger-bg: rgba(220, 38, 38, 0.16);
+  --tint-danger-border: rgba(248, 113, 113, 0.35);
+  --tint-danger-text: #fca5a5;
+  --tint-info-bg: rgba(59, 130, 246, 0.14);
+  --tint-info-border: rgba(96, 165, 250, 0.35);
+  --tint-info-text: #93c5fd;
+
+  --field-bg: rgba(15, 23, 42, 0.6);
+  --field-border: rgba(148, 163, 184, 0.28);
 }
 
 /* Glassmorphism utilitário refinado */
@@ -123,7 +163,10 @@ html.dark {
   -webkit-backdrop-filter: blur(20px);
   border: 1px solid var(--color-card-border);
   box-shadow: 0 10px 30px -10px var(--color-card-shadow);
-  transition: background-color 0.4s ease, border-color 0.4s ease, box-shadow 0.4s ease;
+  transition:
+    background-color 0.4s ease,
+    border-color 0.4s ease,
+    box-shadow 0.4s ease;
 }
 
 .glass-card {
@@ -132,7 +175,10 @@ html.dark {
   -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--color-card-border);
   box-shadow: 0 4px 20px -2px rgba(0, 0, 0, 0.05);
-  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.4s ease, border-color 0.4s ease;
+  transition:
+    all 0.25s cubic-bezier(0.16, 1, 0.3, 1),
+    background-color 0.4s ease,
+    border-color 0.4s ease;
 }
 
 .glass-card:hover {
@@ -401,7 +447,7 @@ select:focus-visible,
 .gaze-hover {
   transform: scale(1.04) !important;
   box-shadow: 0 12px 32px rgba(27, 84, 168, 0.25) !important;
-  border-color: #1B54A8 !important;
+  border-color: #1b54a8 !important;
   z-index: 50;
   position: relative;
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
@@ -512,19 +558,32 @@ select:focus-visible,
 .accuracy-dot .dot-inner::after {
   content: '';
   position: absolute;
-  left: 50%; top: 50%;
-  width: 6px; height: 6px;
+  left: 50%;
+  top: 50%;
+  width: 6px;
+  height: 6px;
   border-radius: 50%;
   background: #0b1220;
   transform: translate(-50%, -50%);
 }
 @keyframes accuracyRingPulse {
-  0%, 100% { transform: scale(0.85); opacity: 0.9; }
-  50%      { transform: scale(1.15); opacity: 0.35; }
+  0%,
+  100% {
+    transform: scale(0.85);
+    opacity: 0.9;
+  }
+  50% {
+    transform: scale(1.15);
+    opacity: 0.35;
+  }
 }
 @keyframes accuracyDotPulse {
-  from { transform: scale(0.9); }
-  to   { transform: scale(1.15); }
+  from {
+    transform: scale(0.9);
+  }
+  to {
+    transform: scale(1.15);
+  }
 }
 
 /* ── Diagnostic overlay (resumo pós-teste) ─────────────────────────────────── */
@@ -539,7 +598,9 @@ select:focus-visible,
   opacity: 0;
   transition: opacity 0.3s ease-out;
 }
-.diagnostic-overlay.visible { opacity: 1; }
+.diagnostic-overlay.visible {
+  opacity: 1;
+}
 
 .diagnostic-svg {
   position: absolute;
@@ -584,8 +645,17 @@ select:focus-visible,
   font-size: 0.9rem;
   color: #cbd5e1;
 }
-.legend-item { display: inline-flex; align-items: center; gap: 0.5rem; }
-.legend-dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  display: inline-block;
+}
 
 .diagnostic-metrics {
   display: flex;
@@ -604,9 +674,21 @@ select:focus-visible,
   justify-content: center;
   gap: 0.35rem;
 }
-.metric-value { font-size: 1.75rem; font-weight: 800; line-height: 1; }
-.metric-label { font-size: 0.75rem; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.08em; }
-.metric-divider { width: 1px; background: rgba(255, 255, 255, 0.08); }
+.metric-value {
+  font-size: 1.75rem;
+  font-weight: 800;
+  line-height: 1;
+}
+.metric-label {
+  font-size: 0.75rem;
+  color: #94a3b8;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.metric-divider {
+  width: 1px;
+  background: rgba(255, 255, 255, 0.08);
+}
 
 .diagnostic-point-grid {
   display: grid;
@@ -621,12 +703,30 @@ select:focus-visible,
   text-align: center;
   background: rgba(255, 255, 255, 0.04);
 }
-.diag-point-card.diag-none { border-style: dashed; border-color: rgba(255, 255, 255, 0.18); opacity: 0.6; }
-.diag-point-card.diag-ok   { border-color: rgba(34, 197, 94, 0.45); }
-.diag-point-card.diag-warn { border-color: rgba(255, 204, 0, 0.45); }
-.diag-point-card.diag-bad  { border-color: rgba(239, 68, 68, 0.45); }
-.diag-point-name  { font-size: 0.7rem; color: #94a3b8; margin-bottom: 0.2rem; }
-.diag-point-error { font-size: 0.95rem; font-weight: 700; color: #ffffff; }
+.diag-point-card.diag-none {
+  border-style: dashed;
+  border-color: rgba(255, 255, 255, 0.18);
+  opacity: 0.6;
+}
+.diag-point-card.diag-ok {
+  border-color: rgba(34, 197, 94, 0.45);
+}
+.diag-point-card.diag-warn {
+  border-color: rgba(255, 204, 0, 0.45);
+}
+.diag-point-card.diag-bad {
+  border-color: rgba(239, 68, 68, 0.45);
+}
+.diag-point-name {
+  font-size: 0.7rem;
+  color: #94a3b8;
+  margin-bottom: 0.2rem;
+}
+.diag-point-error {
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: #ffffff;
+}
 
 .diagnostic-actions {
   font-size: 0.9rem;
@@ -661,8 +761,14 @@ select:focus-visible,
   font-size: 0.95rem;
   line-height: 1.5;
 }
-.diagnostic-advice strong { display: block; margin-bottom: 0.4rem; color: #ffffff; }
-.diagnostic-advice p { margin: 0.25rem 0 0; }
+.diagnostic-advice strong {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #ffffff;
+}
+.diagnostic-advice p {
+  margin: 0.25rem 0 0;
+}
 
 .diagnostic-hitrate {
   margin-bottom: 0.75rem;
@@ -693,7 +799,10 @@ select:focus-visible,
   font-size: 1.05rem;
   font-weight: 700;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .diagnostic-btn:hover,
 .diagnostic-btn:focus-visible {
@@ -710,10 +819,18 @@ select:focus-visible,
 }
 
 /* Cores qualitativas do score (usadas no bloco de resumo persistido) */
-.accuracy-excellent { color: #22c55e; }
-.accuracy-good      { color: #00fff0; }
-.accuracy-regular   { color: #ffcc00; }
-.accuracy-poor      { color: #ef4444; }
+.accuracy-excellent {
+  color: #22c55e;
+}
+.accuracy-good {
+  color: #00fff0;
+}
+.accuracy-regular {
+  color: #ffcc00;
+}
+.accuracy-poor {
+  color: #ef4444;
+}
 
 /* ────────────────────────────────────────────────────────────────────────────
  * Design System de Interação Ocular — Componentes Canônicos (Sprint B1)
@@ -733,12 +850,15 @@ select:focus-visible,
   font-weight: 700;
   font-size: 1.25rem;
   cursor: pointer;
-  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1), border-color 0.15s, box-shadow 0.15s;
+  transition:
+    transform 0.15s cubic-bezier(0.16, 1, 0.3, 1),
+    border-color 0.15s,
+    box-shadow 0.15s;
 }
 
 /* 1. Entrada: contorno destacado */
 .gaze-button.gaze-hover {
-  border-color: var(--color-primary, #1B54A8);
+  border-color: var(--color-primary, #1b54a8);
   box-shadow: 0 0 0 4px rgba(27, 84, 168, 0.2);
   transform: scale(1.02);
 }
@@ -789,13 +909,11 @@ select:focus-visible,
   border-radius: inherit;
   pointer-events: none;
   border: 4px solid transparent;
-  background: conic-gradient(
-    #1B54A8 calc(var(--gaze-dwell-progress, 0) * 360deg),
-    transparent 0
-  ) border-box;
-  -webkit-mask: 
-     linear-gradient(#fff 0 0) padding-box, 
-     linear-gradient(#fff 0 0);
+  background: conic-gradient(#1b54a8 calc(var(--gaze-dwell-progress, 0) * 360deg), transparent 0)
+    border-box;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) padding-box,
+    linear-gradient(#fff 0 0);
   -webkit-mask-composite: destination-out;
   mask-composite: exclude;
   opacity: 0;
@@ -818,15 +936,13 @@ select:focus-visible,
   color: #ffffff;
 }
 .gaze-button.emergency .gaze-button-progress-ring {
-  background: conic-gradient(
-    #ef4444 calc(var(--gaze-dwell-progress, 0) * 360deg),
-    transparent 0
-  ) border-box;
+  background: conic-gradient(#ef4444 calc(var(--gaze-dwell-progress, 0) * 360deg), transparent 0)
+    border-box;
 }
 
 /* Estado desabilitado */
 .gaze-button:disabled,
-.gaze-button[data-no-dwell="true"] {
+.gaze-button[data-no-dwell='true'] {
   opacity: 0.4;
   cursor: not-allowed;
   pointer-events: none;
@@ -857,7 +973,9 @@ select:focus-visible,
   overflow: hidden;
   /* Só a cor transiciona, e devagar: `transform` aqui deslocaria a tecla sob
      o olhar fixo, que é exatamente o que não pode acontecer. */
-  transition: background-color 120ms linear, border-color 120ms linear;
+  transition:
+    background-color 120ms linear,
+    border-color 120ms linear;
 }
 
 /* Nível 1 — escolher um GRUPO. Recuado: contorno frio, rótulo mais quieto.
@@ -954,7 +1072,9 @@ select:focus-visible,
   border-radius: 20px;
   color: var(--kb-glyph-dim);
   padding: 0;
-  transition: background-color 120ms linear, border-color 120ms linear;
+  transition:
+    background-color 120ms linear,
+    border-color 120ms linear;
 }
 
 .kb-nav.gaze-hover {

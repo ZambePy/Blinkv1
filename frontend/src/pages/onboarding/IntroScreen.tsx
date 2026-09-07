@@ -1,7 +1,7 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Eye, UserRound, HeartHandshake, ArrowRight } from 'lucide-react';
+import { UserRound, HeartHandshake, ArrowRight } from 'lucide-react';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { LanguageSwitcher } from '../../components/ui/LanguageSwitcher';
 import { INTRO_SEEN_KEY } from './bootDestination';
@@ -33,7 +33,7 @@ export const IntroScreen: React.FC = () => {
       aria-labelledby="intro-title"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+        background: 'var(--settings-bg)',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
@@ -57,7 +57,12 @@ export const IntroScreen: React.FC = () => {
         <div
           style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1.15rem' }}
         >
-          <Eye size={52} color="#1B54A8" aria-hidden="true" />
+          <img
+            src="/LOGO.png"
+            alt="IrisFlow"
+            style={{ width: 230, height: 'auto' }}
+            onError={(e) => (e.currentTarget.style.display = 'none')}
+          />
           <h1
             id="intro-title"
             style={{
@@ -140,8 +145,8 @@ const Papel: React.FC<{ icone: React.ReactNode; titulo: string; corpo: string }>
   <div
     className="glass-card"
     style={{
-      background: 'rgba(255,255,255,0.9)',
-      border: '1px solid rgba(255,255,255,0.9)',
+      background: 'var(--color-card-bg)',
+      border: '1px solid var(--color-card-border)',
       borderRadius: '1.4rem',
       padding: '1.6rem 1.4rem',
       display: 'flex',

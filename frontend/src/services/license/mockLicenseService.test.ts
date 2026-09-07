@@ -4,6 +4,7 @@ import {
   CONTAS_DE_TESTE,
   SENHA_DE_TESTE,
   MOCK_NETWORK_KEY,
+  LOGIN_PADRAO,
 } from './mockLicenseService';
 import { getDeviceBinding } from './deviceId';
 import type { LicenseService } from './types';
@@ -196,5 +197,44 @@ describe('logout', () => {
 
     const r = await service.verify(login.license.token, device.deviceId);
     expect(r).toMatchObject({ ok: false, reason: 'invalid-token' });
+  });
+});
+
+describe('login padrao do produto', () => {
+  // Conta de acesso do dono do produto: entra sempre, em qualquer maquina, sem
+  // vencer. Existe para inspecionar o produto pelo fluxo real — diferente do
+  // Modo Desenvolvedor, que PULA o fluxo. As duas sao pendencia de lancamento.
+  it('entra com as credenciais padrao', async () => {
+    const r = await service.login(LOGIN_PADRAO.email, LOGIN_PADRAO.senha, estePC());
+    expect(r.ok).toBe(true);
+  });
+
+  it('nao vence nunca, entao nunca bloqueia no boot', async () => {
+    const device = estePC();
+    const login = await service.login(LOGIN_PADRAO.email, LOGIN_PADRAO.senha, device);
+    if (!login.ok) throw new Error('o login padrao deveria passar');
+
+    expect(login.license.plan.validUntil).toBeNull();
+
+    const r = await service.verify(login.license.token, device.deviceId);
+    expect(r.ok).toBe(true);
+  });
+
+  it('nao tem limite de maquina, entao nunca cai em device-limit', async () => {
+    // Sem isto, trocar de PC (ou limpar os dados do app) travaria o proprio
+    // dono na tela de transferencia.
+    await service.login(LOGIN_PADRAO.email, LOGIN_PADRAO.senha, {
+      deviceId: 'outra-maquina-qualquer',
+      deviceName: 'Outro PC',
+      boundAt: new Date().toISOString(),
+    });
+
+    const r = await service.login(LOGIN_PADRAO.email, LOGIN_PADRAO.senha, estePC());
+    expect(r.ok).toBe(true);
+  });
+
+  it('recusa a senha errada, como qualquer outra conta', async () => {
+    const r = await service.login(LOGIN_PADRAO.email, 'nao-e-a-senha', estePC());
+    expect(r).toMatchObject({ ok: false, reason: 'invalid-credentials' });
   });
 });

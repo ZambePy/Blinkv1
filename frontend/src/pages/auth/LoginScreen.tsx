@@ -88,7 +88,7 @@ export const LoginScreen: React.FC = () => {
       aria-labelledby="login-title"
       style={{
         minHeight: '100vh',
-        background: 'linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%)',
+        background: 'var(--settings-bg)',
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -98,7 +98,7 @@ export const LoginScreen: React.FC = () => {
       <div
         className="glass-card animate-scale-in"
         style={{
-          background: 'rgba(255,255,255,0.94)',
+          background: 'var(--color-card-bg)',
           padding: '2.75rem 2.5rem',
           borderRadius: '2rem',
           boxShadow: '0 20px 40px -10px rgba(27,84,168,0.12)',
@@ -181,11 +181,11 @@ export const LoginScreen: React.FC = () => {
                 display: 'flex',
                 flexDirection: 'column',
                 gap: '0.65rem',
-                background: '#fef2f2',
-                border: '1px solid #fecaca',
+                background: 'var(--tint-danger-bg)',
+                border: '1px solid var(--tint-danger-border)',
                 padding: '0.9rem 1rem',
                 borderRadius: '0.9rem',
-                color: '#991b1b',
+                color: 'var(--tint-danger-text)',
                 fontSize: '0.92rem',
                 lineHeight: 1.45,
               }}
@@ -239,7 +239,13 @@ export const LoginScreen: React.FC = () => {
           </PrimaryButton>
         </form>
 
-        <div style={{ textAlign: 'center', borderTop: '1px solid #e2e8f0', paddingTop: '1.25rem' }}>
+        <div
+          style={{
+            textAlign: 'center',
+            borderTop: '1px solid var(--color-card-border)',
+            paddingTop: '1.25rem',
+          }}
+        >
           <LinkExterno href={CRIAR_CONTA_URL} rotulo={t('login.createAccount')} />
         </div>
       </div>
@@ -316,8 +322,8 @@ const Campo: React.FC<{
       style={{
         display: 'flex',
         alignItems: 'center',
-        background: 'var(--color-bg-base)',
-        border: '1px solid #cbd5e1',
+        background: 'var(--field-bg)',
+        border: '1px solid var(--field-border)',
         borderRadius: '0.9rem',
         padding: '0 0.9rem',
       }}

@@ -19,6 +19,22 @@ import type {
 
 export const SENHA_DE_TESTE = 'teste123';
 
+/**
+ * Login padrao de acesso ao produto.
+ *
+ * Serve para percorrer o app pelo fluxo REAL — splash, login, ativacao, termo,
+ * perfil — em vez de pular tudo pelo Modo Desenvolvedor. Plano sem vencimento e
+ * sem limite de maquina: trocar de PC ou limpar os dados do app nao pode travar
+ * o dono do produto na tela de transferencia.
+ *
+ * ⚠️ Pendencia de lancamento, junto com o Modo Desenvolvedor: e uma credencial
+ * fixa no codigo do cliente. Sai antes de qualquer build distribuido.
+ */
+export const LOGIN_PADRAO = {
+  email: 'admin@irisflow.com',
+  senha: 'irisflow2026',
+} as const;
+
 export const CONTAS_DE_TESTE = {
   /** Assinatura em dia, nenhuma máquina vinculada ainda. */
   ativa: 'ativa@teste.com',
@@ -54,6 +70,11 @@ function redeAtual(): MockNetwork {
   } catch {
     return 'online';
   }
+}
+
+/** Plano do login padrao: nao vence e vale em qualquer maquina. */
+function planoCompleto(): Plan {
+  return { id: 'completo', name: 'IrisFlow Completo', validUntil: null, deviceLimit: null };
 }
 
 function planoFamiliar(validUntil: string | null): Plan {
@@ -108,6 +129,13 @@ function contasIniciais(agora: number): Map<string, ContaMock> {
       deviceName: 'Computador da clínica',
       boundAt: emISO(agora - 30 * 24 * 60 * 60 * 1000),
     },
+  });
+
+  m.set(LOGIN_PADRAO.email, {
+    email: LOGIN_PADRAO.email,
+    temAssinatura: true,
+    plan: planoCompleto(),
+    vinculo: null,
   });
 
   m.set(CONTAS_DE_TESTE.vencida, {
@@ -167,9 +195,10 @@ export function createMockLicenseService(): LicenseService {
     }
 
     const conta = contas.get(email);
+    const senhaEsperada = email === LOGIN_PADRAO.email ? LOGIN_PADRAO.senha : SENHA_DE_TESTE;
     // Conta inexistente e senha errada dão a MESMA resposta de propósito:
     // distinguir as duas revela quais e-mails têm conta no produto.
-    if (!conta || senha !== SENHA_DE_TESTE) {
+    if (!conta || senha !== senhaEsperada) {
       tentativasFalhas.set(email, (tentativasFalhas.get(email) ?? 0) + 1);
       return { ok: false, reason: 'invalid-credentials' };
     }

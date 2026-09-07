@@ -348,3 +348,23 @@ nenhum.
    `irisflow_dev_mode` direto no `sessionStorage`, o que não dispara o evento
    que o `GazeContext` escuta — o cursor de gaze continuava ligado no modo
    desenvolvedor. Agora usa `setDevMode()`, que já existia.
+
+6. **As telas nasceram no tema errado.** O tema padrão do app é o **escuro**
+   (`SettingsContext`: `theme: 'dark'`), e as seis telas foram construídas com
+   fundo claro cravado — inclusive sobrescrevendo, inline, o `background` que a
+   própria classe `.glass-card` já aplicava pelo token. Com texto em
+   `var(--color-text-base)`, que no escuro vira `#f8fafc`, o resultado era
+   título branco sobre cartão branco: texto invisível, não apenas apagado.
+   Corrigido usando `--settings-bg`, `--color-card-bg` e tokens novos de tinta
+   (`--tint-ok/warn/danger/info-*`) e de campo (`--field-bg`, `--field-border`),
+   definidos nos dois temas em `index.css`. `pages/temaEscuro.test.tsx` varre o
+   código-fonte das sete telas e falha se qualquer cor só-clara voltar — varre a
+   fonte, e não a árvore renderizada, porque metade das cores vive em ramos que
+   o estado padrão não monta.
+
+7. **`LOGIN_PADRAO` — conta de acesso ao produto.** `admin@irisflow.com` /
+   `irisflow2026`, plano sem vencimento e sem limite de máquina. Serve para
+   percorrer o fluxo **real** (splash → login → ativação → termo → perfil), ao
+   contrário do Modo Desenvolvedor, que o pula. **Pendência de lançamento junto
+   com o Modo Desenvolvedor:** é credencial fixa no código do cliente e sai
+   antes de qualquer build distribuído.

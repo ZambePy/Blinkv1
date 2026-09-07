@@ -8,6 +8,7 @@ export {
   SENHA_DE_TESTE,
   MOCK_NETWORK_KEY,
   MANAGE_URL,
+  LOGIN_PADRAO,
   createMockLicenseService,
 } from './mockLicenseService';
 
