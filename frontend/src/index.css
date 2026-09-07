@@ -96,6 +96,11 @@ body,
 
 /* Variáveis base (light mode) — disponíveis como CSS custom properties normais */
 :root {
+  /* Diz ao navegador em que paleta desenhar o que ele mesmo pinta: caixa de
+     senha, seletor de arquivo, barra de rolagem, autofill. Sem isto o Chromium
+     assume claro e mistura controles brancos com o tema escuro do app. */
+  color-scheme: light;
+
   --color-bg-base: #f8fafc;
   --color-text-base: #0f172a;
   --color-card-bg: rgba(255, 255, 255, 0.82);
@@ -128,6 +133,8 @@ body,
 
 /* Modo escuro (via classe no html) */
 html.dark {
+  color-scheme: dark;
+
   --color-bg-base: #0f172a;
   --color-text-base: #f8fafc;
   --color-card-bg: rgba(30, 41, 59, 0.9);
@@ -1141,4 +1148,27 @@ select:focus-visible,
 /* A marca aparece nos títulos e no wordmark, não no texto que o paciente lê. */
 .font-display {
   font-family: var(--font-family-display);
+}
+
+/* O autofill do Chromium pinta um fundo azul-claro proprio, com prioridade que
+   `background` inline nao vence — o campo preenchido ficava mais claro que o
+   vizinho, como se estivesse com defeito. So um `inset box-shadow` cobre, e a
+   transicao longa impede o flash da cor original no primeiro quadro. */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 1000px var(--field-bg) inset !important;
+  -webkit-text-fill-color: var(--color-text-base) !important;
+  caret-color: var(--color-text-base);
+  transition: background-color 100000s ease-in-out 0s;
+}
+
+/* O anel de foco global tem 3px de outline mais 6px de sombra. Num campo com
+   canto arredondado o outline precisa acompanhar o raio, senao sobra um
+   retangulo em volta de uma caixa redonda. */
+input:focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  border-radius: inherit;
 }

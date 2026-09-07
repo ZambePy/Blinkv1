@@ -318,17 +318,28 @@ const Campo: React.FC<{
     >
       {rotulo}
     </label>
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        background: 'var(--field-bg)',
-        border: '1px solid var(--field-border)',
-        borderRadius: '0.9rem',
-        padding: '0 0.9rem',
-      }}
-    >
-      {icone}
+    {/*
+      Fundo, borda e raio vivem no PROPRIO input, nao numa div em volta.
+
+      O `index.css` aplica `outline` + `box-shadow` de 6px em
+      `input:focus-visible`. Com o visual na div externa e o input transparente
+      por dentro, esse anel desenhava em volta do input INTERNO — dentro da
+      caixa — e o campo aparecia partido em duas cores. Agora o anel coincide
+      com a caixa que a pessoa enxerga.
+    */}
+    <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+      <span
+        aria-hidden="true"
+        style={{
+          position: 'absolute',
+          left: '0.9rem',
+          display: 'flex',
+          alignItems: 'center',
+          pointerEvents: 'none',
+        }}
+      >
+        {icone}
+      </span>
       <input
         id={id}
         type={tipo}
@@ -337,12 +348,12 @@ const Campo: React.FC<{
         placeholder={placeholder}
         autoComplete={autoComplete}
         style={{
-          border: 'none',
-          background: 'transparent',
-          padding: '0.9rem 0.7rem',
+          background: 'var(--field-bg)',
+          border: '1px solid var(--field-border)',
+          borderRadius: '0.9rem',
+          padding: '0.9rem 0.9rem 0.9rem 2.9rem',
           fontSize: '1rem',
           width: '100%',
-          outline: 'none',
           color: 'var(--color-text-base)',
         }}
       />

@@ -3,16 +3,21 @@ import React from 'react';
 /**
  * Falhas que bloqueiam o controle por olhar precisam ser VISÍVEIS.
  *
- * `cameraError` e `calibrationInvalidated` já eram calculados no
- * `GazeProvider` e expostos no contexto, mas ninguém renderizava: a câmera
- * podia falhar e o app seguia mudo.
+ * `cameraError` era calculado no `GazeProvider` e exposto no contexto, mas
+ * ninguém renderizava: a câmera podia falhar e o app seguia mudo. Uma webcam
+ * desconectada deixa o cursor sumido e nada clicável — indistinguível de "o
+ * programa travou", e o usuário-alvo não tem como diagnosticar isso sozinho.
  *
- * O caso `uncalibrated` também é tratado: sem calibração o cursor é escondido
- * (não há mapeamento para desenhar) e o dwell fica desligado — inclusive para
- * emergência, por decisão de segurança: sobre o fallback do nariz, permitir
- * emergência é disparar alarme por acaso. Cursor invisível + nada clicável,
- * sem aviso, é indistinguível de "o programa travou" — e o usuário-alvo não
- * tem como reiniciar sozinho. Este banner é o que fecha esse beco.
+ * **Os avisos de calibração foram removidos em definitivo, a pedido.** Eram
+ * três — "Ainda não há calibração", "A calibração deixou de valer" e
+ * "Distância diferente da calibração" — e apareciam em TODAS as telas, porque
+ * este componente mora no `GazeProvider`, que envolve o app inteiro. Cobriam o
+ * topo do login e do onboarding, telas que o cuidador opera com mouse e teclado
+ * e onde não existe controle por olhar nenhum.
+ *
+ * O bloqueio que eles anunciavam continua valendo: sem calibração o dwell segue
+ * desligado, inclusive para emergência (ver `GazeContext.dwell.test.tsx`). O
+ * que saiu foi o aviso, não a proteção.
  *
  * Renderizado dentro do `GazeProvider`, que fica FORA do router: por isso não
  * navega, apenas instrui. Quem age é o cuidador, com mouse ou toque.
@@ -70,13 +75,12 @@ const CARD: React.CSSProperties = {
   boxShadow: '0 10px 30px rgba(0,0,0,0.35)',
 };
 
-export const GazeStatusBanner: React.FC<Props> = ({
-  state,
-  cameraError,
-  calibrationInvalidated,
-  distanceAdvice = null,
-  gazeLostMessage = null,
-}) => {
+export const GazeStatusBanner: React.FC<Props> = ({ cameraError, gazeLostMessage = null }) => {
+  // `state`, `calibrationInvalidated` e `distanceAdvice` continuam no contrato
+  // e sao IGNORADOS de proposito. Ficam por dois motivos: o `GazeProvider`
+  // segue calculando e passando os tres, e os testes precisam de um jeito de
+  // afirmar que passa-los nao produz banner nenhum. Removidos do tipo, essa
+  // afirmacao viraria erro de compilacao em vez de teste.
   // Ordem de precedência = ordem de gravidade. Sem câmera, nada mais importa.
   let tom: 'erro' | 'aviso' | null = null;
   let titulo = '';
@@ -86,17 +90,6 @@ export const GazeStatusBanner: React.FC<Props> = ({
     tom = 'erro';
     titulo = 'A câmera não está disponível';
     detalhe = `${cameraError} O controle por olhar está desligado até a câmera voltar.`;
-  } else if (calibrationInvalidated) {
-    tom = 'erro';
-    titulo = 'A calibração deixou de valer';
-    detalhe = `${calibrationInvalidated} É preciso calibrar de novo antes de usar o olhar.`;
-  } else if (state === 'uncalibrated') {
-    tom = 'aviso';
-    titulo = 'Ainda não há calibração';
-    detalhe =
-      'O controle por olhar está desligado, inclusive o botão de emergência — ' +
-      'sem calibração o sistema não sabe para onde você está olhando. ' +
-      'Peça ao cuidador para abrir a calibração e seguir os pontos na tela.';
   } else if (gazeLostMessage) {
     // acima do aviso de distância e abaixo dos erros de configuração.
     //
@@ -109,13 +102,6 @@ export const GazeStatusBanner: React.FC<Props> = ({
     detalhe =
       'O rastreamento perdeu o rosto. O cursor volta assim que a câmera ' +
       'enxergar você de novo.';
-  } else if (distanceAdvice) {
-    // o tom é 'aviso', não 'erro': o sistema continua funcionando, só
-    // com precisão pior que a medida na calibração. Tratar isso como erro
-    // ensinaria o cuidador a ignorar banners vermelhos.
-    tom = 'aviso';
-    titulo = 'Distância diferente da calibração';
-    detalhe = distanceAdvice;
   }
 
   if (!tom) return null;

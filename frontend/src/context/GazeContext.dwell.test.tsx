@@ -15,8 +15,14 @@ const engineMock = {
   // O provider chama `dispose()` no cleanup; sem este método no mock, o
   // cleanup lançaria.
   dispose: vi.fn(),
-  subscribe: (cb: (s: GazeSample) => void) => { emitir = cb; return () => {}; },
-  onStateChange: (cb: (s: string) => void) => { empurrarEstado = cb; return () => {}; },
+  subscribe: (cb: (s: GazeSample) => void) => {
+    emitir = cb;
+    return () => {};
+  },
+  onStateChange: (cb: (s: string) => void) => {
+    empurrarEstado = cb;
+    return () => {};
+  },
   onL2CSStatusChange: () => () => {},
   getState: () => estadoEngine,
   getSessionUptimeMs: () => 1000,
@@ -52,8 +58,13 @@ const DWELL_MS = 1500;
 
 function amostra(over: Partial<GazeSample> = {}): GazeSample {
   return {
-    x: 50, y: 50, timestamp: 0,
-    hasFace: true, degraded: false, uncalibrated: false, eyeState: 'open',
+    x: 50,
+    y: 50,
+    timestamp: 0,
+    hasFace: true,
+    degraded: false,
+    uncalibrated: false,
+    eyeState: 'open',
     ...over,
   } as GazeSample;
 }
@@ -71,11 +82,7 @@ function olhar(ms: number, inicio: number, over: Partial<GazeSample> = {}) {
 
 function montar(botao: React.ReactElement) {
   const onClick = vi.fn();
-  render(
-    <GazeProvider>
-      {React.cloneElement(botao, { onClick })}
-    </GazeProvider>,
-  );
+  render(<GazeProvider>{React.cloneElement(botao, { onClick })}</GazeProvider>);
   const el = screen.getByTestId('alvo');
   // jsdom não implementa layout: `elementFromPoint` devolveria null sempre.
   document.elementFromPoint = vi.fn(() => el);
@@ -92,12 +99,18 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     // O provider abre a câmera no mount; sem isto o boot rejeita e polui o log.
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
-      value: { getUserMedia: vi.fn(async () => { throw new Error('sem câmera no teste'); }) },
+      value: {
+        getUserMedia: vi.fn(async () => {
+          throw new Error('sem câmera no teste');
+        }),
+      },
     });
     vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
-  afterEach(() => { vi.restoreAllMocks(); });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it('clica de verdade quando o olhar fica no alvo pelo dwell inteiro', () => {
     const { onClick } = montar(<button data-testid="alvo">Ok</button>);
@@ -115,19 +128,25 @@ describe('GazeContext — casca DOM do dispatcher', () => {
   it('não clica NEM no botão de emergência sem calibração', () => {
     calibrado = false;
     const { onClick } = montar(
-      <button data-testid="alvo" data-emergency="true">SOS</button>,
+      <button data-testid="alvo" data-emergency="true">
+        SOS
+      </button>
     );
     olhar(8000, 0, { uncalibrated: true });
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it('o banner de "sem calibração" fica visível', () => {
+  it('nenhum banner de "sem calibração" aparece — foi removido a pedido', () => {
+    // O aviso saiu; a PROTEÇÃO não. Os dois testes acima continuam afirmando
+    // que sem calibração o dwell não clica, nem no botão de emergência.
     estadoEngine = 'uncalibrated';
     calibrado = false;
     montar(<button data-testid="alvo">Ok</button>);
-    act(() => { empurrarEstado('uncalibrated'); });
-    expect(screen.getByTestId('gaze-status-banner')).toBeInTheDocument();
-    expect(screen.getByText(/Ainda não há calibração/i)).toBeInTheDocument();
+    act(() => {
+      empurrarEstado('uncalibrated');
+    });
+    expect(screen.queryByTestId('gaze-status-banner')).toBeNull();
+    expect(screen.queryByText(/Ainda não há calibração/i)).toBeNull();
   });
 
   it('olhos fechados por 3 s sobre o botão não geram clique ao reabrir', () => {
@@ -138,7 +157,9 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     t = olhar(3000, t, { eyeState: 'closed' });
     expect(onClick).not.toHaveBeenCalled();
     // ...e o primeiro frame após reabrir não pode completar.
-    act(() => { emitir(amostra({ timestamp: t + 33, eyeState: 'open' })); });
+    act(() => {
+      emitir(amostra({ timestamp: t + 33, eyeState: 'open' }));
+    });
     expect(onClick).not.toHaveBeenCalled();
   });
 
@@ -169,10 +190,15 @@ describe('GazeContext — casca DOM do dispatcher', () => {
     try {
       render(
         <GazeProvider>
-          <button data-testid="alvo" onClick={() => { throw new Error('handler quebrado'); }}>
+          <button
+            data-testid="alvo"
+            onClick={() => {
+              throw new Error('handler quebrado');
+            }}
+          >
             Ok
           </button>
-        </GazeProvider>,
+        </GazeProvider>
       );
       const el = screen.getByTestId('alvo');
       document.elementFromPoint = vi.fn(() => el);
@@ -191,19 +217,31 @@ describe('GazeContext — casca DOM do dispatcher', () => {
   });
 
   it('respeita data-no-dwell', () => {
-    const { onClick } = montar(<button data-testid="alvo" data-no-dwell="true">Ok</button>);
+    const { onClick } = montar(
+      <button data-testid="alvo" data-no-dwell="true">
+        Ok
+      </button>
+    );
     olhar(5000, 0);
     expect(onClick).not.toHaveBeenCalled();
   });
 
   it('respeita aria-disabled', () => {
-    const { onClick } = montar(<button data-testid="alvo" aria-disabled="true">Ok</button>);
+    const { onClick } = montar(
+      <button data-testid="alvo" aria-disabled="true">
+        Ok
+      </button>
+    );
     olhar(5000, 0);
     expect(onClick).not.toHaveBeenCalled();
   });
 
   it('data-dwell-ms inválido não vira clique instantâneo', () => {
-    const { onClick } = montar(<button data-testid="alvo" data-dwell-ms="abc">Ok</button>);
+    const { onClick } = montar(
+      <button data-testid="alvo" data-dwell-ms="abc">
+        Ok
+      </button>
+    );
     // Bem menos que o dwell padrão: se o NaN virasse 0, clicaria no 1º frame.
     olhar(200, 0);
     expect(onClick).not.toHaveBeenCalled();
