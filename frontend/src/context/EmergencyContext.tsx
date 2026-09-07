@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertOctagon } from 'lucide-react';
 import { GazeButton } from '../components/ui/GazeButton';
@@ -9,6 +9,17 @@ interface EmergencyContextValue {
   isConfirming: boolean;
   cancelEmergency: () => void;
   triggerEmergencyImmediately: () => void;
+  /**
+   * Ensaio do tutorial: o acionamento acontece na tela e NADA sai daqui.
+   *
+   * O paciente precisa saber o que vai acontecer antes de precisar, mas um
+   * ensaio que vaze dispara alerta real para um cuidador que não está lá. Uma
+   * ou duas dessas e o alerta de verdade passa a ser tratado como possível
+   * engano — que é quando ele deixa de funcionar.
+   */
+  setModoEnsaio: (on: boolean) => void;
+  /** Se o ensaio foi acionado. O tutorial registra isso no perfil. */
+  ensaioDisparado: boolean;
 }
 
 const EmergencyContext = createContext<EmergencyContextValue | null>(null);
@@ -79,12 +90,36 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     playCancelSound();
   };
 
+  /**
+   * Numa ref, e não só no estado: o efeito da contagem regressiva lê o valor no
+   * momento em que dispara, e uma closure obsoleta ali significaria alerta real
+   * enviado durante um ensaio.
+   */
+  const modoEnsaioRef = useRef(false);
+  const [modoEnsaio, setModoEnsaioState] = useState(false);
+  const [ensaioDisparado, setEnsaioDisparado] = useState(false);
+
+  const setModoEnsaio = useCallback((on: boolean) => {
+    modoEnsaioRef.current = on;
+    setModoEnsaioState(on);
+    if (!on) setEnsaioDisparado(false);
+  }, []);
+
   const triggerEmergencyImmediately = () => {
     if (countdownIntervalRef.current) {
       clearInterval(countdownIntervalRef.current);
       countdownIntervalRef.current = null;
     }
     setIsConfirming(false);
+
+    // O ENSAIO PARA AQUI. O envio não mora neste contexto — a navegação para
+    // `/emergency?autoTrigger=other` é o que faz o `EmergencyEscalation`
+    // chamar `api.sendHelpAlert`. Não navegar é não enviar.
+    if (modoEnsaioRef.current) {
+      setEnsaioDisparado(true);
+      return;
+    }
+
     navigate('/emergency?autoTrigger=other');
   };
 
@@ -116,14 +151,35 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         countdownIntervalRef.current = null;
       }
       setIsConfirming(false);
+
+      // Segundo caminho até o envio: a contagem chegando a zero. Sem esta
+      // guarda, esperar o contador durante o ensaio mandaria o alerta de
+      // verdade — e é justamente o que um paciente curioso faria.
+      if (modoEnsaioRef.current) {
+        setEnsaioDisparado(true);
+        return;
+      }
+
       navigate('/emergency?autoTrigger=other');
     }
   }, [isConfirming, countdown, navigate]);
 
+  // Desliga ao desmontar. Um ensaio que ficasse ligado transformaria o botão de
+  // emergência num enfeite pelo resto da sessão — a falha mais perigosa aqui.
+  useEffect(
+    () => () => {
+      modoEnsaioRef.current = false;
+    },
+    []
+  );
+
   const showEmergencyButton = isPatientScreen() && location.pathname !== '/emergency';
 
   useEffect(() => {
-    if (!showEmergencyButton) { setMedindo(false); return; }
+    if (!showEmergencyButton) {
+      setMedindo(false);
+      return;
+    }
     // O ponto do teste de precisão é desenhado pelo núcleo (`#accuracy-dot`).
     const verificar = () =>
       setMedindo(state === 'calibrating' || document.getElementById('accuracy-dot') !== null);
@@ -133,21 +189,26 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [showEmergencyButton, state]);
 
   useEffect(() => {
-    if (!medindo || !showEmergencyButton) { setFabOculto(false); return; }
+    if (!medindo || !showEmergencyButton) {
+      setFabOculto(false);
+      return;
+    }
     const verificar = () => {
       const el = fabRef.current;
       if (!el || typeof document.elementsFromPoint !== 'function') return;
       const r = el.getBoundingClientRect();
       if (r.width === 0 || r.height === 0) return;
       const cantos: Array<[number, number]> = [
-        [r.left + 2, r.top + 2], [r.right - 2, r.top + 2],
-        [r.left + 2, r.bottom - 2], [r.right - 2, r.bottom - 2],
+        [r.left + 2, r.top + 2],
+        [r.right - 2, r.top + 2],
+        [r.left + 2, r.bottom - 2],
+        [r.right - 2, r.bottom - 2],
         [r.left + r.width / 2, r.top + r.height / 2],
       ];
       const cobre = cantos.some(([x, y]) =>
-        document.elementsFromPoint(x, y).some(
-          (e) => !el.contains(e) && e.closest('[data-calibration-target]') !== null,
-        ),
+        document
+          .elementsFromPoint(x, y)
+          .some((e) => !el.contains(e) && e.closest('[data-calibration-target]') !== null)
       );
       setFabOculto(cobre);
     };
@@ -167,6 +228,8 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         isConfirming,
         cancelEmergency,
         triggerEmergencyImmediately,
+        setModoEnsaio,
+        ensaioDisparado,
       }}
     >
       {children}
@@ -225,9 +288,7 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           ref={fabRef}
           style={{
             position: 'fixed',
-            ...(medindo
-              ? { bottom: '1.5rem', right: '1.5rem' }
-              : { top: '2rem', right: '3rem' }),
+            ...(medindo ? { bottom: '1.5rem', right: '1.5rem' } : { top: '2rem', right: '3rem' }),
             zIndex: 99990,
             visibility: fabOculto ? 'hidden' : undefined,
           }}
@@ -280,9 +341,12 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               to { background-color: rgba(153, 27, 27, 0.95); }
             }
           `}</style>
-          
-          <AlertOctagon size={120} style={{ marginBottom: '2rem', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.3))' }} />
-          
+
+          <AlertOctagon
+            size={120}
+            style={{ marginBottom: '2rem', filter: 'drop-shadow(0 10px 15px rgba(0,0,0,0.3))' }}
+          />
+
           <h1
             id="emerg-confirm-title"
             style={{
@@ -293,9 +357,12 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               textShadow: '0 4px 10px rgba(0,0,0,0.3)',
             }}
           >
-            EMERGÊNCIA ACIONADA
+            {/* Durante o ensaio do tutorial a confirmação é IDÊNTICA à real.
+                Um cuidador entrando na sala nesse momento acharia que está
+                acontecendo de verdade — daí o rótulo. */}
+            {modoEnsaio ? 'ENSAIO — NADA SERÁ ENVIADO' : 'EMERGÊNCIA ACIONADA'}
           </h1>
-          
+
           <p
             style={{
               fontSize: '2rem',
@@ -305,7 +372,8 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
               opacity: 0.9,
             }}
           >
-            Enviando alerta de socorro em <strong style={{ fontSize: '3rem', color: '#fde047' }}>{countdown}</strong> segundos...
+            Enviando alerta de socorro em{' '}
+            <strong style={{ fontSize: '3rem', color: '#fde047' }}>{countdown}</strong> segundos...
           </p>
 
           <GazeButton
