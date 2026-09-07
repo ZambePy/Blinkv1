@@ -366,5 +366,58 @@
       "why": "Refaça quando o tempo de permanência deixar de servir — em ELA isso muda com o tempo.",
       "button": "Refazer o tutorial"
     }
+  },
+  "calib": {
+    "preparo": {
+      "title": "Antes de começar",
+      "lead": "A calibração ensina o sistema a ler o seu olhar. São {{alvos}} pontos e leva cerca de {{min}} minuto.",
+      "i1": "Olhe para o CENTRO do alvo, não para a borda.",
+      "i2": "Pisque normalmente. Não segure o piscar — o olho resseca e a leitura piora.",
+      "i3": "Fique na posição que você ajustou no preparo, e não mude durante os pontos.",
+      "i4": "Se precisar parar, é só sair. Dá para recomeçar depois.",
+      "comecar": "Começar a calibração"
+    },
+    "resultado": {
+      "title": "Resultado da calibração",
+      "bom": "Boa calibração.",
+      "aceitavel": "Calibração aceitável.",
+      "refazer": "Vale refazer.",
+      "bomBody": "O sistema aprendeu bem o seu olhar. Pode seguir.",
+      "aceitavelBody": "Dá para usar. Refazer pode melhorar, se você tiver tempo.",
+      "refazerBody": "O resultado ficou abaixo do que dá para conseguir.",
+      "motivo": {
+        "sessaoRuim": "A leitura ficou instável na tela inteira — normalmente é luz ou distância.",
+        "alvoInaprendivel": "Um dos pontos não foi aprendido, e isso atrapalha os outros.",
+        "periferia": "Os cantos da tela ficaram menos precisos que o centro.",
+        "erroAlto": "A precisão ficou pior que o esperado, mas de forma uniforme.",
+        "derivaPostural": "A cabeça mudou de posição entre os pontos. Recalibrar sem corrigir a posição repete o resultado."
+      },
+      "erro": "Erro médio da calibração: {{px}} px",
+      "deriva": "Movimento da cabeça: {{g}}°",
+      "seguir": "Seguir assim",
+      "refazerBtn": "Refazer a calibração",
+      "semObrigacao": "Refazer é sempre opcional — quem decide é você."
+    },
+    "relatorio": {
+      "title": "Relatório da sessão",
+      "rodando": "Medindo a precisão…",
+      "erroGraus": "Erro médio: {{g}}°",
+      "erroPx": "{{px}} px",
+      "bloco": "{{n}}ª rodada contra esta calibração",
+      "blocoUm": "Primeira rodada contra esta calibração. A comparação entre blocos precisa de uma segunda, sem recalibrar.",
+      "blocoAusente": "Sem calibração ativa — esta rodada não pertence a bloco nenhum.",
+      "monitor": "Monitor: {{pol}}\" ({{origem}})",
+      "origem": {
+        "edid": "lido do monitor",
+        "manual": "medido à mão",
+        "auto": "lido do monitor",
+        "default": "valor padrão, NÃO medido"
+      },
+      "lux": "Luz ambiente: {{lux}} lux",
+      "semLux": "Luz ambiente não medida.",
+      "exportar": "Exportar relatório",
+      "exportado": "Relatório salvo.",
+      "rodar": "Rodar o teste de precisão"
+    }
   }
 }

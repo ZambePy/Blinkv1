@@ -190,3 +190,49 @@ Verificação: `cd frontend && npm run verify`.
 3. **O veredito não sabe se o paciente estava cansado.** Ele lê geometria e
    erro. Um "bom" numa sessão em que a pessoa estava exausta continua sendo
    "bom" — a leitura clínica é do cuidador.
+
+
+---
+
+## 7. Desvios da implementação
+
+1. **A preparação virou cartão, não rota.** O estágio `tutorial` do
+   `CalibrationCheck` já é a tela pré-início e carrega o `ReadinessPanel`, a
+   escolha entre calibração completa e rápida, e o estado de carregamento do
+   modelo. Extraí-lo perderia as três coisas; somar uma rota ao lado seria a
+   duplicação que este projeto já acumulou vezes demais. O que faltava era
+   **conteúdo**, e é isso que o cartão entrega.
+
+2. **Os limiares saíram das seis sessões reais**, não da regra do §3.1. Medido
+   em `docs/medicoes/historico/`:
+
+   | | LOO (px) | deriva máx (°) | grade |
+   |---|---|---|---|
+   | melhor | 68 | 2,67 | `ok` |
+   | mediana | 170 | — | — |
+   | pior | 252 | 2,12 | `sessao_ruim` |
+
+   A sessão com **3,47°** de deriva foi classificada pelo core como
+   `periferia_fora_de_alcance`, não como ruim. O "deriva > 3° → refazer" que o
+   §3.1 propunha reprovaria uma sessão que o próprio core aceita. A deriva
+   passou a escolher o **motivo**; quem decide o veredito é `gridDiagnosis`.
+
+   `LOO_BOM_PX = 110` rebaixa de bom para aceitável e **não** reprova: LOO alto
+   com grade `ok` pode ser distância ou luz, e recalibrar não corrige nenhuma
+   das duas.
+
+3. **O relatório apresenta; não dispara.** O disparo nas Configurações resolve
+   geometria, monta a `RunMeta`, deriva o bloco e registra no histórico
+   clínico. Reproduzir aquilo na tela nova duplicaria um caminho delicado e já
+   correto. Quem roda grava um resumo
+   (`services/local/ultimoRelatorio.ts`), e a tela lê.
+
+4. **O botão exporta um RESUMO, não o relatório.** O relatório canônico
+   (`schema: irisflow.accuracy-report/2`) já é escrito pelo próprio
+   `startAccuracyTest`, na raiz do projeto ou no download. O resumo tem schema
+   próprio (`irisflow.accuracy-summary/1`) para ninguém confundir os dois numa
+   análise posterior, e a tela diz em voz alta que o completo já foi salvo.
+
+5. **O destino após o resultado vem no `state` da rota.** A regra "tutorial na
+   primeira vez, menu depois" mora na calibração; reproduzi-la na tela de
+   resultado criaria duas cópias dela.

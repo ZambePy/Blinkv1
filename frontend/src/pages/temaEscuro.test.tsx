@@ -50,6 +50,10 @@ const ARQUIVOS = [
   'tutorial/steps/Concluido.tsx',
   '../components/ui/AnelDeDwell.tsx',
   '../components/ui/ControleDeDwell.tsx',
+  // Bloco 4 — moldura da calibracao.
+  'calibration/PreparoDaCalibracao.tsx',
+  'calibration/ResultadoDaCalibracao.tsx',
+  'relatorio/RelatorioDaSessao.tsx',
   '../components/ui/Semaforo.tsx',
 ];
 

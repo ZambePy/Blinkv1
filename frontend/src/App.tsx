@@ -43,6 +43,14 @@ const IntroScreen = lazyNamed(() => import('./pages/onboarding/IntroScreen'), 'I
 const ConsentScreen = lazyNamed(() => import('./pages/onboarding/ConsentScreen'), 'ConsentScreen');
 const ActivatedScreen = lazyNamed(() => import('./pages/auth/ActivatedScreen'), 'ActivatedScreen');
 const SetupWizard = lazyNamed(() => import('./pages/setup/SetupWizard'), 'SetupWizard');
+const ResultadoDaCalibracao = lazyNamed(
+  () => import('./pages/calibration/ResultadoDaCalibracao'),
+  'ResultadoDaCalibracao'
+);
+const RelatorioDaSessao = lazyNamed(
+  () => import('./pages/relatorio/RelatorioDaSessao'),
+  'RelatorioDaSessao'
+);
 const CalibrationCheck = lazyNamed(
   () => import('./pages/onboarding/CalibrationCheck'),
   'CalibrationCheck'
@@ -172,6 +180,22 @@ function App() {
                               <PreparoGate>
                                 <CalibrationCheck />
                               </PreparoGate>
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/calibration/resultado"
+                          element={
+                            <ProtectedRoute>
+                              <ResultadoDaCalibracao />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/relatorio"
+                          element={
+                            <ProtectedRoute>
+                              <RelatorioDaSessao />
                             </ProtectedRoute>
                           }
                         />

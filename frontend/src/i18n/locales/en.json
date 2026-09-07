@@ -366,5 +366,58 @@
       "why": "Redo it when the dwell time stops fitting — with ALS that changes over time.",
       "button": "Redo the tutorial"
     }
+  },
+  "calib": {
+    "preparo": {
+      "title": "Before we start",
+      "lead": "Calibration teaches the system to read your gaze. It is {{alvos}} points and takes about {{min}} minute.",
+      "i1": "Look at the CENTRE of the target, not at its edge.",
+      "i2": "Blink normally. Do not hold your blink — the eye dries out and the reading gets worse.",
+      "i3": "Stay in the position you set during setup, and do not change it between points.",
+      "i4": "If you need to stop, just leave. You can start again later.",
+      "comecar": "Start calibration"
+    },
+    "resultado": {
+      "title": "Calibration result",
+      "bom": "Good calibration.",
+      "aceitavel": "Acceptable calibration.",
+      "refazer": "Worth redoing.",
+      "bomBody": "The system learned your gaze well. You can carry on.",
+      "aceitavelBody": "Usable. Redoing may improve it, if you have the time.",
+      "refazerBody": "The result came out below what is achievable.",
+      "motivo": {
+        "sessaoRuim": "The reading was unstable across the whole screen — usually light or distance.",
+        "alvoInaprendivel": "One of the points was not learned, and that harms the others.",
+        "periferia": "The screen corners came out less accurate than the centre.",
+        "erroAlto": "Accuracy came out worse than expected, but evenly so.",
+        "derivaPostural": "The head moved between points. Recalibrating without fixing the position repeats the result."
+      },
+      "erro": "Calibration mean error: {{px}} px",
+      "deriva": "Head movement: {{g}}°",
+      "seguir": "Carry on",
+      "refazerBtn": "Redo calibration",
+      "semObrigacao": "Redoing is always optional — it is your call."
+    },
+    "relatorio": {
+      "title": "Session report",
+      "rodando": "Measuring accuracy…",
+      "erroGraus": "Mean error: {{g}}°",
+      "erroPx": "{{px}} px",
+      "bloco": "Run {{n}} against this calibration",
+      "blocoUm": "First run against this calibration. Comparing blocks needs a second one, without recalibrating.",
+      "blocoAusente": "No active calibration — this run belongs to no block.",
+      "monitor": "Monitor: {{pol}}\" ({{origem}})",
+      "origem": {
+        "edid": "read from the monitor",
+        "manual": "measured by hand",
+        "auto": "read from the monitor",
+        "default": "default value, NOT measured"
+      },
+      "lux": "Ambient light: {{lux}} lux",
+      "semLux": "Ambient light not measured.",
+      "exportar": "Export report",
+      "exportado": "Report saved.",
+      "rodar": "Run the accuracy test"
+    }
   }
 }

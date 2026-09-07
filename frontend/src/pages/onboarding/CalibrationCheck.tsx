@@ -14,6 +14,7 @@ import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
 import { getResumoDoPonto } from '@tracker/calibration';
 import { esperarPintura } from '@tracker/aguardarPintura';
 import { ReadinessPanel } from '../../components/ui/ReadinessPanel';
+import { PreparoDaCalibracao } from '../calibration/PreparoDaCalibracao';
 import { tutorialConcluido } from '../../services/local/tutorialProfile';
 import { useAuth } from '../../context/AuthContext';
 
@@ -303,12 +304,16 @@ export const CalibrationCheck: React.FC = () => {
 
   const finishAndTransition = () => {
     setStage('transitioning');
-    // Tutorial DEPOIS da calibração: "sentir o tempo de permanência" só é
-    // real com o olhar funcionando. Antes dela o dwell fica desligado, e a
-    // prática seria feita com o mouse.
+    // O resultado da calibração vem ANTES de seguir. O diagnóstico de ajuste
+    // já era calculado e só aparecia embutido nesta tela; agora ele tem uma
+    // leitura própria, em linguagem de cuidador.
+    //
+    // O destino final (tutorial na primeira vez, menu depois) é decidido lá,
+    // no botão de seguir — e vai junto no `state` para a tela de resultado não
+    // precisar reproduzir esta regra.
     setTimeout(() => {
       const destino = perfilAtual && !tutorialConcluido(perfilAtual.id) ? '/tutorial' : '/menu';
-      navigate(destino);
+      navigate('/calibration/resultado', { state: { destino } });
     }, 800);
   };
 
@@ -777,6 +782,12 @@ export const CalibrationCheck: React.FC = () => {
                   traz de volta é a checagem de viewport, única defesa contra
                   calibrar em janela não-maximizada — o que infla o erro
                   angular do relatório (/). */}
+              {/* O que vai acontecer, quanto tempo leva, e as duas instrucoes que
+                  mudam o resultado — inclusive "pisque normalmente", que a
+                  versao ingenua ("nao pisque") inverte com o pior efeito
+                  possivel: o olho resseca durante a coleta. */}
+              <PreparoDaCalibracao />
+
               <ReadinessPanel />
 
               {errorMessage && (

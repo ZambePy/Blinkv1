@@ -49,6 +49,7 @@ import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
 import type { FilterPresetV2 } from '@tracker/oneEuroFilter';
 import { applyUptimeToRunMetaIfDefault } from '../utils/autoTestMeta';
 import { proximoBloco } from '../registroDaSessao';
+import { gravarUltimoRelatorio } from '../services/local/ultimoRelatorio';
 import { getCalibrationTimestampMs } from '@tracker/calibration';
 import { hoverAndFocusBackground } from '../components/ui/hoverFocus';
 import { ControleDeDwell } from '../components/ui/ControleDeDwell';
@@ -388,6 +389,9 @@ export const SettingsScreen: React.FC = () => {
       (r) => {
         setAccuracyRunning(false);
         setLastAccuracy(r);
+        // Guarda para a tela de relatorio apresentar. O relatorio CANONICO ja
+        // foi escrito pelo proprio `startAccuracyTest`; isto e o resumo.
+        gravarUltimoRelatorio(r, metaWithUptime);
         // só registra no histórico clínico quando houve medição. Gravar
         // um `null` (ou pior, um `0`) como resultado de precisão contaminaria a
         // curva de acompanhamento do paciente com um teste que falhou.
