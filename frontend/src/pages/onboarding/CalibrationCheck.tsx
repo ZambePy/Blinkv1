@@ -14,8 +14,14 @@ import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
 import { getResumoDoPonto } from '@tracker/calibration';
 import { esperarPintura } from '@tracker/aguardarPintura';
 import { ReadinessPanel } from '../../components/ui/ReadinessPanel';
+import { tutorialConcluido } from '../../services/local/tutorialProfile';
+import { useAuth } from '../../context/AuthContext';
 
-interface CalibrationPointUI { x: number; y: number; name: string; }
+interface CalibrationPointUI {
+  x: number;
+  y: number;
+  name: string;
+}
 const POINT_NAME: Record<string, string> = {
   '0.1,0.1': 'Superior Esquerdo',
   '0.5,0.1': 'Superior Central',
@@ -29,11 +35,11 @@ const POINT_NAME: Record<string, string> = {
 };
 
 const OPTICAL_LABELS: Record<OpticalCondition, string> = {
-  sem_oculos:          'Sem óculos',
-  oculos_simples:      'Óculos comuns (leitura, míopia)',
-  oculos_progressivo:  'Óculos progressivos (multifocais)',
-  lentes_contato:      'Lentes de contato',
-  desconhecido:        'Prefiro não dizer',
+  sem_oculos: 'Sem óculos',
+  oculos_simples: 'Óculos comuns (leitura, míopia)',
+  oculos_progressivo: 'Óculos progressivos (multifocais)',
+  lentes_contato: 'Lentes de contato',
+  desconhecido: 'Prefiro não dizer',
 };
 const OPTICAL_OPTIONS: OpticalCondition[] = [
   'sem_oculos',
@@ -46,18 +52,21 @@ const OPTICAL_OPTIONS: OpticalCondition[] = [
 // ─── Paleta CAA — escura em todas as etapas ────────────────────────────────
 // fundo preto reduz fadiga ocular e força menos a piscada, permitindo fixações
 // mais longas e estáveis. Contraste alto (branco/âmbar sobre preto) é o padrão CAA.
-const BG           = '#000000';
+const BG = '#000000';
 const TEXT_PRIMARY = '#FFFFFF';
-const TEXT_DIM     = 'rgba(255,255,255,0.65)';
-const ACCENT       = '#1B54A8';          // IrisFlow Azul
+const TEXT_DIM = 'rgba(255,255,255,0.65)';
+const ACCENT = '#1B54A8'; // IrisFlow Azul
 
-const SUCCESS      = '#22C55E';
-const DANGER       = '#EF4444';
+const SUCCESS = '#22C55E';
+const DANGER = '#EF4444';
 
 const humanMessage: Record<string, string> = {
-  singular_matrix: 'Não foi possível treinar o modelo (matriz singular). A causa mais comum é reflexo constante nos óculos ou desvio extremo do olhar.',
-  insufficient_samples: 'Amostras insuficientes coletadas. Certifique-se de que seu rosto está visível e centralizado durante toda a calibração.',
-  degenerate_features: 'Os dados coletados não variaram o suficiente. A causa mais comum é reflexo nos óculos travando a detecção ou olhar fixo fora dos pontos.',
+  singular_matrix:
+    'Não foi possível treinar o modelo (matriz singular). A causa mais comum é reflexo constante nos óculos ou desvio extremo do olhar.',
+  insufficient_samples:
+    'Amostras insuficientes coletadas. Certifique-se de que seu rosto está visível e centralizado durante toda a calibração.',
+  degenerate_features:
+    'Os dados coletados não variaram o suficiente. A causa mais comum é reflexo nos óculos travando a detecção ou olhar fixo fora dos pontos.',
   engine_indisponivel: 'O rastreamento não está ativo. Volte ao menu e entre de novo nesta tela.',
   unknown: 'Erro desconhecido durante o treinamento do modelo. Por favor, tente novamente.',
 };
@@ -66,6 +75,7 @@ const AUTO_RECORD_STORAGE_KEY = 'irisflow.autoRecordOnCalibrate';
 
 export const CalibrationCheck: React.FC = () => {
   const navigate = useNavigate();
+  const { currentProfile: perfilAtual } = useAuth();
   const { calibration, l2csStatus, getSessionUptimeMs, recording, getDiagnostics } = useGaze();
   // Geometria física do posto de uso. Fonte ÚNICA para (a) o erro angular do
   // relatório e (b) o posicionamento dos alvos pelo orçamento de
@@ -80,7 +90,7 @@ export const CalibrationCheck: React.FC = () => {
   // `iris12`), o status virou 'disabled' — e sem esta linha o usuário ficaria
   // preso na tela de pré-calibração para sempre, esperando um modelo que nunca
   // vai carregar porque ninguém pediu que carregasse.
-  const l2csReady  = l2csStatus === 'ready' || l2csStatus === 'disabled';
+  const l2csReady = l2csStatus === 'ready' || l2csStatus === 'disabled';
   const l2csFailed = l2csStatus === 'error';
 
   const [stage, setStage] = useState<
@@ -89,7 +99,9 @@ export const CalibrationCheck: React.FC = () => {
   // Espelho do `stage` para os listeners de visibilidade/blur, que são
   // registrados uma única vez e fechariam sobre o valor do primeiro render.
   const stageRef = useRef(stage);
-  useEffect(() => { stageRef.current = stage; }, [stage]);
+  useEffect(() => {
+    stageRef.current = stage;
+  }, [stage]);
 
   // veredito da deriva de pose da calibração recém-treinada. Não-nulo
   // significa que a cabeça migrou mais que o limiar DURANTE a coleta.
@@ -105,11 +117,11 @@ export const CalibrationCheck: React.FC = () => {
   // para a grade e o relatório usarem exatamente o mesmo número.
   const sessionDistanceRef = useRef<number | null>(null);
 
-  const [currentIndex, setCurrentIndex]       = useState(0);
-  const [completedList, setCompletedList]     = useState<number[]>([]);
-  const [errorMessage, setErrorMessage]       = useState<string | null>(null);
+  const [currentIndex, setCurrentIndex] = useState(0);
+  const [completedList, setCompletedList] = useState<number[]>([]);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastCompletedPoint, setLastCompletedPoint] = useState<number | null>(null);
-  const [preparing, setPreparing]             = useState(false);
+  const [preparing, setPreparing] = useState(false);
   const PREPARE_MS = 1500;
 
   const [opticalCondition, setOpticalCondition] = useState<OpticalCondition>('desconhecido');
@@ -119,12 +131,18 @@ export const CalibrationCheck: React.FC = () => {
   // EXPORT continuam manuais em Configurações. Default OFF: usuário normal
   // nunca dispara gravação sem querer.
   const [autoRecord, setAutoRecord] = useState<boolean>(() => {
-    try { return localStorage.getItem(AUTO_RECORD_STORAGE_KEY) === 'true'; }
-    catch { return false; }
+    try {
+      return localStorage.getItem(AUTO_RECORD_STORAGE_KEY) === 'true';
+    } catch {
+      return false;
+    }
   });
   useEffect(() => {
-    try { localStorage.setItem(AUTO_RECORD_STORAGE_KEY, String(autoRecord)); }
-    catch { /* localStorage indisponível — silencia */ }
+    try {
+      localStorage.setItem(AUTO_RECORD_STORAGE_KEY, String(autoRecord));
+    } catch {
+      /* localStorage indisponível — silencia */
+    }
   }, [autoRecord]);
   // Espelho reativo do isActive() do recorder — usado só para mostrar o
   // indicador "🔴 Gravando" na UI. Poll a 500 ms é barato e evita ter que
@@ -177,9 +195,15 @@ export const CalibrationCheck: React.FC = () => {
     const targets = calibration.getCalibrationTargets?.() ?? [];
     if (targets.length === 0) {
       return [
-        { x: 0.1, y: 0.1 }, { x: 0.5, y: 0.1 }, { x: 0.9, y: 0.1 },
-        { x: 0.1, y: 0.5 }, { x: 0.5, y: 0.5 }, { x: 0.9, y: 0.5 },
-        { x: 0.1, y: 0.9 }, { x: 0.5, y: 0.9 }, { x: 0.9, y: 0.9 },
+        { x: 0.1, y: 0.1 },
+        { x: 0.5, y: 0.1 },
+        { x: 0.9, y: 0.1 },
+        { x: 0.1, y: 0.5 },
+        { x: 0.5, y: 0.5 },
+        { x: 0.9, y: 0.5 },
+        { x: 0.1, y: 0.9 },
+        { x: 0.5, y: 0.9 },
+        { x: 0.9, y: 0.9 },
       ].map((t) => ({ x: t.x * 100, y: t.y * 100, name: POINT_NAME[`${t.x},${t.y}`] ?? '' }));
     }
     return toUiPoints(targets);
@@ -188,10 +212,10 @@ export const CalibrationCheck: React.FC = () => {
   // O que a tela desenha: os alvos da sessão quando existe uma, senão o preview.
   const activePoints: CalibrationPointUI[] = sessionPoints ?? nominalPoints;
 
-  const shuffleOrderRef          = useRef<number[]>([]);
-  const isMounted                = useRef(true);
-  const retryCountRef            = useRef(0);
-  const MAX_RETRIES_PER_POINT    = 3;
+  const shuffleOrderRef = useRef<number[]>([]);
+  const isMounted = useRef(true);
+  const retryCountRef = useRef(0);
+  const MAX_RETRIES_PER_POINT = 3;
 
   // Ownership da gravação auto-iniciada. Só finalizamos gravação que ESTE
   // componente iniciou (via handleStart com autoRecord marcado). Se o
@@ -262,7 +286,9 @@ export const CalibrationCheck: React.FC = () => {
       setPreparing(false);
       setCompletedList([]);
       setSessionPoints(null);
-      setErrorMessage('A calibração foi interrompida porque a janela perdeu o foco. Comece de novo.');
+      setErrorMessage(
+        'A calibração foi interrompida porque a janela perdeu o foco. Comece de novo.'
+      );
     };
     const onVisibility = () => abortarPorPerdaDeFoco('visibility');
     const onBlur = () => abortarPorPerdaDeFoco('blur');
@@ -277,7 +303,13 @@ export const CalibrationCheck: React.FC = () => {
 
   const finishAndTransition = () => {
     setStage('transitioning');
-    setTimeout(() => { navigate('/menu'); }, 800);
+    // Tutorial DEPOIS da calibração: "sentir o tempo de permanência" só é
+    // real com o olhar funcionando. Antes dela o dwell fica desligado, e a
+    // prática seria feita com o mouse.
+    setTimeout(() => {
+      const destino = perfilAtual && !tutorialConcluido(perfilAtual.id) ? '/tutorial' : '/menu';
+      navigate(destino);
+    }, 800);
   };
 
   // O teste de precisão desenha seu próprio overlay por cima desta tela. Se
@@ -303,8 +335,8 @@ export const CalibrationCheck: React.FC = () => {
       const estado = diagRef.current() ? 'ativo' : 'sem diagnóstico';
       setFalhaDoTeste(
         `O teste de precisão não abriu em 6 segundos (rastreamento ${estado}, ` +
-        `modelo ${calibRef.current.isCalibrated() ? 'treinado' : 'NÃO treinado'}). ` +
-        'Veja o console para o erro completo.',
+          `modelo ${calibRef.current.isCalibrated() ? 'treinado' : 'NÃO treinado'}). ` +
+          'Veja o console para o erro completo.'
       );
     }, 6000);
     return () => clearTimeout(id);
@@ -328,31 +360,37 @@ export const CalibrationCheck: React.FC = () => {
     // Sem isto o relatório não sabe em que provider o L2CS rodou nem qual
     // filtro governava — e duas condições viram um número só.
     const d = getDiagnostics();
-    const runtime: RuntimeInfo | undefined = d ? {
-      l2csExecutionProvider: d.l2cs?.executionProvider ?? null,
-      l2csFallback: d.l2cs?.fallback,
-      l2csLatencyMs: d.l2cs?.latencyMs,
-      l2csStalePct: d.l2cs?.stalePct,
-      filterEffective: d.filtro?.efetivo,
-      filterPreset: d.filtro?.preset ?? null,
-      fpsRender: d.fpsRender,
-      video: d.video ? { width: d.video.width, height: d.video.height } : undefined,
-    } : undefined;
+    const runtime: RuntimeInfo | undefined = d
+      ? {
+          l2csExecutionProvider: d.l2cs?.executionProvider ?? null,
+          l2csFallback: d.l2cs?.fallback,
+          l2csLatencyMs: d.l2cs?.latencyMs,
+          l2csStalePct: d.l2cs?.stalePct,
+          filterEffective: d.filtro?.efetivo,
+          filterPreset: d.filtro?.preset ?? null,
+          fpsRender: d.fpsRender,
+          video: d.video ? { width: d.video.width, height: d.video.height } : undefined,
+        }
+      : undefined;
 
-    startAccuracyTest((_result, action) => {
-      if (!isMounted.current) return;
-      if (action === 'redo') {
-        // Attempt descartado — não exporta um JSONL parcial.
-        finalizeAutoRecordingRef.current(false);
-        calibration.clear?.();
-        setStage('tutorial');
-        setCompletedList([]);
-        return;
-      }
-      // Fluxo bem-sucedido: para + exporta antes de sair da tela.
-      finalizeAutoRecordingRef.current(true);
-      finishAndTransition();
-    }, meta, runtime);
+    startAccuracyTest(
+      (_result, action) => {
+        if (!isMounted.current) return;
+        if (action === 'redo') {
+          // Attempt descartado — não exporta um JSONL parcial.
+          finalizeAutoRecordingRef.current(false);
+          calibration.clear?.();
+          setStage('tutorial');
+          setCompletedList([]);
+          return;
+        }
+        // Fluxo bem-sucedido: para + exporta antes de sair da tela.
+        finalizeAutoRecordingRef.current(true);
+        finishAndTransition();
+      },
+      meta,
+      runtime
+    );
   };
 
   const startNextPoint = (step: number) => {
@@ -372,53 +410,54 @@ export const CalibrationCheck: React.FC = () => {
       // Dois rAF garantem que a pintura aconteceu: o primeiro roda antes do
       // quadro que mostra a tela nova, o segundo já depois dele.
       esperarPintura(() => {
-      if (!isMounted.current) return;
-      calibration.completeCalibration?.((outcome) => {
-        if (!outcome || outcome.ok !== false) {
-          // a deriva de pose já era medida e só ia para o console. Se a
-          // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
-          // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
-          // decidir, em vez de seguir para o teste com um ajuste contaminado.
-          const veredito = calibration.getPoseDriftVerdict?.() ?? null;
-          // `getTargetsSkipped` e não `getCalibrationFitDiagnostics`: o
-          // segundo dispara o leave-one-target-out (~9 s de main thread
-          // travado) e aqui só se quer a contagem de alvos pulados.
-          const pulados = calibration.getTargetsSkipped?.()?.length ?? 0;
-          if ((veredito || pulados > 0) && isMounted.current) {
-            if (veredito) console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
-            if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
-            setDriftVerdict(veredito);
-            setAlvosPulados(pulados);
-            setStage('drift-warning');
-            return;
-          }
-          console.log('[React] Calibração concluída — disparando teste de precisão automático');
-          setTimeout(() => {
-            if (!isMounted.current) return;
-            // Dentro de um `setTimeout` uma exceção não tem quem a pegue: a
-            // tela ficaria no spinner de "Iniciando teste de precisão" para
-            // sempre, sem nada dito ao operador.
-            try {
-              runAccuracyTestThenExit();
-            } catch (e) {
-              console.error('[React] falha ao iniciar o teste de precisão:', e);
-              finalizeAutoRecordingRef.current(false);
-              setFalhaDoTeste(e instanceof Error ? e.message : String(e));
+        if (!isMounted.current) return;
+        calibration.completeCalibration?.((outcome) => {
+          if (!outcome || outcome.ok !== false) {
+            // a deriva de pose já era medida e só ia para o console. Se a
+            // cabeça migrou mais que o limiar entre o primeiro e o último alvo, o
+            // modelo aprendeu postura junto com alvo: para aqui e deixa a pessoa
+            // decidir, em vez de seguir para o teste com um ajuste contaminado.
+            const veredito = calibration.getPoseDriftVerdict?.() ?? null;
+            // `getTargetsSkipped` e não `getCalibrationFitDiagnostics`: o
+            // segundo dispara o leave-one-target-out (~9 s de main thread
+            // travado) e aqui só se quer a contagem de alvos pulados.
+            const pulados = calibration.getTargetsSkipped?.()?.length ?? 0;
+            if ((veredito || pulados > 0) && isMounted.current) {
+              if (veredito)
+                console.warn(`[React] Deriva de pose na calibração: ${veredito.mensagem}`);
+              if (pulados > 0) console.warn(`[React] ${pulados} alvo(s) ignorado(s) na calibração`);
+              setDriftVerdict(veredito);
+              setAlvosPulados(pulados);
+              setStage('drift-warning');
+              return;
             }
-          }, 400);
-        } else {
-          if (isMounted.current) {
-            const reason = outcome.reason || 'unknown';
-            const msg = humanMessage[reason] || humanMessage.unknown;
-            console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
-            // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
-            // Descarta em vez de exportar; próxima tentativa recomeça limpa.
-            finalizeAutoRecordingRef.current(false);
-            setErrorMessage(msg);
-            setStage('tutorial');
+            console.log('[React] Calibração concluída — disparando teste de precisão automático');
+            setTimeout(() => {
+              if (!isMounted.current) return;
+              // Dentro de um `setTimeout` uma exceção não tem quem a pegue: a
+              // tela ficaria no spinner de "Iniciando teste de precisão" para
+              // sempre, sem nada dito ao operador.
+              try {
+                runAccuracyTestThenExit();
+              } catch (e) {
+                console.error('[React] falha ao iniciar o teste de precisão:', e);
+                finalizeAutoRecordingRef.current(false);
+                setFalhaDoTeste(e instanceof Error ? e.message : String(e));
+              }
+            }, 400);
+          } else {
+            if (isMounted.current) {
+              const reason = outcome.reason || 'unknown';
+              const msg = humanMessage[reason] || humanMessage.unknown;
+              console.error(`[React] Treinamento falhou: ${reason} - ${outcome.detail}`);
+              // Calibração falhou — o JSONL até aqui não tem accuracy test útil.
+              // Descarta em vez de exportar; próxima tentativa recomeça limpa.
+              finalizeAutoRecordingRef.current(false);
+              setErrorMessage(msg);
+              setStage('tutorial');
+            }
           }
-        }
-      });
+        });
       });
       return;
     }
@@ -437,7 +476,7 @@ export const CalibrationCheck: React.FC = () => {
       // trocados entre a UI e o engine passar batido.
       console.error(
         `[calib] alvo ${pointIdx} inexistente na lista da sessão ` +
-        `(${activePointsRef.current.length} alvos). Coleta abortada.`,
+          `(${activePointsRef.current.length} alvos). Coleta abortada.`
       );
       setErrorMessage('Erro interno na grade de calibração. Tente novamente.');
       setStage('tutorial');
@@ -448,31 +487,37 @@ export const CalibrationCheck: React.FC = () => {
       if (success) {
         retryCountRef.current = 0;
         setLastCompletedPoint(pointIdx);
-        setCompletedList(prev => [...prev, pointIdx]);
-        setTimeout(() => { if (isMounted.current) startNextPoint(step + 1); }, 1200);
+        setCompletedList((prev) => [...prev, pointIdx]);
+        setTimeout(() => {
+          if (isMounted.current) startNextPoint(step + 1);
+        }, 1200);
       } else {
         retryCountRef.current++;
         if (retryCountRef.current >= MAX_RETRIES_PER_POINT) {
           retryCountRef.current = 0;
-          setCompletedList(prev => [...prev, pointIdx]);
-          setTimeout(() => { if (isMounted.current) startNextPoint(step + 1); }, 500);
+          setCompletedList((prev) => [...prev, pointIdx]);
+          setTimeout(() => {
+            if (isMounted.current) startNextPoint(step + 1);
+          }, 500);
         } else {
           // A mensagem diz a causa real: culpar o movimento quando o
           // problema é a lâmpada faz o paciente tentar se mexer menos, sem
           // efeito nenhum.
           const r = getResumoDoPonto();
           const detalhe = `${r.aceitos}/${r.necessario} amostras`;
-          const pitch = r.pitchAbsMedioDeg !== null
-            ? `, |pitch| ${r.pitchAbsMedioDeg.toFixed(0)}°` : '';
+          const pitch =
+            r.pitchAbsMedioDeg !== null ? `, |pitch| ${r.pitchAbsMedioDeg.toFixed(0)}°` : '';
           // As três causas de bloco zerado eram uma mensagem só, e ela culpava
           // o olhar do paciente. Duas delas são do MODELO — mandar a pessoa
           // parar de se mexer não muda nenhuma das duas. Os números vão junto
           // porque é por eles que se decide se o limiar está mal calibrado.
           const m = r.l2csPorMotivo;
           const dominante =
-            m.confianca >= m.implausivel && m.confianca >= m.stale ? 'confianca'
-            : m.implausivel >= m.stale ? 'implausivel'
-            : 'stale';
+            m.confianca >= m.implausivel && m.confianca >= m.stale
+              ? 'confianca'
+              : m.implausivel >= m.stale
+                ? 'implausivel'
+                : 'stale';
           const msgL2cs =
             dominante === 'confianca'
               ? `Modelo de olhar sem confiança neste ponto (${detalhe}; confiança média ` +
@@ -487,9 +532,11 @@ export const CalibrationCheck: React.FC = () => {
               ? `Imagem ruim neste ponto (${detalhe}) — verifique iluminação e reflexo nos óculos. Tentando novamente...`
               : r.porL2cs > 0
                 ? msgL2cs
-                : `Poucas amostras neste ponto (${detalhe}) — o rosto pode ter saído do enquadramento. Tentando novamente...`,
+                : `Poucas amostras neste ponto (${detalhe}) — o rosto pode ter saído do enquadramento. Tentando novamente...`
           );
-          setTimeout(() => { if (isMounted.current) startNextPoint(step); }, 1500);
+          setTimeout(() => {
+            if (isMounted.current) startNextPoint(step);
+          }, 1500);
         }
       }
     });
@@ -541,16 +588,13 @@ export const CalibrationCheck: React.FC = () => {
 
     console.log(
       `[calib] distâncias da sessão — tela ${screenCm.toFixed(1)} cm ` +
-      `(configurada), câmera ${cameraCm === null ? 'não medida' : `${cameraCm.toFixed(1)} cm`}.`,
+        `(configurada), câmera ${cameraCm === null ? 'não medida' : `${cameraCm.toFixed(1)} cm`}.`
     );
 
     // Congela as distâncias desta calibração. A compensação de distância usa
     // a VARIAÇÃO em relação a estes dois números para reescalar a predição
     // quando o paciente sentar mais perto ou mais longe depois.
-    calibration.setCalibrationDistancesCm?.(
-      cameraCm,
-      screenCm,
-    );
+    calibration.setCalibrationDistancesCm?.(cameraCm, screenCm);
 
     calibration.startCalibrationMode?.({
       quick,
@@ -583,25 +627,32 @@ export const CalibrationCheck: React.FC = () => {
     }, PREPARE_MS);
   };
 
-  const progressPct = activePoints.length > 0
-    ? (completedList.length / activePoints.length) * 100
-    : 0;
+  const progressPct =
+    activePoints.length > 0 ? (completedList.length / activePoints.length) * 100 : 0;
 
   // ─── TRANSIÇÃO ────────────────────────────────────────────────────────────
   if (stage === 'transitioning') {
     return (
-      <div style={{
-        position: 'fixed', inset: 0,
-        backgroundColor: BG,
-        zIndex: 9999,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        animation: 'cfFadeOut 0.8s ease-in-out forwards',
-      }}>
-        <div style={{
-          width: '100vw', height: '100vh',
-          background: `radial-gradient(circle, ${ACCENT} 0%, ${BG} 100%)`,
-          animation: 'cfRipple 0.8s ease-out forwards',
-        }} />
+      <div
+        style={{
+          position: 'fixed',
+          inset: 0,
+          backgroundColor: BG,
+          zIndex: 9999,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          animation: 'cfFadeOut 0.8s ease-in-out forwards',
+        }}
+      >
+        <div
+          style={{
+            width: '100vw',
+            height: '100vh',
+            background: `radial-gradient(circle, ${ACCENT} 0%, ${BG} 100%)`,
+            animation: 'cfRipple 0.8s ease-out forwards',
+          }}
+        />
         <style>{`
           @keyframes cfFadeOut { from { opacity:1; } to { opacity:0; } }
           @keyframes cfRipple  { from { transform:scale(0.1); opacity:1; } to { transform:scale(3); opacity:0; } }
@@ -616,46 +667,106 @@ export const CalibrationCheck: React.FC = () => {
         role="main"
         style={{
           position: 'relative',
-          width: '100vw', height: '100vh',
+          width: '100vw',
+          height: '100vh',
           background: BG,
           color: TEXT_PRIMARY,
           overflow: 'hidden',
           userSelect: 'none',
-          display: 'flex', flexDirection: 'column',
+          display: 'flex',
+          flexDirection: 'column',
           fontFamily: "'Inter', system-ui, -apple-system, sans-serif",
         }}
       >
         {/* Botão Voltar */}
-        {(stage === 'tutorial') && (
+        {stage === 'tutorial' && (
           <div style={{ position: 'absolute', top: '2rem', left: '2rem', zIndex: 60 }}>
             <BackButton />
           </div>
         )}
 
-
         {/* ─── TUTORIAL / INÍCIO ───────────────────────────────────────── */}
         {stage === 'tutorial' && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-            <div style={{
-              maxWidth: 500, width: '100%',
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              textAlign: 'center', gap: '2rem',
-              animation: 'cfFadeUp 0.4s ease-out both',
-            }}>
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem',
+            }}
+          >
+            <div
+              style={{
+                maxWidth: 500,
+                width: '100%',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: '2rem',
+                animation: 'cfFadeUp 0.4s ease-out both',
+              }}
+            >
               {/* Preview do ponto — mostra ao usuário o que vai aparecer */}
-              <div style={{ position: 'relative', width: 90, height: 90, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                <div style={{ position: 'absolute', width: 80, height: 80, borderRadius: '50%', background: `radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)`, animation: 'cfRadarPing 2s ease-out infinite' }} />
-                <div style={{ width: 34, height: 34, borderRadius: '50%', background: ACCENT, boxShadow: `0 0 30px ${ACCENT}`, animation: 'cfPulse 1.2s infinite alternate' }} />
-                <div style={{ position: 'absolute', width: 9, height: 9, borderRadius: '50%', background: BG, opacity: 0.85 }} />
+              <div
+                style={{
+                  position: 'relative',
+                  width: 90,
+                  height: 90,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    position: 'absolute',
+                    width: 80,
+                    height: 80,
+                    borderRadius: '50%',
+                    background: `radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)`,
+                    animation: 'cfRadarPing 2s ease-out infinite',
+                  }}
+                />
+                <div
+                  style={{
+                    width: 34,
+                    height: 34,
+                    borderRadius: '50%',
+                    background: ACCENT,
+                    boxShadow: `0 0 30px ${ACCENT}`,
+                    animation: 'cfPulse 1.2s infinite alternate',
+                  }}
+                />
+                <div
+                  style={{
+                    position: 'absolute',
+                    width: 9,
+                    height: 9,
+                    borderRadius: '50%',
+                    background: BG,
+                    opacity: 0.85,
+                  }}
+                />
               </div>
 
               <div>
-                <h1 style={{ fontSize: '2.1rem', fontWeight: 800, margin: '0 0 0.75rem', color: TEXT_PRIMARY }}>
+                <h1
+                  style={{
+                    fontSize: '2.1rem',
+                    fontWeight: 800,
+                    margin: '0 0 0.75rem',
+                    color: TEXT_PRIMARY,
+                  }}
+                >
                   Calibração
                 </h1>
                 <p style={{ fontSize: '1.1rem', color: TEXT_DIM, margin: 0, lineHeight: 1.65 }}>
-                  Um ponto <strong style={{ color: ACCENT }}>azul</strong> vai aparecer na tela.<br />
-                  Olhe <strong style={{ color: TEXT_PRIMARY }}>direto para ele</strong> e fique parado até sumir.
+                  Um ponto <strong style={{ color: ACCENT }}>azul</strong> vai aparecer na tela.
+                  <br />
+                  Olhe <strong style={{ color: TEXT_PRIMARY }}>direto para ele</strong> e fique
+                  parado até sumir.
                 </p>
               </div>
 
@@ -669,24 +780,28 @@ export const CalibrationCheck: React.FC = () => {
               <ReadinessPanel />
 
               {errorMessage && (
-                <div style={{
-                  padding: '1rem',
-                  background: 'rgba(239, 68, 68, 0.1)',
-                  border: `1px solid ${DANGER}`,
-                  borderRadius: '0.75rem',
-                  color: DANGER,
-                  fontSize: '0.95rem',
-                  maxWidth: 400,
-                  lineHeight: 1.5,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '0.75rem',
-                  textAlign: 'left',
-                  animation: 'cfFadeUp 0.3s ease-out both'
-                }}>
+                <div
+                  style={{
+                    padding: '1rem',
+                    background: 'rgba(239, 68, 68, 0.1)',
+                    border: `1px solid ${DANGER}`,
+                    borderRadius: '0.75rem',
+                    color: DANGER,
+                    fontSize: '0.95rem',
+                    maxWidth: 400,
+                    lineHeight: 1.5,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '0.75rem',
+                    textAlign: 'left',
+                    animation: 'cfFadeUp 0.3s ease-out both',
+                  }}
+                >
                   <AlertTriangle size={24} style={{ flexShrink: 0 }} />
                   <div>
-                    <strong style={{ display: 'block', marginBottom: '0.15rem' }}>Falha na calibração</strong>
+                    <strong style={{ display: 'block', marginBottom: '0.15rem' }}>
+                      Falha na calibração
+                    </strong>
                     {errorMessage}
                     <div style={{ marginTop: '0.5rem' }}>
                       <a
@@ -700,7 +815,7 @@ export const CalibrationCheck: React.FC = () => {
                           fontWeight: 700,
                           textDecoration: 'underline',
                           fontSize: '0.9rem',
-                          cursor: 'pointer'
+                          cursor: 'pointer',
                         }}
                       >
                         Ver Guia de Instalação e Dicas do Cuidador
@@ -773,7 +888,8 @@ export const CalibrationCheck: React.FC = () => {
                   style={{ width: 18, height: 18, cursor: 'pointer', accentColor: ACCENT }}
                 />
                 <span style={{ flex: 1, textAlign: 'left' }}>
-                  <strong style={{ color: TEXT_PRIMARY }}>Gravar sessão</strong> junto com esta calibração
+                  <strong style={{ color: TEXT_PRIMARY }}>Gravar sessão</strong> junto com esta
+                  calibração
                   {isRecording && (
                     <span style={{ color: DANGER, marginLeft: '0.5rem', fontWeight: 700 }}>
                       🔴 gravando
@@ -781,8 +897,8 @@ export const CalibrationCheck: React.FC = () => {
                   )}
                   <br />
                   <span style={{ fontSize: '0.78rem', color: TEXT_DIM }}>
-                    Grava calibração + teste de precisão. JSONL baixa automático quando
-                    o teste termina. Redo/falha descarta.
+                    Grava calibração + teste de precisão. JSONL baixa automático quando o teste
+                    termina. Redo/falha descarta.
                   </span>
                 </span>
               </label>
@@ -810,21 +926,44 @@ export const CalibrationCheck: React.FC = () => {
                   border: 'none',
                   padding: '1rem 3rem',
                   borderRadius: '2rem',
-                  fontSize: '1.15rem', fontWeight: 800,
+                  fontSize: '1.15rem',
+                  fontWeight: 800,
                   cursor: l2csReady ? 'pointer' : 'not-allowed',
-                  display: 'flex', alignItems: 'center', gap: '0.7rem',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.7rem',
                   transition: 'all 0.2s',
                   boxShadow: l2csReady ? '0 8px 24px rgba(27, 84, 168, 0.40)' : 'none',
                   opacity: l2csReady ? 1 : 0.75,
                 }}
                 {...hoverAndFocus(
-                  el => { if (l2csReady) { el.style.transform = 'translateY(-2px)'; el.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)'; } },
-                  el => { if (l2csReady) { el.style.transform = ''; el.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)'; } }
+                  (el) => {
+                    if (l2csReady) {
+                      el.style.transform = 'translateY(-2px)';
+                      el.style.boxShadow = '0 12px 32px rgba(27, 84, 168, 0.55)';
+                    }
+                  },
+                  (el) => {
+                    if (l2csReady) {
+                      el.style.transform = '';
+                      el.style.boxShadow = '0 8px 24px rgba(27, 84, 168, 0.40)';
+                    }
+                  }
                 )}
               >
                 {l2csReady && '👁  Começar (9 pontos)'}
-                {l2csStatus === 'loading' && (<><Loader2 size={20} style={{ animation: 'cfSpin 1s linear infinite' }} />Carregando...</>)}
-                {l2csFailed && (<><AlertTriangle size={20} />Modelo indisponível</>)}
+                {l2csStatus === 'loading' && (
+                  <>
+                    <Loader2 size={20} style={{ animation: 'cfSpin 1s linear infinite' }} />
+                    Carregando...
+                  </>
+                )}
+                {l2csFailed && (
+                  <>
+                    <AlertTriangle size={20} />
+                    Modelo indisponível
+                  </>
+                )}
               </button>
 
               {l2csReady && (
@@ -842,7 +981,8 @@ export const CalibrationCheck: React.FC = () => {
                     border: `1px solid rgba(255,255,255,0.35)`,
                     padding: '0.7rem 2.2rem',
                     borderRadius: '2rem',
-                    fontSize: '0.95rem', fontWeight: 700,
+                    fontSize: '0.95rem',
+                    fontWeight: 700,
                     cursor: 'pointer',
                     transition: 'all 0.15s',
                   }}
@@ -856,10 +996,18 @@ export const CalibrationCheck: React.FC = () => {
                 id="l2cs-status-message"
                 role={l2csFailed ? 'alert' : 'status'}
                 aria-live="polite"
-                style={{ fontSize: '0.88rem', color: l2csFailed ? DANGER : TEXT_DIM, minHeight: '1.4rem', maxWidth: 400, lineHeight: 1.5 }}
+                style={{
+                  fontSize: '0.88rem',
+                  color: l2csFailed ? DANGER : TEXT_DIM,
+                  minHeight: '1.4rem',
+                  maxWidth: 400,
+                  lineHeight: 1.5,
+                }}
               >
-                {l2csStatus === 'loading' && 'Aguardando o modelo (~10-15s na 1ª vez). Não feche a página.'}
-                {l2csFailed && 'Não foi possível carregar o modelo. Recarregue a página e tente novamente.'}
+                {l2csStatus === 'loading' &&
+                  'Aguardando o modelo (~10-15s na 1ª vez). Não feche a página.'}
+                {l2csFailed &&
+                  'Não foi possível carregar o modelo. Recarregue a página e tente novamente.'}
               </div>
             </div>
           </div>
@@ -872,55 +1020,103 @@ export const CalibrationCheck: React.FC = () => {
               <div
                 data-testid="recording-indicator"
                 style={{
-                  position: 'absolute', top: '1.25rem', right: '1.5rem', zIndex: 45,
-                  display: 'flex', alignItems: 'center', gap: '0.4rem',
+                  position: 'absolute',
+                  top: '1.25rem',
+                  right: '1.5rem',
+                  zIndex: 45,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '0.4rem',
                   padding: '0.35rem 0.7rem',
                   background: 'rgba(239,68,68,0.10)',
                   border: `1px solid ${DANGER}`,
                   borderRadius: '999px',
-                  color: DANGER, fontSize: '0.8rem', fontWeight: 700,
+                  color: DANGER,
+                  fontSize: '0.8rem',
+                  fontWeight: 700,
                 }}
               >
-                <span style={{
-                  width: 8, height: 8, borderRadius: '50%', background: DANGER,
-                  animation: 'cfPulseRed 1.2s infinite alternate',
-                }} />
+                <span
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: DANGER,
+                    animation: 'cfPulseRed 1.2s infinite alternate',
+                  }}
+                />
                 Gravando
               </div>
             )}
 
             {/* Barra de progresso — discreta, no topo, não distrai o olhar */}
-            <div style={{
-              position: 'absolute', top: '1.25rem', left: '50%', transform: 'translateX(-50%)',
-              zIndex: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.35rem',
-            }}>
-              <div style={{ width: 130, height: 4, background: 'rgba(255,255,255,0.10)', borderRadius: 2, overflow: 'hidden' }}>
-                <div style={{ width: `${progressPct}%`, height: '100%', background: ACCENT, transition: 'width 0.5s ease-out', borderRadius: 2 }} />
+            <div
+              style={{
+                position: 'absolute',
+                top: '1.25rem',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                zIndex: 40,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: '0.35rem',
+              }}
+            >
+              <div
+                style={{
+                  width: 130,
+                  height: 4,
+                  background: 'rgba(255,255,255,0.10)',
+                  borderRadius: 2,
+                  overflow: 'hidden',
+                }}
+              >
+                <div
+                  style={{
+                    width: `${progressPct}%`,
+                    height: '100%',
+                    background: ACCENT,
+                    transition: 'width 0.5s ease-out',
+                    borderRadius: 2,
+                  }}
+                />
               </div>
-              <span style={{ fontSize: '0.8rem', color: TEXT_DIM, fontVariantNumeric: 'tabular-nums' }}>
-                {completedList.length} / <span data-testid="calib-progress-total">{activePoints.length}</span>
+              <span
+                style={{ fontSize: '0.8rem', color: TEXT_DIM, fontVariantNumeric: 'tabular-nums' }}
+              >
+                {completedList.length} /{' '}
+                <span data-testid="calib-progress-total">{activePoints.length}</span>
               </span>
             </div>
 
             {/* Instrução contextual — só quando necessário (prepare-se / erro) */}
             {(preparing || errorMessage) && (
-              <div style={{
-                position: 'absolute', bottom: '2.5rem', left: '50%', transform: 'translateX(-50%)',
-                zIndex: 40, padding: '0.7rem 2rem',
-                background: errorMessage ? 'rgba(239,68,68,0.12)' : 'rgba(27, 84, 168, 0.10)',
-                border: `1px solid ${errorMessage ? DANGER : ACCENT}`,
-                borderRadius: '3rem',
-                color: errorMessage ? DANGER : ACCENT,
-                fontSize: '1.05rem', fontWeight: 600, whiteSpace: 'nowrap',
-              }}>
+              <div
+                style={{
+                  position: 'absolute',
+                  bottom: '2.5rem',
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  zIndex: 40,
+                  padding: '0.7rem 2rem',
+                  background: errorMessage ? 'rgba(239,68,68,0.12)' : 'rgba(27, 84, 168, 0.10)',
+                  border: `1px solid ${errorMessage ? DANGER : ACCENT}`,
+                  borderRadius: '3rem',
+                  color: errorMessage ? DANGER : ACCENT,
+                  fontSize: '1.05rem',
+                  fontWeight: 600,
+                  whiteSpace: 'nowrap',
+                }}
+              >
                 {errorMessage ?? '👁  Prepare-se… olhe para o ponto azul'}
               </div>
             )}
 
             {/* Pontos de calibração */}
             {activePoints.map((pt, idx) => {
-              const isCurrent      = idx === currentIndex;
-              const isDone         = completedList.includes(idx);
+              const isCurrent = idx === currentIndex;
+              const isDone = completedList.includes(idx);
               const isJustFinished = idx === lastCompletedPoint;
 
               return (
@@ -929,59 +1125,106 @@ export const CalibrationCheck: React.FC = () => {
                   data-calibration-target=""
                   style={{
                     position: 'absolute',
-                    left: `${pt.x}%`, top: `${pt.y}%`,
+                    left: `${pt.x}%`,
+                    top: `${pt.y}%`,
                     transform: 'translate(-50%, -50%)',
-                    width: 80, height: 80,
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    width: 80,
+                    height: 80,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     zIndex: isCurrent ? 30 : 10,
                   }}
                 >
                   {/* ── Ponto atual ── */}
                   {isCurrent && !isJustFinished && (
-                    <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div
+                      style={{
+                        position: 'relative',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
                       {/* Halo pulsante — "olhe aqui" */}
-                      <div style={{
-                        position: 'absolute', width: 72, height: 72, borderRadius: '50%',
-                        background: 'radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)',
-                        animation: 'cfRadarPing 2.2s ease-out infinite',
-                      }} />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          width: 72,
+                          height: 72,
+                          borderRadius: '50%',
+                          background:
+                            'radial-gradient(circle, rgba(27, 84, 168, 0.22) 0%, transparent 70%)',
+                          animation: 'cfRadarPing 2.2s ease-out infinite',
+                        }}
+                      />
                       {/* Anel rotativo de guia */}
-                      <div style={{
-                        position: 'absolute', width: 52, height: 52, borderRadius: '50%',
-                        border: '2px solid rgba(27, 84, 168, 0.40)',
-                        animation: 'cfHalo 3s linear infinite',
-                      }} />
+                      <div
+                        style={{
+                          position: 'absolute',
+                          width: 52,
+                          height: 52,
+                          borderRadius: '50%',
+                          border: '2px solid rgba(27, 84, 168, 0.40)',
+                          animation: 'cfHalo 3s linear infinite',
+                        }}
+                      />
                       {/* Ponto central — azul, limpo, sem elementos sobre ele */}
-                      <div style={{
-                        width: 34, height: 34, borderRadius: '50%',
-                        background: ACCENT,
-                        boxShadow: `0 0 0 8px rgba(27, 84, 168, 0.18), 0 0 36px ${ACCENT}`,
-                        animation: 'cfPulse 1.2s infinite alternate',
-                      }} />
+                      <div
+                        style={{
+                          width: 34,
+                          height: 34,
+                          borderRadius: '50%',
+                          background: ACCENT,
+                          boxShadow: `0 0 0 8px rgba(27, 84, 168, 0.18), 0 0 36px ${ACCENT}`,
+                          animation: 'cfPulse 1.2s infinite alternate',
+                        }}
+                      />
                     </div>
                   )}
 
                   {/* ── Recém concluído ── */}
                   {isJustFinished && (
-                    <div style={{
-                      width: 48, height: 48, borderRadius: '50%',
-                      background: SUCCESS,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center',
-                      boxShadow: `0 0 24px rgba(34,197,94,0.70)`,
-                      animation: 'cfScaleIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
-                    }}>
+                    <div
+                      style={{
+                        width: 48,
+                        height: 48,
+                        borderRadius: '50%',
+                        background: SUCCESS,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        boxShadow: `0 0 24px rgba(34,197,94,0.70)`,
+                        animation: 'cfScaleIn 0.3s cubic-bezier(0.34,1.56,0.64,1) both',
+                      }}
+                    >
                       <CheckCircle2 size={28} color="#fff" />
                     </div>
                   )}
 
                   {/* ── Feito, não recente ── */}
                   {isDone && !isJustFinished && (
-                    <div style={{ width: 10, height: 10, borderRadius: '50%', background: SUCCESS, opacity: 0.35 }} />
+                    <div
+                      style={{
+                        width: 10,
+                        height: 10,
+                        borderRadius: '50%',
+                        background: SUCCESS,
+                        opacity: 0.35,
+                      }}
+                    />
                   )}
 
                   {/* ── Pendente ── */}
                   {!isCurrent && !isDone && (
-                    <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'rgba(255,255,255,0.13)' }} />
+                    <div
+                      style={{
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: 'rgba(255,255,255,0.13)',
+                      }}
+                    />
                   )}
                 </div>
               );
@@ -991,13 +1234,25 @@ export const CalibrationCheck: React.FC = () => {
 
         {/* ─── TESTING ─────────────────────────────────────────────────── */}
         {stage === 'testing' && falhaDoTeste && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem',
+            }}
+          >
             <div
               role="alertdialog"
               aria-label="Falha ao iniciar o teste de precisão"
               style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                textAlign: 'center', gap: '1.25rem', maxWidth: 620,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: '1.25rem',
+                maxWidth: 620,
               }}
             >
               <AlertTriangle size={48} color="#f59e0b" aria-hidden="true" />
@@ -1005,17 +1260,27 @@ export const CalibrationCheck: React.FC = () => {
                 O teste de precisão não começou
               </h2>
               <p style={{ color: TEXT_DIM, fontSize: '1.02rem', margin: 0, lineHeight: 1.6 }}>
-                {falhaDoTeste} A calibração foi treinada e continua valendo — só a
-                medição não rodou.
+                {falhaDoTeste} A calibração foi treinada e continua valendo — só a medição não
+                rodou.
               </p>
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <div
+                style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}
+              >
                 <button
                   type="button"
-                  onClick={() => { setFalhaDoTeste(null); runAccuracyTestThenExit(); }}
+                  onClick={() => {
+                    setFalhaDoTeste(null);
+                    runAccuracyTestThenExit();
+                  }}
                   style={{
-                    background: ACCENT, color: '#fff', border: 'none',
-                    padding: '1rem 2.4rem', borderRadius: '2rem',
-                    fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
+                    background: ACCENT,
+                    color: '#fff',
+                    border: 'none',
+                    padding: '1rem 2.4rem',
+                    borderRadius: '2rem',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
                   }}
                 >
                   Tentar de novo
@@ -1024,10 +1289,14 @@ export const CalibrationCheck: React.FC = () => {
                   type="button"
                   onClick={() => navigate('/menu')}
                   style={{
-                    background: 'transparent', color: TEXT_DIM,
+                    background: 'transparent',
+                    color: TEXT_DIM,
                     border: '1px solid rgba(255,255,255,0.25)',
-                    padding: '1rem 2.4rem', borderRadius: '2rem',
-                    fontSize: '1.05rem', fontWeight: 700, cursor: 'pointer',
+                    padding: '1rem 2.4rem',
+                    borderRadius: '2rem',
+                    fontSize: '1.05rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
                   }}
                 >
                   Ir para o menu
@@ -1038,15 +1307,39 @@ export const CalibrationCheck: React.FC = () => {
         )}
 
         {stage === 'testing' && !falhaDoTeste && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
-            <div style={{
-              display: 'flex', flexDirection: 'column', alignItems: 'center',
-              textAlign: 'center', gap: '1.5rem',
-              animation: 'cfFadeUp 0.4s ease-out both',
-            }}>
-              <Loader2 size={52} color={ACCENT} style={{ animation: 'cfSpin 1s linear infinite' }} />
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: '1.5rem',
+                animation: 'cfFadeUp 0.4s ease-out both',
+              }}
+            >
+              <Loader2
+                size={52}
+                color={ACCENT}
+                style={{ animation: 'cfSpin 1s linear infinite' }}
+              />
               <div>
-                <h2 style={{ fontSize: '1.65rem', fontWeight: 800, margin: '0 0 0.5rem', color: TEXT_PRIMARY }}>
+                <h2
+                  style={{
+                    fontSize: '1.65rem',
+                    fontWeight: 800,
+                    margin: '0 0 0.5rem',
+                    color: TEXT_PRIMARY,
+                  }}
+                >
                   Iniciando teste de precisão
                 </h2>
                 <p style={{ color: TEXT_DIM, fontSize: '1rem', margin: 0, lineHeight: 1.6 }}>
@@ -1059,29 +1352,53 @@ export const CalibrationCheck: React.FC = () => {
 
         {/* ───: DERIVA DE POSE DURANTE A CALIBRAÇÃO ─────────────── */}
         {stage === 'drift-warning' && (driftVerdict || alvosPulados > 0) && (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '2rem' }}>
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '2rem',
+            }}
+          >
             <div
               role="alertdialog"
               aria-labelledby="drift-title"
               aria-describedby="drift-msg"
               style={{
-                display: 'flex', flexDirection: 'column', alignItems: 'center',
-                textAlign: 'center', gap: '1.5rem', maxWidth: 620,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                textAlign: 'center',
+                gap: '1.5rem',
+                maxWidth: 620,
                 background: 'rgba(255,255,255,0.04)',
                 border: '1px solid rgba(245, 158, 11, 0.35)',
-                borderRadius: '1.5rem', padding: '2.5rem',
+                borderRadius: '1.5rem',
+                padding: '2.5rem',
                 animation: 'cfFadeUp 0.4s ease-out both',
               }}
             >
               <AlertTriangle size={52} color="#f59e0b" aria-hidden="true" />
 
               <div>
-                <h2 id="drift-title" style={{ fontSize: '1.65rem', fontWeight: 800, margin: '0 0 0.75rem', color: TEXT_PRIMARY }}>
+                <h2
+                  id="drift-title"
+                  style={{
+                    fontSize: '1.65rem',
+                    fontWeight: 800,
+                    margin: '0 0 0.75rem',
+                    color: TEXT_PRIMARY,
+                  }}
+                >
                   {driftVerdict
                     ? 'A cabeça se moveu durante a calibração'
                     : 'Alguns pontos não foram medidos'}
                 </h2>
-                <p id="drift-msg" style={{ color: TEXT_DIM, fontSize: '1.05rem', margin: 0, lineHeight: 1.65 }}>
+                <p
+                  id="drift-msg"
+                  style={{ color: TEXT_DIM, fontSize: '1.05rem', margin: 0, lineHeight: 1.65 }}
+                >
                   {driftVerdict?.mensagem}
                   {alvosPulados > 0 && (
                     <>
@@ -1098,10 +1415,20 @@ export const CalibrationCheck: React.FC = () => {
                   "mexi 238px-equivalentes". */}
               <div style={{ display: 'flex', gap: '2rem', alignItems: 'center' }}>
                 <div>
-                  <div data-testid="drift-px" style={{ fontSize: '2rem', fontWeight: 800, color: '#f59e0b' }}>
+                  <div
+                    data-testid="drift-px"
+                    style={{ fontSize: '2rem', fontWeight: 800, color: '#f59e0b' }}
+                  >
                     {driftVerdict ? `${driftVerdict.piorEixoPx.toFixed(0)}px` : '—'}
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: TEXT_DIM, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  <div
+                    style={{
+                      fontSize: '0.85rem',
+                      color: TEXT_DIM,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                    }}
+                  >
                     deriva equivalente
                   </div>
                 </div>
@@ -1109,7 +1436,14 @@ export const CalibrationCheck: React.FC = () => {
                   <div style={{ fontSize: '2rem', fontWeight: 800, color: TEXT_PRIMARY }}>
                     {driftVerdict ? (driftVerdict.monotona ? 'Progressiva' : 'Errática') : '—'}
                   </div>
-                  <div style={{ fontSize: '0.85rem', color: TEXT_DIM, textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+                  <div
+                    style={{
+                      fontSize: '0.85rem',
+                      color: TEXT_DIM,
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.08em',
+                    }}
+                  >
                     padrão do movimento
                   </div>
                 </div>
@@ -1121,17 +1455,28 @@ export const CalibrationCheck: React.FC = () => {
                   perda de autonomia que motivou tirar o atributo do botão de
                   começar (ver acima). Em vez de bloquear, dwell LONGO: refazer
                   a calibração por acidente custa 1–2 min de sessão. */}
-              <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}>
+              <div
+                style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', justifyContent: 'center' }}
+              >
                 {/* Recalibrar vem primeiro: é a ação que corrige o problema. */}
                 <button
                   type="button"
                   data-dwell-ms="2500"
                   data-testid="drift-recalibrar"
-                  onClick={() => { setDriftVerdict(null); setAlvosPulados(0); handleStart(false); }}
+                  onClick={() => {
+                    setDriftVerdict(null);
+                    setAlvosPulados(0);
+                    handleStart(false);
+                  }}
                   style={{
-                    background: ACCENT, color: '#fff', border: 'none',
-                    padding: '1rem 2.4rem', borderRadius: '2rem',
-                    fontSize: '1.05rem', fontWeight: 800, cursor: 'pointer',
+                    background: ACCENT,
+                    color: '#fff',
+                    border: 'none',
+                    padding: '1rem 2.4rem',
+                    borderRadius: '2rem',
+                    fontSize: '1.05rem',
+                    fontWeight: 800,
+                    cursor: 'pointer',
                   }}
                 >
                   Refazer calibração
@@ -1155,10 +1500,14 @@ export const CalibrationCheck: React.FC = () => {
                     }
                   }}
                   style={{
-                    background: 'transparent', color: TEXT_PRIMARY,
+                    background: 'transparent',
+                    color: TEXT_PRIMARY,
                     border: '1px solid rgba(255,255,255,0.35)',
-                    padding: '1rem 2rem', borderRadius: '2rem',
-                    fontSize: '0.98rem', fontWeight: 700, cursor: 'pointer',
+                    padding: '1rem 2rem',
+                    borderRadius: '2rem',
+                    fontSize: '0.98rem',
+                    fontWeight: 700,
+                    cursor: 'pointer',
                   }}
                 >
                   Continuar mesmo assim

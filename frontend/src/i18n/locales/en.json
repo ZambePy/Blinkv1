@@ -301,5 +301,70 @@
       "normal": "Normal",
       "rapido": "Fast"
     }
+  },
+  "tutorial": {
+    "title": "Using your gaze",
+    "back": "Back",
+    "next": "Continue",
+    "finish": "Finish",
+    "skip": "Skip the tutorial",
+    "steps": {
+      "oQueEDwell": "The click",
+      "pratica": "Practice",
+      "ajuste": "Timing",
+      "emergencia": "Emergency",
+      "concluido": "Done"
+    },
+    "dwell": {
+      "title": "Look to click",
+      "lead": "There is no button to press. You look at something and it gets chosen on its own.",
+      "passo1": "You look at what you want.",
+      "passo2": "A ring starts filling around it.",
+      "passo3": "When the ring closes, it is chosen.",
+      "tempo": "Right now the ring takes {{s}} seconds to close.",
+      "estatico": "Animation off: the three stages are above, in order."
+    },
+    "pratica": {
+      "title": "Let's practise",
+      "lead": "Look at the target and hold. There is no wrong here, and no time limit.",
+      "alvo": "Target {{n}}",
+      "restantes": "{{n}} to go",
+      "fim": "Done. That is how it should feel.",
+      "rapido": "The click came before your gaze settled. Want a longer time?",
+      "lento": "You held longer than needed. You could shorten the time.",
+      "bom": "Good. That is how it should feel.",
+      "indeterminado": "Recorded.",
+      "ajustar": "Adjust the time"
+    },
+    "ajuste": {
+      "title": "The right time is yours",
+      "lead": "More time avoids clicks you did not mean. Less time is less tiring. Try it on the target beside.",
+      "alvo": "Test target",
+      "feito": "Chosen."
+    },
+    "emergencia": {
+      "title": "The emergency button",
+      "lead": "It sits in the corner of the screen, everywhere in the app.",
+      "como": "Triggering it needs a longer look than a normal click, and still asks for confirmation — so it does not fire by accident.",
+      "ensaiar": "Run a drill",
+      "ensaioAtivo": "Drill on: nothing will be sent. Look at the red button.",
+      "ensaiado": "That is what will happen. Next time, the call for help is sent for real.",
+      "pular": "Not now"
+    },
+    "concluido": {
+      "title": "All set",
+      "lead": "You know enough to get started.",
+      "refazer": "You can redo this tutorial any time, in Settings.",
+      "ir": "Start using"
+    },
+    "atalho": {
+      "title": "Usage tutorial",
+      "done": "Done on {{data}}.",
+      "never": "Not done yet for this patient.",
+      "dwell": "Chosen time: {{s}} s",
+      "semEnsaio": "The emergency drill was not run.",
+      "why": "Redo it when the dwell time stops fitting — with ALS that changes over time.",
+      "button": "Redo the tutorial"
+    }
   }
 }

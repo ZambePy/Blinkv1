@@ -40,6 +40,16 @@ const ARQUIVOS = [
   'setup/steps/Iluminacao.tsx',
   'setup/steps/VerificacaoDoMonitor.tsx',
   'setup/AtalhoDePreparo.tsx',
+  // Bloco 3 — tutorial.
+  'tutorial/TutorialWizard.tsx',
+  'tutorial/AtalhoDeTutorial.tsx',
+  'tutorial/steps/OQueEDwell.tsx',
+  'tutorial/steps/PraticaGuiada.tsx',
+  'tutorial/steps/AjusteDoTempo.tsx',
+  'tutorial/steps/BotaoDeEmergencia.tsx',
+  'tutorial/steps/Concluido.tsx',
+  '../components/ui/AnelDeDwell.tsx',
+  '../components/ui/ControleDeDwell.tsx',
   '../components/ui/Semaforo.tsx',
 ];
 
@@ -85,6 +95,7 @@ describe('o fundo da pagina acompanha o tema', () => {
     'auth/ActivatedScreen.tsx',
     'auth/ProfileSelect.tsx',
     'setup/SetupWizard.tsx',
+    'tutorial/TutorialWizard.tsx',
   ];
 
   for (const rel of COM_CARTAO) {

@@ -52,6 +52,7 @@ import { proximoBloco } from '../registroDaSessao';
 import { getCalibrationTimestampMs } from '@tracker/calibration';
 import { hoverAndFocusBackground } from '../components/ui/hoverFocus';
 import { ControleDeDwell } from '../components/ui/ControleDeDwell';
+import { AtalhoDeTutorial } from './tutorial/AtalhoDeTutorial';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -755,6 +756,8 @@ export const SettingsScreen: React.FC = () => {
             a webcam ou a posição do monitor. Sem ele, o preparo de um perfil
             só sairia apagando o perfil, e a calibração iria junto. */}
         <AtalhoDePreparo />
+
+        <AtalhoDeTutorial />
 
         {/* Card do Guia do Cuidador */}
         <section

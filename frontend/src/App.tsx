@@ -37,7 +37,7 @@ const QuickPhrasesScreen = lazyNamed(
 const SettingsScreen = lazyNamed(() => import('./pages/SettingsScreen'), 'SettingsScreen');
 const GamesMenu = lazyNamed(() => import('./pages/GamesMenu'), 'GamesMenu');
 const BubblePopGame = lazyNamed(() => import('./pages/BubblePopGame'), 'BubblePopGame');
-const TutorialScreen = lazyNamed(() => import('./pages/help/TutorialScreen'), 'TutorialScreen');
+const TutorialWizard = lazyNamed(() => import('./pages/tutorial/TutorialWizard'), 'TutorialWizard');
 const ProfileSelect = lazyNamed(() => import('./pages/auth/ProfileSelect'), 'ProfileSelect');
 const IntroScreen = lazyNamed(() => import('./pages/onboarding/IntroScreen'), 'IntroScreen');
 const ConsentScreen = lazyNamed(() => import('./pages/onboarding/ConsentScreen'), 'ConsentScreen');
@@ -152,7 +152,14 @@ function App() {
                         <Route path="/login" element={<LoginScreen />} />
                         <Route path="/activated" element={<ActivatedScreen />} />
                         <Route path="/consent" element={<ConsentScreen />} />
-                        <Route path="/tutorial" element={<TutorialScreen />} />
+                        <Route
+                          path="/tutorial"
+                          element={
+                            <ProtectedRoute>
+                              <TutorialWizard />
+                            </ProtectedRoute>
+                          }
+                        />
                         <Route path="/profiles" element={<ProfileSelect />} />
                         <Route
                           path="/calibration-check"

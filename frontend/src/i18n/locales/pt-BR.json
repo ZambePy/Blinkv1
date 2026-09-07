@@ -301,5 +301,70 @@
       "normal": "Normal",
       "rapido": "Rápido"
     }
+  },
+  "tutorial": {
+    "title": "Como usar o olhar",
+    "back": "Voltar",
+    "next": "Continuar",
+    "finish": "Concluir",
+    "skip": "Pular o tutorial",
+    "steps": {
+      "oQueEDwell": "O clique",
+      "pratica": "Prática",
+      "ajuste": "Tempo",
+      "emergencia": "Emergência",
+      "concluido": "Pronto"
+    },
+    "dwell": {
+      "title": "Olhar para clicar",
+      "lead": "Não há botão para apertar. Você olha para uma coisa e ela é escolhida sozinha.",
+      "passo1": "Você olha para o que quer.",
+      "passo2": "Um anel começa a encher em volta.",
+      "passo3": "Quando o anel fecha, está escolhido.",
+      "tempo": "Hoje o anel leva {{s}} segundos para fechar.",
+      "estatico": "Animação desligada: as três etapas estão acima, em ordem."
+    },
+    "pratica": {
+      "title": "Vamos praticar",
+      "lead": "Olhe para o alvo e segure. Não há erro aqui, nem tempo esgotado.",
+      "alvo": "Alvo {{n}}",
+      "restantes": "Faltam {{n}}",
+      "fim": "Pronto. Foi assim que deve parecer.",
+      "rapido": "O clique veio antes de o olhar assentar. Quer aumentar o tempo?",
+      "lento": "Você segurou mais do que precisava. Dá para diminuir o tempo.",
+      "bom": "Bom. Foi assim que deve parecer.",
+      "indeterminado": "Registrado.",
+      "ajustar": "Ajustar o tempo"
+    },
+    "ajuste": {
+      "title": "O tempo certo é o seu",
+      "lead": "Mais tempo evita cliques sem querer. Menos tempo cansa menos. Experimente no alvo ao lado.",
+      "alvo": "Alvo de teste",
+      "feito": "Escolhido."
+    },
+    "emergencia": {
+      "title": "O botão de emergência",
+      "lead": "Ele fica sempre no canto da tela, em qualquer lugar do app.",
+      "como": "Acionar exige olhar mais tempo que um clique comum, e ainda pede confirmação — para não disparar sem querer.",
+      "ensaiar": "Fazer um ensaio",
+      "ensaioAtivo": "Ensaio ligado: nada será enviado. Olhe para o botão vermelho.",
+      "ensaiado": "Foi isso que vai acontecer. Da próxima, o pedido de ajuda é enviado de verdade.",
+      "pular": "Não quero ensaiar agora"
+    },
+    "concluido": {
+      "title": "Tudo pronto",
+      "lead": "Você já sabe o suficiente para começar.",
+      "refazer": "Dá para refazer este tutorial quando quiser, em Ajustes.",
+      "ir": "Começar a usar"
+    },
+    "atalho": {
+      "title": "Tutorial de uso",
+      "done": "Feito em {{data}}.",
+      "never": "Ainda não foi feito para este paciente.",
+      "dwell": "Tempo escolhido: {{s}} s",
+      "semEnsaio": "A emergência não foi ensaiada.",
+      "why": "Refaça quando o tempo de permanência deixar de servir — em ELA isso muda com o tempo.",
+      "button": "Refazer o tutorial"
+    }
   }
 }
