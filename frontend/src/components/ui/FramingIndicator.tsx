@@ -1,15 +1,24 @@
 import React, { useEffect, useState } from 'react';
 import { useGaze } from '../../context/GazeContext';
+import { useSettings } from '../../context/SettingsContext';
+import {
+  estimateDistanceCm,
+  DISTANCIA_OK_MIN_CM,
+  DISTANCIA_OK_MAX_CM,
+} from '@tracker/setupReadiness';
 import { AlertTriangle } from 'lucide-react';
 
 export const FramingIndicator: React.FC = () => {
   const { getDiagnostics, state } = useGaze();
+  const { settings } = useSettings();
   const [metrics, setMetrics] = useState<{
     hasFace: boolean;
     iod: number;
     faceCenter: { x: number; y: number };
     specularRatio?: number;
     specularStability?: number;
+    iodPx?: number;
+    videoWidth?: number;
   } | null>(null);
 
   useEffect(() => {
@@ -17,7 +26,7 @@ export const FramingIndicator: React.FC = () => {
     const interval = setInterval(() => {
       const diag = getDiagnostics();
       if (diag && diag.framing) {
-        setMetrics(diag.framing);
+        setMetrics({ ...diag.framing, videoWidth: diag.video?.width });
       } else {
         setMetrics(null);
       }
@@ -41,19 +50,54 @@ export const FramingIndicator: React.FC = () => {
     );
   }
 
-  // 1. Distância (via IOD)
-  // faixa ideal: [0.18, 0.26]
-  const iod = metrics.iod;
+  // 1. Distância — em centímetros, e com a MESMA faixa do resto do app.
+  //
+  // Aqui havia a QUARTA implementação de "que distância é boa" no projeto:
+  // banda própria `iod ∈ [0.18, 0.26]` cravada no componente, que em
+  // centímetros é 25–36 cm — praticamente colado no monitor. Era o que fazia
+  // este widget mandar aproximar quem estava a 60 cm.
+  //
+  // E comparava contra `framing.iod`, que o engine documenta como "normalizado
+  // e ANISOTRÓPICO, porque x divide por largura e y por altura" — grandeza
+  // diferente da fração para a qual bandas assim foram pensadas.
+  //
+  // Agora não decide nada: consome `estimateDistanceCm` e a faixa do
+  // `setupReadiness`. Uma definição só de distância boa, num lugar só.
+  const distanciaCm =
+    metrics.iodPx !== undefined && metrics.videoWidth
+      ? estimateDistanceCm(metrics.iodPx, metrics.videoWidth, settings.cameraHorizontalFovDeg)
+      : null;
+
   let distanceText = 'Distância Ideal';
   let distanceColor = '#22c55e';
 
-  if (iod < 0.18) {
-    distanceText = 'Muito longe (Aproxime-se)';
-    distanceColor = '#eab308';
-  } else if (iod > 0.26) {
-    distanceText = 'Muito perto (Afaste-se)';
-    distanceColor = '#eab308';
+  if (distanciaCm !== null) {
+    const cm = Math.round(distanciaCm);
+    if (cm < DISTANCIA_OK_MIN_CM) {
+      distanceText = `Muito perto — ${cm} cm (Afaste-se)`;
+      distanceColor = '#eab308';
+    } else if (cm > DISTANCIA_OK_MAX_CM) {
+      distanceText = `Muito longe — ${cm} cm (Aproxime-se)`;
+      distanceColor = '#eab308';
+    } else {
+      distanceText = `Distância boa — ${cm} cm`;
+    }
+  } else {
+    // Sem FOV ou sem largura de vídeo não há centímetro para afirmar. Inventar
+    // um veredito aqui é o defeito que esta correção remove, não repete.
+    distanceText = 'Distância — medindo…';
+    distanceColor = '#94a3b8';
   }
+
+  // Posição da bolinha na régua. A régua vai de metade a dobro da faixa boa,
+  // para que as bordas de "ok" caiam visivelmente dentro dela em vez de na
+  // ponta. Sem medida, fica no meio e cinza — não finge posição.
+  const REGUA_MIN_CM = DISTANCIA_OK_MIN_CM / 2;
+  const REGUA_MAX_CM = DISTANCIA_OK_MAX_CM * 1.5;
+  const posicaoPct =
+    distanciaCm === null
+      ? 50
+      : ((distanciaCm - REGUA_MIN_CM) / (REGUA_MAX_CM - REGUA_MIN_CM)) * 100;
 
   // 2. Centralização
   // faixa ideal: x em [0.4, 0.6], y em [0.35, 0.65]
@@ -96,7 +140,7 @@ export const FramingIndicator: React.FC = () => {
           <div style={progressBarContainerStyle}>
             <div style={{
               position: 'absolute',
-              left: `${Math.max(0, Math.min(100, (iod / 0.4) * 100))}%`,
+              left: `${Math.max(0, Math.min(100, posicaoPct))}%`,
               width: '10px',
               height: '10px',
               background: distanceColor,

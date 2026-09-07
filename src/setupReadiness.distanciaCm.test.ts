@@ -50,14 +50,24 @@ function snapA(distanciaCm: number, fovDeg = FOV_DE_REFERENCIA_DEG): ReadinessSn
 const distanciaEm = (cm: number, fov: number | null = FOV_DE_REFERENCIA_DEG) =>
   evaluateReadiness(snapA(cm), { horizontalFovDeg: fov }).checks.find((c) => c.id === 'distance')!;
 
-describe('a faixa confortável é a medida em uso, não uma herdada de iodFraction', () => {
-  it('50 a 70 cm', () => {
-    expect(DISTANCIA_OK_MIN_CM).toBe(50);
-    expect(DISTANCIA_OK_MAX_CM).toBe(70);
+describe('a faixa confortável é a medida em uso, com folga em volta', () => {
+  it('45 a 80 cm — a faixa de 50–70 medida em uso, mais margem dos dois lados', () => {
+    // Fechar a faixa exatamente em 50–70 faria o aviso disparar a cada
+    // pequeno deslocamento de quem está USANDO o app corretamente. A margem
+    // existe para o aviso significar "saia daí", não "você respirou".
+    expect(DISTANCIA_OK_MIN_CM).toBe(45);
+    expect(DISTANCIA_OK_MAX_CM).toBe(80);
   });
 
-  it('o alvo é o meio da faixa', () => {
+  it('o alvo continua no centro da faixa MEDIDA, não da faixa tolerada', () => {
+    // 60 cm é o meio de 50–70, onde as medições de fato aconteceram. O meio de
+    // 45–80 seria 62,5 — um número que ninguém mediu.
     expect(DISTANCIA_ALVO_CM).toBe(60);
+  });
+
+  it('toda a faixa de trabalho medida cabe dentro da tolerada', () => {
+    expect(DISTANCIA_OK_MIN_CM).toBeLessThanOrEqual(50);
+    expect(DISTANCIA_OK_MAX_CM).toBeGreaterThanOrEqual(70);
   });
 });
 
@@ -111,12 +121,20 @@ describe('com FOV conhecido, a checagem banda em centímetros', () => {
     expect(distanciaEm(70).status).toBe('ok');
   });
 
-  it('45 cm avisa que está perto demais', () => {
-    expect(distanciaEm(45).status).toBe('warn');
+  it('45 cm — a nova borda de perto — está ok', () => {
+    expect(distanciaEm(45).status).toBe('ok');
   });
 
-  it('80 cm avisa que está longe demais', () => {
-    expect(distanciaEm(80).status).toBe('warn');
+  it('80 cm — a nova borda de longe — está ok', () => {
+    expect(distanciaEm(80).status).toBe('ok');
+  });
+
+  it('40 cm avisa que está perto demais', () => {
+    expect(distanciaEm(40).status).toBe('warn');
+  });
+
+  it('90 cm avisa que está longe demais', () => {
+    expect(distanciaEm(90).status).toBe('warn');
   });
 
   it('25 cm reprova', () => {
@@ -130,12 +148,12 @@ describe('com FOV conhecido, a checagem banda em centímetros', () => {
   it('a mensagem cita a distância medida em cm', () => {
     // O usuário precisa saber ONDE está, não só que está errado. A tela dizia
     // "aproxime-se" sem número nenhum.
-    expect(distanciaEm(80).message).toMatch(/80\s*cm/);
+    expect(distanciaEm(95).message).toMatch(/95\s*cm/);
   });
 
   it('a mensagem cita a faixa alvo', () => {
-    expect(distanciaEm(80).message).toMatch(/50/);
-    expect(distanciaEm(80).message).toMatch(/70/);
+    expect(distanciaEm(95).message).toMatch(/45/);
+    expect(distanciaEm(95).message).toMatch(/80/);
   });
 });
 

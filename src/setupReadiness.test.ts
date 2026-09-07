@@ -237,8 +237,9 @@ describe('idealDistanceCm — "onde eu me sento?"', () => {
     expect(semFov.message).not.toMatch(/\d+\s*cm/);
 
     expect(comFov.message).toMatch(/\d+\s*cm/);
-    expect(comFov.message).toMatch(/50/);
-    expect(comFov.message).toMatch(/70/);
+    // A faixa tolerada, citada por extenso na mensagem.
+    expect(comFov.message).toMatch(/45/);
+    expect(comFov.message).toMatch(/80/);
   });
 });
 
