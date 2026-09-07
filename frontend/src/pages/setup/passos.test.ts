@@ -16,13 +16,7 @@ import { PASSOS, indiceDoPasso, proximoPasso, passoAnterior, type PassoId } from
 
 describe('a ordem dos passos', () => {
   it('tem os cinco, na ordem em que dependem uns dos outros', () => {
-    expect(PASSOS).toEqual([
-      'permissao',
-      'camera',
-      'posicionamento',
-      'iluminacao',
-      'monitor',
-    ]);
+    expect(PASSOS).toEqual(['permissao', 'camera', 'posicionamento', 'iluminacao', 'monitor']);
   });
 });
 

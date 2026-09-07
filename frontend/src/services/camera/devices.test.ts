@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import {
-  listarCameras,
-  classificarFps,
-  contarFps,
-  FPS_BOM,
-  FPS_BAIXO,
-} from './devices';
+import { listarCameras, classificarFps, contarFps, FPS_BOM, FPS_BAIXO } from './devices';
 
 // -----------------------------------------------------------------------------
 // O pipeline assume 30 fps em vários pontos — as janelas de baseline da

@@ -42,7 +42,11 @@ describe('preparoConcluido', () => {
     // afirmação sobre outra coisa. Melhor refazer que confiar.
     localStorage.setItem(
       chaveDoPreparo('p1'),
-      JSON.stringify({ ...preparoCompleto, version: PREPARO_VERSION - 1, completedAt: new Date().toISOString() })
+      JSON.stringify({
+        ...preparoCompleto,
+        version: PREPARO_VERSION - 1,
+        completedAt: new Date().toISOString(),
+      })
     );
     expect(preparoConcluido('p1')).toBe(false);
   });

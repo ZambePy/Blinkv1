@@ -1,11 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import {
-  ESTABILIDADE_EXIGIDA_MS,
-  inicial,
-  acumular,
-  msEstavel,
-  estavel,
-} from './estabilidade';
+import { ESTABILIDADE_EXIGIDA_MS, inicial, acumular, msEstavel, estavel } from './estabilidade';
 
 // -----------------------------------------------------------------------------
 // O portão do passo de posicionamento.

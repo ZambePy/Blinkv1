@@ -125,10 +125,7 @@ export function medirFps(
 }
 
 /** Resolução e taxa do stream que já está tocando neste `<video>`. */
-export function lerCapacidade(
-  video: HTMLVideoElement,
-  fpsMedido: number
-): CameraCapacidade {
+export function lerCapacidade(video: HTMLVideoElement, fpsMedido: number): CameraCapacidade {
   const track = (video.srcObject as MediaStream | null)?.getVideoTracks?.()[0] ?? null;
   const settings = track?.getSettings?.() ?? {};
 

@@ -4,6 +4,7 @@ import { GazeProvider } from './context/GazeContext';
 import { AuthProvider } from './context/AuthContext';
 import { LicenseProvider } from './context/LicenseContext';
 import { ProtectedRoute } from './components/ui/ProtectedRoute';
+import { PreparoGate } from './pages/setup/PreparoGate';
 import { GraceBanner } from './components/ui/GraceBanner';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
@@ -41,6 +42,7 @@ const ProfileSelect = lazyNamed(() => import('./pages/auth/ProfileSelect'), 'Pro
 const IntroScreen = lazyNamed(() => import('./pages/onboarding/IntroScreen'), 'IntroScreen');
 const ConsentScreen = lazyNamed(() => import('./pages/onboarding/ConsentScreen'), 'ConsentScreen');
 const ActivatedScreen = lazyNamed(() => import('./pages/auth/ActivatedScreen'), 'ActivatedScreen');
+const SetupWizard = lazyNamed(() => import('./pages/setup/SetupWizard'), 'SetupWizard');
 const CalibrationCheck = lazyNamed(
   () => import('./pages/onboarding/CalibrationCheck'),
   'CalibrationCheck'
@@ -156,7 +158,21 @@ function App() {
                           path="/calibration-check"
                           element={
                             <ProtectedRoute>
-                              <CalibrationCheck />
+                              {/* O preparo bloqueia a CALIBRAÇÃO, não o app:
+                                  calibrar num ambiente não conferido produz um
+                                  mapeamento ruim que o paciente carrega pela
+                                  sessão inteira, sem ter como diagnosticar. */}
+                              <PreparoGate>
+                                <CalibrationCheck />
+                              </PreparoGate>
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/setup"
+                          element={
+                            <ProtectedRoute>
+                              <SetupWizard />
                             </ProtectedRoute>
                           }
                         />

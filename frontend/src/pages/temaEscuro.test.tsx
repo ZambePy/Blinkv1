@@ -32,6 +32,14 @@ const ARQUIVOS = [
   'auth/ActivatedScreen.tsx',
   'auth/ProfileSelect.tsx',
   '../components/ui/GraceBanner.tsx',
+  // Bloco 2 — entram na mesma lista, pelo mesmo motivo.
+  'setup/SetupWizard.tsx',
+  'setup/steps/PermissaoCamera.tsx',
+  'setup/steps/EscolhaDaCamera.tsx',
+  'setup/steps/Posicionamento.tsx',
+  'setup/steps/Iluminacao.tsx',
+  'setup/steps/VerificacaoDoMonitor.tsx',
+  '../components/ui/Semaforo.tsx',
 ];
 
 /**
@@ -75,6 +83,7 @@ describe('o fundo da pagina acompanha o tema', () => {
     'auth/LoginScreen.tsx',
     'auth/ActivatedScreen.tsx',
     'auth/ProfileSelect.tsx',
+    'setup/SetupWizard.tsx',
   ];
 
   for (const rel of COM_CARTAO) {
