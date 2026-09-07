@@ -278,6 +278,17 @@
       "invalid": "Informe um número entre 10 e 60.",
       "manual": "Corrigir à mão",
       "useEdid": "Usar o valor lido"
+    },
+    "atalho": {
+      "title": "Preparo do ambiente",
+      "done": "Concluído em {{data}}.",
+      "never": "Ainda não foi feito para este paciente.",
+      "camera": "Câmera",
+      "fps": "{{fps}} quadros por segundo",
+      "monitor": "Monitor de {{polegadas}} polegadas",
+      "lux": "{{lux}} lux",
+      "why": "Refaça ao mudar de sala, trocar a webcam ou reposicionar o monitor — o preparo antigo descreve um ambiente que não existe mais.",
+      "button": "Refazer o preparo"
     }
   }
 }

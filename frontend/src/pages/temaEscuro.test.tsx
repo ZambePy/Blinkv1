@@ -39,6 +39,7 @@ const ARQUIVOS = [
   'setup/steps/Posicionamento.tsx',
   'setup/steps/Iluminacao.tsx',
   'setup/steps/VerificacaoDoMonitor.tsx',
+  'setup/AtalhoDePreparo.tsx',
   '../components/ui/Semaforo.tsx',
 ];
 

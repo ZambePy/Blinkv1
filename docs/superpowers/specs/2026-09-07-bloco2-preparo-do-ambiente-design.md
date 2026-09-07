@@ -266,4 +266,7 @@ Registradas de propósito.
    `accuracy.ts` tirou `luxAmbiente` do protocolo em 2026-09-06; este bloco
    devolve o campo à UI sem devolvê-lo à obrigatoriedade.
 5. **O preparo não é reavaliado sozinho.** Trocar a webcam ou mudar de sala não
-   dispara nada; quem refaz é o cuidador, pelo atalho nas Configurações.
+   dispara nada; quem refaz é o cuidador, pelo atalho nas Configurações
+   (`pages/setup/AtalhoDePreparo.tsx`, montado em `SettingsScreen`). O atalho
+   mostra quando o preparo foi feito e com que câmera, que é como o cuidador
+   percebe que o ambiente mudou — mas quem nota a mudança é ele, não o app.

@@ -278,6 +278,17 @@
       "invalid": "Enter a number between 10 and 60.",
       "manual": "Correct by hand",
       "useEdid": "Use the value read"
+    },
+    "atalho": {
+      "title": "Environment setup",
+      "done": "Completed on {{data}}.",
+      "never": "Not done yet for this patient.",
+      "camera": "Camera",
+      "fps": "{{fps}} frames per second",
+      "monitor": "{{polegadas}}-inch monitor",
+      "lux": "{{lux}} lux",
+      "why": "Redo it when you change rooms, swap the webcam or move the monitor — the old setup describes an environment that no longer exists.",
+      "button": "Redo setup"
     }
   }
 }

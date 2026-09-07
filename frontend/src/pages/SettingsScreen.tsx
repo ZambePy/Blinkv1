@@ -42,6 +42,7 @@ import {
   logCalibrationAccuracy,
 } from '../utils/clinicalLogger';
 import { CaregiverPageLayout } from '../components/ui/CaregiverPageLayout';
+import { AtalhoDePreparo } from './setup/AtalhoDePreparo';
 import { startAccuracyTest } from '@tracker/accuracy';
 import { buildRuntimeInfo } from '../utils/runtimeInfo';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
@@ -71,28 +72,36 @@ const MonitorBrightnessSlider: React.FC = () => {
   const [current, setCurrent] = useState<number | null>(settings.monitorBrightness);
 
   useEffect(() => {
-    const api = (window as unknown as {
-      electronBrightness?: {
-        get: () => Promise<{ ok: boolean; value?: number; error?: string }>;
-        set: (pct: number) => Promise<{ ok: boolean; error?: string }>;
-      };
-    }).electronBrightness;
-    if (!api) { setAvailable(false); return; }
-
-    api.get().then((r) => {
-      if (r.ok && typeof r.value === 'number') {
-        setAvailable(true);
-        // Preferência salva ganha do valor atual — o usuário já escolheu.
-        if (current == null) setCurrent(r.value);
-      } else {
-        // API existe mas driver não suporta (Windows sem WMI habilitado).
-        console.warn('[monitor-brightness] IPC disponível mas driver não respondeu:', r.error);
-        setAvailable(false);
+    const api = (
+      window as unknown as {
+        electronBrightness?: {
+          get: () => Promise<{ ok: boolean; value?: number; error?: string }>;
+          set: (pct: number) => Promise<{ ok: boolean; error?: string }>;
+        };
       }
-    }).catch((e) => {
-      console.warn('[monitor-brightness] erro no IPC get:', e);
+    ).electronBrightness;
+    if (!api) {
       setAvailable(false);
-    });
+      return;
+    }
+
+    api
+      .get()
+      .then((r) => {
+        if (r.ok && typeof r.value === 'number') {
+          setAvailable(true);
+          // Preferência salva ganha do valor atual — o usuário já escolheu.
+          if (current == null) setCurrent(r.value);
+        } else {
+          // API existe mas driver não suporta (Windows sem WMI habilitado).
+          console.warn('[monitor-brightness] IPC disponível mas driver não respondeu:', r.error);
+          setAvailable(false);
+        }
+      })
+      .catch((e) => {
+        console.warn('[monitor-brightness] erro no IPC get:', e);
+        setAvailable(false);
+      });
     // Roda uma única vez no mount — não depender de `current` evita loop.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -102,7 +111,17 @@ const MonitorBrightnessSlider: React.FC = () => {
   const value = current ?? 100;
   return (
     <div style={{ marginBottom: '1.5rem' }}>
-      <label htmlFor="brightness-monitor" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--color-text-base, #1e293b)' }}>
+      <label
+        htmlFor="brightness-monitor"
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          fontSize: '0.95rem',
+          fontWeight: 700,
+          marginBottom: '0.5rem',
+          color: 'var(--color-text-base, #1e293b)',
+        }}
+      >
         <span style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
           <Monitor size={16} /> Brilho do monitor (todo o sistema)
         </span>
@@ -122,7 +141,14 @@ const MonitorBrightnessSlider: React.FC = () => {
         }}
         style={{ width: '100%', accentColor: '#1B54A8', height: '2rem', cursor: 'pointer' }}
       />
-      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-base, #94a3b8)', opacity: 0.7, marginTop: '0.25rem' }}>
+      <div
+        style={{
+          fontSize: '0.75rem',
+          color: 'var(--color-text-base, #94a3b8)',
+          opacity: 0.7,
+          marginTop: '0.25rem',
+        }}
+      >
         Escurece o monitor inteiro. Requer suporte do driver (WMI no Windows).
       </div>
     </div>
@@ -165,9 +191,10 @@ export const SettingsScreen: React.FC = () => {
   // o poll; `stats` é atualizado por setInterval enquanto gravando (o
   // singleton não é reativo).
   const [recActive, setRecActive] = useState(false);
-  const [recStats, setRecStats] = useState<{ frames: number; dropped: number }>(
-    { frames: 0, dropped: 0 },
-  );
+  const [recStats, setRecStats] = useState<{ frames: number; dropped: number }>({
+    frames: 0,
+    dropped: 0,
+  });
 
   const [newReminderTitle, setNewReminderTitle] = useState('');
   const [newReminderTime, setNewReminderTime] = useState('');
@@ -188,7 +215,11 @@ export const SettingsScreen: React.FC = () => {
   };
 
   const handleClearClinicalLogs = () => {
-    if (window.confirm('Tem certeza de que deseja apagar permanentemente todos os registros clínicos locais do paciente? Esta ação não pode ser desfeita.')) {
+    if (
+      window.confirm(
+        'Tem certeza de que deseja apagar permanentemente todos os registros clínicos locais do paciente? Esta ação não pode ser desfeita.'
+      )
+    ) {
       clearClinicalData();
       setClinicalData(getClinicalData());
       toast.success('Todos os dados clínicos locais foram excluídos.');
@@ -197,10 +228,10 @@ export const SettingsScreen: React.FC = () => {
 
   const handleExportClinicalLogs = () => {
     const dataStr = JSON.stringify(clinicalData, null, 2);
-    const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    
+    const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+
     const exportFileDefaultName = `relatorio-clinico-paciente-${new Date().toISOString().split('T')[0]}.json`;
-    
+
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
@@ -273,7 +304,6 @@ export const SettingsScreen: React.FC = () => {
     toast.success('Gravação descartada.');
   };
 
-
   const chooseFilterPreset = (preset: FilterPresetV2) => {
     setFilterPresetState(preset);
     setFilterPreset(preset);
@@ -341,7 +371,7 @@ export const SettingsScreen: React.FC = () => {
         // geometria válida das inválidas neste fluxo.
         screenGeometrySource: settings.screenGeometrySource,
       },
-      getSessionUptimeMs(),
+      getSessionUptimeMs()
     );
     // O bloco entra aqui também — este é o caminho do BLOCO 2, e sem ele a
     // rodada de 10 minutos chegaria ao JSON sem nada que a identificasse como
@@ -352,28 +382,32 @@ export const SettingsScreen: React.FC = () => {
     if (bloco !== null) metaWithUptime.blocoDeMedicao = bloco;
 
     setAccuracyRunning(true);
-    startAccuracyTest((r) => {
-      setAccuracyRunning(false);
-      setLastAccuracy(r);
-      // só registra no histórico clínico quando houve medição. Gravar
-      // um `null` (ou pior, um `0`) como resultado de precisão contaminaria a
-      // curva de acompanhamento do paciente com um teste que falhou.
-      if (r.meanErrorDeg !== null) logCalibrationAccuracy(r.meanErrorDeg);
-      setClinicalData(getClinicalData());
-      if (r.meanError === null || r.meanErrorDeg === null) {
-        toast.error(
-          `Teste de precisão sem amostras (${r.pontosNaoMedidos} de ` +
-          `${r.pontosMedidos + r.pontosNaoMedidos} pontos). Verifique o rastreamento e repita.`,
-        );
-      } else {
-        toast.success(
-          `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`,
-        );
-      }
-      // Sem o terceiro argumento o relatório sai com `pipeline.runtime: null`
-      // — sem provider efetivo, sem fallback, sem staleness e sem fps. Uma
-      // sessão assim não diz em que condição foi medida.
-    }, metaWithUptime, buildRuntimeInfo(getDiagnostics()));
+    startAccuracyTest(
+      (r) => {
+        setAccuracyRunning(false);
+        setLastAccuracy(r);
+        // só registra no histórico clínico quando houve medição. Gravar
+        // um `null` (ou pior, um `0`) como resultado de precisão contaminaria a
+        // curva de acompanhamento do paciente com um teste que falhou.
+        if (r.meanErrorDeg !== null) logCalibrationAccuracy(r.meanErrorDeg);
+        setClinicalData(getClinicalData());
+        if (r.meanError === null || r.meanErrorDeg === null) {
+          toast.error(
+            `Teste de precisão sem amostras (${r.pontosNaoMedidos} de ` +
+              `${r.pontosMedidos + r.pontosNaoMedidos} pontos). Verifique o rastreamento e repita.`
+          );
+        } else {
+          toast.success(
+            `Precisão: ${Math.round(r.meanError)}px médio (${r.meanErrorDeg.toFixed(2)}°) — ${r.score}`
+          );
+        }
+        // Sem o terceiro argumento o relatório sai com `pipeline.runtime: null`
+        // — sem provider efetivo, sem fallback, sem staleness e sem fps. Uma
+        // sessão assim não diz em que condição foi medida.
+      },
+      metaWithUptime,
+      buildRuntimeInfo(getDiagnostics())
+    );
   };
 
   const handleLogin = (e: React.FormEvent) => {
@@ -436,7 +470,8 @@ export const SettingsScreen: React.FC = () => {
         aria-labelledby="settings-auth-title"
         style={{
           minHeight: '100vh',
-          background: 'var(--settings-bg, linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%))',
+          background:
+            'var(--settings-bg, linear-gradient(160deg, #f0f4ff 0%, #e8f0fb 50%, #f1f5f9 100%))',
           transition: 'background 0.4s ease',
           display: 'flex',
           alignItems: 'center',
@@ -476,7 +511,12 @@ export const SettingsScreen: React.FC = () => {
             {t('settings.auth.title')}
           </h2>
           <p
-            style={{ color: 'var(--color-text-base)', opacity: 0.9, marginBottom: '2rem', fontFamily: 'system-ui, sans-serif' }}
+            style={{
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
+              marginBottom: '2rem',
+              fontFamily: 'system-ui, sans-serif',
+            }}
           >
             {t('settings.auth.hint')}
           </p>
@@ -613,7 +653,8 @@ export const SettingsScreen: React.FC = () => {
                   cursor: 'pointer',
                   fontSize: '1rem',
                   fontWeight: 700,
-                  color: 'var(--color-text-base)', opacity: 0.9,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
                 }}
               >
                 {t('common.cancel')}
@@ -683,8 +724,17 @@ export const SettingsScreen: React.FC = () => {
           >
             <Activity size={24} /> Painel de Acompanhamento (Rotina & Diário)
           </h2>
-          <p style={{ color: '#cbd5e1', opacity: 0.9, marginBottom: '1.5rem', fontSize: '1rem', fontFamily: 'system-ui, sans-serif' }}>
-            Acesse a rotina diária de cuidados, registro clínico de sintomas e histórico recente do paciente.
+          <p
+            style={{
+              color: '#cbd5e1',
+              opacity: 0.9,
+              marginBottom: '1.5rem',
+              fontSize: '1rem',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Acesse a rotina diária de cuidados, registro clínico de sintomas e histórico recente do
+            paciente.
           </p>
           <button
             onClick={() => navigate('/caregiver')}
@@ -705,6 +755,11 @@ export const SettingsScreen: React.FC = () => {
             {t('settings.dashboardLink.button')}
           </button>
         </section>
+
+        {/* Preparo do ambiente — o atalho para refazer quando muda a sala,
+            a webcam ou a posição do monitor. Sem ele, o preparo de um perfil
+            só sairia apagando o perfil, e a calibração iria junto. */}
+        <AtalhoDePreparo />
 
         {/* Card do Guia do Cuidador */}
         <section
@@ -728,8 +783,17 @@ export const SettingsScreen: React.FC = () => {
           >
             <FileText size={24} /> Guia de Instalação e Suporte do Cuidador
           </h2>
-          <p style={{ color: '#cbd5e1', opacity: 0.9, marginBottom: '1.5rem', fontSize: '1rem', fontFamily: 'system-ui, sans-serif' }}>
-            Instruções passo a passo sobre como posicionar a câmera, melhorar a iluminação do ambiente e solucionar problemas com óculos ou calibração.
+          <p
+            style={{
+              color: '#cbd5e1',
+              opacity: 0.9,
+              marginBottom: '1.5rem',
+              fontSize: '1rem',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            Instruções passo a passo sobre como posicionar a câmera, melhorar a iluminação do
+            ambiente e solucionar problemas com óculos ou calibração.
           </p>
           <button
             onClick={() => navigate('/caregiver/guide?from=/settings')}
@@ -799,7 +863,6 @@ export const SettingsScreen: React.FC = () => {
           </div>
         </section>
 
-
         {/* Som */}
         <section aria-labelledby="sound-title" style={cardStyle}>
           <div
@@ -852,14 +915,25 @@ export const SettingsScreen: React.FC = () => {
             ) : (
               <Sun size={28} color="#1B54A8" aria-hidden="true" />
             )}
-            <h2 id="theme-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-base, #1e293b)' }}>
+            <h2
+              id="theme-title"
+              style={{
+                fontSize: '1.25rem',
+                fontWeight: 700,
+                color: 'var(--color-text-base, #1e293b)',
+              }}
+            >
               Tema Visual
             </h2>
           </div>
-          <div role="radiogroup" aria-labelledby="theme-title" style={{ display: 'flex', gap: '1rem' }}>
+          <div
+            role="radiogroup"
+            aria-labelledby="theme-title"
+            style={{ display: 'flex', gap: '1rem' }}
+          >
             {[
               { key: 'light', label: 'Modo Claro', icon: <Sun size={20} /> },
-              { key: 'dark', label: 'Modo Escuro', icon: <Moon size={20} /> }
+              { key: 'dark', label: 'Modo Escuro', icon: <Moon size={20} /> },
             ].map(({ key, label, icon }) => {
               const active = settings.theme === key;
               return (
@@ -899,23 +973,52 @@ export const SettingsScreen: React.FC = () => {
          * Toggle âmbar bloqueia parte do azul do espectro — evidência AAO
          * de alívio de fotofobia. */}
         <section aria-labelledby="visual-comfort-title" style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}>
+          <div
+            style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1rem' }}
+          >
             <SunDim size={28} color="#1B54A8" aria-hidden="true" />
-            <h2 id="visual-comfort-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--color-text-base, #1e293b)' }}>
+            <h2
+              id="visual-comfort-title"
+              style={{
+                fontSize: '1.25rem',
+                fontWeight: 700,
+                color: 'var(--color-text-base, #1e293b)',
+              }}
+            >
               Conforto Visual
             </h2>
           </div>
-          <p style={{ margin: '0 0 1.25rem', fontSize: '0.95rem', color: 'var(--color-text-base, #64748b)', opacity: 0.75, lineHeight: 1.5 }}>
-            Reduza o brilho e ative o filtro âmbar se o paciente piscar muito ou
-            reclamar de deslumbramento. Evidência clínica: brilho excessivo em
-            usuários com ALS aumenta fadiga visual e induz piscadas involuntárias.
+          <p
+            style={{
+              margin: '0 0 1.25rem',
+              fontSize: '0.95rem',
+              color: 'var(--color-text-base, #64748b)',
+              opacity: 0.75,
+              lineHeight: 1.5,
+            }}
+          >
+            Reduza o brilho e ative o filtro âmbar se o paciente piscar muito ou reclamar de
+            deslumbramento. Evidência clínica: brilho excessivo em usuários com ALS aumenta fadiga
+            visual e induz piscadas involuntárias.
           </p>
 
           {/* Slider de brilho da INTERFACE (CSS filter — funciona sempre) */}
           <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="brightness-ui" style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.95rem', fontWeight: 700, marginBottom: '0.5rem', color: 'var(--color-text-base, #1e293b)' }}>
+            <label
+              htmlFor="brightness-ui"
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: '0.95rem',
+                fontWeight: 700,
+                marginBottom: '0.5rem',
+                color: 'var(--color-text-base, #1e293b)',
+              }}
+            >
               <span>Brilho da tela do IrisFlow</span>
-              <span style={{ color: '#1B54A8' }}>{Math.round(settings.brightnessLevel * 100)}%</span>
+              <span style={{ color: '#1B54A8' }}>
+                {Math.round(settings.brightnessLevel * 100)}%
+              </span>
             </label>
             <input
               id="brightness-ui"
@@ -924,13 +1027,24 @@ export const SettingsScreen: React.FC = () => {
               max={100}
               step={5}
               value={Math.round(settings.brightnessLevel * 100)}
-              onChange={(e) => updateSettings({ brightnessLevel: parseInt(e.target.value, 10) / 100 })}
+              onChange={(e) =>
+                updateSettings({ brightnessLevel: parseInt(e.target.value, 10) / 100 })
+              }
               aria-valuemin={40}
               aria-valuemax={100}
               aria-valuenow={Math.round(settings.brightnessLevel * 100)}
               style={{ width: '100%', accentColor: '#1B54A8', height: '2rem', cursor: 'pointer' }}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.75rem', color: 'var(--color-text-base, #94a3b8)', opacity: 0.7, marginTop: '0.25rem' }}>
+            <div
+              style={{
+                display: 'flex',
+                justifyContent: 'space-between',
+                fontSize: '0.75rem',
+                color: 'var(--color-text-base, #94a3b8)',
+                opacity: 0.7,
+                marginTop: '0.25rem',
+              }}
+            >
               <span>40% (muito escuro)</span>
               <span>100% (normal)</span>
             </div>
@@ -942,21 +1056,37 @@ export const SettingsScreen: React.FC = () => {
           <MonitorBrightnessSlider />
 
           {/* Toggle Filtro Âmbar */}
-          <div style={{
-            marginTop: '1.25rem',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '1rem',
-            padding: '0.85rem 1rem',
-            background: 'var(--color-primary-light, #f1f5f9)',
-            borderRadius: '0.9rem',
-          }}>
+          <div
+            style={{
+              marginTop: '1.25rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '1rem',
+              padding: '0.85rem 1rem',
+              background: 'var(--color-primary-light, #f1f5f9)',
+              borderRadius: '0.9rem',
+            }}
+          >
             <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <Droplet size={22} color="#d97706" aria-hidden="true" />
               <div>
-                <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--color-text-base, #1e293b)' }}>Filtro âmbar</div>
-                <div style={{ fontSize: '0.8rem', color: 'var(--color-text-base, #64748b)', opacity: 0.75 }}>
+                <div
+                  style={{
+                    fontWeight: 700,
+                    fontSize: '0.95rem',
+                    color: 'var(--color-text-base, #1e293b)',
+                  }}
+                >
+                  Filtro âmbar
+                </div>
+                <div
+                  style={{
+                    fontSize: '0.8rem',
+                    color: 'var(--color-text-base, #64748b)',
+                    opacity: 0.75,
+                  }}
+                >
                   Reduz a componente azul da luz. Alivia sensibilidade à luz.
                 </div>
               </div>
@@ -968,7 +1098,8 @@ export const SettingsScreen: React.FC = () => {
               aria-checked={settings.amberFilter}
               onClick={() => updateSettings({ amberFilter: !settings.amberFilter })}
               style={{
-                width: 56, height: 30,
+                width: 56,
+                height: 30,
                 borderRadius: 999,
                 border: 'none',
                 cursor: 'pointer',
@@ -981,8 +1112,10 @@ export const SettingsScreen: React.FC = () => {
                 aria-hidden="true"
                 style={{
                   position: 'absolute',
-                  top: 3, left: settings.amberFilter ? 29 : 3,
-                  width: 24, height: 24,
+                  top: 3,
+                  left: settings.amberFilter ? 29 : 3,
+                  width: 24,
+                  height: 24,
                   borderRadius: '50%',
                   background: 'white',
                   boxShadow: '0 2px 4px rgba(0,0,0,0.2)',
@@ -1030,7 +1163,8 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p
             style={{
-              color: 'var(--color-text-base)', opacity: 0.9,
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
               marginBottom: '1.25rem',
               fontFamily: 'system-ui, sans-serif',
               lineHeight: 1.6,
@@ -1072,12 +1206,18 @@ export const SettingsScreen: React.FC = () => {
               <Mic size={20} aria-hidden="true" /> {t('settings.voice.upload')}
             </button>
             {voiceStatus === 'uploading' && (
-              <span role="status" style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                role="status"
+                style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}
+              >
                 {t('settings.voice.uploading')}
               </span>
             )}
             {voiceStatus === 'processing' && (
-              <span role="status" style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                role="status"
+                style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}
+              >
                 {t('settings.voice.processing')}
               </span>
             )}
@@ -1130,42 +1270,53 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p
             style={{
-              color: 'var(--color-text-base)', opacity: 0.9,
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
               marginBottom: '1.25rem',
               fontFamily: 'system-ui, sans-serif',
               lineHeight: 1.6,
             }}
           >
-            Preset do filtro temporal. <strong>Estável</strong>: jitter baixo,
-            ideal para leitura. <strong>Responsivo</strong>: lag baixo, ideal
-            para teclado virtual e jogos.
+            Preset do filtro temporal. <strong>Estável</strong>: jitter baixo, ideal para leitura.{' '}
+            <strong>Responsivo</strong>: lag baixo, ideal para teclado virtual e jogos.
           </p>
-          <div role="radiogroup" aria-labelledby="filter-title" style={{ display: 'flex', gap: '1rem' }}>
-            {(['estavel-v2', 'balanceado-v2', 'responsivo-v2'] as FilterPresetV2[]).map((preset) => {
-              const active = filterPreset === preset;
-              const label = preset === 'estavel-v2' ? 'Estável' : preset === 'balanceado-v2' ? 'Balanceado' : 'Responsivo';
-              return (
-                <button
-                  key={preset}
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => chooseFilterPreset(preset)}
-                  style={{
-                    flex: 1,
-                    padding: '1rem',
-                    borderRadius: '1rem',
-                    cursor: 'pointer',
-                    fontWeight: 700,
-                    border: '2px solid',
-                    background: active ? 'linear-gradient(135deg, #1B54A8, #2563eb)' : 'white',
-                    color: active ? 'white' : '#475569',
-                    borderColor: active ? '#1B54A8' : '#e2e8f0',
-                  }}
-                >
-                  {label}
-                </button>
-              );
-            })}
+          <div
+            role="radiogroup"
+            aria-labelledby="filter-title"
+            style={{ display: 'flex', gap: '1rem' }}
+          >
+            {(['estavel-v2', 'balanceado-v2', 'responsivo-v2'] as FilterPresetV2[]).map(
+              (preset) => {
+                const active = filterPreset === preset;
+                const label =
+                  preset === 'estavel-v2'
+                    ? 'Estável'
+                    : preset === 'balanceado-v2'
+                      ? 'Balanceado'
+                      : 'Responsivo';
+                return (
+                  <button
+                    key={preset}
+                    role="radio"
+                    aria-checked={active}
+                    onClick={() => chooseFilterPreset(preset)}
+                    style={{
+                      flex: 1,
+                      padding: '1rem',
+                      borderRadius: '1rem',
+                      cursor: 'pointer',
+                      fontWeight: 700,
+                      border: '2px solid',
+                      background: active ? 'linear-gradient(135deg, #1B54A8, #2563eb)' : 'white',
+                      color: active ? 'white' : '#475569',
+                      borderColor: active ? '#1B54A8' : '#e2e8f0',
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              }
+            )}
           </div>
         </section>
 
@@ -1188,15 +1339,16 @@ export const SettingsScreen: React.FC = () => {
           </div>
           <p
             style={{
-              color: 'var(--color-text-base)', opacity: 0.9,
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
               marginBottom: '1.25rem',
               fontFamily: 'system-ui, sans-serif',
               lineHeight: 1.6,
             }}
           >
             Roda a matriz de 13 pontos de validação e exporta o JSON com métricas
-            (mean/median/p90/jitter) + metadados. Preencha a condição abaixo antes
-            de iniciar — ela vira parte do relatório.
+            (mean/median/p90/jitter) + metadados. Preencha a condição abaixo antes de iniciar — ela
+            vira parte do relatório.
           </p>
 
           <div
@@ -1208,7 +1360,14 @@ export const SettingsScreen: React.FC = () => {
             }}
           >
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
+                }}
+              >
                 Iluminação
               </span>
               <select
@@ -1232,7 +1391,14 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
+                }}
+              >
                 Movimento da cabeça
               </span>
               <select
@@ -1256,7 +1422,14 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
+                }}
+              >
                 Óculos
               </span>
               <select
@@ -1277,7 +1450,14 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
+                }}
+              >
                 Sessão (min)
               </span>
               <select
@@ -1302,7 +1482,14 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
+                }}
+              >
                 Distância (cm)
               </span>
               <input
@@ -1324,7 +1511,14 @@ export const SettingsScreen: React.FC = () => {
             </label>
 
             <label style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600, color: 'var(--color-text-base)', opacity: 0.9 }}>
+              <span
+                style={{
+                  fontSize: '0.85rem',
+                  fontWeight: 600,
+                  color: 'var(--color-text-base)',
+                  opacity: 0.9,
+                }}
+              >
                 Tela (polegadas)
               </span>
               <input
@@ -1355,35 +1549,46 @@ export const SettingsScreen: React.FC = () => {
               mede a distância com fita, o app lê o tamanho do rosto naquele
               instante, e a geometria devolve o FOV. Depois disso o app
               estima a distância sozinho em toda sessão. */}
-          <div style={{
-            marginTop: '1rem', padding: '0.9rem 1rem',
-            borderRadius: '0.75rem',
-            border: '2px solid var(--color-card-border)',
-            display: 'flex', flexDirection: 'column', gap: '0.6rem',
-          }}>
+          <div
+            style={{
+              marginTop: '1rem',
+              padding: '0.9rem 1rem',
+              borderRadius: '0.75rem',
+              border: '2px solid var(--color-card-border)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.6rem',
+            }}
+          >
             <div style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--color-text-base)' }}>
               Campo de visão da câmera
             </div>
             <div style={{ fontSize: '0.82rem', opacity: 0.8, lineHeight: 1.5 }}>
               {settings.cameraHorizontalFovDeg !== null
                 ? `Calibrado: ${settings.cameraHorizontalFovDeg.toFixed(1)}°. O medidor de distância da pré-calibração está ativo.`
-                : 'Não calibrado — o medidor de distância da pré-calibração fica inativo. '
-                  + 'Meça a distância do rosto até a CÂMERA com fita, digite acima em "Distância (cm)", '
-                  + 'sente na posição de uso e clique abaixo.'}
+                : 'Não calibrado — o medidor de distância da pré-calibração fica inativo. ' +
+                  'Meça a distância do rosto até a CÂMERA com fita, digite acima em "Distância (cm)", ' +
+                  'sente na posição de uso e clique abaixo.'}
             </div>
             <button
               type="button"
               onClick={() => {
                 const d = getDiagnostics();
                 if (!d || !d.framing.hasFace || d.video.width <= 0) {
-                  toast.error('Rosto não detectado. Sente-se de frente para a câmera e tente de novo.');
+                  toast.error(
+                    'Rosto não detectado. Sente-se de frente para a câmera e tente de novo.'
+                  );
                   return;
                 }
                 const fov = deriveHorizontalFovDeg(
-                  d.framing.iodPx, d.video.width, settings.viewingDistanceCm,
+                  d.framing.iodPx,
+                  d.video.width,
+                  settings.viewingDistanceCm
                 );
                 if (fov === null) {
-                  toast.error('Não foi possível derivar o campo de visão. Confira a distância digitada.');
+                  toast.error(
+                    'Não foi possível derivar o campo de visão. Confira a distância digitada.'
+                  );
                   return;
                 }
                 updateSettings({ cameraHorizontalFovDeg: fov });
@@ -1391,9 +1596,14 @@ export const SettingsScreen: React.FC = () => {
               }}
               style={{
                 alignSelf: 'flex-start',
-                padding: '0.6rem 1.2rem', borderRadius: '1.5rem',
-                border: 'none', background: 'var(--color-accent, #1B54A8)', color: '#fff',
-                fontSize: '0.88rem', fontWeight: 700, cursor: 'pointer',
+                padding: '0.6rem 1.2rem',
+                borderRadius: '1.5rem',
+                border: 'none',
+                background: 'var(--color-accent, #1B54A8)',
+                color: '#fff',
+                fontSize: '0.88rem',
+                fontWeight: 700,
+                cursor: 'pointer',
               }}
             >
               Calibrar campo de visão
@@ -1403,10 +1613,15 @@ export const SettingsScreen: React.FC = () => {
                 type="button"
                 onClick={() => updateSettings({ cameraHorizontalFovDeg: null })}
                 style={{
-                  alignSelf: 'flex-start', padding: '0.35rem 0',
-                  border: 'none', background: 'transparent',
-                  color: 'var(--color-text-base)', opacity: 0.6,
-                  fontSize: '0.8rem', cursor: 'pointer', textDecoration: 'underline',
+                  alignSelf: 'flex-start',
+                  padding: '0.35rem 0',
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--color-text-base)',
+                  opacity: 0.6,
+                  fontSize: '0.8rem',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
                 }}
               >
                 Limpar calibração
@@ -1423,9 +1638,7 @@ export const SettingsScreen: React.FC = () => {
               padding: '1rem 1.5rem',
               borderRadius: '1rem',
               border: 'none',
-              background: accuracyRunning
-                ? '#94a3b8'
-                : 'linear-gradient(135deg, #1B54A8, #2563eb)',
+              background: accuracyRunning ? '#94a3b8' : 'linear-gradient(135deg, #1B54A8, #2563eb)',
               color: 'white',
               fontWeight: 700,
               cursor: accuracyRunning ? 'not-allowed' : 'pointer',
@@ -1459,30 +1672,45 @@ export const SettingsScreen: React.FC = () => {
                   relatório mostrava `0px` num campo e `NaN` noutro para o
                   mesmo evento. */}
               <div>
-                mean = {px(lastAccuracy.meanError)} ·{' '}
-                median = {px(lastAccuracy.medianError)} ·{' '}
-                p90 = {px(lastAccuracy.p90Error)} ·{' '}
-                jitter = {lastAccuracy.jitterRMS === null ? '—' : `${lastAccuracy.jitterRMS.toFixed(1)}px`} ·{' '}
+                mean = {px(lastAccuracy.meanError)} · median = {px(lastAccuracy.medianError)} · p90
+                = {px(lastAccuracy.p90Error)} · jitter ={' '}
+                {lastAccuracy.jitterRMS === null ? '—' : `${lastAccuracy.jitterRMS.toFixed(1)}px`} ·{' '}
                 {lastAccuracy.meanErrorDeg === null
                   ? '—'
                   : `${lastAccuracy.meanErrorDeg.toFixed(2)}°`}
               </div>
             </div>
           )}
-
         </section>
 
         <section aria-labelledby="recorder-title" style={cardStyle}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              marginBottom: '1.25rem',
+            }}
+          >
             <Video size={28} color="#1B54A8" aria-hidden="true" />
-            <h2 id="recorder-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}>
+            <h2
+              id="recorder-title"
+              style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}
+            >
               Gravador de sessão
             </h2>
           </div>
-          <p style={{ color: 'var(--color-text-base)', opacity: 0.9, marginBottom: '1.25rem', fontFamily: 'system-ui, sans-serif', lineHeight: 1.6 }}>
-            Grava landmarks, saída do L2CS, features e ponto predito em
-            JSONL — <strong>sem vídeo</strong>. Use para depurar sem se
-            preocupar em reproduzir a sessão.
+          <p
+            style={{
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
+              marginBottom: '1.25rem',
+              fontFamily: 'system-ui, sans-serif',
+              lineHeight: 1.6,
+            }}
+          >
+            Grava landmarks, saída do L2CS, features e ponto predito em JSONL —{' '}
+            <strong>sem vídeo</strong>. Use para depurar sem se preocupar em reproduzir a sessão.
           </p>
 
           <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
@@ -1505,7 +1733,11 @@ export const SettingsScreen: React.FC = () => {
                 gap: '0.5rem',
               }}
             >
-              {recActive ? <Square size={20} aria-hidden="true" /> : <Video size={20} aria-hidden="true" />}
+              {recActive ? (
+                <Square size={20} aria-hidden="true" />
+              ) : (
+                <Video size={20} aria-hidden="true" />
+              )}
               {recActive ? 'Parar gravação' : 'Iniciar gravação'}
             </button>
 
@@ -1603,7 +1835,10 @@ export const SettingsScreen: React.FC = () => {
             }}
           >
             <div style={{ flex: 2, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
-              <label htmlFor="reminder-title" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#475569' }}>
+              <label
+                htmlFor="reminder-title"
+                style={{ fontSize: '0.9rem', fontWeight: 600, color: '#475569' }}
+              >
                 Atividade / Lembrete
               </label>
               <input
@@ -1625,8 +1860,19 @@ export const SettingsScreen: React.FC = () => {
               />
             </div>
 
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem', minWidth: '130px' }}>
-              <label htmlFor="reminder-time" style={{ fontSize: '0.9rem', fontWeight: 600, color: '#475569' }}>
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '0.5rem',
+                minWidth: '130px',
+              }}
+            >
+              <label
+                htmlFor="reminder-time"
+                style={{ fontSize: '0.9rem', fontWeight: 600, color: '#475569' }}
+              >
                 Horário
               </label>
               <input
@@ -1670,7 +1916,14 @@ export const SettingsScreen: React.FC = () => {
 
           {/* Lista de Lembretes Ativos */}
           <div>
-            <h3 style={{ fontSize: '1.05rem', fontWeight: 700, color: '#475569', marginBottom: '1rem' }}>
+            <h3
+              style={{
+                fontSize: '1.05rem',
+                fontWeight: 700,
+                color: '#475569',
+                marginBottom: '1rem',
+              }}
+            >
               Lembretes Agendados ({reminders.length})
             </h3>
             {reminders.length === 0 ? (
@@ -1709,7 +1962,13 @@ export const SettingsScreen: React.FC = () => {
                       >
                         {r.time}
                       </div>
-                      <span style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--color-text-base)' }}>
+                      <span
+                        style={{
+                          fontSize: '1.1rem',
+                          fontWeight: 700,
+                          color: 'var(--color-text-base)',
+                        }}
+                      >
                         {r.title}
                       </span>
                     </div>
@@ -1733,9 +1992,13 @@ export const SettingsScreen: React.FC = () => {
                         justifyContent: 'center',
                         transition: 'background 0.2s',
                       }}
-                      onMouseOver={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)')}
+                      onMouseOver={(e) =>
+                        (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)')
+                      }
                       onMouseOut={(e) => (e.currentTarget.style.background = 'transparent')}
-                      onFocus={(e) => (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)')}
+                      onFocus={(e) =>
+                        (e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)')
+                      }
                       onBlur={(e) => (e.currentTarget.style.background = 'transparent')}
                     >
                       <Trash2 size={20} />
@@ -1782,8 +2045,9 @@ export const SettingsScreen: React.FC = () => {
               🔒 Proteção de Dados e Privacidade (LGPD)
             </p>
             <p style={{ margin: 0 }}>
-              Em conformidade com a LGPD, o IrisFlow apenas armazena dados de uso, calibrações e sentenças faladas
-              localmente neste dispositivo para fins de acompanhamento clínico. Nenhum dado de saúde é enviado a servidores externos.
+              Em conformidade com a LGPD, o IrisFlow apenas armazena dados de uso, calibrações e
+              sentenças faladas localmente neste dispositivo para fins de acompanhamento clínico.
+              Nenhum dado de saúde é enviado a servidores externos.
             </p>
             <label
               style={{
@@ -1841,10 +2105,18 @@ export const SettingsScreen: React.FC = () => {
                       gap: '0.5rem',
                     }}
                   >
-                    <Activity size={20} color="#1B54A8" /> Histórico de Calibrações ({clinicalData.calibrations.length})
+                    <Activity size={20} color="#1B54A8" /> Histórico de Calibrações (
+                    {clinicalData.calibrations.length})
                   </h3>
                   {clinicalData.calibrations.length === 0 ? (
-                    <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                    <p
+                      style={{
+                        fontSize: '0.9rem',
+                        color: '#94a3b8',
+                        fontStyle: 'italic',
+                        margin: 0,
+                      }}
+                    >
                       Nenhum teste de precisão registrado.
                     </p>
                   ) : (
@@ -1873,7 +2145,9 @@ export const SettingsScreen: React.FC = () => {
                               borderRadius: '0.75rem',
                             }}
                           >
-                            <span style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}>
+                            <span
+                              style={{ fontSize: '0.85rem', color: '#64748b', fontWeight: 500 }}
+                            >
                               {dateStr}
                             </span>
                             <span
@@ -1903,8 +2177,9 @@ export const SettingsScreen: React.FC = () => {
                         lineHeight: 1.4,
                       }}
                     >
-                      💡 <strong>Aviso clínico:</strong> Um aumento progressivo no desvio angular (° médio) ao longo das
-                      semanas pode indicar fadiga muscular ocular, alteração postural ou progressão da doença motora.
+                      💡 <strong>Aviso clínico:</strong> Um aumento progressivo no desvio angular (°
+                      médio) ao longo das semanas pode indicar fadiga muscular ocular, alteração
+                      postural ou progressão da doença motora.
                     </div>
                   )}
                 </div>
@@ -1932,7 +2207,14 @@ export const SettingsScreen: React.FC = () => {
                     <MessageSquare size={20} color="#1B54A8" /> Frases mais Comuns
                   </h3>
                   {clinicalData.sentences.length === 0 ? (
-                    <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                    <p
+                      style={{
+                        fontSize: '0.9rem',
+                        color: '#94a3b8',
+                        fontStyle: 'italic',
+                        margin: 0,
+                      }}
+                    >
                       Nenhuma frase registrada no histórico.
                     </p>
                   ) : (
@@ -2004,7 +2286,14 @@ export const SettingsScreen: React.FC = () => {
                     <Clock size={20} color="#1B54A8" /> Atividade por Período
                   </h3>
                   {clinicalData.sentences.length === 0 ? (
-                    <p style={{ fontSize: '0.9rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
+                    <p
+                      style={{
+                        fontSize: '0.9rem',
+                        color: '#94a3b8',
+                        fontStyle: 'italic',
+                        margin: 0,
+                      }}
+                    >
                       Nenhum dado de atividade disponível.
                     </p>
                   ) : (
@@ -2097,7 +2386,8 @@ export const SettingsScreen: React.FC = () => {
             </div>
           ) : (
             <p style={{ fontSize: '0.95rem', color: '#94a3b8', fontStyle: 'italic', margin: 0 }}>
-              Ative a autorização de coleta acima para visualizar o painel histórico e evolução de calibrações.
+              Ative a autorização de coleta acima para visualizar o painel histórico e evolução de
+              calibrações.
             </p>
           )}
         </section>
@@ -2129,7 +2419,8 @@ export const SettingsScreen: React.FC = () => {
               borderRadius: '1rem',
               border: '2px solid var(--color-card-border)',
               background: 'var(--color-card-bg)',
-              color: 'var(--color-text-base)', opacity: 0.9,
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
               fontWeight: 700,
               cursor: 'pointer',
               display: 'flex',
