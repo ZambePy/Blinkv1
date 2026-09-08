@@ -419,5 +419,38 @@
       "exportado": "Relatório salvo.",
       "rodar": "Rodar o teste de precisão"
     }
+  },
+  "sessao": {
+    "calibracao": "Calibração {{idade}}",
+    "semCalibracao": "Sem calibração",
+    "recalibrar": "Recalibrar",
+    "calibrar": "Calibrar",
+    "graceCurto": "Sem conexão desde {{data}}",
+    "conta": {
+      "title": "Conta e assinatura",
+      "plano": "Plano",
+      "validade": "Válida até {{data}}",
+      "semValidade": "Sem data de expiração",
+      "dispositivo": "Este computador",
+      "vinculadoEm": "Vinculado em {{data}}",
+      "verificada": "Verificada pela última vez {{idade}}",
+      "estado": {
+        "active": "Assinatura ativa.",
+        "grace": "Sem conexão. A assinatura segue valendo por alguns dias.",
+        "blocked": "A assinatura não está valendo agora.",
+        "none": "Nenhuma assinatura nesta máquina.",
+        "checking": "Verificando…"
+      },
+      "sair": "Sair desta máquina",
+      "sairAviso": "O paciente perde o acesso até alguém entrar de novo. A calibração e os perfis ficam salvos.",
+      "sairConfirmar": "Sim, sair",
+      "sairCancelar": "Cancelar"
+    },
+    "perfil": {
+      "title": "Paciente",
+      "ativo": "Em uso: {{nome}}",
+      "nenhum": "Nenhum paciente selecionado.",
+      "trocar": "Trocar de paciente"
+    }
   }
 }

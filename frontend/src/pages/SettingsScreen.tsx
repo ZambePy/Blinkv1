@@ -54,6 +54,7 @@ import { getCalibrationTimestampMs } from '@tracker/calibration';
 import { hoverAndFocusBackground } from '../components/ui/hoverFocus';
 import { ControleDeDwell } from '../components/ui/ControleDeDwell';
 import { AtalhoDeTutorial } from './tutorial/AtalhoDeTutorial';
+import { AtalhoDePerfilEConta } from './conta/AtalhoDePerfilEConta';
 
 const cardStyle: React.CSSProperties = {
   background: 'var(--color-card-bg, rgba(255,255,255,0.75))',
@@ -759,6 +760,12 @@ export const SettingsScreen: React.FC = () => {
         {/* Preparo do ambiente — o atalho para refazer quando muda a sala,
             a webcam ou a posição do monitor. Sem ele, o preparo de um perfil
             só sairia apagando o perfil, e a calibração iria junto. */}
+        {/* Trocar de paciente e ver a assinatura — os dois caminhos que
+            faltavam aqui. Sem o primeiro, trocar de paciente exigia fechar o
+            app; sem o segundo, so se descobria que a licenca venceu quando
+            tudo parou. */}
+        <AtalhoDePerfilEConta />
+
         <AtalhoDePreparo />
 
         <AtalhoDeTutorial />

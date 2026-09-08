@@ -54,6 +54,10 @@ const ARQUIVOS = [
   'calibration/PreparoDaCalibracao.tsx',
   'calibration/ResultadoDaCalibracao.tsx',
   'relatorio/RelatorioDaSessao.tsx',
+  // Bloco 5A.
+  'conta/ContaEAssinatura.tsx',
+  'conta/AtalhoDePerfilEConta.tsx',
+  '../components/ui/EstadoDaSessao.tsx',
   '../components/ui/Semaforo.tsx',
 ];
 

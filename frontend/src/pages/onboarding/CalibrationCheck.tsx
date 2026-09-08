@@ -8,6 +8,7 @@ import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hove
 import { startAccuracyTest, type RuntimeInfo } from '@tracker/accuracy';
 import { montarMetaDeMedicao } from '../../utils/autoTestMeta';
 import { getCalibrationTimestampMs } from '@tracker/calibration';
+import { idadeEmTexto } from '../../idadeEmTexto';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
 import type { VeredictoDeriva } from '@tracker/calibration';
 import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
@@ -559,15 +560,13 @@ export const CalibrationCheck: React.FC = () => {
    */
   const temCalibracaoSalva = calibration.isCalibrated();
 
-  /** "hoje", "há 3 dias" — o que decide se vale reaproveitar. */
-  const idadeDaCalibracao = (() => {
-    const ts = getCalibrationTimestampMs();
-    if (ts === null || !Number.isFinite(ts)) return 'sem data';
-    const dias = Math.floor((Date.now() - ts) / (24 * 60 * 60 * 1000));
-    if (dias <= 0) return 'de hoje';
-    if (dias === 1) return 'de ontem';
-    return `há ${dias} dias`;
-  })();
+  /**
+   * "de hoje", "há 3 dias" — o que decide se vale reaproveitar.
+   *
+   * O cálculo estava aqui e o menu principal precisa do MESMO texto; duas
+   * cópias divergiriam no primeiro ajuste.
+   */
+  const idadeDaCalibracao = idadeEmTexto(getCalibrationTimestampMs());
 
   /**
    * Segue com o modelo que já existe, sem coletar ponto nenhum.

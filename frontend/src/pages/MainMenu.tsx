@@ -4,6 +4,7 @@ import { MessageSquare, Keyboard, Monitor, Settings, Heart, Moon } from 'lucide-
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeGrid } from '../components/ui/GazeGrid';
 import { GazeButton } from '../components/ui/GazeButton';
+import { EstadoDaSessao } from '../components/ui/EstadoDaSessao';
 
 interface AppModule {
   id: string;
@@ -97,6 +98,12 @@ export const MainMenu: React.FC = () => {
             Olhe para o botão desejado para selecioná-lo.
           </p>
         </div>
+
+        {/* Estado da sessao: quando foi a ultima calibracao, e se a licenca
+            esta em tolerancia offline. So o que muda uma decisao do cuidador —
+            esta e a tela do paciente, e enche-la de informacao atrapalha
+            justamente quem ela existe para servir. */}
+        <EstadoDaSessao />
 
         <div style={{ flex: 1, minHeight: 0 }}>
           <GazeGrid columns={3} rows={2} gap={40}>

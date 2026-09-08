@@ -419,5 +419,38 @@
       "exportado": "Report saved.",
       "rodar": "Run the accuracy test"
     }
+  },
+  "sessao": {
+    "calibracao": "Calibration {{idade}}",
+    "semCalibracao": "Not calibrated",
+    "recalibrar": "Recalibrate",
+    "calibrar": "Calibrate",
+    "graceCurto": "Offline since {{data}}",
+    "conta": {
+      "title": "Account and subscription",
+      "plano": "Plan",
+      "validade": "Valid until {{data}}",
+      "semValidade": "No expiry date",
+      "dispositivo": "This computer",
+      "vinculadoEm": "Linked on {{data}}",
+      "verificada": "Last verified {{idade}}",
+      "estado": {
+        "active": "Subscription active.",
+        "grace": "Offline. The subscription still holds for a few days.",
+        "blocked": "The subscription is not valid right now.",
+        "none": "No subscription on this machine.",
+        "checking": "Checking…"
+      },
+      "sair": "Sign out of this computer",
+      "sairAviso": "The patient loses access until someone signs in again. Calibration and profiles stay saved.",
+      "sairConfirmar": "Yes, sign out",
+      "sairCancelar": "Cancel"
+    },
+    "perfil": {
+      "title": "Patient",
+      "ativo": "In use: {{nome}}",
+      "nenhum": "No patient selected.",
+      "trocar": "Switch patient"
+    }
   }
 }

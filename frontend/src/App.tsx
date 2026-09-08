@@ -47,6 +47,10 @@ const ResultadoDaCalibracao = lazyNamed(
   () => import('./pages/calibration/ResultadoDaCalibracao'),
   'ResultadoDaCalibracao'
 );
+const ContaEAssinatura = lazyNamed(
+  () => import('./pages/conta/ContaEAssinatura'),
+  'ContaEAssinatura'
+);
 const RelatorioDaSessao = lazyNamed(
   () => import('./pages/relatorio/RelatorioDaSessao'),
   'RelatorioDaSessao'
@@ -188,6 +192,14 @@ function App() {
                           element={
                             <ProtectedRoute>
                               <ResultadoDaCalibracao />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/conta"
+                          element={
+                            <ProtectedRoute>
+                              <ContaEAssinatura />
                             </ProtectedRoute>
                           }
                         />
