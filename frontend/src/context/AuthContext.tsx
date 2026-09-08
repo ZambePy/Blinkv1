@@ -1,5 +1,6 @@
 import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { env } from '../config/env';
+import { definirPerfilAtivo } from '../utils/clinicalLogger';
 import {
   listarPerfis,
   criarPerfil,
@@ -94,6 +95,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [caregiver, setCaregiver] = useState<CaregiverSession>(loadCaregiverSession);
   const [profiles, setProfiles] = useState<Profile[]>(() => listarPerfis().map(paraProfile));
   const { isCaregiver, authToken } = caregiver;
+
+  // O histórico clínico é gravado POR PACIENTE, e quem sabe qual é o paciente é
+  // este contexto. Sem isto o logger não teria a quem atribuir e não gravaria
+  // nada — que é o lado certo de falhar, mas silencioso demais para deixar.
+  useEffect(() => {
+    definirPerfilAtivo(currentProfile?.id ?? null);
+  }, [currentProfile]);
 
   useEffect(() => {
     try {

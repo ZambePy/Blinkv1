@@ -8,11 +8,17 @@ import {
   logCalibrationAccuracy,
   getMostUsedPhrases,
   getActivityByHour,
+  definirPerfilAtivo,
+  chaveDoPerfil,
 } from './clinicalLogger';
 
 describe('clinicalLogger — Telemetria Clínica Local', () => {
   beforeEach(() => {
     localStorage.clear();
+    // O registro passou a ser POR PACIENTE: sem perfil ativo nada é gravado,
+    // porque não há a quem atribuir. Num produto clínico, curva de dois
+    // pacientes misturada é pior que curva nenhuma.
+    definirPerfilAtivo('paciente-de-teste');
   });
 
   it('deve iniciar sem consentimento e ignorar logs se não autorizado', () => {
@@ -69,13 +75,14 @@ describe('clinicalLogger — Telemetria Clínica Local', () => {
 
     const t1 = new Date(now);
     t1.setHours(8, 30, 0); // Manhã (08h)
-    
+
     const t2 = new Date(now);
     t2.setHours(15, 10, 0); // Tarde (15h)
 
     data.sentences.push({ id: 's1', text: 'Bom dia', timestamp: t1.toISOString() });
     data.sentences.push({ id: 's2', text: 'Boa tarde', timestamp: t2.toISOString() });
-    localStorage.setItem('irisflow_clinical_data', JSON.stringify(data));
+    // A chave passou a ser por paciente; escrever na global não seria lida.
+    localStorage.setItem(chaveDoPerfil('paciente-de-teste'), JSON.stringify(data));
 
     const hours = getActivityByHour();
     expect(hours[8]).toBe(1);
