@@ -14,6 +14,8 @@ export interface EstadoDoBoot {
   introVisto: boolean;
   temConsentimento: boolean;
   temPerfil: boolean;
+  /** Há um modelo de calibração salvo para conferir. */
+  temCalibracao: boolean;
 }
 
 export const INTRO_SEEN_KEY = 'irisflow_intro_seen';
@@ -24,6 +26,7 @@ export function destinoDoBoot({
   introVisto,
   temConsentimento,
   temPerfil,
+  temCalibracao,
 }: EstadoDoBoot): string | null {
   if (status === 'checking') return null;
 
@@ -36,5 +39,14 @@ export function destinoDoBoot({
   // offline é um aviso, não um desvio de fluxo.
   if (!temConsentimento) return '/consent';
   if (!temPerfil) return '/profiles';
+
+  // Da segunda abertura em diante, uma conferência de quinze segundos antes do
+  // menu. O que muda entre um dia e outro não é o software: é a cadeira, o
+  // monitor, a luz, quem está na frente da câmera — e o paciente não tem como
+  // diagnosticar um cursor fora do lugar nem reclamar dele.
+  //
+  // Sem calibração salva não há o que conferir: a checagem mediria o modelo
+  // genérico e chamaria isso de mudança.
+  if (temCalibracao) return '/retomada';
   return '/menu';
 }

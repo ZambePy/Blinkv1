@@ -1,7 +1,15 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { UserRound, CreditCard, Monitor, Clock, LogOut, AlertTriangle } from 'lucide-react';
+import {
+  UserRound,
+  CreditCard,
+  Monitor,
+  Clock,
+  LogOut,
+  AlertTriangle,
+  TrendingDown,
+} from 'lucide-react';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useLicense } from '../../context/LicenseContext';
 import { idadeEmTexto } from '../../idadeEmTexto';
@@ -118,6 +126,22 @@ export const ContaEAssinatura: React.FC = () => {
             </Linha>
           </div>
         )}
+
+        {/* O histórico de precisão do paciente vive na área do cuidador, não no
+            menu do paciente: é dado de acompanhamento clínico, e quem lê uma
+            curva de erro angular é quem cuida, não quem usa para falar.
+
+            Sem esta linha a tela existiria sem rota que chegue nela — o padrão
+            "módulo pronto sem fio" que já apareceu cinco vezes neste projeto. */}
+        <PrimaryButton
+          type="button"
+          variant="ghost"
+          onClick={() => navigate('/historico')}
+          data-dwell-ms="2000"
+          style={{ alignSelf: 'flex-start' }}
+        >
+          <TrendingDown size={17} aria-hidden="true" /> {t('historico.title')}
+        </PrimaryButton>
 
         {/* Só oferece sair de uma máquina onde alguém entrou. */}
         {license && !confirmando && (

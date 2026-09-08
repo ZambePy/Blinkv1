@@ -14,6 +14,7 @@ const base: EstadoDoBoot = {
   introVisto: false,
   temConsentimento: false,
   temPerfil: false,
+  temCalibracao: false,
 };
 
 const destino = (parcial: Partial<EstadoDoBoot>) => destinoDoBoot({ ...base, ...parcial });
@@ -55,8 +56,32 @@ describe('licença em ordem', () => {
     );
   });
 
-  it('com tudo pronto, vai direto ao menu', () => {
+  it('sem calibração salva, vai direto ao menu', () => {
+    // Não há o que conferir: uma checagem sem calibração de referência mediria
+    // o modelo genérico e chamaria isso de "algo mudou".
     expect(destino({ status: 'active', temConsentimento: true, temPerfil: true })).toBe('/menu');
+  });
+});
+
+describe('a segunda abertura em diante', () => {
+  const pronto = { status: 'active', temConsentimento: true, temPerfil: true } as const;
+
+  it('com calibração salva, passa pela conferência', () => {
+    // O que muda entre um dia e outro não é o software: é a cadeira, o monitor,
+    // a luz, quem está na frente da câmera. Quinze segundos aqui evitam uma
+    // sessão inteira de cursor fora do lugar — que o paciente não tem como
+    // diagnosticar nem reclamar.
+    expect(destino({ ...pronto, temCalibracao: true })).toBe('/retomada');
+  });
+
+  it('a conferência nunca vem antes do termo', () => {
+    expect(destino({ ...pronto, temConsentimento: false, temCalibracao: true })).toBe('/consent');
+  });
+
+  it('nem antes do perfil — a checagem é de ALGUÉM', () => {
+    // Sem perfil ativo não há referência de quem, e a comparação seria contra
+    // o número de outro paciente.
+    expect(destino({ ...pronto, temPerfil: false, temCalibracao: true })).toBe('/profiles');
   });
 });
 

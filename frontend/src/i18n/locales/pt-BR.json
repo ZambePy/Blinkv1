@@ -452,5 +452,46 @@
       "nenhum": "Nenhum paciente selecionado.",
       "trocar": "Trocar de paciente"
     }
+  },
+  "retomada": {
+    "title": "Conferindo",
+    "explica": "Isto NÃO mede a precisão. Confere se algo mudou desde a calibração — a posição, o monitor, ou quem está na frente da câmera.",
+    "fase": {
+      "enquadramento": "Posicione-se como de costume.",
+      "alvos": "Olhe para cada ponto.",
+      "fim": "Pronto."
+    },
+    "alvo": "Ponto {{n}} de {{total}}",
+    "pular": "Pular a conferência",
+    "veredicto": {
+      "seguir": "Tudo como antes.",
+      "atencao": "Algo mudou.",
+      "recalibrar": "Melhor calibrar de novo."
+    },
+    "corpo": {
+      "seguir": "Nada mudou desde a calibração. Pode usar.",
+      "atencao": "A leitura ficou diferente da conferência anterior. Dá para usar assim, ou calibrar de novo.",
+      "recalibrar": "Não deu para confirmar que a calibração ainda serve."
+    },
+    "motivo": {
+      "posicaoRosto": "O rosto não ficou no enquadramento.",
+      "posicaoDistancia": "A distância até a tela está fora da faixa.",
+      "semMedicao": "Não deu para medir os pontos.",
+      "piorou": "A leitura ficou bem diferente da primeira conferência desta calibração."
+    },
+    "primeira": "Esta foi a primeira conferência desta calibração — ela vira a referência das próximas.",
+    "usar": "Usar assim",
+    "calibrar": "Calibrar de novo"
+  },
+  "historico": {
+    "title": "Histórico de precisão",
+    "vazio": "Ainda não há medições para este paciente.",
+    "poucos": "Só há uma medição. A evolução aparece a partir da segunda.",
+    "medicao": "{{graus}}° em {{data}}",
+    "herdado": "herdado",
+    "avisoHerdado": "As medições marcadas como herdadas vêm de antes da separação por paciente, e podem incluir medições de outra pessoa desta máquina.",
+    "melhor": "Melhor: {{graus}}°",
+    "pior": "Pior: {{graus}}°",
+    "total": "{{n}} medições"
   }
 }

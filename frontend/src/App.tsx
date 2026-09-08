@@ -55,6 +55,11 @@ const RelatorioDaSessao = lazyNamed(
   () => import('./pages/relatorio/RelatorioDaSessao'),
   'RelatorioDaSessao'
 );
+const ChecagemRapida = lazyNamed(() => import('./pages/retomada/ChecagemRapida'), 'ChecagemRapida');
+const HistoricoDeSessoes = lazyNamed(
+  () => import('./pages/historico/HistoricoDeSessoes'),
+  'HistoricoDeSessoes'
+);
 const CalibrationCheck = lazyNamed(
   () => import('./pages/onboarding/CalibrationCheck'),
   'CalibrationCheck'
@@ -200,6 +205,22 @@ function App() {
                           element={
                             <ProtectedRoute>
                               <ContaEAssinatura />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/retomada"
+                          element={
+                            <ProtectedRoute>
+                              <ChecagemRapida />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/historico"
+                          element={
+                            <ProtectedRoute>
+                              <HistoricoDeSessoes />
                             </ProtectedRoute>
                           }
                         />

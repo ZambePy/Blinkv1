@@ -59,6 +59,9 @@ const ARQUIVOS = [
   'conta/AtalhoDePerfilEConta.tsx',
   '../components/ui/EstadoDaSessao.tsx',
   '../components/ui/Semaforo.tsx',
+  // Bloco 5B.
+  'retomada/ChecagemRapida.tsx',
+  'historico/HistoricoDeSessoes.tsx',
 ];
 
 /**

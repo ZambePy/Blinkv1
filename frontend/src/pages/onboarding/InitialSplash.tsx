@@ -6,6 +6,7 @@ import { useLicense } from '../../context/LicenseContext';
 import { useAuth } from '../../context/AuthContext';
 import { temConsentimentoValido } from '../../services/local/consent';
 import { setDevMode } from '../../devMode';
+import { haCalibracaoNoDisco } from '@tracker/calibration';
 import { destinoDoBoot, INTRO_SEEN_KEY } from './bootDestination';
 
 /**
@@ -51,6 +52,10 @@ export const InitialSplash: React.FC = () => {
       introVisto: introFoiVisto(),
       temConsentimento: temConsentimentoValido(),
       temPerfil: currentProfile !== null,
+      // Lido do disco, não do engine: aqui o `init()` do rastreador pode nem
+      // ter rodado, e `isCalibrated()` responderia "não" para quem tem
+      // calibração — pulando a conferência na abertura em que ela serve.
+      temCalibracao: haCalibracaoNoDisco(),
     });
     if (destino) navigate(destino, { replace: true });
   }, [pisoCumprido, status, currentProfile, navigate]);

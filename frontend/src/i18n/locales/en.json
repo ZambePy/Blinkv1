@@ -452,5 +452,46 @@
       "nenhum": "No patient selected.",
       "trocar": "Switch patient"
     }
+  },
+  "retomada": {
+    "title": "Checking",
+    "explica": "This does NOT measure accuracy. It checks whether something changed since calibration — the position, the monitor, or who is in front of the camera.",
+    "fase": {
+      "enquadramento": "Sit as you usually do.",
+      "alvos": "Look at each dot.",
+      "fim": "Done."
+    },
+    "alvo": "Dot {{n}} of {{total}}",
+    "pular": "Skip the check",
+    "veredicto": {
+      "seguir": "Same as before.",
+      "atencao": "Something changed.",
+      "recalibrar": "Better to calibrate again."
+    },
+    "corpo": {
+      "seguir": "Nothing changed since calibration. You can carry on.",
+      "atencao": "The reading came out different from the previous check. You can use it as is, or calibrate again.",
+      "recalibrar": "We could not confirm the calibration still holds."
+    },
+    "motivo": {
+      "posicaoRosto": "Your face was not in frame.",
+      "posicaoDistancia": "The distance to the screen is outside the range.",
+      "semMedicao": "We could not measure the dots.",
+      "piorou": "The reading came out well apart from this calibration's first check."
+    },
+    "primeira": "This was the first check for this calibration — it becomes the reference for the next ones.",
+    "usar": "Use as is",
+    "calibrar": "Calibrate again"
+  },
+  "historico": {
+    "title": "Accuracy history",
+    "vazio": "No measurements for this patient yet.",
+    "poucos": "Only one measurement. Progress shows from the second one.",
+    "medicao": "{{graus}}° on {{data}}",
+    "herdado": "inherited",
+    "avisoHerdado": "Measurements marked as inherited come from before the per-patient split, and may include another person's on this machine.",
+    "melhor": "Best: {{graus}}°",
+    "pior": "Worst: {{graus}}°",
+    "total": "{{n}} measurements"
   }
 }

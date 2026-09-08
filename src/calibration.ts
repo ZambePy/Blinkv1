@@ -879,7 +879,7 @@ export function getLambdaDiagnostics(): LambdaDiagnostics | null {
 // incompatível: `predictRidge` lançaria por dimensão divergente e o
 // `mapGaze` cairia em null a 30 Hz. Trocar a chave descarta os antigos de
 // forma limpa, em vez de depender do erro em tempo de inferência.
-const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles.v2';
+export const PROFILES_STORAGE_KEY = 'irisflow.calib.profiles.v2';
 const PROFILES_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 /**
@@ -939,6 +939,24 @@ function tryParseStoredProfiles(): StoredCalibrationProfile[] {
   } catch {
     return [];
   }
+}
+
+/**
+ * Existe calibração gravada no disco?
+ *
+ * Diferente de `isCalibrated()`, que responde sobre os regressores EM MEMÓRIA e
+ * só fica verdadeiro depois do `loadProfile()` do engine. A tela de abertura
+ * decide a rota antes disso: com `isCalibrated()` ela mandaria para o menu
+ * quem tem calibração, pulando a conferência justamente na abertura em que ela
+ * serve.
+ *
+ * Só lê. Não carrega, não ativa, não muda o estado do rastreador — uma decisão
+ * de rota não pode ter efeito colateral no modelo.
+ */
+export function haCalibracaoNoDisco(): boolean {
+  return tryParseStoredProfiles().some(
+    p => p !== null && typeof p === 'object' && p.meta !== null && typeof p.meta === 'object',
+  );
 }
 
 export function loadProfile(): boolean {
