@@ -57,13 +57,14 @@
       "off": "Sound Off"
     },
     "voice": {
-      "title": "Custom Voice Cloning",
-      "description": "Upload an audio file (.wav) of the patient to create a personalized synthesized voice.",
-      "upload": "Upload Audio (.wav)",
-      "uploading": "Uploading audio…",
-      "processing": "Processing…",
-      "ready": "✓ Custom voice enabled",
-      "lgpd": "GDPR/LGPD: Voice is sensitive biometric data. The model will be stored exclusively for local assistive use by the patient."
+      "title": "Personalized voice",
+      "description": "Recreate the patient's voice from a recording (voice note, video, old audio). Everything is processed and stored on this computer.",
+      "open": "Open personalized voice",
+      "ready": "✓ Personalized voice active",
+      "importedOff": "Voice imported, but turned off",
+      "none": "No voice imported",
+      "onlyDesktop": "Available in the installed app",
+      "lgpd": "LGPD/GDPR: voice is sensitive biometric data. The reference audio, the model and the generated phrases stay exclusively on this computer, for the patient's assistive use, and can be deleted at any time."
     },
     "backup": {
       "title": "Settings Backup",
@@ -135,7 +136,8 @@
       "retry": "Try again",
       "retryIn": "Try again in {{seconds}}s"
     },
-    "lastAttempt": "Last attempt at {{time}}."
+    "lastAttempt": "Last attempt at {{time}}.",
+    "devMode": "Developer Mode (open the menu without calibrating)"
   },
   "license": {
     "activated": {

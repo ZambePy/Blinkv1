@@ -13,6 +13,7 @@ import {
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useLicense } from '../../context/LicenseContext';
 import { idadeEmTexto } from '../../idadeEmTexto';
+import { CloudStatusLines } from '../../cloud/CloudStatusLines';
 
 /**
  * Conta e assinatura.
@@ -124,6 +125,9 @@ export const ContaEAssinatura: React.FC = () => {
             <Linha icone={<Clock size={17} aria-hidden="true" />}>
               {t('sessao.conta.verificada', { idade: idadeEmTexto(lastVerifiedAt) })}
             </Linha>
+
+            {/* Ligação com o celular do cuidador (só com a nuvem configurada). */}
+            <CloudStatusLines Linha={Linha} />
           </div>
         )}
 

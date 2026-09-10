@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { emitirFalaDoPaciente } from '../cloud/eventos';
+import { falar } from '../services/voz';
 import { ArrowLeft, Delete, Home, Speech, Trash2 } from 'lucide-react';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeButton } from '../components/ui/GazeButton';
@@ -185,15 +187,14 @@ export const KeyboardScreen: React.FC = () => {
   };
 
   const speak = () => {
-    if ('speechSynthesis' in window && text.trim()) {
-      window.speechSynthesis.cancel();
-      const u = new SpeechSynthesisUtterance(text);
-      u.lang = 'pt-BR';
-      u.rate = 0.9;
-      window.speechSynthesis.speak(u);
+    if (text.trim()) {
+      // Voz clonada do paciente quando pronta; senão a do sistema.
+      void falar(text, { rate: 0.9 });
       triggerFeedback('speak');
       learnSentence(text);
       logSentence(text);
+      // vai para o celular do cuidador (se a conta estiver ligada)
+      emitirFalaDoPaciente(text, 'texto');
     }
   };
 

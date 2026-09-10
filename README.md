@@ -21,14 +21,21 @@ restrição motora. Sem hardware especializado: uma webcam, um computador e
 O IrisFlow estima o ponto da tela para onde a pessoa está olhando e converte
 fixações prolongadas (*dwell*) em cliques. Com isso o paciente escreve num
 teclado, fala frases prontas, pede ajuda, joga e descansa, usando só os olhos.
+No **Modo Computador** o mesmo cursor sai do app e passa a controlar o Windows
+inteiro (clicar, arrastar, rolar, digitar), e com a **voz personalizada** o
+que o paciente diz sai na própria voz dele, recriada a partir de uma gravação
+— tudo processado neste computador.
 
 Duas pessoas usam o app: o **paciente**, que opera tudo pelo olhar em telas
 de alvos grandes e alto contraste, e o **cuidador**, que usa mouse e teclado
 para configurar, calibrar e acompanhar o rastreamento.
 
-Nenhuma imagem, landmark facial, perfil de calibração ou relatório sai do
-dispositivo. No Electron isso é imposto por política de conteúdo (CSP), não só
-por disciplina de código.
+Nenhuma imagem, landmark facial, perfil de calibração, relatório, áudio de
+referência da voz ou modelo sai do dispositivo. No Electron isso é imposto por
+política de conteúdo (CSP), não só por disciplina de código. As únicas saídas
+de rede são a conta IrisFlow (texto escolhido pelo paciente, alertas e números
+agregados — ver `INTEGRACAO.md`) e o download, uma vez, dos pesos do modelo de
+voz.
 
 ---
 
@@ -132,6 +139,9 @@ src/                        núcleo do pipeline (TypeScript puro, testado com Vi
   telemetry/                gravação JSONL e cronometragem por estágio
   testUtils/                harness sintético e baseline de regressão
   electronSecurity.ts       permissões, navegação e CSP do Electron
+  computador/               Modo Computador: geometria (janela→tela→físico),
+                            structs INPUT do Win32 e contrato IPC (puro, testado)
+  voz/                      contrato da voz clonada (IPC e protocolo do motor)
 
 frontend/src/               interface (React 19, Tailwind v4, HashRouter)
   pages/onboarding/         boas-vindas, calibração e teste
@@ -141,9 +151,21 @@ frontend/src/               interface (React 19, Tailwind v4, HashRouter)
   pages/caregiver/          painel e guia do cuidador
   context/GazeContext.tsx   estado global de gaze, dwell e câmera
   components/ui/            GazeButton, GazeGrid, GazePageLayout e afins
+  computador/               hook que liga o Modo Computador e manda o olhar ao main
+  overlay/                  a SOBREPOSIÇÃO sobre o Windows (página própria,
+                            `overlay.html`): cursor pequeno, barra de ações,
+                            lupa, teclado; máquina de estados pura e testada
+  services/voz/             `falar()`: voz clonada quando pronta, senão a do sistema
+  pages/settings/VozScreen  Configurações → Voz personalizada (termo, importação)
   index.css                 tokens de design (cores, raios, tipografia)
 
 electron/                   processo principal, preload e IPC de sistema
+  computador/               sessão do Modo Computador, janela de sobreposição,
+                            adaptadores de SO (Windows via koffi/user32, Linux via xdotool)
+  voz/                      gerente do motor de voz (processo Python), cache, consentimento
+  overlayPreload.ts         ponte estreita da sobreposição
+voice-engine/               motor de voz local em Python (Chatterbox multilíngue):
+                            preparo do áudio, síntese, protocolo JSON, testes, build
 docs/MEDICOES.md            protocolo e métricas de medição
 docs/medicoes/historico/    relatórios reais guardados
 ```
@@ -152,35 +174,63 @@ docs/medicoes/historico/    relatórios reais guardados
 
 ## Requisitos
 
-Node.js 22.12 ou superior (o CI usa Node 24).
+Para desenvolver: Node.js 22.12 ou superior (o CI usa Node 24) e, só para o
+motor de voz, **Python 3.11 (64 bits)** — ver [Voz personalizada](#voz-personalizada-clonagem-local).
 
-| componente | mínimo | recomendado |
-|---|---|---|
-| Webcam | 1280×720 @ 30 fps | 1920×1080, campo de visão estreito, montada perto do rosto |
-| Processador | quad-core com WebAssembly SIMD | — |
-| GPU | WebGL (MediaPipe) | WebGPU (o L2CS cai de ~2 s para ~50 ms por inferência) |
-| Memória | 8 GB | — |
-| Ambiente | luz frontal difusa | apoio de cabeça; monitor com diagonal conhecida |
+### Hardware do paciente (tabela preliminar)
+
+Os números abaixo são o ponto de partida para a tabela oficial que sai com o
+lançamento; valem para o app inteiro, e a coluna da voz é o que muda o piso.
+
+| componente | mínimo (rastreamento + comunicação) | mínimo com voz personalizada | recomendado |
+|---|---|---|---|
+| Sistema | Windows 10 64 bits (Modo Computador: Windows) | Windows 10/11 64 bits | Windows 11 |
+| Webcam | 1280×720 @ 30 fps | idem | 1920×1080, campo de visão estreito, perto do rosto |
+| Processador | quad-core com WebAssembly SIMD (Intel 8ª geração / Ryzen 2000 ou melhor) | 6 núcleos ou mais (a síntese em CPU usa todos menos um) | — |
+| GPU | WebGL (MediaPipe) | WebGL; **NVIDIA com CUDA** deixa a síntese quase imediata | WebGPU para o L2CS (~2 s → ~50 ms por inferência) |
+| Memória | 8 GB | **16 GB** (o modelo de voz ocupa 2–3 GB enquanto carregado) | 16 GB |
+| Disco | 2 GB livres | 5 GB livres (pesos do modelo ~1,5 GB + cache de frases até 300 MB) | SSD |
+| Ambiente | luz frontal difusa | idem | apoio de cabeça; monitor com diagonal conhecida |
 
 O erro do rastreamento escala com o inverso da densidade de pixels sobre o
 olho: uma lente mais estreita ou a câmera mais perto do rosto melhora a
-precisão mais do que qualquer ajuste de software.
+precisão mais do que qualquer ajuste de software. A latência da voz
+personalizada em CPU é de alguns segundos por frase nova; frases já ditas
+saem do cache na hora (ver a seção da voz).
 
 ---
 
 ## Instalação e execução
 
 ```bash
-npm install
+npm install                      # inclui o `koffi` (FFI do Windows para o Modo Computador)
 npm --prefix frontend install
 ```
+
+O motor de voz é opcional para rodar o app; sem ele a tela de Voz explica o que
+falta e o paciente fala com a voz do sistema. Para tê-lo em desenvolvimento
+(Windows, PowerShell, dentro de `voice-engine/`):
+
+```powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+```
+
+O Electron acha o `.venv` sozinho (`voice-engine/.venv/Scripts/python.exe`); a
+variável `IRISFLOW_PYTHON` aponta para outro interpretador se preciso. Use o
+`.venv` mesmo: instalar no Python global mistura com pacotes de outros
+projetos, e um `torchvision` de outra versão faz o modelo falhar ao carregar
+("operator torchvision::nms does not exist"). Se isso acontecer no global,
+`pip install --force-reinstall torchvision==0.21.0` resolve.
 
 | comando | o que faz |
 |---|---|
 | `npm run dev` | interface em `http://localhost:5173` (desenvolvimento) |
 | `npm run build` e `npm --prefix frontend run preview` | build de produção em `http://127.0.0.1:4173`; use este para medir |
 | `npm run electron:dev` | app desktop em desenvolvimento |
-| `npm run electron:build` | instalador (Windows NSIS, macOS DMG, Linux AppImage), gerado na pasta temporária do sistema para escapar do OneDrive |
+| `npm run electron:build` | instalador (Windows NSIS, macOS DMG, Linux AppImage), gerado na pasta temporária do sistema para escapar do OneDrive; inclui o motor de voz se `voice-engine\dist\irisflow-voz\` existir |
+| `voice-engine\build-voice-engine.ps1` | gera o executável do motor de voz (PyInstaller, modo pasta) para entrar no instalador |
 
 ### Modelos
 
@@ -217,7 +267,9 @@ opções e avisa quando falta recarregar.
 ## Fluxo de uso
 
 1. **Boas-vindas** (`/`): o paciente escolhe entre o tutorial e ir direto à
-   calibração; o cuidador acessa sua área por um botão discreto.
+   calibração; o cuidador acessa sua área por um botão discreto. Com a conta
+   IrisFlow configurada, o primeiro passo é o **login** (`/login`) com o
+   e-mail e a senha da assinatura feita no site.
 2. **Tutorial** (`/tutorial`): como funciona, posicionamento, o que é o
    dwell, prática com três alvos, emergência, descanso e o que esperar da
    calibração.
@@ -226,16 +278,170 @@ opções e avisa quando falta recarregar.
    teste de precisão. O botão de emergência fica compacto e sai de cima dos
    alvos.
 4. **Menu** (`/menu`) e telas do paciente: teclado, frases rápidas,
-   pictogramas, jogos, câmera, galeria, descanso, emergência. O botão de
-   emergência é um alerta local (som e tela); o app não envia mensagens.
-5. **Área do cuidador** (`/settings`, `/caregiver`, `/caregiver/guide`):
-   configurações por seção (rastreamento, tela, calibração, voz, dados),
-   painel com estado do rastreamento e alertas, guia de instalação e leitura
-   do teste de precisão.
+   pictogramas, jogos, câmera, galeria, descanso, emergência, **conversa**
+   (`/conversation`) com o celular do cuidador e **Computador**
+   (`/virtual-mouse`), que liga o Modo Computador. O botão de emergência é um
+   alerta local (som e tela) e, com a conta ligada, também chega ao celular.
+5. **Área do cuidador** (`/settings`, `/settings/voice`, `/caregiver`,
+   `/caregiver/guide`): configurações por seção (rastreamento, tela,
+   calibração, voz personalizada, dados), painel com estado do rastreamento e
+   alertas, guia de instalação e leitura do teste de precisão.
 
 Regras da interface do paciente: alvos de no mínimo 160×120 px, nada se move
 sob o olhar (sem `transform` em hover), uma ação principal por tela, zona de
 descanso sem alvos, textos curtos e sem jargão.
+
+### Conta IrisFlow (site + app do cuidador)
+
+O app continua 100 % local por padrão (a licença usa o serviço simulado do
+Bloco 1, com as contas de teste). Com `VITE_SUPABASE_URL` e
+`VITE_SUPABASE_ANON_KEY` em `frontend/.env.local` (os mesmos do site), o
+serviço de licença passa a ser o real: o e-mail/senha da assinatura vale aqui,
+condicionado ao pagamento; o que o paciente fala vai para o celular do
+cuidador, as respostas do cuidador são faladas na tela, o socorro dispara
+notificação e o resumo da calibração vai para os relatórios do app. **O que sai do computador é só texto escolhido
+pelo paciente, alertas e números agregados** — nunca imagem, landmarks ou
+perfil de calibração (a CSP só libera a origem do Supabase). Tudo isso está
+descrito, arquivo por arquivo, em **`INTEGRACAO.md`**.
+
+---
+
+## Modo Computador (o cursor do IrisFlow sobre o Windows)
+
+Inspirado no Windows Control do Tobii Dynavox e no OptiKey: o cursor de olhar
+do app sai da janela e passa a valer para o sistema inteiro, com a mesma
+lógica de dwell. Cartão **Computador** no menu → botão **Ativar controle pelo
+olhar**.
+
+O que acontece ao ligar:
+
+- a janela do app se **esconde** (a câmera e o motor continuam rodando nela —
+  `backgroundThrottling: false` impede o Chromium de congelar o loop) e o dwell
+  do app é **suspenso**, para a tela oculta não clicar em nada;
+- uma janela de **sobreposição** transparente, sempre no topo e atravessável
+  pelo mouse cobre o monitor: nela ficam o cursor (encolhido para ~60 % do
+  tamanho do app, sem descer de 24 px), o anel de progresso, uma **barra
+  lateral** de ações e, quando abertos, a lupa e o teclado;
+- cada amostra de olhar vai da janela do app ao processo principal, que a
+  converte para o monitor (px CSS da janela → DIP da tela → px físicos, com
+  `screen.dipToScreenPoint` no Windows, para a escala de 125/150 % e
+  monitores múltiplos não virarem desvio) e a entrega à sobreposição.
+
+Como se usa (modelo "arma e olha", o mesmo do Tobii):
+
+1. um dwell na barra **arma** uma ação: Clicar, Duplo, Direito, Arrastar,
+   Rolar ou Teclado. Nada acontece na tela enquanto nenhuma ação está armada —
+   ler um parágrafo não clica;
+2. o paciente olha o alvo. Sobre a área, o dwell é uma **fixação** (o olhar
+   tem de ficar a menos de 35 px do ponto), não "qualquer lugar por 1,5 s";
+3. com a **Lupa** ligada (padrão), a região em volta é ampliada 2,5× num
+   painel e o segundo dwell, dentro dele, é o que clica — é o que faz o botão
+   de fechar do Chrome ser alcançável com ~1° de erro;
+4. a ação **desarma** depois de executar, salvo com **Fixar** ligado.
+   **Arrastar** usa dois pontos (pressiona, interpola o movimento, solta);
+   **Rolar** fixa uma âncora e rola enquanto o olhar está acima ou abaixo
+   dela; o **Teclado** digita em qualquer programa (Unicode via `SendInput`,
+   com acentos e ç); **Pausar** congela a área sem sair do modo.
+
+Como se sai: botão verde **IrisFlow** na barra; botão vermelho **Socorro**
+(abre a tela de emergência do app); **3 minutos sem rosto** encerram sozinhos;
+o cuidador pode clicar na barra com o **mouse físico** (ela deixa de ser
+atravessável enquanto o mouse está sobre ela) ou usar o atalho
+**Ctrl+Alt+Shift+Esc**. Um vigia no processo principal também encerra se o
+olhar parar de chegar por 6 s ou vier sem calibração por 10 s, e se a
+resolução, a escala ou o monitor mudarem (a calibração deixa de valer).
+
+Sistema: **Windows** completo (user32 `SetCursorPos`/`SendInput` via `koffi`,
+sem compilar nada; limitação conhecida: janelas elevadas pelo UAC ignoram a
+entrada de um processo comum). **Linux X11** com `xdotool` (Wayland não
+permite que um programa mova o cursor de outro). **macOS** ainda sem adaptador
+(exige helper assinado com permissão de Acessibilidade). Segurança: o renderer
+não move nem clica nada diretamente — só o processo principal, que valida a
+forma e o remetente de cada mensagem e aceita uma lista fechada de teclas.
+
+Arquivos: `src/computador/*` (puro, testado), `electron/computador/*`,
+`electron/overlayPreload.ts`, `frontend/overlay.html` + `frontend/src/overlay/*`,
+`frontend/src/computador/*`, `frontend/src/pages/VirtualMouseScreen.tsx`.
+
+---
+
+## Voz personalizada (clonagem local)
+
+A voz do paciente, recriada a partir de uma gravação e usada em tudo que ele
+diz pelo IrisFlow (teclado, frases, pictogramas, respostas ao cuidador).
+Alarmes de emergência e as mensagens lidas do cuidador continuam na voz do
+sistema, de propósito. Tela: **Configurações → Voz personalizada**
+(`/settings/voice`).
+
+- **Modelo**: [Chatterbox multilíngue](https://github.com/resemble-ai/chatterbox)
+  (Resemble AI, licença MIT), clonagem zero-shot com português entre os 23
+  idiomas. Roda num processo Python ao lado do Electron (`voice-engine/`),
+  falando JSON por linha em stdin/stdout. Os pesos (~1,5 GB) são baixados do
+  Hugging Face **uma vez**, pela tela de Voz, para a pasta de dados do app;
+  depois disso o motor é posto em modo offline.
+- **Importação**: o cuidador aceita o **termo de consentimento** (voz é dado
+  biométrico — LGPD art. 5º, II e art. 11 — e a pessoa clonada muitas vezes
+  já não pode consentir por si), escolhe um arquivo (nota de voz, vídeo,
+  áudio antigo; WAV/MP3/OGG/OPUS/FLAC direto, formatos de vídeo só com
+  `ffmpeg` no PATH) e o motor prepara a referência: passa-altas, medição de
+  relação sinal/ruído por percentis, redução de ruído quando precisa, corte
+  de silêncios e escolha dos melhores ~12 s (o modelo condiciona nos
+  primeiros 10 s). O app mostra a **qualidade** (boa / aceitável / fraca) e
+  os avisos. Só a referência preparada fica no computador; o arquivo original
+  não é copiado. Testado com três gravações reais (limpa, nota de voz,
+  ruidosa): 24 dB, 36 dB e 17 dB de SNR — a terceira passou pela redução de
+  ruído e saiu como "aceitável".
+- **Ao falar**: `services/voz/falar()` procura a frase no **cache** local
+  (por voz + texto); se está lá, toca na hora. Se não, pede a geração com um
+  prazo de **2,5 s**: dentro dele sai clonada; passado o prazo, o app fala com
+  a voz do sistema e deixa a geração terminar para o cache — a frase sai
+  clonada na próxima vez. Uma fala nova cancela a anterior. O botão
+  **Preparar frases rápidas** pré-sintetiza as frases e pictogramas padrão.
+- **Custo**: em CPU comum, 3–8 s por frase nova (mais a carga do modelo na
+  primeira frase da sessão); com GPU NVIDIA, abaixo de 1 s. O processo Python
+  é encerrado depois de 15 min ocioso para devolver a memória. O motor só é
+  iniciado quando há voz importada e ativa, ou quando a tela de Voz é aberta.
+- **Plano**: o recurso é do plano **IrisFlow Voz** (`features.voz` da
+  licença). Sem ele a tela explica e o paciente fala com a voz do sistema.
+- **O que fica onde**: `%APPDATA%\IrisFlow\voz\` — `referencia.wav`,
+  `referencia.json` (qualidade, avisos, consentimento aceito), `estado.json`,
+  `cache\*.wav`, `modelos\` (HF_HOME). "Remover voz" apaga tudo menos os
+  pesos do modelo.
+
+- **Guarda de recursos**: o motor mede a memória antes de carregar e recusa
+  com mensagem clara quando há menos de 4,5 GB livres (em vez de levar o
+  computador para o swap); usa metade dos núcleos (1–4) e roda com prioridade
+  abaixo do normal, para o rastreamento ocular não engasgar. A tela de Voz
+  mostra a memória do computador e avisa quando ele está abaixo de 12 GB.
+- **Testar o motor sozinho** (sem o Electron), dentro de `voice-engine\` com o
+  `.venv` ativado:
+
+  ```powershell
+  python -m irisflow_voz --diagnostico                                  # versões, memória, modelo baixado
+  python -m irisflow_voz --baixar                                       # pesos do modelo (~1,5 GB)
+  python -m irisflow_voz --preparar "C:\caminho\voz.ogg" ref.wav         # preparo da referência
+  python -m irisflow_voz --falar "Olá, esta é a minha voz." ref.wav fala.wav
+  ```
+
+  Sem argumentos o processo entra no modo protocolo (JSON por linha), que é
+  como o Electron o usa. `HF_HOME` define onde os pesos ficam (o app usa
+  `%APPDATA%\irisflow\voz\modelos`; no terminal, aponte para a mesma pasta
+  para não baixar duas vezes).
+- **Limpar tudo**: `voice-engine\limpar-voz.ps1` apaga voz importada, cache e
+  pesos; com `-Ambiente` apaga também o `.venv` e o build.
+
+Empacotar o motor para o instalador (Windows, uma vez por versão):
+
+```powershell
+cd voice-engine
+.\build-voice-engine.ps1      # cria .venv, instala, roda PyInstaller → dist\irisflow-voz\
+cd ..
+npm run electron:build         # copia dist\irisflow-voz para resources\voice-engine
+```
+
+Testes do motor: `cd voice-engine; .\.venv\Scripts\python -m pytest -q tests`
+(usa um dublê do modelo; `IRISFLOW_AUDIO_TESTE=<arquivo>` testa o preparo com
+um áudio real).
 
 ---
 
@@ -247,14 +453,18 @@ npx tsc --noEmit -p tsconfig.json     # tipos do núcleo
 npx tsc --noEmit -p electron/tsconfig.json
 npm --prefix frontend run verify      # lint, tipos, testes e build da interface
 npm run electron:compile
+cd voice-engine && python -m pytest -q tests   # motor de voz (dublê do modelo)
 ```
 
 Tudo isso roda no CI (`.github/workflows/ci.yml`, Windows) a cada push.
 
 Os testes do núcleo cobrem os módulos puros, onde os limiares e as leis de
 controle vivem: calibração, Ridge, filtros, decodificação do L2CS, prontidão,
-ajuste de câmera, geometria de tela, protocolo de medição e segurança do
-Electron. O harness sintético (`src/testUtils/`) roda o pipeline inteiro sobre
+ajuste de câmera, geometria de tela, protocolo de medição, segurança do
+Electron, geometria e structs Win32 do Modo Computador e protocolo da voz. Na
+interface, a máquina de estados da sobreposição e a própria sobreposição são
+testadas de ponta a ponta com uma ponte falsa (armar → lupa → clique no ponto
+mapeado); `falar()` é testado com cache, prazo e substituição. O harness sintético (`src/testUtils/`) roda o pipeline inteiro sobre
 trajetórias determinísticas e barra regressões contra um baseline versionado.
 
 ---
@@ -263,9 +473,10 @@ trajetórias determinísticas e barra regressões contra um baseline versionado.
 
 | plataforma | estado |
 |---|---|
-| Windows 10/11 (Electron) | testado; lê a diagonal do monitor pelo EDID |
-| Chromium (Chrome, Edge) | testado; sem acesso à geometria do sistema |
-| Linux / macOS | não testado; o núcleo é agnóstico, o IPC de sistema é do Windows |
+| Windows 10/11 (Electron) | testado; lê a diagonal do monitor pelo EDID; Modo Computador e voz personalizada completos |
+| Chromium (Chrome, Edge) | testado; sem acesso à geometria do sistema, sem Modo Computador nem voz personalizada |
+| Linux (Electron) | não testado; Modo Computador em X11 via `xdotool`; motor de voz roda (Python) |
+| macOS (Electron) | não testado; Modo Computador ainda sem adaptador (Acessibilidade) |
 
 Os controles de câmera (`zoom`, `brightness`, `contrast`, `exposureMode`)
 dependem do driver. O app sonda o que existe e, quando não consegue ajustar,

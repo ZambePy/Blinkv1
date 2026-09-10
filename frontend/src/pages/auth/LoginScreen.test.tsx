@@ -173,4 +173,12 @@ describe('criar conta', () => {
     montar();
     expect(screen.getByRole('link', { name: /criar no site/i })).toBeInTheDocument();
   });
+
+  it('Modo Desenvolvedor liga o atalho e abre o menu sem licença nem calibração', async () => {
+    montar();
+    fireEvent.click(screen.getByRole('button', { name: /modo desenvolvedor/i }));
+    await waitFor(() => expect(screen.getByTestId('rota').textContent).toBe('/menu'));
+    expect(sessionStorage.getItem('irisflow_dev_mode')).toBe('true');
+    sessionStorage.removeItem('irisflow_dev_mode');
+  });
 });

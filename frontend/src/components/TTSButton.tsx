@@ -1,20 +1,18 @@
 import React from 'react';
 import { Play } from 'lucide-react';
+import { falar } from '../services/voz';
 
 interface TTSButtonProps {
   text: string;
-  voiceProfileId?: string; // futuro: voz clonada
+  /** Mantido por compatibilidade: a escolha da voz é do serviço (`services/voz`). */
+  voiceProfileId?: string;
 }
 
-export const TTSButton: React.FC<TTSButtonProps> = ({ text, voiceProfileId: _voiceProfileId }) => {
+export const TTSButton: React.FC<TTSButtonProps> = ({ text }) => {
   const speak = () => {
     if (!text.trim()) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = 'pt-BR';
-    u.rate = 0.9;
-    // Futuro: se voiceProfileId, buscar áudio do backend
-    window.speechSynthesis.speak(u);
+    // Voz clonada do paciente quando pronta e liberada; senão a do sistema.
+    void falar(text, { rate: 0.9 });
   };
 
   return (

@@ -1,0 +1,25 @@
+# Motor de voz local do IrisFlow — Python 3.11 (64 bits).
+#
+# Instalação em desenvolvimento (Windows, PowerShell), a partir desta pasta:
+#   py -3.11 -m venv .venv
+#   .\.venv\Scripts\Activate.ps1
+#   pip install -r requirements.txt
+#
+# O `chatterbox-tts` fixa as versões do torch/torchaudio que precisa (2.6.x).
+# Só CPU por padrão: para GPU NVIDIA instale antes o torch com CUDA seguindo
+# https://pytorch.org/get-started/locally/ e depois rode o pip acima — o pip
+# mantém a versão CUDA se ela satisfizer o pino.
+chatterbox-tts>=0.1.4
+# O chatterbox não usa torchvision, mas o `transformers` importa o torchvision
+# se ele estiver instalado — e um torchvision de outra versão (sobra de outro
+# projeto no mesmo Python) derruba o carregamento do modelo com
+# "operator torchvision::nms does not exist". Fixar o par certo evita isso.
+torchvision==0.21.0
+noisereduce>=3.0
+soundfile>=0.12
+librosa>=0.10
+scipy>=1.11
+numpy>=1.26
+huggingface_hub>=0.23
+# Memória livre e prioridade do processo (guarda contra travar a máquina).
+psutil>=5.9

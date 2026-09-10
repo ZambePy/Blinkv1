@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { emitirFalaDoPaciente } from '../../cloud/eventos';
+import { falar } from '../../services/voz';
 import { Heart, Plus, Trash2, Volume2 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
@@ -22,12 +24,8 @@ const loadFavorites = (userId: string): Favorite[] => {
 };
 
 const speak = (text: string) => {
-  if (!('speechSynthesis' in window)) return;
-  window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = 'pt-BR';
-  u.rate = 0.9;
-  window.speechSynthesis.speak(u);
+  emitirFalaDoPaciente(text, 'frase');
+  void falar(text, { rate: 0.9 });
 };
 
 export const MyOptionsScreen: React.FC = () => {

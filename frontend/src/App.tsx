@@ -10,6 +10,8 @@ import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
 import { ReminderProvider } from './context/ReminderContext';
 import { EmergencyProvider } from './context/EmergencyContext';
+import { CloudProvider } from './cloud/CloudContext';
+import { CloudBanners } from './cloud/CloudBanners';
 import { DebugHUD } from './components/DebugHUD';
 import { PreflightPanel } from './components/PreflightPanel';
 import { FatigueIndicator } from './components/FatigueIndicator';
@@ -20,11 +22,16 @@ import { LoginScreen } from './pages/auth/LoginScreen';
 
 // Lazy loading — Vite fatia o bundle por rota.
 // Os módulos exportam como named export; envolvemos para satisfazer o contrato do lazy().
+// O módulo pode exportar outras coisas além de componentes (listas de frases,
+// por exemplo); só o export pedido precisa ser um componente.
 type AnyComponent = React.ComponentType<Record<string, never>>;
-const lazyNamed = (loader: () => Promise<Record<string, AnyComponent>>, name: string) =>
+const lazyNamed = <M extends Record<string, unknown>, K extends keyof M & string>(
+  loader: () => Promise<M>,
+  name: M[K] extends AnyComponent ? K : never,
+) =>
   lazy(async () => {
     const mod = await loader();
-    return { default: mod[name] };
+    return { default: mod[name] as AnyComponent };
   });
 
 const MainMenu = lazyNamed(() => import('./pages/MainMenu'), 'MainMenu');
@@ -56,6 +63,12 @@ const RelatorioDaSessao = lazyNamed(
   'RelatorioDaSessao'
 );
 const ChecagemRapida = lazyNamed(() => import('./pages/retomada/ChecagemRapida'), 'ChecagemRapida');
+const ConversationScreen = lazyNamed(
+  () => import('./pages/caregiver/ConversationScreen'),
+  'ConversationScreen'
+);
+const VoiceControlScreen = lazyNamed(() => import('./pages/core/EmBreveScreen'), 'VoiceControlScreen');
+const AccessibilityScreen = lazyNamed(() => import('./pages/core/EmBreveScreen'), 'AccessibilityScreen');
 const HistoricoDeSessoes = lazyNamed(
   () => import('./pages/historico/HistoricoDeSessoes'),
   'HistoricoDeSessoes'
@@ -101,6 +114,7 @@ const VirtualMouseScreen = lazyNamed(
   () => import('./pages/VirtualMouseScreen'),
   'VirtualMouseScreen'
 );
+const VozScreen = lazyNamed(() => import('./pages/settings/VozScreen'), 'VozScreen');
 
 const RouteFallback: React.FC = () => (
   <div
@@ -154,10 +168,17 @@ function App() {
         <SettingsProvider>
           <ToastProvider>
             <GazeProvider>
+              {/* Nuvem (conversa com o cuidador, socorro, resumo da calibração).
+                  Dentro do GazeProvider — lê o engine para o heartbeat — e
+                  abaixo do LicenseProvider — segue a licença. Fora do router:
+                  a mensagem do cuidador é falada em qualquer tela. Sem
+                  VITE_SUPABASE_URL é inerte. */}
+              <CloudProvider>
               <ReminderProvider>
                 <AppRouter>
                   <EmergencyProvider>
                     <GraceBanner />
+                    <CloudBanners />
                     <DebugHUD />
                     <PreflightPanel />
                     <FatigueIndicator />
@@ -329,6 +350,30 @@ function App() {
                           }
                         />
                         <Route
+                          path="/voice"
+                          element={
+                            <ProtectedRoute>
+                              <VoiceControlScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/accessibility"
+                          element={
+                            <ProtectedRoute>
+                              <AccessibilityScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
+                          path="/conversation"
+                          element={
+                            <ProtectedRoute>
+                              <ConversationScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
                           path="/caregiver/guide"
                           element={
                             <ProtectedRoute>
@@ -445,6 +490,14 @@ function App() {
                           }
                         />
                         <Route
+                          path="/settings/voice"
+                          element={
+                            <ProtectedRoute>
+                              <VozScreen />
+                            </ProtectedRoute>
+                          }
+                        />
+                        <Route
                           path="/virtual-mouse"
                           element={
                             <ProtectedRoute>
@@ -457,6 +510,7 @@ function App() {
                   </EmergencyProvider>
                 </AppRouter>
               </ReminderProvider>
+              </CloudProvider>
             </GazeProvider>
           </ToastProvider>
         </SettingsProvider>

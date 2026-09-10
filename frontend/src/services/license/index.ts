@@ -1,4 +1,6 @@
 import { createMockLicenseService } from './mockLicenseService';
+import { createSupabaseLicenseService } from './supabaseLicenseService';
+import { nuvemConfigurada } from '../../cloud/config';
 import type { LicenseService } from './types';
 
 export * from './types';
@@ -12,13 +14,20 @@ export {
   createMockLicenseService,
 } from './mockLicenseService';
 
+export { createSupabaseLicenseService } from './supabaseLicenseService';
+
 /**
  * A implementação em uso pelo app.
  *
- * Só existe o mock: o backend tem apenas banco de dados, e um adapter HTTP
- * contra um servidor inexistente seria mais um módulo sem fio — padrão que já
- * se repetiu cinco vezes neste projeto. O contrato HTTP está documentado no
- * §4.2 do spec do Bloco 1; quando o servidor existir, o adapter entra aqui e
- * nenhuma tela muda.
+ * Com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY` em `frontend/.env.local`
+ * entra o serviço real (`supabaseLicenseService`): o e-mail/senha do site vale
+ * aqui, condicionado à assinatura, e o computador fica ligado ao app do
+ * cuidador. Sem as variáveis, o mock continua sendo o comportamento do produto
+ * (contas de teste, modo local) — nenhuma tela muda entre um e outro.
  */
-export const licenseService: LicenseService = createMockLicenseService();
+export const licenseService: LicenseService = nuvemConfigurada
+  ? createSupabaseLicenseService()
+  : createMockLicenseService();
+
+/** Qual implementação está ativa, para a tela de conta dizer a verdade. */
+export const licenseBackend: 'supabase' | 'mock' = nuvemConfigurada ? 'supabase' : 'mock';

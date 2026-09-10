@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { Mail, Lock, LogIn, AlertCircle, ExternalLink } from 'lucide-react';
+import { Mail, Lock, LogIn, AlertCircle, ExternalLink, Wrench } from 'lucide-react';
+import { setDevMode } from '../../devMode';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useLicense } from '../../context/LicenseContext';
 import { MANAGE_URL } from '../../services/license';
@@ -248,6 +249,36 @@ export const LoginScreen: React.FC = () => {
         >
           <LinkExterno href={CRIAR_CONTA_URL} rotulo={t('login.createAccount')} />
         </div>
+
+        {/* Modo Desenvolvedor: o mesmo atalho do splash. Pula licença, termo,
+            perfil e calibração e abre o menu para inspecionar o produto com
+            mouse — o cursor de olhar e o dwell ficam desligados. Fica discreto
+            de propósito: é ferramenta de quem desenvolve, não do cuidador. */}
+        <button
+          type="button"
+          onClick={() => {
+            setDevMode(true);
+            navigate('/menu', { replace: true });
+          }}
+          aria-label={t('login.devMode')}
+          style={{
+            alignSelf: 'center',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.4rem',
+            background: 'transparent',
+            border: '1px solid var(--color-card-border)',
+            color: 'var(--color-text-base)',
+            padding: '0.4rem 0.9rem',
+            borderRadius: '999px',
+            fontSize: '0.78rem',
+            fontWeight: 700,
+            cursor: 'pointer',
+            opacity: 0.55,
+          }}
+        >
+          <Wrench size={14} aria-hidden="true" /> {t('login.devMode')}
+        </button>
       </div>
     </main>
   );

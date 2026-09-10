@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { emitirFalaDoPaciente } from '../../cloud/eventos';
+import { falar } from '../../services/voz';
 import { Utensils, Droplets, Smile, Frown, Home, Phone, AlertCircle, Heart, ChevronRight, ChevronLeft, Play } from 'lucide-react';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
 import { GazeGrid } from '../../components/ui/GazeGrid';
@@ -15,19 +17,17 @@ const PICTOGRAMS = [
   { id: 8, label: 'Não estou Bem', Icon: Frown, color: '#f43f5e', bg: 'rgba(244, 63, 94, 0.1)' },
 ];
 
+/** Só os textos, para a tela de Voz pré-sintetizar no cache da voz clonada. */
+export const TEXTOS_DOS_PICTOGRAMAS = PICTOGRAMS.map((p) => p.label);
+
 export const PictogramScreen: React.FC = () => {
   const [selectedText, setSelectedText] = useState('');
   const [currentPage, setCurrentPage] = useState(0);
 
   const handleSpeak = (text: string) => {
     setSelectedText(text);
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'pt-BR';
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
-    }
+    void falar(text, { rate: 0.9 });
+    emitirFalaDoPaciente(text, 'pictograma');
   };
 
   const itemsPerPage = 5;

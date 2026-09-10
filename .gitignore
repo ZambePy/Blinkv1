@@ -51,3 +51,13 @@ frontend/python_scripts/l2cs_validation/
 *.njsproj
 *.sln
 *.sw?
+
+# Motor de voz local (Python): ambiente virtual, build do PyInstaller e caches.
+# O áudio de referência e os pesos do modelo ficam na pasta de dados do app,
+# nunca no repositório.
+voice-engine/.venv/
+voice-engine/build/
+voice-engine/dist/
+voice-engine/*.spec
+voice-engine/**/__pycache__/
+voice-engine/.pytest_cache/

@@ -1,10 +1,114 @@
-import { app, BrowserWindow, session, ipcMain, screen } from 'electron';
+import { app, BrowserWindow, session, ipcMain, screen, safeStorage } from 'electron';
 import { execFile } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { buildMonitorSizeQuery } from '../src/displayGeometry';
-import { permitirPermissao, permitirNavegacao, CSP, CSP_DEV } from '../src/electronSecurity';
+import { permitirPermissao, permitirNavegacao, CSP, CSP_DEV, cspComNuvem } from '../src/electronSecurity';
+import { registrarModoComputador } from './computador/sessao';
+import { registrarVoz } from './voz';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173';
+const RAIZ_DO_PROJETO = path.join(__dirname, '..');
+
+/** A janela do app. Só existe uma; o Modo Computador e a voz precisam achá-la. */
+let janelaPrincipal: BrowserWindow | null = null;
+
+// URL do Supabase do IrisFlow, para liberar a origem no cabeçalho de CSP do
+// servidor de dev. No build empacotado a CSP vai como <meta> gerada pelo Vite,
+// que lê a mesma variável em tempo de build — aqui só interessa em dev.
+// Lê do ambiente e, se não houver, de `frontend/.env.local` / `frontend/.env`
+// (sem depender de dotenv: só a chave que importa).
+function lerVariavelDoFrontend(nome: string): string | undefined {
+  if (process.env[nome]) return process.env[nome];
+  if (app.isPackaged) return undefined;
+  for (const arquivoEnv of ['.env.local', '.env']) {
+    const arquivo = path.join(__dirname, '..', 'frontend', arquivoEnv);
+    try {
+      const linha = fs.readFileSync(arquivo, 'utf-8').split(/\r?\n/)
+        .find((l) => new RegExp(`^\\s*${nome}\\s*=`).test(l));
+      if (linha) return linha.split('=').slice(1).join('=').trim().replace(/^["']|["']$/g, '');
+    } catch { /* arquivo ausente: segue */ }
+  }
+  return undefined;
+}
+
+// ---------------------------------------------------------------------
+// Cofre local: token da sessão do Supabase e chave do computador.
+//
+// O renderer não guarda credenciais em localStorage (legível por qualquer
+// coisa que abra o perfil do Chromium). Ele pede ao main, que cifra com
+// `safeStorage` — DPAPI no Windows, Keychain no macOS — e grava em
+// `userData/cloud-store.json`. Sem cifra disponível (Linux sem keyring, por
+// exemplo) o valor é gravado em claro com aviso, para o app não ficar sem
+// login em vez de sem segurança adicional.
+// ---------------------------------------------------------------------
+type Cofre = Record<string, { enc: boolean; v: string }>;
+const COFRE_CHAVES_PERMITIDAS = /^irisflow\.[a-z0-9_.-]{1,64}$/i;
+
+function caminhoDoCofre(): string {
+  return path.join(app.getPath('userData'), 'cloud-store.json');
+}
+function lerCofre(): Cofre {
+  try {
+    const raw = fs.readFileSync(caminhoDoCofre(), 'utf-8');
+    const parsed: unknown = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? (parsed as Cofre) : {};
+  } catch {
+    return {};
+  }
+}
+function gravarCofre(c: Cofre): void {
+  fs.mkdirSync(path.dirname(caminhoDoCofre()), { recursive: true });
+  fs.writeFileSync(caminhoDoCofre(), JSON.stringify(c), { encoding: 'utf-8', mode: 0o600 });
+}
+function chaveValida(chave: unknown): chave is string {
+  return typeof chave === 'string' && COFRE_CHAVES_PERMITIDAS.test(chave);
+}
+
+ipcMain.handle('irisflow:secure-get', (_e, chave: unknown): string | null => {
+  if (!chaveValida(chave)) return null;
+  const item = lerCofre()[chave];
+  if (!item) return null;
+  try {
+    if (!item.enc) return item.v;
+    if (!safeStorage.isEncryptionAvailable()) return null;
+    return safeStorage.decryptString(Buffer.from(item.v, 'base64'));
+  } catch (e) {
+    console.warn('[cofre] não foi possível ler', chave, e);
+    return null;
+  }
+});
+
+ipcMain.handle('irisflow:secure-set', (_e, chave: unknown, valor: unknown): boolean => {
+  // 2 MB: a fila offline pode acumular relatórios; safeStorage lida com isso.
+  if (!chaveValida(chave) || typeof valor !== 'string' || valor.length > 2_000_000) return false;
+  const cofre = lerCofre();
+  if (safeStorage.isEncryptionAvailable()) {
+    cofre[chave] = { enc: true, v: safeStorage.encryptString(valor).toString('base64') };
+  } else {
+    console.warn('[cofre] safeStorage indisponível neste sistema — gravando sem cifra');
+    cofre[chave] = { enc: false, v: valor };
+  }
+  gravarCofre(cofre);
+  return true;
+});
+
+ipcMain.handle('irisflow:secure-remove', (_e, chave: unknown): boolean => {
+  if (!chaveValida(chave)) return false;
+  const cofre = lerCofre();
+  delete cofre[chave];
+  gravarCofre(cofre);
+  return true;
+});
+
+// Identidade do computador para o pareamento (nome exibido no app do cuidador).
+ipcMain.handle('irisflow:app-info', () => ({
+  version: app.getVersion(),
+  hostname: os.hostname(),
+  platform: process.platform,
+  encryptionAvailable: safeStorage.isEncryptionAvailable(),
+}));
 
 // Tamanho físico da tela, lido do EDID via WMI (Windows).
 //
@@ -72,7 +176,22 @@ function createWindow(): void {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      // No Modo Computador esta janela fica ESCONDIDA enquanto a câmera e o
+      // motor continuam rodando nela. Sem isto o Chromium congela o
+      // `requestAnimationFrame` de janela oculta e o olhar para de chegar à
+      // sobreposição — o cursor sobre o Windows simplesmente trava.
+      backgroundThrottling: false,
     },
+  });
+  janelaPrincipal = win;
+  win.on('closed', () => { if (janelaPrincipal === win) janelaPrincipal = null; });
+
+  // Zoom travado em 1: o Modo Computador converte px CSS do app em DIP da
+  // tela, e um Ctrl+= acidental (menu padrão do Electron) desalinharia o
+  // cursor sobre o Windows sem parecer erro de calibração.
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.setZoomFactor(1);
+    win.webContents.setVisualZoomLevelLimits(1, 1).catch(() => undefined);
   });
 
   // Um link externo (num texto que o paciente compôs, por exemplo) não pode
@@ -128,7 +247,11 @@ app.whenReady().then(async () => {
   // `file://`, não há cabeçalhos: a mesma política vai como `<meta>` no
   // `index.html`, injetada pelo Vite. Em dev vale `CSP_DEV`: o preâmbulo do
   // Fast Refresh é um script inline e a política de produção o bloquearia.
-  const politica = app.isPackaged ? CSP : CSP_DEV;
+  const politica = cspComNuvem(
+    app.isPackaged ? CSP : CSP_DEV,
+    lerVariavelDoFrontend('VITE_SUPABASE_URL'),
+    lerVariavelDoFrontend('VITE_DESKTOP_SYNC_URL'),
+  );
   session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
     callback({
       responseHeaders: {
@@ -137,6 +260,21 @@ app.whenReady().then(async () => {
       },
     });
   });
+
+  // Modo Computador: cursor do IrisFlow sobre o sistema. A sobreposição é a
+  // página `overlay.html` do mesmo build do frontend, com preload próprio.
+  registrarModoComputador({
+    janelaPrincipal: () => janelaPrincipal,
+    preloadDaSobreposicao: path.join(__dirname, 'overlayPreload.cjs'),
+    carregarSobreposicao: (janela) =>
+      app.isPackaged
+        ? janela.loadFile(path.join(__dirname, '..', 'frontend', 'dist', 'overlay.html'))
+        : janela.loadURL(`${DEV_SERVER_URL}/overlay.html`),
+  });
+
+  // Voz clonada local (sidecar Python / executável em resources/voice-engine).
+  const voz = registrarVoz({ raizDoProjeto: RAIZ_DO_PROJETO, janelaPrincipal: () => janelaPrincipal });
+  app.on('before-quit', () => voz.encerrar());
 
   createWindow();
 

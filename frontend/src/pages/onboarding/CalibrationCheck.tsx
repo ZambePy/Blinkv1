@@ -7,6 +7,7 @@ import { BackButton } from '../../components/ui/BackButton';
 import { hoverAndFocus, hoverAndFocusBackground } from '../../components/ui/hoverFocus';
 import { startAccuracyTest, type RuntimeInfo } from '@tracker/accuracy';
 import { montarMetaDeMedicao } from '../../utils/autoTestMeta';
+import { emitirResultadoDeCalibracao } from '../../cloud/eventos';
 import { getCalibrationTimestampMs } from '@tracker/calibration';
 import { idadeEmTexto } from '../../idadeEmTexto';
 import type { OpticalCondition } from '@tracker/calibrationProfiles';
@@ -216,6 +217,8 @@ export const CalibrationCheck: React.FC = () => {
 
   const shuffleOrderRef = useRef<number[]>([]);
   const isMounted = useRef(true);
+  /** Quando a coleta começou — vira `calibration_seconds` no resumo para o cuidador. */
+  const calibracaoIniciadaEmRef = useRef<number | null>(null);
   const retryCountRef = useRef(0);
   const MAX_RETRIES_PER_POINT = 3;
 
@@ -379,9 +382,16 @@ export const CalibrationCheck: React.FC = () => {
         }
       : undefined;
 
+    const inicioDaCalibracaoMs = calibracaoIniciadaEmRef.current;
     startAccuracyTest(
-      (_result, action) => {
+      (result, action) => {
         if (!isMounted.current) return;
+        if (action === 'continue') {
+          // Resumo para o app do cuidador (acurácia, precisão, taxa de acerto,
+          // condições). Só agregados — o relatório completo fica no disco.
+          const duracaoS = inicioDaCalibracaoMs ? Math.round((Date.now() - inicioDaCalibracaoMs) / 1000) : null;
+          try { emitirResultadoDeCalibracao(result, meta, duracaoS); } catch (e) { console.warn('[cloud] resumo não emitido', e); }
+        }
         if (action === 'redo') {
           // Attempt descartado — não exporta um JSONL parcial.
           finalizeAutoRecordingRef.current(false);
@@ -598,6 +608,7 @@ export const CalibrationCheck: React.FC = () => {
 
     setCalibrationMode(quick ? 'quick' : 'full');
     setStage('calibrating');
+    calibracaoIniciadaEmRef.current = Date.now();
     setCompletedList([]);
 
     // A distância MEDIDA nesta sessão manda, quando existe.

@@ -57,13 +57,14 @@
       "off": "Som Desativado"
     },
     "voice": {
-      "title": "Clonagem de Voz Personalizada",
-      "description": "Faça upload de um arquivo de áudio (.wav) do paciente para criar uma voz sintetizada personalizada.",
-      "upload": "Upload de Áudio (.wav)",
-      "uploading": "Enviando áudio…",
-      "processing": "Processando…",
-      "ready": "✓ Voz personalizada ativada",
-      "lgpd": "LGPD: A voz é dado biométrico sensível. O modelo será armazenado exclusivamente para uso assistivo local do paciente."
+      "title": "Voz personalizada",
+      "description": "Recrie a voz do paciente a partir de uma gravação (nota de voz, vídeo, áudio antigo). Tudo é processado e guardado neste computador.",
+      "open": "Abrir voz personalizada",
+      "ready": "✓ Voz personalizada ativa",
+      "importedOff": "Voz importada, mas desligada",
+      "none": "Nenhuma voz importada",
+      "onlyDesktop": "Disponível no aplicativo instalado",
+      "lgpd": "LGPD: a voz é dado biométrico sensível. O áudio de referência, o modelo e as frases geradas ficam exclusivamente neste computador, para uso assistivo do paciente, e podem ser apagados a qualquer momento."
     },
     "backup": {
       "title": "Backup de Configurações",
@@ -135,7 +136,8 @@
       "retry": "Tentar de novo",
       "retryIn": "Tentar de novo em {{seconds}}s"
     },
-    "lastAttempt": "Última tentativa às {{time}}."
+    "lastAttempt": "Última tentativa às {{time}}.",
+    "devMode": "Modo Desenvolvedor (abrir o menu sem calibrar)"
   },
   "license": {
     "activated": {

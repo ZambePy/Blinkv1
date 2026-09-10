@@ -1,9 +1,9 @@
-import { defineConfig, type Plugin } from 'vite';
+import { defineConfig, loadEnv, type Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CSP } from '../src/electronSecurity.js';
+import { CSP, cspComNuvem } from '../src/electronSecurity.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -48,23 +48,25 @@ function saveAccuracyReportPlugin(): Plugin {
 
 // No build empacotado o Electron carrega `file://`, sem cabeçalhos HTTP, então a
 // CSP entra como `<meta>`. Só no build: em dev o plugin do React injeta um
-// script inline que ela bloquearia.
-function cspMetaPlugin(): Plugin {
+// script inline que ela bloquearia. A origem do Supabase (login e mensagens do
+// cuidador) entra em `connect-src` quando `VITE_SUPABASE_URL` existe no .env —
+// é a única saída de rede além de localhost que o app tem.
+function cspMetaPlugin(env: Record<string, string>): Plugin {
   return {
     name: 'csp-meta',
     apply: 'build',
     transformIndexHtml() {
-      return [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: CSP }, injectTo: 'head-prepend' }];
+      return [{ tag: 'meta', attrs: { 'http-equiv': 'Content-Security-Policy', content: cspComNuvem(CSP, env.VITE_SUPABASE_URL, env.VITE_DESKTOP_SYNC_URL) }, injectTo: 'head-prepend' }];
     },
   };
 }
 
 // https://vite.dev/config/
-export default defineConfig({
+export default defineConfig(({ mode }) => ({
   // Caminhos relativos: o Electron carrega o build via `file://`, onde `/assets`
   // apontaria para a raiz do disco.
   base: './',
-  plugins: [react(), saveAccuracyReportPlugin(), cspMetaPlugin()],
+  plugins: [react(), saveAccuracyReportPlugin(), cspMetaPlugin(loadEnv(mode, __dirname, 'VITE_'))],
   // Carimbo do build, desenhado num canto da tela de calibração.
   //
   // Três rodadas de depuração foram gastas com o navegador servindo um bundle
@@ -108,6 +110,14 @@ export default defineConfig({
     target: 'es2022',
     sourcemap: true,
     rollupOptions: {
+      // Duas páginas: o app (`index.html`) e a sobreposição do Modo Computador
+      // (`overlay.html`), que o Electron abre numa janela transparente por
+      // cima do Windows. Mesmo bundle, mesma CSP (o plugin acima injeta a
+      // <meta> em todo HTML do build).
+      input: {
+        main: path.resolve(__dirname, 'index.html'),
+        overlay: path.resolve(__dirname, 'overlay.html'),
+      },
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
@@ -125,4 +135,4 @@ export default defineConfig({
       },
     },
   },
-});
+}));

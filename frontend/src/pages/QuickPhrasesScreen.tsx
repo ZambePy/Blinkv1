@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { emitirFalaDoPaciente } from '../cloud/eventos';
+import { falar } from '../services/voz';
 import { MessageSquare, AlertCircle, Tv, Wind, Activity, ChevronRight, ChevronLeft } from 'lucide-react';
 import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeGrid } from '../components/ui/GazeGrid';
@@ -64,18 +66,16 @@ const PHRASES = [
   },
 ];
 
+/** Só os textos, para a tela de Voz pré-sintetizar no cache da voz clonada. */
+export const TEXTOS_DAS_FRASES_RAPIDAS = PHRASES.map((p) => p.text);
+
 export const QuickPhrasesScreen: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(0);
 
   const handleSpeak = (text: string) => {
-    if ('speechSynthesis' in window) {
-      window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'pt-BR';
-      utterance.rate = 0.9;
-      window.speechSynthesis.speak(utterance);
-      logSentence(text);
-    }
+    void falar(text, { rate: 0.9 });
+    logSentence(text);
+    emitirFalaDoPaciente(text, 'frase');
   };
 
   const itemsPerPage = 5;

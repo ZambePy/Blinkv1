@@ -15,6 +15,13 @@
 export interface Account {
   email: string;
   name?: string;
+  /**
+   * Paciente (beneficiário) desta conta no banco do IrisFlow. Preenchido pelo
+   * serviço real; é o que liga este computador à conversa e aos relatórios do
+   * app do cuidador. O mock não precisa disso.
+   */
+  beneficiaryId?: string;
+  beneficiaryName?: string;
 }
 
 export interface Plan {
@@ -28,6 +35,13 @@ export interface Plan {
    * Vem do servidor porque depende do plano assinado — o app não decide.
    */
   deviceLimit: number | null;
+  /**
+   * Recursos liberados pelo plano, como o servidor os devolve. Ausente no
+   * mock e em licenças gravadas antes deste campo existir — nesses casos o
+   * app trata como liberado (é o cache de uma licença válida, não uma
+   * recusa).
+   */
+  features?: { relatorios?: boolean; multiplos_dispositivos?: boolean; assistente?: boolean; voz?: boolean };
 }
 
 export interface DeviceBinding {

@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertOctagon, HeartPulse, ShieldAlert, Thermometer, Wind } from 'lucide-react';
 import { api } from '../../utils/api';
+import { emitirFalaDoPaciente, emitirPedidoDeAjuda } from '../../cloud/eventos';
 import { useAuth } from '../../context/AuthContext';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
 import { GazeButton } from '../../components/ui/GazeButton';
@@ -57,6 +58,8 @@ export const EmergencyEscalation: React.FC = () => {
     api.sendHelpAlert(currentProfile?.id ?? 'anon', 'high').catch((e) => {
       console.warn('Falha ao enviar alerta de emergência ao backend:', e);
     });
+    // Celular do cuidador: tela de emergência + push (Edge Function desktop-sync).
+    emitirPedidoDeAjuda('emergencia', label);
   };
 
   // Efeito de escuta de parâmetro para auto-disparo
@@ -77,6 +80,9 @@ export const EmergencyEscalation: React.FC = () => {
       api.sendHelpAlert(currentProfile?.id ?? 'anon', 'critical').catch((e) => {
         console.warn('Falha ao enviar alerta de escalonamento:', e);
       });
+      // Um segundo pedido inflaria o contador da sessão; o escalonamento vai
+      // como mensagem de sistema na conversa.
+      emitirFalaDoPaciente(`Alerta escalado: ${triggered} sem resposta em 15 s`, 'sistema');
     }, 15000);
 
     return () => clearTimeout(timer);

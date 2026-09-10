@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -28,7 +28,7 @@ import { deriveHorizontalFovDeg } from '@tracker/cameraTuner';
 import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
-import { api, ApiError } from '../utils/api';
+import { useEstadoDaVoz } from '../services/voz';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
 import { useGaze } from '../context/GazeContext';
 import { useReminders } from '../context/ReminderContext';
@@ -175,17 +175,15 @@ export const SettingsScreen: React.FC = () => {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { settings, updateSettings } = useSettings();
-  const { isCaregiver, loginCaregiver, currentProfile } = useAuth();
+  const { isCaregiver, loginCaregiver } = useAuth();
   const toast = useToast();
 
   const [pin, setPin] = useState('');
   const [pinError, setPinError] = useState<string | null>(null);
 
-  const [voiceStatus, setVoiceStatus] = useState<
-    'idle' | 'uploading' | 'processing' | 'ready' | 'error'
-  >('idle');
-  const [voiceError, setVoiceError] = useState<string | null>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  // Estado da voz clonada local (só para mostrar a situação; a tela própria
+  // faz a importação e o download do modelo).
+  const estadoDaVoz = useEstadoDaVoz();
 
   const { calibration, recording, setFilterPreset, getSessionUptimeMs, getDiagnostics } = useGaze();
   const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
@@ -425,36 +423,6 @@ export const SettingsScreen: React.FC = () => {
     } else {
       setPinError(t('settings.auth.pinError'));
       setPin('');
-    }
-  };
-
-  const handleUpload = async (file: File) => {
-    if (!currentProfile) {
-      const msg = 'Selecione um perfil antes de clonar a voz.';
-      setVoiceError(msg);
-      setVoiceStatus('error');
-      toast.error(msg);
-      return;
-    }
-    setVoiceStatus('uploading');
-    setVoiceError(null);
-    try {
-      const res = await api.cloneVoice(file, currentProfile.id);
-      setVoiceStatus('processing');
-      const status = await api.voiceStatus(res.task_id);
-      if (status.voice_profile_id) {
-        updateSettings({ voiceProfileId: status.voice_profile_id, voiceGender: 'cloned' });
-      }
-      setVoiceStatus('ready');
-      toast.success('Voz personalizada ativada com sucesso.');
-    } catch (err) {
-      const msg =
-        err instanceof ApiError
-          ? `Erro ${err.status} ao processar áudio`
-          : 'Falha ao enviar áudio. Verifique a conexão com o backend.';
-      setVoiceError(msg);
-      setVoiceStatus('error');
-      toast.error(msg);
     }
   };
 
@@ -1130,7 +1098,8 @@ export const SettingsScreen: React.FC = () => {
           <LanguageSwitcher />
         </section>
 
-        {/* Clonagem de Voz */}
+        {/* Voz personalizada (clonagem local) — a tela própria tem o termo de
+            consentimento, o download do modelo e a importação do áudio. */}
         <section aria-labelledby="voice-title" style={cardStyle}>
           <div
             style={{
@@ -1156,23 +1125,11 @@ export const SettingsScreen: React.FC = () => {
           >
             {t('settings.voice.description')}
           </p>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="audio/wav,audio/mpeg,audio/*"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleUpload(file);
-            }}
-            style={{ display: 'none' }}
-            aria-label="Selecionar arquivo de áudio para clonagem de voz"
-          />
-          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
             <button
               type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={voiceStatus === 'uploading' || voiceStatus === 'processing'}
-              aria-label="Enviar arquivo de áudio para clonagem"
+              onClick={() => navigate('/settings/voice')}
+              aria-label="Abrir a tela de voz personalizada"
               style={{
                 display: 'flex',
                 alignItems: 'center',
@@ -1184,40 +1141,17 @@ export const SettingsScreen: React.FC = () => {
                 borderRadius: '1rem',
                 cursor: 'pointer',
                 fontWeight: 700,
-                opacity: voiceStatus === 'uploading' || voiceStatus === 'processing' ? 0.6 : 1,
               }}
             >
-              <Mic size={20} aria-hidden="true" /> {t('settings.voice.upload')}
+              <Mic size={20} aria-hidden="true" /> {t('settings.voice.open')}
             </button>
-            {voiceStatus === 'uploading' && (
-              <span
-                role="status"
-                style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}
-              >
-                {t('settings.voice.uploading')}
-              </span>
-            )}
-            {voiceStatus === 'processing' && (
-              <span
-                role="status"
-                style={{ alignSelf: 'center', color: 'var(--color-text-base)', opacity: 0.9 }}
-              >
-                {t('settings.voice.processing')}
-              </span>
-            )}
-            {voiceStatus === 'ready' && (
-              <span
-                role="status"
-                style={{ alignSelf: 'center', color: '#16a34a', fontWeight: 700 }}
-              >
-                {t('settings.voice.ready')}
-              </span>
-            )}
-            {voiceStatus === 'error' && voiceError && (
-              <span role="alert" style={{ alignSelf: 'center', color: '#dc2626' }}>
-                {voiceError}
-              </span>
-            )}
+            <span role="status" style={{ color: estadoDaVoz?.voz.importada && estadoDaVoz.ativa ? '#16a34a' : 'var(--color-text-base)', fontWeight: 700, opacity: estadoDaVoz?.voz.importada ? 1 : 0.8 }}>
+              {estadoDaVoz === null
+                ? t('settings.voice.onlyDesktop')
+                : estadoDaVoz.voz.importada
+                  ? estadoDaVoz.ativa ? t('settings.voice.ready') : t('settings.voice.importedOff')
+                  : t('settings.voice.none')}
+            </span>
           </div>
           <div
             style={{
@@ -1234,6 +1168,7 @@ export const SettingsScreen: React.FC = () => {
             {t('settings.voice.lgpd')}
           </div>
         </section>
+
 
         <section aria-labelledby="filter-title" style={cardStyle}>
           <div

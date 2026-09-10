@@ -6,14 +6,20 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 // Compila o processo main + preload do Electron (TypeScript -> CJS).
 const options = {
-  entryPoints: [path.join(__dirname, 'main.ts'), path.join(__dirname, 'preload.ts')],
+  entryPoints: [
+    path.join(__dirname, 'main.ts'),
+    path.join(__dirname, 'preload.ts'),
+    path.join(__dirname, 'overlayPreload.ts'),
+  ],
   outdir: path.join(__dirname, '..', 'dist-electron'),
   outExtension: { '.js': '.cjs' },
   bundle: true,
   platform: 'node',
   format: 'cjs',
   target: 'node20',
-  external: ['electron'],
+  // `koffi` é um módulo nativo (Node-API): fica em node_modules e é carregado
+  // em tempo de execução pelo adaptador do Windows — nunca entra no bundle.
+  external: ['electron', 'koffi'],
   sourcemap: true,
   logLevel: 'info',
 };

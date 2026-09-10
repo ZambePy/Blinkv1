@@ -49,7 +49,11 @@ export function permitirNavegacao(url: string | null | undefined): boolean {
  * - `connect-src` só aceita a própria origem e `localhost` — é o que torna a
  *   promessa de privacidade (nada sai do dispositivo) uma política de
  *   navegador. O `localhost` cobre o servidor de dev e o backend de
- *   demonstração das telas de chatbot/perfis.
+ *   demonstração das telas de chatbot/perfis. A ÚNICA exceção é a origem do
+ *   Supabase do IrisFlow (login, licença, mensagens do cuidador), acrescentada
+ *   por `cspComNuvem` quando `VITE_SUPABASE_URL` está configurada — e só ela:
+ *   imagem, landmarks, perfil de calibração e relatório bruto continuam sem
+ *   rota para fora.
  * - `blob:` em worker/media: o worker do L2CS e o `<video>` da câmera.
  *
  * No build empacotado (`file://`) não há cabeçalho HTTP; a mesma política é
@@ -85,3 +89,37 @@ export const CSP_DEV = CSP.replace(
   "script-src 'self' 'wasm-unsafe-eval'",
   "script-src 'self' 'wasm-unsafe-eval' 'unsafe-inline'",
 );
+
+/**
+ * Origem da nuvem do IrisFlow (projeto Supabase), normalizada, ou `null` se a
+ * URL não servir. Só `https:` — a chave anônima e o token da sessão viajam
+ * nessa conexão.
+ */
+export function origemDaNuvem(url: string | null | undefined): string | null {
+  if (!url) return null;
+  let u: URL;
+  try {
+    u = new URL(url.trim());
+  } catch {
+    return null;
+  }
+  if (u.protocol !== 'https:' || !u.hostname) return null;
+  return u.origin;
+}
+
+/**
+ * CSP com as origens da nuvem liberadas em `connect-src` (HTTPS para REST/RPC
+ * e Edge Functions, WSS para o realtime das mensagens do cuidador). Aceita
+ * mais de uma URL (Supabase e, se houver, a Edge Function hospedada fora).
+ * Qualquer outra diretiva fica intacta; sem URL válida devolve a política
+ * original.
+ */
+export function cspComNuvem(csp: string, ...urls: Array<string | null | undefined>): string {
+  const origens = [...new Set(urls.map(origemDaNuvem).filter((o): o is string => o !== null))];
+  if (origens.length === 0) return csp;
+  const extras = origens.flatMap((o) => [o, o.replace(/^https:/, 'wss:')]).join(' ');
+  return csp
+    .split('; ')
+    .map((d) => (d.startsWith('connect-src ') ? `${d} ${extras}` : d))
+    .join('; ');
+}

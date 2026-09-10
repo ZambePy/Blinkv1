@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ThumbsUp, Send } from 'lucide-react';
 import { api } from '../../utils/api';
+import { emitirFalaDoPaciente } from '../../cloud/eventos';
 import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
@@ -16,6 +17,8 @@ export const IAmOkScreen: React.FC = () => {
   const dispatchSignal = useCallback(async () => {
     if (sending || sent) return;
     setSending(true);
+    // O celular do cuidador recebe como mensagem de sistema na conversa.
+    emitirFalaDoPaciente('Estou bem', 'sistema');
     try {
       await api.sendIAmOk(currentProfile?.id ?? 'anon');
       toast.success('Sinal "Estou Bem" enviado.');

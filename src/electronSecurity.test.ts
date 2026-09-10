@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { origemConfiavel, permitirPermissao, permitirNavegacao, CSP, CSP_DEV } from './electronSecurity';
+import { origemConfiavel, permitirPermissao, permitirNavegacao, CSP, CSP_DEV, cspComNuvem, origemDaNuvem } from './electronSecurity';
 
 // A decisão de segurança do Electron é testável sem abrir o Electron.
 
@@ -116,5 +116,35 @@ describe('a CSP fecha a promessa de privacidade', () => {
     const semScript = (p: string) => p.split('; ').filter((d) => !d.startsWith('script-src'));
     expect(semScript(CSP_DEV)).toEqual(semScript(CSP));
     expect(CSP_DEV).not.toMatch(/script-src[^;]*'unsafe-eval'/);
+  });
+});
+
+describe('CSP com a origem da nuvem', () => {
+  it('sem URL a política é a original', () => {
+    expect(cspComNuvem(CSP, undefined)).toBe(CSP);
+    expect(cspComNuvem(CSP, '')).toBe(CSP);
+    expect(cspComNuvem(CSP, 'nao-e-url')).toBe(CSP);
+  });
+
+  it('só https entra; http e outros protocolos são recusados', () => {
+    expect(origemDaNuvem('http://abc.supabase.co')).toBeNull();
+    expect(origemDaNuvem('ftp://abc.supabase.co')).toBeNull();
+    expect(origemDaNuvem('https://abc.supabase.co/rest/v1')).toBe('https://abc.supabase.co');
+  });
+
+  it('libera REST (https) e realtime (wss) SÓ em connect-src', () => {
+    const csp = cspComNuvem(CSP, 'https://abc.supabase.co');
+    const diretivas = Object.fromEntries(csp.split('; ').map((d) => [d.split(' ')[0], d]));
+    expect(diretivas['connect-src']).toContain('https://abc.supabase.co');
+    expect(diretivas['connect-src']).toContain('wss://abc.supabase.co');
+    // nenhuma outra diretiva ganhou a origem — script-src continua só local
+    expect(diretivas['script-src']).toBe("script-src 'self' 'wasm-unsafe-eval'");
+    expect(diretivas['default-src']).toBe("default-src 'self'");
+    expect(csp.split('supabase.co').length - 1).toBe(2);
+  });
+
+  it('a origem remota continua NÃO sendo destino de navegação', () => {
+    // CSP libera fetch/websocket; a janela em si nunca navega para lá.
+    expect(permitirNavegacao('https://abc.supabase.co/')).toBe(false);
   });
 });

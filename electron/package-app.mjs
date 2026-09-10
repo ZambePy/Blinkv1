@@ -21,10 +21,26 @@
  */
 
 import { build } from 'electron-builder';
+import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const output = path.join(os.tmpdir(), 'irisflow-release');
+
+// Motor de voz (clonagem local). E opcional no empacotamento: se a pasta gerada
+// por voice-engine/build-voice-engine.ps1 existir, vai para resources/voice-engine;
+// se nao, o app e empacotado sem ela e a tela de Voz avisa que o motor nao veio.
+const motorDeVoz = path.join(__dirname, '..', 'voice-engine', 'dist', 'irisflow-voz');
+const extraResources = fs.existsSync(motorDeVoz)
+  ? [{ from: motorDeVoz, to: 'voice-engine', filter: ['**/*'] }]
+  : [];
+console.log(
+  extraResources.length
+    ? '[electron:package] motor de voz encontrado: sera incluido em resources/voice-engine'
+    : '[electron:package] motor de voz NAO encontrado (voice-engine/dist/irisflow-voz): empacotando sem ele',
+);
 
 console.log('[electron:package] Iniciando empacotamento via electron-builder...');
 console.log('[electron:package] Output (fora do OneDrive):', output);
@@ -33,6 +49,7 @@ const artifacts = await build({
   config: {
     // Sobrescreve apenas o diretorio de output; todo o resto vem do package.json "build".
     directories: { output },
+    extraResources,
   },
 });
 

@@ -66,6 +66,25 @@ export type {
 // Data-no-dwell="true" on any element that should opt out.
 export const DWELL_SELECTOR = 'button, a, [role="button"], [role="link"]';
 
+/**
+ * Suspensão do dwell do APP.
+ *
+ * No Modo Computador a janela do app fica escondida, mas o motor continua
+ * emitindo (é ele que alimenta a sobreposição sobre o Windows) e este
+ * dispatcher continuaria clicando nos botões da tela oculta — inclusive no
+ * botão flutuante de emergência, que fica acima de qualquer escudo visual.
+ * Com o dwell suspenso, nenhum alvo do app acumula; o clique por piscada
+ * também para. É uma variável de módulo, não estado React: precisa valer no
+ * mesmo frame em que o modo liga, sem esperar re-render.
+ */
+let dwellSuspenso = false;
+export function suspenderDwell(suspenso: boolean): void {
+  dwellSuspenso = suspenso;
+}
+export function dwellEstaSuspenso(): boolean {
+  return dwellSuspenso;
+}
+
 interface GazeContextValue {
   subscribe: (cb: (sample: GazeSample) => void) => () => void;
   state: EngineState;
@@ -715,9 +734,10 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           ) as HTMLElement | null)
         : null;
 
-      if (engineIsCalibrating && !alvoDuranteCalibracao) {
-        // Nada além da emergência é clicável: um dwell acidental na UI da
-        // própria calibração corromperia a coleta.
+      if (dwellSuspenso || (engineIsCalibrating && !alvoDuranteCalibracao)) {
+        // Suspenso (Modo Computador: a janela está oculta e quem clica é a
+        // sobreposição) ou calibrando: nada além da emergência é clicável — um
+        // dwell acidental na UI da própria calibração corromperia a coleta.
         clearDwellVisuals();
         dwellStateRef.current = createDwellState();
       } else {
@@ -788,7 +808,7 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         const piscadaPermitida =
           sample.uncalibrated !== true && !isDegraded && target?.isDisabled !== true;
 
-        if (EXPERIMENT.blinkClick) {
+        if (EXPERIMENT.blinkClick && !dwellSuspenso) {
           const rb = stepBlinkClick(blinkClickRef.current, {
             piscando:
               !sample.hasFace || sample.eyeState === undefined
