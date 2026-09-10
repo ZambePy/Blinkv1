@@ -5,6 +5,14 @@ pessoas com Esclerose Lateral Amiotrófica (ELA) e outras condições severas de
 restrição motora. Sem hardware especializado: uma webcam, um computador e
 100 % do processamento local.
 
+O produto entregue à família chama-se **IrisFlow Communicator** — é esse o nome
+do instalador, do atalho, do `productName`, da janela e da tela de abertura.
+**IrisFlow** continua sendo o nome da empresa, e é assim que o app se apresenta
+onde o espaço é curto (barra compacta, rodapés) e ao longo desta documentação.
+Os canais de IPC e as chaves de `localStorage` seguem com o prefixo `irisflow`
+**de propósito**: renomeá-los apagaria a calibração, os perfis, o vocabulário e
+o vínculo de quem já usa o app.
+
 ![Vite](https://img.shields.io/badge/Vite-8-646CFF?logo=vite&logoColor=white)
 ![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
 ![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
@@ -24,18 +32,34 @@ teclado, fala frases prontas, pede ajuda, joga e descansa, usando só os olhos.
 No **Modo Computador** o mesmo cursor sai do app e passa a controlar o Windows
 inteiro (clicar, arrastar, rolar, digitar), e com a **voz personalizada** o
 que o paciente diz sai na própria voz dele, recriada a partir de uma gravação
-— tudo processado neste computador.
+— tudo processado neste computador. Um **assistente de escrita** aprende as
+palavras e as frases dessa pessoa e as oferece de volta, para que dizer o que
+já foi dito custe uma fixação em vez de vinte.
 
 Duas pessoas usam o app: o **paciente**, que opera tudo pelo olhar em telas
 de alvos grandes e alto contraste, e o **cuidador**, que usa mouse e teclado
 para configurar, calibrar e acompanhar o rastreamento.
 
-Nenhuma imagem, landmark facial, perfil de calibração, relatório, áudio de
-referência da voz ou modelo sai do dispositivo. No Electron isso é imposto por
-política de conteúdo (CSP), não só por disciplina de código. As únicas saídas
-de rede são a conta IrisFlow (texto escolhido pelo paciente, alertas e números
-agregados — ver `INTEGRACAO.md`) e o download, uma vez, dos pesos do modelo de
-voz.
+A privacidade do produto se organiza em **três camadas**, e vale enunciá-las
+nesta ordem porque é assim que elas são explicadas ao cuidador e ao paciente:
+
+1. **O rastreamento é 100 % local e não sai nunca.** Imagens da câmera, marcos
+   faciais, vetores de calibração e os registros brutos de sessão ficam neste
+   computador. No Electron isso é imposto por política de conteúdo (CSP), não
+   só por disciplina de código.
+2. **O que o paciente escolheu dizer sai apenas quando há conta vinculada** — o
+   texto que ele mandou falar, os alertas de socorro e os indicadores agregados
+   da calibração vão para o celular do cuidador. Sem conta, nada disso existe;
+   o app funciona inteiro offline. Ver `INTEGRACAO.md`.
+3. **Dois módulos dependem de autorização expressa por funcionalidade, e
+   revogável**: a **clonagem de voz**, porque o áudio de referência é dado
+   biométrico, e o **chatbot integrado**. Este último hoje existe só na versão
+   local — o assistente de escrita — e por isso não envia nada; o dia em que
+   houver um modo de nuvem, ele passará pela mesma autorização separada que a
+   voz tem hoje.
+
+A única outra saída de rede do app é o download, uma vez, dos pesos do modelo
+de voz, feito pelo processo Python fora do renderer.
 
 ---
 
@@ -109,6 +133,11 @@ amostra-a-amostra e BCEA de 68 %), perda de dados, taxa de acerto por raio de
 alvo, a distância medida durante o teste e o **tamanho mínimo de botão** que o
 erro daquela pessoa exige. O protocolo completo, o significado de cada
 métrica, o checklist de relato e as referências estão em [`docs/MEDICOES.md`](docs/MEDICOES.md).
+O acompanhamento **de campo** durante a beta — quinze minutos por casa por
+semana, seis perguntas e uma planilha — é outro documento, e de propósito:
+[`docs/PROTOCOLO-SEMANAL.md`](docs/PROTOCOLO-SEMANAL.md). O de laboratório
+responde qual pipeline erra menos; o semanal responde se a pessoa conseguiu
+falar naquela semana.
 
 ---
 
@@ -142,6 +171,11 @@ src/                        núcleo do pipeline (TypeScript puro, testado com Vi
   computador/               Modo Computador: geometria (janela→tela→físico),
                             structs INPUT do Win32 e contrato IPC (puro, testado)
   voz/                      contrato da voz clonada (IPC e protocolo do motor)
+  voz/requisitos.ts         faixas de hardware da voz clonada e em qual o
+                            computador atual cai
+  assistente/               motor do assistente de escrita: modelo aprendido
+                            (palavras, bigramas, frases, respostas), sugestão de
+                            palavra e de frase (puro, testado)
 
 frontend/src/               interface (React 19, Tailwind v4, HashRouter)
   pages/onboarding/         boas-vindas, calibração e teste
@@ -157,6 +191,13 @@ frontend/src/               interface (React 19, Tailwind v4, HashRouter)
                             lupa, teclado; máquina de estados pura e testada
   services/voz/             `falar()`: voz clonada quando pronta, senão a do sistema
   pages/settings/VozScreen  Configurações → Voz personalizada (termo, importação)
+  services/assistente/      persistência do assistente (localStorage) e a porta
+                            única que as telas usam para pedir sugestão
+  utils/wordPredictor.ts    adaptador do preditor antigo sobre o motor novo;
+                            migra o vocabulário `irisflow_user_words` uma vez
+  services/apresentacao.ts  modo apresentação: corta a saída para a nuvem
+  services/diagnostico/     relatório de suporte (JSON sem nada do paciente)
+  pages/games/              jogos por fixação ocular (alvo, memória, desenho)
   index.css                 tokens de design (cores, raios, tipografia)
 
 electron/                   processo principal, preload e IPC de sistema
@@ -166,8 +207,13 @@ electron/                   processo principal, preload e IPC de sistema
   overlayPreload.ts         ponte estreita da sobreposição
 voice-engine/               motor de voz local em Python (Chatterbox multilíngue):
                             preparo do áudio, síntese, protocolo JSON, testes, build
-docs/MEDICOES.md            protocolo e métricas de medição
+build/                      ícone do aplicativo (icon.ico, icon.png), gerado do
+                            símbolo oficial e consumido pelo electron-builder
+docs/MEDICOES.md            protocolo e métricas de medição (laboratório)
+docs/PROTOCOLO-SEMANAL.md   acompanhamento semanal das casas da beta (campo)
+docs/ROTEIRO-DE-TESTE.md    roteiro de teste manual, em blocos
 docs/medicoes/historico/    relatórios reais guardados
+docs/medicoes/beta-semanal-modelo.csv   planilha modelo do protocolo semanal
 ```
 
 ---
@@ -197,6 +243,11 @@ olho: uma lente mais estreita ou a câmera mais perto do rosto melhora a
 precisão mais do que qualquer ajuste de software. A latência da voz
 personalizada em CPU é de alguns segundos por frase nova; frases já ditas
 saem do cache na hora (ver a seção da voz).
+
+Para a **voz clonada** especificamente, a tabela que vale — e que o app mostra
+na tela, com a faixa deste computador destacada — é a de
+[Requisitos de hardware da voz](#requisitos-de-hardware-da-voz), derivada de
+`src/voz/requisitos.ts`.
 
 ---
 
@@ -284,19 +335,37 @@ opções e avisa quando falta recarregar.
    alerta local (som e tela) e, com a conta ligada, também chega ao celular.
 5. **Área do cuidador** (`/settings`, `/settings/voice`, `/caregiver`,
    `/caregiver/guide`): configurações por seção (rastreamento, tela,
-   calibração, voz personalizada, dados), painel com estado do rastreamento e
-   alertas, guia de instalação e leitura do teste de precisão.
+   calibração, voz personalizada, sugestões de escrita, dados), painel com
+   estado do rastreamento e alertas, guia de instalação e leitura do teste de
+   precisão. É também de onde saem o **modo apresentação** e o **relatório de
+   suporte**, descritos adiante.
 
 Regras da interface do paciente: alvos de no mínimo 160×120 px, nada se move
 sob o olhar (sem `transform` em hover), uma ação principal por tela, zona de
 descanso sem alvos, textos curtos e sem jargão.
 
+### Lazer e jogos
+
+O cartão **Lazer** do menu reúne o que não é comunicação: **Estoura Bolhas**,
+**Siga o Alvo**, **Jogo da Memória**, **Desenho**, **Notícias** e
+**Meditação**. Os quatro primeiros foram reescritos para funcionar **por
+fixação ocular** — antes eram esboços controlados por mouse, isto é,
+inutilizáveis exatamente pela pessoa para quem o app existe. O Desenho pinta na
+posição do olhar, assinando `useGaze().subscribe` diretamente em vez de esperar
+por eventos de ponteiro. Notícias e Meditação já existiam como rotas, mas eram
+órfãs: nenhum caminho da interface levava até elas, e agora estão no menu.
+
+Um bug do **Siga o Alvo** merece registro porque falseava o único retorno que o
+jogo dá: o placar subia sozinho, sem o paciente acertar nada. Corrigido — a
+pontuação agora exige a fixação sobre o alvo.
+
 ### Conta IrisFlow (site + app do cuidador)
 
 O app continua 100 % local por padrão (a licença usa o serviço simulado do
 Bloco 1, com as contas de teste). Com `VITE_SUPABASE_URL` e
-`VITE_SUPABASE_ANON_KEY` em `frontend/.env.local` (os mesmos do site), o
-serviço de licença passa a ser o real: o e-mail/senha da assinatura vale aqui,
+`VITE_SUPABASE_ANON_KEY` em `frontend/.env.local` (os mesmos do site) — que
+**já estão gravados neste repositório de trabalho**, apontando para o projeto
+Supabase real —, o serviço de licença passa a ser o real: o e-mail/senha da assinatura vale aqui,
 condicionado ao pagamento; o que o paciente fala vai para o celular do
 cuidador, as respostas do cuidador são faladas na tela, o socorro dispara
 notificação e o resumo da calibração vai para os relatórios do app. **O que sai do computador é só texto escolhido
@@ -373,6 +442,32 @@ Alarmes de emergência e as mensagens lidas do cuidador continuam na voz do
 sistema, de propósito. Tela: **Configurações → Voz personalizada**
 (`/settings/voice`).
 
+> **Recurso experimental.** A tela de Voz e a seção correspondente em
+> Configurações trazem um selo dizendo isso, e ele não é formalidade jurídica:
+> a qualidade da voz depende da gravação de referência, a primeira frase de
+> cada sessão é lenta em CPU e há computadores em que o recurso simplesmente
+> não vale a pena. É melhor que a família saiba disso antes de baixar 1,5 GB de
+> modelo do que descubra depois.
+
+### Requisitos de hardware da voz
+
+A tabela abaixo vive em `src/voz/requisitos.ts` (testada) e é mostrada na
+própria tela de Voz, com a faixa do computador atual **destacada** — o cuidador
+vê onde a máquina dele cai antes de decidir. Os números vêm da medição no
+computador de referência e dos limites já codificados no motor, não de
+estimativa de marketing.
+
+| faixa | memória | núcleos | o que esperar |
+|---|---|---|---|
+| **Abaixo do mínimo** | menos de 8 GB | qualquer | a voz clonada não é recomendada; o paciente fala com a voz do sistema |
+| **Mínimo** | 8 a 12 GB | 4 | funciona com os outros programas fechados; a primeira frase pode passar de um minuto e o computador fica lento enquanto o modelo carrega |
+| **Recomendado** | 16 GB | 8 | primeira frase em cerca de meio minuto; as frases do dia a dia saem do cache, sem espera |
+| **Folgado** | 32 GB ou mais | 12 ou mais | frases novas saem em poucos segundos mesmo fora do cache |
+
+A memória **livre** decide o caso extremo: não adianta ter 32 GB instalados se
+30 estão ocupados — o modelo não carrega. Fora isso vale a pior das duas
+colunas.
+
 - **Modelo**: [Chatterbox multilíngue](https://github.com/resemble-ai/chatterbox)
   (Resemble AI, licença MIT), clonagem zero-shot com português entre os 23
   idiomas. Roda num processo Python ao lado do Electron (`voice-engine/`),
@@ -393,10 +488,20 @@ sistema, de propósito. Tela: **Configurações → Voz personalizada**
   ruído e saiu como "aceitável".
 - **Ao falar**: `services/voz/falar()` procura a frase no **cache** local
   (por voz + texto); se está lá, toca na hora. Se não, pede a geração com um
-  prazo de **2,5 s**: dentro dele sai clonada; passado o prazo, o app fala com
+  prazo de **4 s**: dentro dele sai clonada; passado o prazo, o app fala com
   a voz do sistema e deixa a geração terminar para o cache — a frase sai
-  clonada na próxima vez. Uma fala nova cancela a anterior. O botão
-  **Preparar frases rápidas** pré-sintetiza as frases e pictogramas padrão.
+  clonada na próxima vez. Em CPU isso significa que **a primeira vez de cada
+  frase nova costuma sair na voz do sistema** e a segunda na clonada; por
+  isso, logo depois de importar a voz, o app pré-sintetiza em segundo plano
+  os pictogramas, as frases rápidas **e as 30 frases mais usadas pelo próprio
+  paciente** (botão **Preparar frases rápidas** refaz quando quiser). Uma fala
+  nova cancela a anterior.
+
+  As frases do paciente entraram nessa lista para resolver um sintoma
+  concreto e confuso de diagnosticar: *"a voz clonada funcionou uma vez no
+  teclado e não funcionou nos pictogramas"*. O cache era pré-aquecido só com os
+  textos de fábrica, então a voz saía clonada nas frases que a equipe testava e
+  falhava justamente nas que a pessoa usa o dia inteiro — que são as dela.
 - **Custo**: em CPU comum, 3–8 s por frase nova (mais a carga do modelo na
   primeira frase da sessão); com GPU NVIDIA, abaixo de 1 s. O processo Python
   é encerrado depois de 15 min ocioso para devolver a memória. O motor só é
@@ -445,6 +550,148 @@ um áudio real).
 
 ---
 
+## Assistente de escrita (o chatbot integrado, na versão local)
+
+Este é o "chatbot integrado" que o roteiro de produto pede, implementado como
+**sugestão que roda inteira no dispositivo**. A escolha é deliberada e tem três
+razões que um serviço de nuvem não conseguiria pagar hoje: mandar conversa de
+saúde para fora do computador, custo por usuário ativo, e dependência de
+internet numa tela que precisa funcionar sempre — inclusive quando a operadora
+cai e a pessoa precisa pedir ajuda.
+
+O motor puro vive em `src/assistente/` e a persistência em
+`frontend/src/services/assistente/`. Ele aprende quatro coisas com **este**
+paciente, e nenhuma sai daqui:
+
+- **palavras** — quantas vezes ele usou cada uma;
+- **bigramas** — que palavra costuma vir depois de outra;
+- **frases inteiras** — com frequência e recência, porque recência desempata;
+- **respostas às perguntas do cuidador** — o que ele respondeu a cada pergunta.
+
+A quarta é a que transforma predição de palavra em conversa. Quando o cuidador
+pergunta "quer água?" pela décima vez, a resposta que o paciente deu nas nove
+anteriores fica a uma fixação de distância.
+
+Onde aparece: **sugestão de palavra no teclado**, **sugestão de frase inteira
+no teclado** e **sugestão de frase inteira na tela de Conversa**. Em
+Configurações há liga/desliga e um botão **apagar aprendizado** — o modelo é
+JSON puro no `localStorage` justamente para que exportar, auditar e apagar seja
+trivial.
+
+`frontend/src/utils/wordPredictor.ts` continua existindo, mas virou
+**adaptador** do motor novo: as telas e os testes que já importavam
+`learnWord`, `learnBigram`, `learnSentence` e `getPredictions` seguem
+funcionando, e o vocabulário antigo (`irisflow_user_words`,
+`irisflow_user_bigrams`) é **migrado uma única vez** na primeira leitura —
+ninguém perde o que já tinha ensinado ao app. Para código novo, use
+`services/assistente` diretamente: é ele que sugere frases, onde está a
+economia real de fixações.
+
+**A porta para a nuvem fica aberta e explícita.** O tipo `ModoDoAssistente` já
+prevê `'nuvem'` ao lado de `'local'`, para que as telas tratem o caso desde
+agora e a troca futura não vire uma varredura pelo código inteiro. Só `'local'`
+está implementado. Ligar o modo de nuvem exigirá **autorização expressa por
+funcionalidade, revogável — o mesmo regime da clonagem de voz**, porque aí sim
+a conversa do paciente passaria a sair do dispositivo.
+
+---
+
+## Modo apresentação e relatório de suporte
+
+Duas ferramentas do cuidador que existem por motivos práticos, ambas em
+Configurações.
+
+**Modo apresentação** (`frontend/src/services/apresentacao.ts`). Numa
+demonstração para clínica ou investidor, alguém vai olhar para o botão de
+socorro — e, sem este modo, esse olhar dispara um pedido de emergência de
+verdade: notificação no celular de um cuidador real, linha no histórico de
+alertas, escalonamento se ninguém responder. Ligado, o modo **corta a saída
+para a nuvem no barramento `cloud/eventos.ts`** (nem fala, nem alerta, nem
+calibração, nem contador saem do computador), troca o nome do paciente por
+"Paciente demonstração" e mantém uma **faixa fixa na tela**, para que ninguém
+na plateia confunda demonstração com uso real. O que ele **não** faz é simular
+dados: as telas continuam mostrando o estado verdadeiro do rastreamento, da
+calibração e da voz. Uma demonstração que inventa números não prova nada a quem
+entende do assunto e mente para quem não entende.
+
+**Relatório de suporte**
+(`frontend/src/services/diagnostico/relatorioDeSuporte.ts`). Um botão que salva
+um JSON para a família anexar quando algo dá errado, sem precisar saber abrir
+console nenhum. Ele traz versão do app, plataforma, núcleos, memória, tela,
+resumo das calibrações, contadores de uso, tamanho do modelo do assistente,
+estado do motor de voz e os **últimos 40 erros e avisos** do console.
+
+A regra que governa o conteúdo é dura e **tem teste que a segura**: nenhuma
+frase escrita pelo paciente, nenhuma imagem e nenhum vetor de calibração entram
+no arquivo. Um relatório de diagnóstico é exatamente onde uma promessa de
+privacidade costuma ser quebrada em silêncio. Se alguém precisar do conteúdo
+para depurar, a resposta certa é reproduzir o problema, não exportar a vida de
+comunicação de uma pessoa por e-mail.
+
+---
+
+## Instalador
+
+O ícone do aplicativo está em `build/icon.ico` e `build/icon.png`, gerados do
+símbolo oficial e apontados em `package.json` → `build.win.icon`,
+`build.mac.icon` e `build.linux.icon`, além da própria `BrowserWindow`. O NSIS
+deixou de ser instalação silenciosa: `oneClick: false`, com escolha da pasta de
+instalação e atalho **IrisFlow Communicator**.
+
+### SmartScreen: o aviso do Windows, e as três saídas
+
+O instalador **não é assinado**. Consequência, dita sem rodeio: na primeira
+execução o Windows vai mostrar a tela azul *"O Windows protegeu o
+computador"*, e o botão para prosseguir fica escondido atrás de **"Mais
+informações"**. Isso não é sintoma de defeito no build — é o comportamento
+padrão para qualquer executável novo sem reputação acumulada.
+
+Há três saídas, e a escolha é de negócio, não técnica:
+
+1. **Conviver com o aviso durante a beta.** Custo zero. Exige instruir a
+   família, por escrito e com captura de tela, a clicar em *Mais informações →
+   Executar assim mesmo*. É o que vale enquanto o público é conhecido e pequeno.
+2. **Certificado de assinatura de código OV** (validação da organização). O
+   aviso não some de imediato: o certificado passa a **acumular reputação** no
+   SmartScreen conforme as instalações acontecem, e isso leva algum tempo.
+3. **Certificado EV** (validação estendida). Remove o aviso desde a primeira
+   instalação, mas custa mais que o OV e exige **token físico** (ou HSM) para
+   guardar a chave, o que também complica assinar em CI.
+
+Os preços variam por autoridade certificadora e por prazo, e mudam com
+frequência; consulte na hora de decidir em vez de confiar em número escrito
+aqui.
+
+### Atualização automática
+
+Na beta os bugs vão aparecer, e "baixe o instalador de novo e passe pelo
+SmartScreen outra vez" não é um pedido que uma família atende duas vezes. Por
+isso o app traz o `electron-updater` (`electron/atualizacao.ts`), com uma
+política deliberadamente simples: **baixa sozinho, nunca reinicia sozinho**.
+Reiniciar no meio de uma frase de quem se comunica por fixação ocular é perder
+a frase. A versão baixada entra quando o cuidador clica em *Reiniciar agora*
+na faixa que aparece no canto da tela (botão de mouse, sem alvo de olhar), ou
+sozinha na próxima vez que o app fechar.
+
+Onde o app procura versões novas **não está no código**. No empacotamento,
+`electron/package-app.mjs` lê a variável `IRISFLOW_UPDATE_URL` e grava o
+endereço em `resources/atualizacao.json`; sem a variável, o app sai com a
+atualização desligada e diz isso em Configurações e no log. O servidor esperado
+é o provedor *generic* do electron-updater: um diretório HTTP estático com o
+`latest.yml` e o instalador — os dois saem lado a lado em
+`%TEMP%\irisflow-release` ao final do `npm run electron:build`. Qualquer
+hospedagem estática serve (um bucket com acesso público de leitura, um GitHub
+Release, uma pasta num site). O fluxo de publicar uma correção fica, então:
+subir a versão em `package.json`, empacotar com `IRISFLOW_UPDATE_URL` definida
+e copiar `latest.yml` + `IrisFlow Setup X.Y.Z.exe` para aquele endereço. Os
+apps abertos verificam 20 segundos depois de abrir e a cada seis horas.
+
+Atualização não assinada tem o mesmo aviso do SmartScreen na instalação, mas o
+`electron-updater` instala pelo NSIS já aprovado uma vez, o que na prática
+elimina o clique em "executar assim mesmo" a partir da segunda versão.
+
+---
+
 ## Verificação
 
 ```bash
@@ -458,14 +705,28 @@ cd voice-engine && python -m pytest -q tests   # motor de voz (dublê do modelo)
 
 Tudo isso roda no CI (`.github/workflows/ci.yml`, Windows) a cada push.
 
+**Estado medido nesta versão:** o núcleo passa em **1402 testes (mais 1 pulado)
+distribuídos em 132 arquivos**, e a interface em **799 testes em 97 arquivos** —
+**2201 testes ao todo**. `tsc --noEmit` termina **sem nenhum erro** nos dois
+projetos, o do núcleo (`tsconfig.json`) e o do Electron
+(`electron/tsconfig.json`).
+
 Os testes do núcleo cobrem os módulos puros, onde os limiares e as leis de
 controle vivem: calibração, Ridge, filtros, decodificação do L2CS, prontidão,
 ajuste de câmera, geometria de tela, protocolo de medição, segurança do
-Electron, geometria e structs Win32 do Modo Computador e protocolo da voz. Na
-interface, a máquina de estados da sobreposição e a própria sobreposição são
-testadas de ponta a ponta com uma ponte falsa (armar → lupa → clique no ponto
-mapeado); `falar()` é testado com cache, prazo e substituição. O harness sintético (`src/testUtils/`) roda o pipeline inteiro sobre
-trajetórias determinísticas e barra regressões contra um baseline versionado.
+Electron, geometria e structs Win32 do Modo Computador, protocolo da voz, as
+faixas de hardware da voz (`voz/requisitos.ts`) e o motor do assistente de
+escrita (`assistente/`). Na interface, a máquina de estados da sobreposição e a
+própria sobreposição são testadas de ponta a ponta com uma ponte falsa (armar →
+lupa → clique no ponto mapeado); `falar()` é testado com cache, prazo e
+substituição; o modo apresentação é testado pelo que ele promete — que os
+eventos `fala`, `ajuda` e `uso` **não** saem do barramento enquanto está
+ligado —; e o relatório de suporte tem teste dedicado a garantir que nenhuma
+frase do paciente, imagem ou vetor de calibração entre no arquivo. Os jogos por
+fixação ocular também têm testes próprios, incluindo o do placar do Siga o Alvo
+que antes subia sozinho. O harness sintético (`src/testUtils/`) roda o pipeline
+inteiro sobre trajetórias determinísticas e barra regressões contra um baseline
+versionado.
 
 ---
 
@@ -473,8 +734,8 @@ trajetórias determinísticas e barra regressões contra um baseline versionado.
 
 | plataforma | estado |
 |---|---|
-| Windows 10/11 (Electron) | testado; lê a diagonal do monitor pelo EDID; Modo Computador e voz personalizada completos |
-| Chromium (Chrome, Edge) | testado; sem acesso à geometria do sistema, sem Modo Computador nem voz personalizada |
+| Windows 10/11 (Electron) | testado; lê a diagonal do monitor pelo EDID; Modo Computador completo e voz personalizada completa, esta ainda **experimental** |
+| Chromium (Chrome, Edge) | testado; sem acesso à geometria do sistema, sem Modo Computador nem voz personalizada. O assistente de escrita funciona (é só renderer) |
 | Linux (Electron) | não testado; Modo Computador em X11 via `xdotool`; motor de voz roda (Python) |
 | macOS (Electron) | não testado; Modo Computador ainda sem adaptador (Acessibilidade) |
 

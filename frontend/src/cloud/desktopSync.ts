@@ -33,12 +33,21 @@ export type AcaoSync =
   | { action: 'settings.get' }
   /** Rótulo da voz em uso, para o app do cuidador mostrar em Ajustes → Voz. */
   | { action: 'voice.status'; voice: string }
+  /**
+   * Relatório de suporte (opt-in, desligado por padrão). Só números e erros
+   * do aplicativo — `montarRelatorio()` garante que nenhuma frase do paciente
+   * entra. `motivo: 'erro'` é o envio automático após uma falha; `'manual'` é
+   * o botão em Ajustes.
+   */
+  | { action: 'report.send'; report: unknown; motivo: 'erro' | 'manual'; resumo?: string }
   | { action: 'device.info' };
 
 export interface RespostaSync {
   ok?: boolean;
   id?: string;
   error?: string;
+  /** `voice.status` e `report.send`: o servidor gravou de fato? */
+  stored?: boolean;
   pending_messages?: number;
   messages?: Message[];
   settings?: PatientSettings | null;

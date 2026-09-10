@@ -52,6 +52,11 @@ export function snapshotFromDiagnostics(
     pose: d.pose,
     brightness,
     contrast,
+    // `undefined` até o medidor rodar a primeira vez — a tela mostra
+    // "medindo…" em vez de aprovar a luz por falta de dado.
+    contraluz: d.framing.contraluz
+      ? { razao: d.framing.contraluz.razao, nivel: d.framing.contraluz.nivel }
+      : undefined,
     detectorConfidence,
     specularRatio,
     specularStability: d.framing.specularStability,

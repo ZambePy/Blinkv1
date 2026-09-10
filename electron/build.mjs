@@ -19,7 +19,7 @@ const options = {
   target: 'node20',
   // `koffi` é um módulo nativo (Node-API): fica em node_modules e é carregado
   // em tempo de execução pelo adaptador do Windows — nunca entra no bundle.
-  external: ['electron', 'koffi'],
+  external: ['electron', 'koffi', 'electron-updater'],
   sourcemap: true,
   logLevel: 'info',
 };

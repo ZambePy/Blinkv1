@@ -33,7 +33,7 @@ const EmBreve: React.FC<{ modulo: Modulo }> = ({ modulo }) => {
   const c = CONTEUDO[modulo];
 
   return (
-    <GazePageLayout showBack backRoute="/menu" showEmergency>
+    <GazePageLayout showBack backRoute="/menu">
       <div
         style={{
           display: 'flex',

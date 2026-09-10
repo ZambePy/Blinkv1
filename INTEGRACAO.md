@@ -31,14 +31,31 @@ PROJETO STARTUP (este) ── login único, licença, ───────┤�
 | nuvem → desktop | mensagens do cuidador | realtime `postgres_changes` em `messages` (+ polling de reserva) | imediato |
 | nuvem → desktop | ajuste remoto (tempo de fixação, suavização) e frases rápidas | realtime em `patient_settings` / `quick_phrases` + `settings.get` | imediato / na abertura |
 | desktop → nuvem | "mensagem do cuidador foi falada" | `desktop-sync` `message.spoken` | após vocalizar |
-| desktop → nuvem | rótulo da voz em uso ("Voz clonada (local)" / "pt-BR padrão") | `desktop-sync` `voice.status` (só texto; `update` em `patient_settings.voice`) | ao ligar os serviços e quando a voz muda |
+| desktop → nuvem | rótulo da voz em uso ("Voz clonada (local)" / "pt-BR padrão") | `desktop-sync` `voice.status` (só texto; `update` em `patient_settings.voice`) — responde `{ ok, stored }` | ao ligar os serviços e quando a voz muda |
 | desktop → internet | download dos pesos do modelo de voz (Hugging Face), **uma vez** | processo Python (`voice-engine`), fora do renderer e da CSP | botão "Baixar o modelo" na tela de Voz |
 
 **O que NUNCA sai:** imagem da câmera, marcos faciais, vetores de features, perfil de calibração,
-relatório bruto (amostras), **áudio de referência da voz, modelo de voz e frases geradas**. Isso é garantido por três camadas: o código só envia o que está em
+relatório bruto (amostras), **áudio de referência da voz, modelo de voz e frases geradas** e o
+**modelo aprendido do assistente de escrita** (palavras, bigramas, frases e respostas do
+paciente — o histórico de comunicação de uma pessoa, que mora no `localStorage` e não tem
+endereço de rede em lugar nenhum do módulo). Isso é garantido por três camadas: o código só envia o que está em
 `frontend/src/cloud/sessao.ts` (resumo numérico), a CSP só libera a origem do Supabase em
 `connect-src` (`src/electronSecurity.ts`), e a Edge Function só aceita colunas de uma lista
 (`SESSION_FIELDS` em `irisflow-cuidador/supabase/functions/desktop-sync/index.ts`).
+
+### A formulação de privacidade em três camadas
+
+É esta a redação oficial, e os três projetos devem repeti-la nos mesmos termos:
+
+1. **Dados do rastreamento — 100 % locais, nunca saem.** Imagens da câmera, marcos faciais,
+   calibração e registros brutos de sessão.
+2. **Só sai com conta vinculada** — e só isto: o texto que o paciente **escolheu** enviar, os
+   alertas e os indicadores agregados. É o que este documento inteiro descreve.
+3. **Dois módulos exigem autorização expressa por funcionalidade, e revogável:** a **clonagem de
+   voz**, porque o áudio de referência é dado biométrico (LGPD art. 5º, II e art. 11), e o
+   **chatbot integrado**. O segundo hoje está implementado apenas na versão local — o assistente
+   de escrita —, que **não envia nada**; um eventual modo de nuvem (`ModoDoAssistente = 'nuvem'`,
+   já previsto no tipo e não implementado) entra sob o mesmo regime de autorização da voz.
 
 ## 2. Mapa de arquivos
 
@@ -78,7 +95,7 @@ CloudProvider (cloud/CloudContext.tsx) ──lê──► useLicense(): status a
 | `supabaseClient.ts` | Cliente supabase-js único, sessão persistida no cofre. | `config`, `armazenamento` | `supabaseLicenseService`, `CloudContext` |
 | `desktopSync.ts` | Cliente da Edge Function `desktop-sync`: headers `x-device-key` + JWT anônimo; **fila offline** para mensagem, socorro, calibração e fim de sessão; `drenar()`, `limparFila()`; só 401/403 com `unauthorized`/`device_revoked` contam como chave perdida (401 do gateway vai para a fila). | `config`, `armazenamento` | `CloudContext` |
 | `sessao.ts` | `resumoDoRelatorio()` e `camposDeCalibracao()`: **o único lugar que decide o que do relatório de precisão sai do computador** (agregados; nunca amostras). | `@tracker/accuracy` (tipos) | `CloudContext` |
-| `eventos.ts` | Barramento: telas emitem `fala`, `ajuda`, `calibracao`, `uso`; o provider escuta. Telas não importam Supabase. | — | telas do paciente, `CloudContext` |
+| `eventos.ts` | Barramento: telas emitem `fala`, `ajuda`, `calibracao`, `uso`; o provider escuta. Telas não importam Supabase. **É aqui que o modo apresentação corta a saída** — com ele ligado o evento é descartado no barramento, antes de virar chamada de rede, e um `console` registra o descarte. | `services/apresentacao` | telas do paciente, `CloudContext` |
 | `CloudContext.tsx` | O provider. Segue `useLicense()`: `active`/`grace` + `token` → liga heartbeat, sessão, realtime e polling; `none`/`blocked` → encerra a sessão e desliga. Fala as mensagens do cuidador (TTS) e confirma (`message.spoken`), aplica ajustes remotos (dwell em ms, preset `-v2`), trata os eventos das telas. Chave recusada → limpa tudo e pede `reverificar()` ao LicenseContext (vira `revoked` → `/login`). `useCloud()` é inerte fora do provider. | tudo acima + `GazeContext`, `SettingsContext`, `LicenseContext`, `dwellMs` | `App.tsx`, telas |
 | `CloudBanners.tsx` | Cartão "Mensagem do cuidador" com Ouvir de novo / Responder (dwell). | `CloudContext` | `App.tsx` |
 | `CloudStatusLines.tsx` | Duas linhas na página **Conta e assinatura** (`/conta`): estado do celular do cuidador (tempo real / consulta periódica / offline, fila, não faladas) e onde as credenciais estão guardadas. Só com a nuvem configurada. | `CloudContext`, `services/license` | `pages/conta/ContaEAssinatura.tsx` |
@@ -158,6 +175,21 @@ Voz personalizada
 | `frontend/src/services/voz/index.ts` | `falar()` cache-first com prazo de 2,5 s e "última vence"; gate por `plan.features.voz`. | Telas chamam só `falar`. |
 | `frontend/src/pages/settings/VozScreen.tsx` | Termo de consentimento (texto em `TERMO_DE_CONSENTIMENTO`), download, importação, amostra, cache, remover. | |
 | `frontend/src/services/license/types.ts` | `Plan.features` (novo, opcional) vem de `planoDe` no serviço real. | Ausente = liberado (mock/cache antigo). |
+
+### Assistente de escrita, modo apresentação e relatório de suporte
+
+Os três são **locais** e nenhum deles fala com a nuvem. Entram neste documento porque dois
+tocam a fronteira que ele guarda: o assistente é o "chatbot integrado" do roteiro de produto —
+e portanto o candidato mais óbvio a virar uma chamada de rede algum dia — e o modo apresentação
+é justamente um interruptor da saída para a nuvem.
+
+| Arquivo | Papel | Toque com cuidado |
+| --- | --- | --- |
+| `src/assistente/` | Motor puro do assistente: `modelo.ts` (palavras, bigramas, frases, respostas), `palavras.ts`, `frases.ts`, `normalizar.ts`, `dicionario.ts`. `ModoDoAssistente = 'local' \| 'nuvem'` — só `'local'` implementado. | Nenhum arquivo deste diretório pode ganhar `fetch`. Se um dia ganhar, é porque o modo de nuvem foi implementado, e aí ele precisa de autorização por funcionalidade e de uma linha nova na tabela da seção 1. |
+| `frontend/src/services/assistente/` | Persistência (`localStorage`), poda por tamanho e a **porta única** que as telas usam. Nenhuma tela conhece o modelo. | É a troca que torna a rota de nuvem futura uma mudança aqui dentro, e não uma varredura por dez telas. |
+| `frontend/src/utils/wordPredictor.ts` | Adaptador da API antiga sobre o motor novo; migra `irisflow_user_words`/`irisflow_user_bigrams` uma vez. | Não apague: telas e testes antigos ainda importam daqui, e a migração precisa rodar ao menos uma vez em cada instalação existente. |
+| `frontend/src/services/apresentacao.ts` | Liga/desliga em Configurações; corta os eventos em `cloud/eventos.ts`; troca o nome do paciente por "Paciente demonstração"; faixa fixa na tela. Não simula dados. | Uma ação nova que fale com a nuvem **por fora do barramento** escapa deste corte. Se precisar criar uma, faça-a passar por `eventos.ts`. |
+| `frontend/src/services/diagnostico/relatorioDeSuporte.ts` | JSON de suporte: versão, plataforma, núcleos, memória, tela, resumo das calibrações, contadores de uso, tamanho do modelo do assistente, estado do motor de voz, últimos 40 erros/avisos do console. | **Regra dura, com teste:** nenhuma frase do paciente, nenhuma imagem, nenhum vetor de calibração. Campo novo aqui é campo que precisa passar por essa pergunta antes. |
 
 ## 3. Fluxos, passo a passo
 
@@ -257,34 +289,103 @@ devolve `403 device_revoked` → `aoPerderCredencial` → tudo limpo + `reverifi
   as telas não mudam. Trocar por um serviço em nuvem seria outra implementação de
   `services/voz/local.ts` — mas aí o áudio de referência sairia do computador, e o termo de
   consentimento teria de dizer isso.
+- **Assistente de escrita:** trocar o motor de sugestão é reescrever `src/assistente/` mantendo
+  `sugerirPalavras` e `sugerirFrases`; as telas falam só com `services/assistente`. Trocar por um
+  serviço de nuvem, porém, **não é uma mudança livre**: passaria a mandar a conversa do paciente
+  para fora, e exige autorização por funcionalidade (como a voz), linha na tabela da seção 1 e
+  revisão do texto de privacidade nos três projetos.
+- **Nomes do produto:** trocar rótulos visíveis (janela, instalador, tela de abertura) entre
+  "IrisFlow Communicator" e "IrisFlow" é livre. **Renomear canais de IPC ou chaves de
+  `localStorage` não é**: os prefixos `irisflow.*` são a identidade dos dados gravados na máquina
+  do paciente — calibração, perfis, vínculo, vocabulário do assistente. Renomear apaga tudo isso
+  para quem já usa o app, em silêncio.
+
 - **Contas de teste do mock** (`admin@irisflow.com` etc.) continuam valendo **sem** as variáveis
   da nuvem. Com elas, só contas criadas no site entram.
 
-## 5. O que falta para ligar de verdade (checklist)
+## 5. Estado real da ligação, e o que ainda falta
 
-1. **Banco**: aplicar, nesta ordem, `SITE IRISFLOW V1/supabase/schema.sql` (já aplicado),
-   `irisflow-cuidador/supabase/migrations/20260904_caregiver_app.sql` e
-   `SITE IRISFLOW V1/supabase/migrations/20260908_integracao_ecossistema.sql`.
-2. **Edge Function**: na pasta `irisflow-cuidador`, `supabase functions deploy desktop-sync`
-   (o `config.toml` já desliga `verify_jwt`).
-3. **Desktop**: `frontend/.env.local` com `VITE_SUPABASE_URL` e `VITE_SUPABASE_ANON_KEY`
-   (os mesmos do site); `npm --prefix frontend install`; `npm --prefix frontend run build`
-   (a CSP do build passa a incluir a origem).
-4. **Conta de teste**: crie pelo site (cadastro → avaliação). O mesmo e-mail/senha entra no desktop
-   e no app do cuidador.
-5. **Push** (opcional agora): `eas init` no app do cuidador para o socorro chegar como notificação.
-6. **Modo Computador**: `npm install` na raiz (instala o `koffi`); rodar `npm run electron:dev`,
-   calibrar, abrir Computador → Ativar; conferir num monitor com escala 125/150 % que o clique cai
-   onde o olhar está (lupa ligada) e que Ctrl+Alt+Shift+Esc e o mouse físico na barra encerram.
-7. **Voz**: Python 3.11 → `pip install -r voice-engine/requirements.txt` (num `.venv` dentro de
-   `voice-engine/`) → Configurações → Voz personalizada → Baixar o modelo → Importar áudio (com
-   o termo) → Ouvir amostra. Para o instalador: `voice-engine\build-voice-engine.ps1` antes de
-   `npm run electron:build`. A síntese real com o modelo **não foi executada aqui** (o ambiente de
-   desenvolvimento não alcança o Hugging Face); o preparo do áudio foi testado com as três
-   gravações enviadas e o restante do fluxo com um dublê do modelo.
-8. **Edge Function**: reimplantar `desktop-sync` (ganhou a ação `voice.status`).
+Esta seção mudou de natureza: até a versão anterior deste documento ela era uma lista do que
+**faltava aplicar**, e a resposta honesta era "tudo". Agora o banco está de pé e a ponte está
+publicada. O que sobra é curto e está no fim.
+
+### 5.1 O que já está aplicado
+
+**Projeto Supabase:** "Site Iris Flow", ref `ydnsnbeugxzhpkpqpqhb`, em
+`https://ydnsnbeugxzhpkpqpqhb.supabase.co`. É um banco só para os três softwares, como o desenho
+do topo deste documento sempre previu.
+
+**Migrações aplicadas, nesta ordem:**
+
+1. `schema.sql` do site — já estava lá;
+2. `caregiver_app_20260904` — `devices`, `sessions`, `help_requests`, `messages`,
+   `quick_phrases`, `patient_settings`, `push_tokens`, a RLS e a publicação realtime;
+3. `integracao_ecossistema_20260908` — colunas de precisão em `sessions`, revogação em `devices`,
+   `license_for_profile`, `desktop_license`, `pair_device`, `revoke_device`, `gateway_events` e
+   `register_charge`;
+4. `endurecimento_funcoes_gatilho` — revoga `EXECUTE` de `anon` e `authenticated` nas funções de
+   gatilho (`touch_updated_at`, `bump_session_help_count`, `handle_new_user`), fixa o
+   `search_path` delas e tira `is_my_beneficiary` do alcance do `anon`. Funções de gatilho não
+   precisam ser chamáveis por cliente nenhum; deixá-las expostas era superfície de ataque sem
+   contrapartida.
+
+**Edge Function `desktop-sync`: publicada e ativa**, com `verify_jwt` desligado no gateway, como
+o `config.toml` pede. O caso `voice.status` responde agora `{ ok, stored }` — e `stored: false`
+tem significado operacional: não havia linha em `patient_settings` para aquele paciente, então o
+rótulo da voz **se perdeu**. A ação continua deliberadamente sem criar a linha com valores
+padrão, para não inventar ajustes que o cuidador nunca escolheu; quem vê `stored: false` deve
+entender "o app do cuidador ainda não vai mostrar a voz em uso", não "deu erro".
+
+**Dados de teste:** a conta que já existia foi movida para o plano **Voz em avaliação por 30
+dias**, com linha de `patient_settings` criada e seis frases rápidas cadastradas — o suficiente
+para exercitar conversa, ajuste remoto e frases rápidas de ponta a ponta.
+
+**Arquivos `.env` gravados nos três projetos**, com a URL e a chave anônima do projeto acima:
+`frontend/.env.local` aqui no desktop, `.env` no app do cuidador e `.env.local` no site. A chave
+não é transcrita em documentação nenhuma, de propósito: quem precisar dela lê o arquivo ou o
+painel do Supabase.
+
+### 5.2 O que ainda falta, e é do lado humano
+
+1. **Leaked Password Protection**: ligar no painel de Auth do Supabase. É um clique, e é o
+   aviso de segurança que continua aberto no projeto.
+2. **Push**: `eas init` no app do cuidador (e `extra.eas.projectId` no `app.json`) para o socorro
+   chegar como notificação em build standalone. Sem isso o alerta chega pelo realtime com o app
+   aberto, mas não acorda o celular.
+3. **Pagamento**: o gateway não está contratado e o webhook `payment-webhook` continua
+   **esqueleto** — completo em código, sem segredo nem URL configurados. Enquanto isso, a licença
+   funciona pelo caminho de avaliação.
+
+### 5.3 Verificações de ponta que continuam valendo
+
+- **Desktop**: `npm --prefix frontend install`; `npm --prefix frontend run build` (a CSP do build
+  passa a incluir a origem lida do `.env.local`).
+- **Modo Computador**: `npm install` na raiz (instala o `koffi`); `npm run electron:dev`,
+  calibrar, abrir Computador → Ativar; conferir num monitor com escala 125/150 % que o clique cai
+  onde o olhar está (lupa ligada) e que Ctrl+Alt+Shift+Esc e o mouse físico na barra encerram.
+- **Voz**: Python 3.11 → `pip install -r voice-engine/requirements.txt` (num `.venv` dentro de
+  `voice-engine/`) → Configurações → Voz personalizada → Baixar o modelo → Importar áudio (com
+  o termo) → Ouvir amostra. Para o instalador: `voice-engine\build-voice-engine.ps1` antes de
+  `npm run electron:build`. A síntese real com o modelo **não foi executada aqui** (o ambiente de
+  desenvolvimento não alcança o Hugging Face); o preparo do áudio foi testado com as três
+  gravações enviadas e o restante do fluxo com um dublê do modelo.
+- **Modo apresentação**: antes de qualquer demonstração em máquina com conta vinculada, ligue-o
+  em Configurações e confirme a faixa na tela. É a diferença entre um olhar distraído no botão de
+  socorro e uma notificação no celular de um cuidador real.
 
 ## 6. Verificação feita
+
+Em ordem cronológica inversa — a primeira entrada é o estado atual.
+
+- **Estado atual (10/set), medido rodando as suítes:** núcleo com **1402 testes passando (mais 1
+  pulado) em 132 arquivos**; interface com **799 testes em 97 arquivos** — **2201 testes ao
+  todo**. `npx tsc --noEmit -p tsconfig.json` e `npx tsc --noEmit -p electron/tsconfig.json`
+  terminam **sem erro nenhum**. Entre os arquivos novos desta rodada estão o motor do assistente
+  de escrita, as faixas de hardware da voz (`src/voz/requisitos.ts`), o corte da saída para a
+  nuvem no modo apresentação e o relatório de suporte — este último com teste dedicado a provar
+  que frase do paciente, imagem e vetor de calibração **não** entram no arquivo.
+  Do lado do banco, as quatro migrações e a Edge Function foram conferidas contra o projeto real
+  `ydnsnbeugxzhpkpqpqhb`, e não contra o que se pretendia aplicar (ver §5.1).
 
 - Modo Computador e voz (9/set): `tsc` do Electron, `tsc -b` e lint da interface, **744 testes em
   87 arquivos** (novos: geometria e structs Win32, protocolo da voz, máquina da sobreposição e

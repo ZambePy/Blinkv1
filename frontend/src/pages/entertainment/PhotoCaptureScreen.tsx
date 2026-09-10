@@ -23,6 +23,11 @@ const FILTERS = [
 export const PhotoCaptureScreen: React.FC = () => {
   const navigate = useNavigate();
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  /** Contagem regressiva da foto. Ver o comentário em `handleStartCapture`. */
+  const contagemRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => () => {
+    if (contagemRef.current !== null) clearInterval(contagemRef.current);
+  }, []);
 
   const [, setStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
@@ -220,13 +225,20 @@ export const PhotoCaptureScreen: React.FC = () => {
     playSound('tick');
 
     let current = timerSeconds;
-    const interval = setInterval(() => {
+    // O identificador vai para um ref porque a contagem precisa sobreviver ao
+    // fim desta função E morrer no desmonte. Antes ele era uma variável local:
+    // sair da tela durante a contagem deixava o intervalo correndo até zerar,
+    // bipando de uma tela que não existe mais e disparando o obturador no
+    // vazio, com `setState` em componente já desmontado.
+    if (contagemRef.current !== null) clearInterval(contagemRef.current);
+    contagemRef.current = setInterval(() => {
       current -= 1;
       if (current > 0) {
         setCountdown(current);
         playSound('tick');
       } else {
-        clearInterval(interval);
+        if (contagemRef.current !== null) clearInterval(contagemRef.current);
+        contagemRef.current = null;
         setCountdown(null);
         captureFrame();
       }

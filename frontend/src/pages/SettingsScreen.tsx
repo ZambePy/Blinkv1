@@ -21,6 +21,7 @@ import {
   SunDim,
   Droplet,
   Monitor,
+  Sparkles,
 } from 'lucide-react';
 import { env } from '../config/env';
 import { useSettings } from '../context/SettingsContext';
@@ -29,7 +30,28 @@ import { resolveCalibrationDistances } from '@tracker/calibrationDistances';
 import { useAuth } from '../context/AuthContext';
 import { useToast } from '../context/ToastContext';
 import { useEstadoDaVoz } from '../services/voz';
+import {
+  apagarModelo,
+  assistenteDesligadoPeloUsuario,
+  definirAssistenteDesligado,
+  resumoDoModelo,
+} from '../services/assistente';
+import { definirModoApresentacao, modoApresentacaoAtivo } from '../services/apresentacao';
+import { baixarRelatorio, montarRelatorio } from '../services/diagnostico/relatorioDeSuporte';
+import { useConfirmacao } from '../components/ui/DialogoDeConfirmacao';
+import { definirRelatosAutomaticos, relatosAutomaticosLigados } from '../services/diagnostico/relatosAutomaticos';
+import {
+  ESTADO_SEM_PONTE,
+  estadoDaAtualizacao,
+  instalarAtualizacao,
+  ouvirAtualizacao,
+  verificarAtualizacao,
+  type EstadoDaAtualizacao,
+} from '../services/atualizacao';
+import { useCloud } from '../cloud/CloudContext';
+import { infoDoApp } from '../cloud/armazenamento';
 import { LanguageSwitcher } from '../components/ui/LanguageSwitcher';
+import { GazeButton } from '../components/ui/GazeButton';
 import { useGaze } from '../context/GazeContext';
 import { useReminders } from '../context/ReminderContext';
 import {
@@ -185,6 +207,52 @@ export const SettingsScreen: React.FC = () => {
   // faz a importação e o download do modelo).
   const estadoDaVoz = useEstadoDaVoz();
 
+  // Assistente de escrita: só duas coisas de estado, porque só há duas coisas
+  // para fazer — ligar/desligar as sugestões e apagar o que ele aprendeu.
+  const [assistenteLigado, setAssistenteLigado] = useState(() => !assistenteDesligadoPeloUsuario());
+  const [aprendizado, setAprendizado] = useState(() => resumoDoModelo());
+
+  // Apresentação e suporte.
+  const [apresentacao, setApresentacao] = useState(modoApresentacaoAtivo);
+  const [relatosLigados, setRelatosLigados] = useState(relatosAutomaticosLigados);
+  const [enviandoRelato, setEnviandoRelato] = useState(false);
+  const cloud = useCloud();
+  const { confirmar, dialogo } = useConfirmacao();
+  const [versaoDoApp, setVersaoDoApp] = useState<string | null>(null);
+  useEffect(() => {
+    void infoDoApp().then((i) => setVersaoDoApp(i.version)).catch(() => setVersaoDoApp(null));
+  }, []);
+  const [atualizacao, setAtualizacao] = useState<EstadoDaAtualizacao>(ESTADO_SEM_PONTE);
+  useEffect(() => {
+    let vivo = true;
+    void estadoDaAtualizacao().then((e) => {
+      if (vivo) setAtualizacao(e);
+    });
+    const parar = ouvirAtualizacao((e) => {
+      if (vivo) setAtualizacao(e);
+    });
+    return () => {
+      vivo = false;
+      parar();
+    };
+  }, []);
+  const descricaoDaAtualizacao = (() => {
+    switch (atualizacao.fase) {
+      case 'inativa':
+        return `Atualização automática desligada (${atualizacao.motivo}).`;
+      case 'verificando':
+        return 'Verificando se há versão nova…';
+      case 'em_dia':
+        return `Esta é a versão mais recente (${atualizacao.versao}).`;
+      case 'baixando':
+        return `Baixando a versão ${atualizacao.versao}: ${atualizacao.progresso}%.`;
+      case 'pronta':
+        return `Versão ${atualizacao.versao} pronta. Entra ao reiniciar ou ao fechar o aplicativo.`;
+      case 'erro':
+        return `Não foi possível verificar agora (${atualizacao.mensagem}). O aplicativo segue normalmente.`;
+    }
+  })();
+
   const { calibration, recording, setFilterPreset, getSessionUptimeMs, getDiagnostics } = useGaze();
   const [filterPreset, setFilterPresetState] = useState<FilterPresetV2>('balanceado-v2');
 
@@ -216,16 +284,17 @@ export const SettingsScreen: React.FC = () => {
     }
   };
 
-  const handleClearClinicalLogs = () => {
-    if (
-      window.confirm(
-        'Tem certeza de que deseja apagar permanentemente todos os registros clínicos locais do paciente? Esta ação não pode ser desfeita.'
-      )
-    ) {
-      clearClinicalData();
-      setClinicalData(getClinicalData());
-      toast.success('Todos os dados clínicos locais foram excluídos.');
-    }
+  const handleClearClinicalLogs = async () => {
+    const ok = await confirmar({
+      titulo: 'Apagar todos os registros clínicos deste computador?',
+      descricao:
+        'Sessões, medições e histórico do paciente somem para sempre. Não há como desfazer, e o que já foi exportado não volta sozinho.',
+      confirmar: 'Apagar registros',
+    });
+    if (!ok) return;
+    clearClinicalData();
+    setClinicalData(getClinicalData());
+    toast.success('Todos os dados clínicos locais foram excluídos.');
   };
 
   const handleExportClinicalLogs = () => {
@@ -614,26 +683,37 @@ export const SettingsScreen: React.FC = () => {
               </button>
             </div>
 
+            {/* A SAÍDA precisa ser alcançável POR OLHAR.
+                O teclado numérico acima é do cuidador, com mouse, e por isso
+                pode ter teclas de 60 px. Mas /settings é um dos cartões do menu
+                do paciente: ele chega aqui por fixação, por engano ou por
+                curiosidade, e cai neste portão. Com um "Cancelar" de ~50 px de
+                altura, a única forma de sair era chamar alguém — uma tela sem
+                saída, que é a pior coisa que este produto pode ter. */}
             <div style={{ display: 'flex', gap: '1rem', marginTop: '0.5rem' }}>
-              <button
+              <GazeButton
                 type="button"
                 onClick={() => navigate('/menu')}
                 aria-label={t('common.cancel')}
+                height={200}
+                data-dwell-ms={1800}
+                noWarn
                 style={{
                   flex: 1,
+                  minHeight: 200,
                   padding: '1rem',
                   background: '#f1f5f9',
                   borderRadius: '1rem',
                   border: 'none',
                   cursor: 'pointer',
-                  fontSize: '1rem',
+                  fontSize: '1.15rem',
                   fontWeight: 700,
                   color: 'var(--color-text-base)',
                   opacity: 0.9,
                 }}
               >
                 {t('common.cancel')}
-              </button>
+              </GazeButton>
               <button
                 type="submit"
                 aria-label={t('settings.auth.submit')}
@@ -1113,6 +1193,23 @@ export const SettingsScreen: React.FC = () => {
             <h2 id="voice-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}>
               {t('settings.voice.title')}
             </h2>
+            {/* O mesmo selo da tela de voz. Quem vê "Voz personalizada" nos
+                ajustes precisa saber o estágio antes de entrar e baixar 1,5 GB. */}
+            <span
+              style={{
+                fontSize: '0.7rem',
+                fontWeight: 800,
+                letterSpacing: '0.08em',
+                textTransform: 'uppercase',
+                padding: '0.2rem 0.55rem',
+                borderRadius: '0.5rem',
+                background: '#fef3c7',
+                color: '#92400e',
+                border: '1px solid #fbbf24',
+              }}
+            >
+              Experimental
+            </span>
           </div>
           <p
             style={{
@@ -1166,6 +1263,287 @@ export const SettingsScreen: React.FC = () => {
             }}
           >
             {t('settings.voice.lgpd')}
+          </div>
+        </section>
+
+        {/* Assistente de escrita — o "chatbot integrado" do roteiro de produto.
+            Fica aqui, e não numa tela própria, porque não há nada para
+            configurar além de ligar/desligar e apagar: ele não pede áudio, não
+            baixa modelo e não fala com a rede. */}
+        <section aria-labelledby="assistente-title" style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+            <Sparkles size={28} color="#F0A030" aria-hidden="true" />
+            <h2 id="assistente-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}>
+              Assistente de escrita
+            </h2>
+          </div>
+          <p
+            style={{
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
+              marginBottom: '1.25rem',
+              fontFamily: 'system-ui, sans-serif',
+              lineHeight: 1.6,
+            }}
+          >
+            Sugere a próxima palavra no teclado e frases inteiras na conversa, aprendendo com o que o
+            paciente já escreveu. Tudo é calculado neste computador: nenhuma palavra, frase ou conversa
+            é enviada para a internet.
+          </p>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => {
+                const novo = !assistenteLigado;
+                setAssistenteLigado(novo);
+                definirAssistenteDesligado(!novo);
+              }}
+              aria-pressed={assistenteLigado}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.85rem 1.5rem',
+                background: assistenteLigado ? '#1e293b' : 'transparent',
+                color: assistenteLigado ? 'white' : '#1e293b',
+                border: assistenteLigado ? 'none' : '2px solid #94a3b8',
+                borderRadius: '1rem',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              <Sparkles size={20} aria-hidden="true" />
+              {assistenteLigado ? 'Sugestões ligadas' : 'Sugestões desligadas'}
+            </button>
+            <span role="status" style={{ color: 'var(--color-text-base)', opacity: 0.85, fontWeight: 600 }}>
+              {aprendizado.frases} {aprendizado.frases === 1 ? 'frase' : 'frases'} · {aprendizado.palavras}{' '}
+              {aprendizado.palavras === 1 ? 'palavra' : 'palavras'} · {aprendizado.kb} KB neste computador
+            </span>
+            <button
+              type="button"
+              onClick={async () => {
+                const ok = await confirmar({
+                  titulo: 'Apagar tudo o que o assistente aprendeu?',
+                  descricao:
+                    'As sugestões voltam ao padrão de fábrica e o assistente recomeça do zero, aprendendo de novo com o uso.',
+                  confirmar: 'Apagar aprendizado',
+                });
+                if (!ok) return;
+                apagarModelo();
+                setAprendizado(resumoDoModelo());
+              }}
+              style={{
+                padding: '0.85rem 1.25rem',
+                background: 'transparent',
+                color: '#b91c1c',
+                border: '2px solid #fecaca',
+                borderRadius: '1rem',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              Apagar o aprendizado
+            </button>
+          </div>
+        </section>
+
+        {/* Apresentação e suporte — as duas coisas que existem para quem está
+            FORA da rotina do paciente: quem demonstra o produto e quem precisa
+            entender uma falha à distância. */}
+        <section aria-labelledby="apresentacao-title" style={cardStyle}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '1.25rem' }}>
+            <Monitor size={28} color="#1B54A8" aria-hidden="true" />
+            <h2 id="apresentacao-title" style={{ fontSize: '1.25rem', fontWeight: 700, color: '#1e293b' }}>
+              Apresentação e suporte
+            </h2>
+          </div>
+          <p
+            style={{
+              color: 'var(--color-text-base)',
+              opacity: 0.9,
+              marginBottom: '1.25rem',
+              fontFamily: 'system-ui, sans-serif',
+              lineHeight: 1.6,
+            }}
+          >
+            No modo apresentação, nada sai deste computador: o pedido de socorro, as mensagens e os
+            indicadores deixam de chegar ao celular do cuidador, e uma faixa fica visível na tela para que
+            ninguém confunda a demonstração com uso real. As telas continuam mostrando o estado verdadeiro
+            do rastreamento — o modo não inventa números.
+          </p>
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center' }}>
+            <button
+              type="button"
+              onClick={() => {
+                const novo = !apresentacao;
+                setApresentacao(novo);
+                definirModoApresentacao(novo);
+              }}
+              aria-pressed={apresentacao}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.85rem 1.5rem',
+                background: apresentacao ? '#F0A030' : 'transparent',
+                color: apresentacao ? '#1a1205' : '#1e293b',
+                border: apresentacao ? 'none' : '2px solid #94a3b8',
+                borderRadius: '1rem',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              <Monitor size={20} aria-hidden="true" />
+              {apresentacao ? 'Modo apresentação ligado' : 'Ligar modo apresentação'}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                baixarRelatorio(montarRelatorio({ versao: versaoDoApp, estadoDaVoz: estadoDaVoz ?? null }));
+                toast.success('Relatório de suporte salvo. Anexe o arquivo ao pedido de ajuda.');
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.85rem 1.5rem',
+                background: '#1e293b',
+                color: 'white',
+                border: 'none',
+                borderRadius: '1rem',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              <Download size={20} aria-hidden="true" /> Salvar relatório de suporte
+            </button>
+          </div>
+
+          {/* Relatos automáticos: desligado por padrão, decisão do cuidador.
+              Mesmo conteúdo do botão acima — só muda quem aperta o botão
+              (o app, quando falha) e para onde vai (a conta IrisFlow). */}
+          <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap', alignItems: 'center', marginTop: '1rem' }}>
+            <button
+              type="button"
+              onClick={() => {
+                const novo = !relatosLigados;
+                setRelatosLigados(novo);
+                definirRelatosAutomaticos(novo);
+              }}
+              aria-pressed={relatosLigados}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                padding: '0.85rem 1.5rem',
+                background: relatosLigados ? '#1e293b' : 'transparent',
+                color: relatosLigados ? 'white' : '#1e293b',
+                border: relatosLigados ? 'none' : '2px solid #94a3b8',
+                borderRadius: '1rem',
+                cursor: 'pointer',
+                fontWeight: 700,
+              }}
+            >
+              {relatosLigados ? 'Relatos automáticos ligados' : 'Ligar relatos automáticos de falha'}
+            </button>
+            <button
+              type="button"
+              disabled={enviandoRelato || !cloud.vinculo}
+              title={cloud.vinculo ? undefined : 'Precisa de uma conta vinculada neste computador'}
+              onClick={async () => {
+                setEnviandoRelato(true);
+                try {
+                  const ok = await cloud.enviarRelatorioDeSuporte('manual', 'enviado pelo cuidador em Ajustes');
+                  if (ok) toast.success('Relatório enviado à IrisFlow.');
+                  else toast.error('Não foi possível enviar agora. Você pode salvar o arquivo e anexar por e-mail.');
+                } finally {
+                  setEnviandoRelato(false);
+                }
+              }}
+              style={{
+                padding: '0.85rem 1.25rem',
+                background: 'transparent',
+                color: cloud.vinculo ? '#1e293b' : '#94a3b8',
+                border: '2px solid #cbd5e1',
+                borderRadius: '1rem',
+                cursor: cloud.vinculo ? 'pointer' : 'not-allowed',
+                fontWeight: 700,
+              }}
+            >
+              {enviandoRelato ? 'Enviando…' : 'Enviar relatório agora'}
+            </button>
+          </div>
+          <p
+            style={{
+              marginTop: '1rem',
+              padding: '1rem 1.25rem',
+              background: '#f0f9ff',
+              border: '1px solid #bae6fd',
+              borderRadius: '1rem',
+              color: '#075985',
+              fontSize: '0.85rem',
+              fontFamily: 'system-ui, sans-serif',
+              lineHeight: 1.6,
+            }}
+          >
+            O relatório traz números sobre o funcionamento — precisão da calibração, quantidade de frases,
+            memória e núcleos deste computador, últimos erros do aplicativo. <strong>Nenhuma frase escrita
+            pelo paciente, nenhuma imagem e nenhum dado de calibração entram no arquivo.</strong> Com os
+            relatos automáticos ligados, o mesmo relatório é enviado sozinho quando o aplicativo falha
+            (no máximo um a cada dez minutos), só se houver conta vinculada.
+          </p>
+          <div
+            style={{
+              marginTop: '1rem',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.75rem',
+              flexWrap: 'wrap',
+              color: '#475569',
+              fontSize: '0.9rem',
+              fontFamily: 'system-ui, sans-serif',
+            }}
+          >
+            <span>
+              {versaoDoApp ? `Versão instalada: ${versaoDoApp}. ` : ''}
+              {descricaoDaAtualizacao}
+            </span>
+            {atualizacao.fase === 'pronta' ? (
+              <button
+                type="button"
+                data-no-dwell="true"
+                onClick={() => void instalarAtualizacao()}
+                style={{
+                  padding: '0.6rem 1rem',
+                  background: '#F0A030',
+                  color: '#1a1205',
+                  border: 'none',
+                  borderRadius: '0.85rem',
+                  cursor: 'pointer',
+                  fontWeight: 800,
+                }}
+              >
+                Reiniciar e atualizar
+              </button>
+            ) : atualizacao.fase !== 'inativa' ? (
+              <button
+                type="button"
+                data-no-dwell="true"
+                disabled={atualizacao.fase === 'verificando' || atualizacao.fase === 'baixando'}
+                onClick={() => void verificarAtualizacao()}
+                style={{
+                  padding: '0.6rem 1rem',
+                  background: 'transparent',
+                  color: '#1e293b',
+                  border: '2px solid #cbd5e1',
+                  borderRadius: '0.85rem',
+                  cursor: 'pointer',
+                  fontWeight: 700,
+                }}
+              >
+                Verificar agora
+              </button>
+            ) : null}
           </div>
         </section>
 
@@ -2364,6 +2742,7 @@ export const SettingsScreen: React.FC = () => {
           produção.
         </p>
       </div>
+      {dialogo}
     </CaregiverPageLayout>
   );
 };

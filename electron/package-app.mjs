@@ -17,7 +17,8 @@
  *   /tmp/irisflow-release/IrisFlow-X.Y.Z.dmg           (macOS)
  *   /tmp/irisflow-release/IrisFlow-X.Y.Z.AppImage      (Linux)
  *
- *   O caminho exato e impresso ao final do build.
+ *   O caminho exato e impresso ao final do build. Ao lado do instalador sai o
+ *   latest.yml, que o electron-updater le para saber se ha versao nova.
  */
 
 import { build } from 'electron-builder';
@@ -42,14 +43,34 @@ console.log(
     : '[electron:package] motor de voz NAO encontrado (voice-engine/dist/irisflow-voz): empacotando sem ele',
 );
 
+// Atualizacao automatica (electron/atualizacao.ts). O endereco de onde o app
+// baixa versoes novas NAO fica no codigo: vem da variavel IRISFLOW_UPDATE_URL no
+// momento do empacotamento e e gravado em resources/atualizacao.json. Sem a
+// variavel, o app sai com a atualizacao desligada (e diz isso no log) — e o
+// latest.yml ainda e gerado, para o dia em que houver onde hospedar.
+const urlDeAtualizacao = (process.env.IRISFLOW_UPDATE_URL ?? '').trim();
+const pastaTemp = fs.mkdtempSync(path.join(os.tmpdir(), 'irisflow-atualizacao-'));
+const arquivoDeAtualizacao = path.join(pastaTemp, 'atualizacao.json');
+fs.writeFileSync(arquivoDeAtualizacao, JSON.stringify({ url: urlDeAtualizacao || null }, null, 2));
+extraResources.push({ from: arquivoDeAtualizacao, to: 'atualizacao.json' });
+console.log(
+  urlDeAtualizacao
+    ? `[electron:package] atualizacao automatica apontando para ${urlDeAtualizacao}`
+    : '[electron:package] IRISFLOW_UPDATE_URL nao definida: app sai com atualizacao automatica desligada',
+);
+
 console.log('[electron:package] Iniciando empacotamento via electron-builder...');
 console.log('[electron:package] Output (fora do OneDrive):', output);
 
 const artifacts = await build({
+  // Nunca publica daqui: so gera o instalador e o latest.yml ao lado dele.
+  // Subir os dois para o endereco de IRISFLOW_UPDATE_URL e um passo manual.
+  publish: 'never',
   config: {
     // Sobrescreve apenas o diretorio de output; todo o resto vem do package.json "build".
     directories: { output },
     extraResources,
+    publish: [{ provider: 'generic', url: urlDeAtualizacao || 'https://atualizacao.invalida.local/irisflow' }],
   },
 });
 

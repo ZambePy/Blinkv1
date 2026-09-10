@@ -7,6 +7,7 @@ import { buildMonitorSizeQuery } from '../src/displayGeometry';
 import { permitirPermissao, permitirNavegacao, CSP, CSP_DEV, cspComNuvem } from '../src/electronSecurity';
 import { registrarModoComputador } from './computador/sessao';
 import { registrarVoz } from './voz';
+import { registrarAtualizacao } from './atualizacao';
 
 const DEV_SERVER_URL = process.env.VITE_DEV_SERVER_URL ?? 'http://localhost:5173';
 const RAIZ_DO_PROJETO = path.join(__dirname, '..');
@@ -66,23 +67,44 @@ function chaveValida(chave: unknown): chave is string {
   return typeof chave === 'string' && COFRE_CHAVES_PERMITIDAS.test(chave);
 }
 
-ipcMain.handle('irisflow:secure-get', (_e, chave: unknown): string | null => {
-  if (!chaveValida(chave)) return null;
+/**
+ * Só a janela principal fala com estes canais.
+ *
+ * Defesa em profundidade, como já se faz em `voz/index.ts` e em
+ * `computador/sessao.ts`. Hoje não é explorável — `contextIsolation`,
+ * `sandbox`, navegação externa bloqueada, e o preload da sobreposição não
+ * expõe nada disto. Mas o cofre guarda o token de sessão do Supabase já
+ * decifrado, a sobreposição do Modo Computador compartilha a mesma sessão do
+ * Chromium, e basta uma janela nova ou um preload distraído para isso virar
+ * exfiltração de credencial. A checagem custa uma linha.
+ */
+function daJanelaPrincipal(e: Electron.IpcMainInvokeEvent): boolean {
+  const w = janelaPrincipal;
+  if (!w || w.isDestroyed()) return false;
+  if (e.sender !== w.webContents) {
+    console.warn('[ipc] pedido recusado: remetente não é a janela principal');
+    return false;
+  }
+  return true;
+}
+
+ipcMain.handle('irisflow:secure-get', (e, chave: unknown): string | null => {
+  if (!daJanelaPrincipal(e) || !chaveValida(chave)) return null;
   const item = lerCofre()[chave];
   if (!item) return null;
   try {
     if (!item.enc) return item.v;
     if (!safeStorage.isEncryptionAvailable()) return null;
     return safeStorage.decryptString(Buffer.from(item.v, 'base64'));
-  } catch (e) {
-    console.warn('[cofre] não foi possível ler', chave, e);
+  } catch (erro) {
+    console.warn('[cofre] não foi possível ler', chave, erro);
     return null;
   }
 });
 
-ipcMain.handle('irisflow:secure-set', (_e, chave: unknown, valor: unknown): boolean => {
+ipcMain.handle('irisflow:secure-set', (e, chave: unknown, valor: unknown): boolean => {
   // 2 MB: a fila offline pode acumular relatórios; safeStorage lida com isso.
-  if (!chaveValida(chave) || typeof valor !== 'string' || valor.length > 2_000_000) return false;
+  if (!daJanelaPrincipal(e) || !chaveValida(chave) || typeof valor !== 'string' || valor.length > 2_000_000) return false;
   const cofre = lerCofre();
   if (safeStorage.isEncryptionAvailable()) {
     cofre[chave] = { enc: true, v: safeStorage.encryptString(valor).toString('base64') };
@@ -94,8 +116,8 @@ ipcMain.handle('irisflow:secure-set', (_e, chave: unknown, valor: unknown): bool
   return true;
 });
 
-ipcMain.handle('irisflow:secure-remove', (_e, chave: unknown): boolean => {
-  if (!chaveValida(chave)) return false;
+ipcMain.handle('irisflow:secure-remove', (e, chave: unknown): boolean => {
+  if (!daJanelaPrincipal(e) || !chaveValida(chave)) return false;
   const cofre = lerCofre();
   delete cofre[chave];
   gravarCofre(cofre);
@@ -103,6 +125,9 @@ ipcMain.handle('irisflow:secure-remove', (_e, chave: unknown): boolean => {
 });
 
 // Identidade do computador para o pareamento (nome exibido no app do cuidador).
+// Sem guarda de remetente de propósito: versão, sistema e nome da máquina não
+// são credencial, e o contrato do preload promete um objeto — devolver `null`
+// aqui só criaria um caminho de falha que nunca acontece no uso real.
 ipcMain.handle('irisflow:app-info', () => ({
   version: app.getVersion(),
   hostname: os.hostname(),
@@ -171,6 +196,12 @@ function createWindow(): void {
   const win = new BrowserWindow({
     width: 1280,
     height: 800,
+    // Ícone da janela e da barra de tarefas. No pacote quem manda é o ícone
+    // embutido no executável pelo electron-builder; isto resolve o
+    // desenvolvimento, onde a janela aparecia com o ícone padrão do Electron —
+    // detalhe pequeno que, numa demonstração, é a primeira coisa que denuncia
+    // um protótipo.
+    icon: path.join(__dirname, '..', 'build', 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -274,6 +305,7 @@ app.whenReady().then(async () => {
 
   // Voz clonada local (sidecar Python / executável em resources/voice-engine).
   const voz = registrarVoz({ raizDoProjeto: RAIZ_DO_PROJETO, janelaPrincipal: () => janelaPrincipal });
+  registrarAtualizacao(() => janelaPrincipal);
   app.on('before-quit', () => voz.encerrar());
 
   createWindow();

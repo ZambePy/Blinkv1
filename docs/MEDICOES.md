@@ -10,6 +10,13 @@ prazo do projeto. O que saiu está registrado na seção 3, com o custo de cada
 corte — nenhuma medida desapareceu em silêncio. O que ficou é o que sustenta a
 única pergunta que o produto precisa responder: **o dwell acerta o botão?**
 
+**Revisão de 2026-09-10.** O protocolo e as métricas continuam **exatamente os
+mesmos** — nenhum número desta página foi remedido nem reinterpretado. O que
+mudou foi o entorno: o app ganhou um segundo arquivo JSON, o *relatório de
+suporte*, que não é de medição e é fácil de confundir com este (§7.1), e um
+*modo apresentação* que não altera medida alguma mas impede a sessão de chegar
+aos relatórios do cuidador (§5.3).
+
 ---
 
 ## 1. O que é medido
@@ -520,6 +527,12 @@ e bloqueia o preflight).
 - A pessoa senta na posição que vai manter a sessão inteira. A calibração
   congela a distância, e deriva de pose entre calibrar e testar é a maior fonte
   de erro do pipeline.
+- **Modo apresentação desligado**, se a máquina tiver conta vinculada. Ele não
+  altera medida nenhuma — as telas seguem mostrando o rastreamento verdadeiro e
+  o relatório sai igual —, mas corta a saída para a nuvem no barramento de
+  eventos, e com ele ligado o `calibration.result` **não sobe**: a sessão medida
+  não aparece nos relatórios do app do cuidador. Se a rodada era para ser vista
+  de fora, confira a faixa da demonstração antes de começar.
 
 ### 5.4 Preflight
 
@@ -643,6 +656,30 @@ recente, traz os valores medidos e a idade da leitura; quando não há, diz
 explicitamente que iluminação e postura são o *default do schema*, não uma
 medição. Antes, `'boa'`/`'parada'` eram gravados hardcoded com a mesma cara de
 um valor medido.
+
+### 7.1 Não confunda com o relatório de suporte
+
+O app passou a gerar um **segundo** JSON, por um botão em Configurações:
+o *relatório de suporte*
+(`frontend/src/services/diagnostico/relatorioDeSuporte.ts`). Ele existe para a
+família anexar num pedido de ajuda, e **não serve para medição** — nem deve ser
+citado num resultado.
+
+| | relatório de precisão | relatório de suporte |
+|---|---|---|
+| arquivo | `accuracy-report-<timestamp>.json` | salvo pelo botão em Configurações |
+| para quê | medir acurácia e precisão de uma sessão | diagnosticar um problema de funcionamento |
+| granularidade | por ponto e por amostra | contadores e estado do computador |
+| contém | posições, predições, amostras, pose, geometria | versão, plataforma, núcleos, memória, tela, **resumo** das calibrações, contadores de uso, tamanho do modelo do assistente, estado do motor de voz, últimos 40 erros do console |
+
+A distinção importa em duas direções. Quem for analisar uma sessão precisa do
+relatório de precisão: o de suporte traz o **último** e o **melhor** erro em
+graus e nada mais, o que não sustenta análise nenhuma. E quem for pedir um
+arquivo à família deve pedir o de suporte, porque ele obedece a uma regra dura,
+com teste: **nenhuma frase escrita pelo paciente, nenhuma imagem e nenhum vetor
+de calibração entram nele**. O relatório de precisão, ao contrário, é cheio de
+dado bruto de rastreamento — ele fica no computador e circula entre quem
+desenvolve, não por e-mail de suporte.
 
 ---
 

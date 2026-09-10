@@ -11,6 +11,7 @@
  */
 import type { MessageKind, HelpKind } from './types';
 import type { AccuracyResult, RunMeta } from '@tracker/accuracy';
+import { modoApresentacaoAtivo } from '../services/apresentacao';
 
 export type EventoDoPaciente =
   /** O paciente falou algo (teclado, frase rápida, pictograma, sim/não). */
@@ -26,6 +27,15 @@ type Ouvinte = (e: EventoDoPaciente) => void;
 const ouvintes = new Set<Ouvinte>();
 
 export function emitir(e: EventoDoPaciente): void {
+  // Modo apresentação: o barramento é o único caminho daqui para a nuvem, e é
+  // por isso que o corte fica exatamente aqui. Numa demonstração, alguém vai
+  // olhar para o botão de socorro — e esse olhar não pode acordar o celular
+  // de um cuidador de verdade. As telas seguem funcionando: o que morre é a
+  // saída, não o aplicativo.
+  if (modoApresentacaoAtivo()) {
+    console.info(`[cloud] modo apresentação: evento "${e.tipo}" não foi enviado`);
+    return;
+  }
   for (const o of ouvintes) {
     try {
       o(e);

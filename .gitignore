@@ -61,3 +61,83 @@ voice-engine/dist/
 voice-engine/*.spec
 voice-engine/**/__pycache__/
 voice-engine/.pytest_cache/
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Documentação, anotações e arquivos de dados fora do código
+#
+# Decisão de 10/09/2026: o repositório guarda CÓDIGO. Texto solto (.txt),
+# documentação (.md) e planilhas ficam de fora, porque quase todos carregam
+# alguma coisa que não deve ir para um repositório público — credenciais,
+# roteiros internos, e principalmente qualquer coisa com dado de paciente.
+# A única exceção é o protocolo de medição, que é a base metodológica do
+# projeto e precisa acompanhar o código.
+# ─────────────────────────────────────────────────────────────────────────────
+*.txt
+*.md
+!docs/MEDICOES.md
+
+# Duas exceções técnicas ao "*.txt" acima. Se quiser mesmo tirar as duas do
+# repositório, apague estas linhas — mas saiba o que cada uma quebra:
+#   - requirements.txt é a lista de dependências do motor de voz; sem ele,
+#     ninguém consegue reconstruir o motor a partir do repositório.
+#   - a licença OFL precisa acompanhar o arquivo da fonte. Versionar a fonte
+#     sem a licença é distribuição irregular.
+!voice-engine/requirements.txt
+!**/*-OFL.txt
+
+# Planilhas e exportações tabulares (o modelo do protocolo semanal é o único
+# arquivo desse tipo que deveria existir aqui, e ele vive fora do repositório
+# junto com os dados reais das casas).
+*.csv
+*.tsv
+*.xlsx
+
+# Arquivos que o próprio aplicativo gera na máquina de quem usa. Nenhum deles
+# é código, e todos podem conter dado de sessão real.
+irisflow-suporte-*.json
+irisflow-recording-*.jsonl
+irisflow_backup.json
+relatorio-clinico-paciente-*.json
+
+# Credenciais. O .env já não entrava pelo frontend/.gitignore, mas a raiz não
+# tinha regra nenhuma — e é onde as chaves acabam parando.
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.pfx
+*.p12
+*.cer
+*.crt
+
+# Áudio: a gravação de referência da voz clonada é biometria do paciente.
+*.wav
+*.opus
+*.mp3
+*.m4a
+*.flac
+*.ogg
+
+# Pesos de modelo e binários grandes (o *.onnx já estava coberto por caminho;
+# aqui vale para qualquer pasta).
+*.onnx
+*.pth
+*.pt
+*.safetensors
+*.ckpt
+
+# Instaladores e pacotes gerados pelo empacotamento.
+*.exe
+*.msi
+*.dmg
+*.AppImage
+*.zip
+*.7z
+*.rar
+
+# Cobertura de testes e caches de ferramenta.
+coverage/
+.nyc_output/
+.vite/
+*.tsbuildinfo

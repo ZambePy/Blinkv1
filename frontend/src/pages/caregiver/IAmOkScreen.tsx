@@ -1,35 +1,41 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { ThumbsUp, Send } from 'lucide-react';
-import { api } from '../../utils/api';
 import { emitirFalaDoPaciente } from '../../cloud/eventos';
-import { useAuth } from '../../context/AuthContext';
 import { useToast } from '../../context/ToastContext';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
 import { GazeButton } from '../../components/ui/GazeButton';
 
 export const IAmOkScreen: React.FC = () => {
-  const { currentProfile } = useAuth();
   const toast = useToast();
   const [timeLeft, setTimeLeft] = useState(30);
   const [sent, setSent] = useState(false);
   const [sending, setSending] = useState(false);
 
-  const dispatchSignal = useCallback(async () => {
+  /**
+   * Envia o "estou bem" pelo barramento da nuvem — o mesmo caminho de toda
+   * fala do paciente, com fila offline e reenvio quando a internet volta.
+   *
+   * Duas correções moram aqui.
+   *
+   * A primeira: havia também uma chamada a `api.sendIAmOk`, que aponta para
+   * um backend que NÃO EXISTE neste produto (`VITE_API_URL`, sem serviço no
+   * repositório). Ela falhava sempre, e o `setSent(true)` estava no `finally`
+   * — então a tela anunciava "Sinal enviado aos cuidadores com sucesso!"
+   * exatamente quando o envio tinha falhado, e sumia com os botões, sem
+   * segunda chance. Para uma tela cuja única função é tranquilizar a família,
+   * era a pior falha possível: mentir dizendo que tranquilizou.
+   *
+   * A segunda: o barramento já entrega ao celular do cuidador. Não havia
+   * nada a acrescentar — só o que tirar.
+   */
+  const dispatchSignal = useCallback(() => {
     if (sending || sent) return;
     setSending(true);
-    // O celular do cuidador recebe como mensagem de sistema na conversa.
     emitirFalaDoPaciente('Estou bem', 'sistema');
-    try {
-      await api.sendIAmOk(currentProfile?.id ?? 'anon');
-      toast.success('Sinal "Estou Bem" enviado.');
-    } catch (err) {
-      console.warn('Falha ao enviar sinal "Estou Bem":', err);
-      toast.error('Falha ao enviar sinal. Tente novamente.');
-    } finally {
-      setSent(true);
-      setSending(false);
-    }
-  }, [sending, sent, currentProfile, toast]);
+    setSent(true);
+    setSending(false);
+    toast.success('Sinal "Estou Bem" enviado ao cuidador.');
+  }, [sending, sent, toast]);
 
   useEffect(() => {
     if (sent) return;
@@ -81,7 +87,14 @@ export const IAmOkScreen: React.FC = () => {
           {sent ? (
             <div role="status" aria-live="polite" style={{ marginTop: '1.5rem' }}>
               <p style={{ fontSize: '1.6rem', color: '#15803d', fontWeight: 700 }}>
-                Sinal enviado aos cuidadores com sucesso!
+                Sinal "Estou bem" enviado ao cuidador.
+              </p>
+              {/* Sem conta vinculada o barramento não tem para onde entregar.
+                  Dizer "enviado" nesse caso seria a mesma mentira de antes,
+                  com outra roupa. */}
+              <p style={{ fontSize: '1.05rem', color: 'var(--color-text-base)', opacity: 0.75, marginTop: '0.75rem' }}>
+                Se este computador ainda não estiver ligado a uma conta IrisFlow, o aviso fica guardado e
+                sai assim que a conta for configurada.
               </p>
               <div style={{ display: 'inline-flex', marginTop: '1.5rem', animation: 'bounce 2s infinite' }}>
                 <Send size={48} color="#22c55e" aria-hidden="true" />

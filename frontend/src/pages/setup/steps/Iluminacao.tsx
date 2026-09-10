@@ -23,7 +23,10 @@ import type { ReadinessCheck } from '@tracker/setupReadiness';
  * decisão é do cuidador — que sabe que a luz vai melhorar em dez minutos.
  */
 
-const IDS_DE_LUZ = ['lighting', 'contrast', 'glasses', 'flicker'] as const;
+// `contraluz` entra PRIMEIRO: quando há janela atrás da pessoa, ela é a
+// causa e as outras três são sintoma. Resolver a ordem errada faz o cuidador
+// mexer no contraste de uma imagem que só precisa de cortina.
+const IDS_DE_LUZ = ['contraluz', 'lighting', 'contrast', 'glasses', 'flicker'] as const;
 
 export const Iluminacao: React.FC<{
   checks: ReadinessCheck[];

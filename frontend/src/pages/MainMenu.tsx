@@ -55,7 +55,7 @@ export const MainMenu: React.FC = () => {
   const { naoFaladas } = useCloud();
 
   return (
-    <GazePageLayout showBack={false} showEmergency={true}>
+    <GazePageLayout showBack={false}>
       <div
         style={{
           display: 'flex',

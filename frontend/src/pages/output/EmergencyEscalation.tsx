@@ -8,6 +8,7 @@ import { useAuth } from '../../context/AuthContext';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
 import { GazeButton } from '../../components/ui/GazeButton';
 import { GazeGrid } from '../../components/ui/GazeGrid';
+import { playTone } from '../../utils/emergencyAudio';
 
 const EMERGENCIES = [
   { id: 'pain', labelKey: 'emergency.items.pain', icon: HeartPulse },
@@ -92,22 +93,20 @@ export const EmergencyEscalation: React.FC = () => {
   useEffect(() => {
     if (!escalated) return;
 
-    // Bip estridente a cada 2s
+    // Bip estridente a cada 2 s, pelo contexto de áudio COMPARTILHADO.
+    //
+    // A versão anterior criava um `new AudioContext()` a cada tique e nunca
+    // fechava nenhum. O Chromium limita ~50 contextos por documento: passado
+    // o limite o construtor lança, o `catch` engolia, e o alarme emudecia
+    // sozinho depois de cerca de um minuto — justamente no caso que o alarme
+    // existe para cobrir, o de ninguém ter vindo. Este bug já tinha sido
+    // corrigido no outro caminho de áudio (ver o comentário em
+    // `context/EmergencyContext.tsx`); a correção não havia chegado aqui.
     const soundInterval = setInterval(() => {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) {
-        try {
-          const audioCtx = new AudioCtx();
-          const oscillator = audioCtx.createOscillator();
-          oscillator.type = 'sawtooth';
-          oscillator.frequency.setValueAtTime(990, audioCtx.currentTime);
-          oscillator.connect(audioCtx.destination);
-          oscillator.start();
-          setTimeout(() => oscillator.stop(), 500);
-        } catch {
-          // Idem: o bipe é acessório, o alerta continua.
-        }
-      }
+      // Duas notas curtas em vez de uma longa: mais perceptível de outro
+      // cômodo, e não depende de manter um oscilador vivo entre tiques.
+      playTone(990, 0, 0.25, 0.35);
+      playTone(760, 0.3, 0.25, 0.35);
     }, 2000);
 
     // Fala contínua a cada 5s
@@ -133,7 +132,7 @@ export const EmergencyEscalation: React.FC = () => {
   }, [escalated]);
 
   return (
-    <GazePageLayout showBack={true} backRoute="/menu" showEmergency={false}>
+    <GazePageLayout showBack={true} backRoute="/menu">
       <div
         style={{
           display: 'flex',

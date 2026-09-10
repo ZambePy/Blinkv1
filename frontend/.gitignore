@@ -28,3 +28,34 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Documentação e arquivos de dados (ver a mesma decisão em ../.gitignore)
+# ─────────────────────────────────────────────────────────────────────────────
+*.txt
+*.md
+# A licença da fonte precisa acompanhar o arquivo da fonte.
+!**/*-OFL.txt
+
+*.csv
+*.tsv
+*.xlsx
+
+# Exportações do próprio aplicativo (podem conter sessão real).
+irisflow-suporte-*.json
+irisflow-recording-*.jsonl
+irisflow_backup.json
+relatorio-clinico-paciente-*.json
+
+# Áudio de referência da voz (biometria) e pesos de modelo.
+*.wav
+*.opus
+*.mp3
+*.m4a
+*.onnx
+*.pth
+*.safetensors
+
+coverage/
+.vite/
+*.tsbuildinfo

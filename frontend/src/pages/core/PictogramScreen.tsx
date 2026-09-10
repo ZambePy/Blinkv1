@@ -26,7 +26,7 @@ export const PictogramScreen: React.FC = () => {
 
   const handleSpeak = (text: string) => {
     setSelectedText(text);
-    void falar(text, { rate: 0.9 });
+    void falar(text, { rate: 0.9 }).catch((e) => console.warn('[voz] falha ao falar:', e));
     emitirFalaDoPaciente(text, 'pictograma');
   };
 

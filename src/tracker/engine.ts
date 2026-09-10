@@ -7,6 +7,7 @@ import * as calibration from '../calibration';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2 } from '../oneEuroFilter';
 import { FilterChain } from '../filters/filterChain';
 import { BlinkHold } from '../filters/blinkHold';
+import { MedidorDeContraluz, type MedidaDeContraluz } from '../contraluz';
 import { geometriaDeDiagonal, type GeometriaDeTela } from '../filters/angularVelocity';
 import type { FilterPreset, FilterPresetV2 } from '../oneEuroFilter';
 import { extractFeatures } from '../featurePipeline';
@@ -285,6 +286,15 @@ export interface EngineDiagnostics {
      *  grandeza em px porque o que governa a precisão é quantos pixels de
      *  sensor caem sobre o olho. */
     iodPx: number;
+    /**
+     * Contraluz medida no QUADRO INTEIRO — razão entre o fundo e o rosto.
+     *
+     * Não sai do `qualityAnalyzer` porque ele lê só o crop dos olhos, e é
+     * justamente isso que torna a checagem de luz cega para uma janela às
+     * costas do paciente: o crop já vem compensado pela exposição automática.
+     * `undefined` = ainda não medido neste posto de uso.
+     */
+    contraluz?: MedidaDeContraluz;
   };
   /**
    * Qualidade do crop ocular no frame corrente.
@@ -448,6 +458,11 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   // Projeta a posição pelo Kalman durante a piscada, em vez de congelar. Só
   // tem efeito quando há Kalman — nunca no modo `'oneEuro'`.
   const blinkHold = new BlinkHold();
+  // Contraluz é propriedade do POSTO de uso, não do instante: ela muda quando
+  // alguém abre uma cortina, não entre dois quadros. Por isso o medidor tem
+  // intervalo próprio e não paga o custo de ler pixels 30 vezes por segundo.
+  const medidorDeContraluz = new MedidorDeContraluz();
+  let latestContraluz: MedidaDeContraluz | undefined;
 
   /** Constrói (ou reconstrói) a cadeia. Chamada quando a geometria aparece. */
   function montarCadeia(): void {
@@ -605,6 +620,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     latestHasFace = false;
     latestIod = 0;
     latestIodPx = 0;
+    // Contraluz é do POSTO de uso: um `stop()`/`start()` pode ser o cuidador
+    // levando o computador para outro cômodo.
+    latestContraluz = undefined;
+    medidorDeContraluz.reiniciar();
     latestFaceCenter = { x: 0.5, y: 0.5 };
     latestSpecularRatio = undefined;
     latestSpecularStability = undefined;
@@ -869,6 +888,50 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         calibration.setCurrentFrameGeometry(
           latestIodPx, videoEl?.videoWidth ?? 0, videoEl?.videoHeight ?? 0, latestFaceCenter,
         );
+
+        // ── Contraluz ────────────────────────────────────────────────────
+        //
+        // Mede aqui, e não junto do `qualityAnalyzer`, por dois motivos.
+        //
+        // O primeiro: lá o bloco está atrás de `!blinkDetected &&
+        // featuresLeft.length > 0`, e contraluz forte é EXATAMENTE o que
+        // derrete a borda da íris e faz a extração falhar. A medição ficaria
+        // presa em "não medido" justamente nos postos que ela existe para
+        // denunciar. Ela lê o quadro inteiro num canvas 64×36 e não depende de
+        // feature nenhuma.
+        //
+        // O segundo: o retângulo do rosto tem de ser calculado em PIXELS. A
+        // primeira versão usava `latestIod` (normalizado, e anisotrópico —
+        // veja o comentário logo acima) como meio-lado nos dois eixos, o que
+        // num vídeo 16:9 produzia uma caixa achatada que engolia fundo dos
+        // lados e cortava testa e queixo. Com a janela ao fundo, esse fundo
+        // entrava na média do "rosto", a razão caía pela metade e o contraluz
+        // era aprovado.
+        if (videoEl && videoEl.videoWidth > 0 && videoEl.videoHeight > 0) {
+          const vw = videoEl.videoWidth;
+          const vh = videoEl.videoHeight;
+          // Rosto ≈ 2,2× a distância entre os cantos externos dos olhos na
+          // largura, e mais alto que largo. Números grosseiros de propósito: a
+          // razão de luminância não é sensível a alguns por cento de caixa, e
+          // segmentar o rosto com precisão custaria mais do que a medida vale.
+          const larguraPx = Math.min(vw, Math.max(60, latestIodPx * 2.2));
+          const alturaPx = Math.min(vh, larguraPx * 1.35);
+          const medida = medidorDeContraluz.medir(
+            videoEl,
+            {
+              x: latestFaceCenter.x - larguraPx / 2 / vw,
+              y: latestFaceCenter.y - alturaPx / 2 / vh,
+              largura: larguraPx / vw,
+              altura: alturaPx / vh,
+            },
+            performance.now(),
+          );
+          // `null` LIMPA. O medidor devolve `null` só quando a leitura falhou
+          // de verdade (canvas contaminado, quadro ausente) — dentro do
+          // intervalo de throttle ele devolve a última medida boa. Manter o
+          // valor velho aqui transformaria "não medido" em código morto.
+          latestContraluz = medida ?? undefined;
+        }
 
         const rawMatrix = results.facialTransformationMatrixes?.[0]?.data;
         const faceMatrix = rawMatrix ? new Float32Array(rawMatrix) : undefined;
@@ -1384,6 +1447,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       }
       cropCtx = null;
       qualityAnalyzer.dispose?.();
+      medidorDeContraluz.dispose();
       calibration.dispose();
       setL2CSStatus('disabled');
     },
@@ -1504,6 +1568,7 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
           specularRatio: latestSpecularRatio,
           specularStability: latestSpecularStability,
           iodPx: latestIodPx,
+          contraluz: latestContraluz,
         },
         quality: latestQuality,
         video: {

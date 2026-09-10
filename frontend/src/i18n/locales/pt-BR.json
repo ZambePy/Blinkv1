@@ -20,7 +20,6 @@
       "pictograms": "Pictogramas\n(CAA)",
       "phrases": "Frases\nRápidas",
       "keyboard": "Teclado\nVirtual",
-      "chatbot": "Assistente\nde IA",
       "options": "Minhas\nOpções",
       "caregiver": "Painel do\nCuidador",
       "meditation": "Meditação\nGuiada",
@@ -102,7 +101,7 @@
     },
     "intro": {
       "title": "Comunicação e autonomia pelo olhar",
-      "tagline": "O IrisFlow transforma o movimento dos olhos em fala, escrita e controle do computador — sem toque, sem voz e sem mover a cabeça.",
+      "tagline": "O IrisFlow Communicator transforma o movimento dos olhos em fala, escrita e controle do computador — sem toque, sem voz e sem mover a cabeça.",
       "patientTitle": "Para quem usa",
       "patientBody": "Navega e se comunica olhando para a tela. Nada precisa ser digitado nem apertado.",
       "caregiverTitle": "Para quem acompanha",
@@ -182,7 +181,7 @@
     "continue": "Concordar e continuar"
   },
   "profiles": {
-    "title": "Quem vai usar o IrisFlow?",
+    "title": "Quem vai usar o IrisFlow Communicator?",
     "subtitle": "Cada paciente tem a própria calibração e o próprio vocabulário.",
     "empty": "Nenhum perfil ainda. Crie o primeiro.",
     "new": "Novo paciente",
@@ -220,7 +219,7 @@
       "monitor": "Monitor"
     },
     "permissao": {
-      "title": "O IrisFlow precisa da câmera",
+      "title": "O IrisFlow Communicator precisa da câmera",
       "why": "A câmera é o que permite ao paciente controlar o computador com o olhar. Ela fica ligada durante o uso.",
       "privacy": "A imagem nunca sai deste computador. Nada é gravado nem enviado — o vídeo é processado aqui e descartado quadro a quadro.",
       "patient": "O paciente não precisa fazer nada agora. Este preparo é seu.",
@@ -228,7 +227,7 @@
       "granted": "Câmera liberada.",
       "checking": "Abrindo a câmera…",
       "deniedTitle": "O Windows está bloqueando a câmera",
-      "deniedBody": "A permissão não é do IrisFlow, é do sistema. Abra as Configurações do Windows no caminho abaixo, ligue o acesso à câmera e volte aqui.",
+      "deniedBody": "A permissão não é do IrisFlow Communicator, é do sistema. Abra as Configurações do Windows no caminho abaixo, ligue o acesso à câmera e volte aqui.",
       "deniedPath": "Configurações → Privacidade e segurança → Câmera",
       "retry": "Tentar de novo"
     },

@@ -4,10 +4,20 @@ import { BackButton } from './BackButton';
 import { GazeButton } from './GazeButton';
 import { useReminders } from '../../context/ReminderContext';
 
+/**
+ * Não existe `showEmergency` aqui, e é de propósito.
+ *
+ * Havia — declarada no tipo, aceita pelo TypeScript em oito telas, e
+ * silenciosamente ignorada: a desestruturação nunca a extraía. Quem decide se
+ * o botão de socorro aparece é o `EmergencyProvider`, globalmente, pela rota.
+ * Uma prop que o compilador aceita e o componente ignora é pior que prop
+ * nenhuma: a próxima tela que precisar esconder o socorro passaria
+ * `showEmergency={false}`, veria o código compilar, e o botão apareceria assim
+ * mesmo.
+ */
 interface GazePageLayoutProps {
   children: React.ReactNode;
   showBack?: boolean;
-  showEmergency?: boolean;
   backRoute?: string;
   /**
    * Modo "sem moldura": fundo preto, sem padding e sem o cabeçalho canônico

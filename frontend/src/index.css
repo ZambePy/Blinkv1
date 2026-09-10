@@ -899,6 +899,18 @@ select:focus-visible,
   pointer-events: auto; /* Garante que o hover seja disparado nessa zona maior */
 }
 
+/*
+ * Alvo isolado (`isolado` no GazeButton): a zona cresce até o alvo mínimo de
+ * 5°, por eixo, com valores calculados pelo componente. Só para botões sem
+ * vizinho acionável — o "Voltar" do cabeçalho é o caso.
+ */
+.gaze-button.gaze-button--isolado .gaze-button-hit-area {
+  top: calc(-1 * var(--gaze-hit-inset-y, var(--gaze-hit-inset)));
+  bottom: calc(-1 * var(--gaze-hit-inset-y, var(--gaze-hit-inset)));
+  left: calc(-1 * var(--gaze-hit-inset-x, var(--gaze-hit-inset)));
+  right: calc(-1 * var(--gaze-hit-inset-x, var(--gaze-hit-inset)));
+}
+
 .gaze-button-content {
   position: relative;
   z-index: 2;

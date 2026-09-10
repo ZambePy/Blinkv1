@@ -14,6 +14,7 @@ export const BackButton: React.FC<BackButtonProps> = ({ to }) => {
       onClick={() => (to ? navigate(to) : navigate(-1))}
       width={180}
       height={64}
+      isolado
       style={{
         border: 'none',
         boxShadow: '0 4px 16px rgba(27,84,168,0.12)',

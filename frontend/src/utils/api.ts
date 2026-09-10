@@ -65,14 +65,6 @@ export async function apiFetch<T = unknown>(
 
 const jsonHeaders = { 'Content-Type': 'application/json' };
 
-export interface ChatbotMessageRequest {
-  text: string;
-  userId?: string;
-}
-export interface ChatbotMessageResponse {
-  reply: string;
-}
-
 export const api = {
   cloneVoice: (audioFile: File, userId: string) => {
     const form = new FormData();
@@ -109,14 +101,6 @@ export const api = {
       method: 'POST',
       headers: jsonHeaders,
       body: JSON.stringify({ device, action }),
-    }),
-
-  chatbotMessage: (body: ChatbotMessageRequest) =>
-    apiFetch<ChatbotMessageResponse>('/chatbot/message', {
-      method: 'POST',
-      headers: jsonHeaders,
-      body: JSON.stringify(body),
-      timeoutMs: 20_000,
     }),
 
   sendIAmOk: (userId: string) =>

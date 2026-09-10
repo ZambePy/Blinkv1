@@ -6,7 +6,12 @@ import { GazePageLayout } from '../components/ui/GazePageLayout';
 import { GazeButton } from '../components/ui/GazeButton';
 import { GazeGrid } from '../components/ui/GazeGrid';
 import { useGaze, useIsDwelling } from '../context/GazeContext';
-import { getPredictions, learnSentence } from '../utils/wordPredictor';
+import {
+  registrarFalaDoPaciente,
+  sugerirFrases,
+  sugerirPalavras,
+  type SugestaoDeFrase,
+} from '../services/assistente';
 import { logSentence } from '../utils/clinicalLogger';
 import { useNavigate } from 'react-router-dom';
 
@@ -131,12 +136,37 @@ export const KeyboardScreen: React.FC = () => {
   const [text, setText] = useState('');
   const [lastPressed, setLastPressed] = useState<string | null>(null);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  /**
+   * Frases inteiras. É a diferença entre economizar letras e economizar a frase:
+   * "quero mudar de posição" custa ~40 fixações letra a letra e uma só aqui.
+   * Com o campo vazio são as frases que o paciente mais usa; com texto escrito,
+   * as que continuam o que ele começou.
+   */
+  const [frasesSugeridas, setFrasesSugeridas] = useState<SugestaoDeFrase[]>([]);
   // activeGroup: null (nível 1) | 0-4 (letras/ações) | 5 (sugestões)
   const [activeGroup, setActiveGroup] = useState<number | null>(null);
 
+  /**
+   * Recalcula as sugestões só quando o TEXTO muda.
+   *
+   * `isDwelling` alterna várias vezes por segundo enquanto o olhar varre as
+   * teclas — o próprio `GazeContext` documenta isso. Tê-lo nas dependências
+   * fazia as duas funções rodarem de novo com o mesmo texto a cada olhar de
+   * passagem, devolvendo arrays novos que disparavam re-render desta tela
+   * inteira, e cada chamada ainda lia `localStorage` para conferir a licença.
+   * Leitura síncrona de disco no mesmo thread que desenha o cursor de olhar é
+   * exatamente o engasgo que este produto não pode ter.
+   *
+   * `isDwelling` continua sendo lido, mas só para ADIAR: durante uma fixação
+   * em curso, mexer nas sugestões trocaria o alvo debaixo do olhar da pessoa.
+   */
+  const textoCalculadoRef = useRef<string | null>(null);
   useEffect(() => {
     if (isDwelling) return;
-    setSuggestions(getPredictions(text).slice(0, MAX_SUGGESTIONS));
+    if (textoCalculadoRef.current === text) return;
+    textoCalculadoRef.current = text;
+    setSuggestions(sugerirPalavras(text, MAX_SUGGESTIONS));
+    setFrasesSugeridas(sugerirFrases({ textoAtual: text, maximo: 3 }));
   }, [text, isDwelling]);
 
   useEffect(() => {
@@ -169,6 +199,19 @@ export const KeyboardScreen: React.FC = () => {
     setActiveGroup(null);
   };
 
+  /**
+   * Frase inteira: substitui o que estava escrito, porque a sugestão de frase
+   * ou completa o que ele começou ou é uma frase dele já pronta. Não fala
+   * sozinha — quem decide falar é o paciente, no "Falar". Acionar a voz por
+   * conta própria a partir de uma sugestão seria pôr palavra na boca de alguém
+   * que não pode desmentir depressa.
+   */
+  const handleSelectPhrase = (frase: string) => {
+    setText(frase + ' ');
+    triggerFeedback(frase);
+    setActiveGroup(null);
+  };
+
   const append = (char: string) => {
     setText((t) => t + char);
     triggerFeedback(char);
@@ -189,9 +232,9 @@ export const KeyboardScreen: React.FC = () => {
   const speak = () => {
     if (text.trim()) {
       // Voz clonada do paciente quando pronta; senão a do sistema.
-      void falar(text, { rate: 0.9 });
+      void falar(text, { rate: 0.9 }).catch((e) => console.warn('[voz] falha ao falar:', e));
       triggerFeedback('speak');
-      learnSentence(text);
+      registrarFalaDoPaciente(text);
       logSentence(text);
       // vai para o celular do cuidador (se a conta estiver ligada)
       emitirFalaDoPaciente(text, 'texto');
@@ -223,6 +266,24 @@ export const KeyboardScreen: React.FC = () => {
 
   const currentSuggestions =
     text.trim().length > 0 && suggestions.length > 0 ? suggestions : DEFAULT_WORDS;
+
+  /**
+   * O que entra nas seis células do grupo de sugestões: frases primeiro, porque
+   * valem mais por fixação, depois palavras. Frases longas demais para caber
+   * numa célula ficam de fora — alvo com texto cortado é alvo que o paciente
+   * escolhe sem saber o que escolheu.
+   */
+  const MAX_CARACTERES_NA_CELULA = 42;
+  const frasesNaGrade = frasesSugeridas
+    .map((f) => f.texto)
+    .filter((t) => t.length <= MAX_CARACTERES_NA_CELULA)
+    .slice(0, 3);
+  const itensDeSugestao: { texto: string; frase: boolean }[] = [
+    ...frasesNaGrade.map((texto) => ({ texto, frase: true })),
+    ...currentSuggestions
+      .filter((w) => !frasesNaGrade.some((f) => f.toLowerCase() === w.toLowerCase()))
+      .map((texto) => ({ texto, frase: false })),
+  ].slice(0, 6);
 
   const keyClass = (variante: 'group' | 'letter' | 'words', pressed = false) =>
     'kb-key kb-key--' + variante + (pressed ? ' kb-key--fired' : '');
@@ -306,12 +367,12 @@ export const KeyboardScreen: React.FC = () => {
         <GazeButton
           key="group-suggestions"
           className={keyClass('words')}
-          onClick={() => { if (currentSuggestions.length > 0) setActiveGroup(5); }}
+          onClick={() => { if (itensDeSugestao.length > 0) setActiveGroup(5); }}
           noWarn
           style={cell}
         >
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.15rem' }}>
-            {currentSuggestions.map((word) => (
+            {currentSuggestions.slice(0, frasesNaGrade.length > 0 ? 3 : 5).map((word) => (
               <span
                 key={word}
                 style={{
@@ -323,6 +384,23 @@ export const KeyboardScreen: React.FC = () => {
                 {word}
               </span>
             ))}
+            {/* A prévia não cabe a frase inteira; diz que ela existe lá dentro.
+                Sem isso, o paciente não teria motivo para entrar no grupo. */}
+            {frasesNaGrade.length > 0 && (
+              <span
+                style={{
+                  marginTop: '0.35rem',
+                  fontSize: '1.5rem',
+                  fontWeight: 600,
+                  letterSpacing: '0.08em',
+                  textTransform: 'uppercase',
+                  color: KB.emberBright,
+                  opacity: 0.9,
+                }}
+              >
+                + {frasesNaGrade.length} {frasesNaGrade.length === 1 ? 'frase' : 'frases'}
+              </span>
+            )}
           </div>
         </GazeButton>
       </GazeGrid>
@@ -331,8 +409,10 @@ export const KeyboardScreen: React.FC = () => {
 
   const renderSubGrid = () => {
     let items: string[] = [];
-    if (activeGroup === 5) items = currentSuggestions.slice(0, 6);
+    if (activeGroup === 5) items = itensDeSugestao.map((i) => i.texto);
     else if (activeGroup !== null && activeGroup < 5) items = GROUPS[activeGroup];
+
+    const ehFrase = (texto: string) => itensDeSugestao.some((i) => i.frase && i.texto === texto);
 
     const pilha = (icone: React.ReactNode, rotulo: string) => (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '0.9rem' }}>
@@ -350,14 +430,36 @@ export const KeyboardScreen: React.FC = () => {
           if (item === 'Falar') content = pilha(<Speech size={ICON_SIZE} />, 'Falar');
           if (item === 'Apagar') content = pilha(<Delete size={ICON_SIZE} />, 'Apagar');
           if (item === 'Limpar') content = pilha(<Trash2 size={ICON_SIZE} />, 'Limpar');
+          const frase = activeGroup === 5 && ehFrase(item);
           if (activeGroup === 5)
-            content = <span style={{ ...letterGlyph, fontSize: FS_SUGGESTION }}>{item}</span>;
+            content = (
+              <span
+                style={{
+                  ...letterGlyph,
+                  // A frase é maior que a palavra e precisa caber; o corpo menor
+                  // e a quebra em duas linhas evitam corte no meio da palavra.
+                  fontSize: frase ? '1.9rem' : FS_SUGGESTION,
+                  lineHeight: frase ? 1.2 : 1,
+                  padding: frase ? '0 1rem' : 0,
+                  textAlign: 'center',
+                  color: frase ? KB.emberBright : undefined,
+                }}
+              >
+                {item}
+              </span>
+            );
 
           return (
             <GazeButton
               key={index}
               className={keyClass('letter', lastPressed === item)}
-              onClick={() => (activeGroup === 5 ? handleSelectSuggestion(item) : handleItemClick(item))}
+              onClick={() =>
+                activeGroup === 5
+                  ? frase
+                    ? handleSelectPhrase(item)
+                    : handleSelectSuggestion(item)
+                  : handleItemClick(item)
+              }
               noWarn
               style={cell}
             >

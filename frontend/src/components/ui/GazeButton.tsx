@@ -20,6 +20,18 @@ interface GazeButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> 
    */
   recovery?: boolean;
   noWarn?: boolean;
+  /**
+   * Alvo ISOLADO: a zona de acerto invisível cresce até o alvo mínimo de 5°
+   * (`alvoMinimoPx`), mesmo que o botão visível seja menor.
+   *
+   * A zona padrão é limitada a 12 px de propósito, porque num teclado ocular
+   * zonas maiores invadem a tecla vizinha. Um botão "Voltar" no cabeçalho não
+   * tem vizinho: ao redor dele há título e espaço vazio. Ali a limitação só
+   * serve para o jitter de poucos pixels na borda zerar o dwell, e o paciente
+   * não consegue sair da tela. Use APENAS em botões sem outro alvo a menos de
+   * `alvoMinimoPx()` de distância.
+   */
+  isolado?: boolean;
 }
 
 export const GazeButton: React.FC<GazeButtonProps> = ({
@@ -29,6 +41,7 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
   emergency = false,
   recovery = false,
   noWarn = false,
+  isolado = false,
   disabled,
   style,
   className = '',
@@ -44,13 +57,22 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
     if (import.meta.env?.DEV && !noWarn) {
       const w = width ?? buttonRef.current?.offsetWidth;
       const h = height ?? buttonRef.current?.offsetHeight;
-      if ((w && w < minPx) || (h && h < minPx)) {
+      // O que importa para acionar é a ZONA, não o retângulo pintado: um botão
+      // isolado tem a zona ampliada até o mínimo e não deve avisar por um
+      // problema que já foi resolvido. Sem `isolado`, a zona padrão é de 12 px
+      // por lado.
+      const extra = isolado ? insetParaAlvoMinimo(width, height, minPx) : { x: 12, y: 12 };
+      if ((w && w + 2 * extra.x < minPx) || (h && h + 2 * extra.y < minPx)) {
         console.warn(
           `[GazeButton] Alvo visual menor que o mínimo recomendado de 5.0° (${minPx}px).`
         );
       }
     }
-  }, [width, height, noWarn]);
+  }, [width, height, noWarn, isolado, minPx]);
+
+  // Quanto a zona de acerto cresce em cada eixo para o alvo isolado chegar ao
+  // mínimo. Sem largura/altura declaradas, assume-se que o botão já é grande.
+  const insetIsolado = isolado ? insetParaAlvoMinimo(width, height, minPx) : null;
 
   return (
     <button
@@ -59,10 +81,16 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
       data-emergency={emergency ? 'true' : undefined}
       data-recovery={recovery ? 'true' : undefined}
       data-no-dwell={disabled ? 'true' : undefined}
-      className={`gaze-button ${emergency ? 'emergency' : ''} ${className}`}
+      className={`gaze-button ${emergency ? 'emergency' : ''} ${isolado ? 'gaze-button--isolado' : ''} ${className}`}
       style={{
         width: width ? `${width}px` : undefined,
         height: height ? `${height}px` : undefined,
+        ...(insetIsolado
+          ? ({
+              '--gaze-hit-inset-x': `${insetIsolado.x}px`,
+              '--gaze-hit-inset-y': `${insetIsolado.y}px`,
+            } as React.CSSProperties)
+          : {}),
         ...style,
       }}
       {...props}
@@ -73,3 +101,19 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
     </button>
   );
 };
+
+/**
+ * Quanto estender a zona de acerto em cada eixo para que (tamanho + 2·inset)
+ * chegue ao alvo mínimo. Nunca menor que a zona padrão (12 px), nunca maior
+ * que o necessário — crescer além do mínimo só aumenta a chance de a zona
+ * alcançar algo que não deveria.
+ */
+export function insetParaAlvoMinimo(
+  width: number | undefined,
+  height: number | undefined,
+  minPx: number,
+): { x: number; y: number } {
+  const inset = (lado: number | undefined) =>
+    lado === undefined ? 12 : Math.max(12, Math.ceil((minPx - lado) / 2));
+  return { x: inset(width), y: inset(height) };
+}

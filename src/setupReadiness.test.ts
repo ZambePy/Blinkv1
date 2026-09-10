@@ -21,6 +21,7 @@ function goodSnapshot(over: Partial<ReadinessSnapshot> = {}): ReadinessSnapshot 
     pose: { yaw: 0.01, pitch: -0.02, roll: 0.005 },
     brightness: 0.45,
     contrast: 0.20,
+    contraluz: { razao: 0.9, nivel: 'ok' },
     detectorConfidence: 0.99,
     specularRatio: 0.0,
     ...over,
@@ -29,6 +30,37 @@ function goodSnapshot(over: Partial<ReadinessSnapshot> = {}): ReadinessSnapshot 
 
 const statusOf = (snap: ReadinessSnapshot, id: CheckId, fov?: number | null) =>
   evaluateReadiness(snap, { horizontalFovDeg: fov }).checks.find((c) => c.id === id)?.status;
+
+describe('contraluz — a janela atrás da pessoa', () => {
+  it('sem medida ainda, diz que está medindo em vez de aprovar', () => {
+    const snap = goodSnapshot({ contraluz: undefined });
+    const c = evaluateReadiness(snap).checks.find((x) => x.id === 'contraluz');
+    expect(c?.status).toBe('unknown');
+    expect(c?.message).toContain('Medindo');
+    // E não pode BLOQUEAR por falta de medida: não medir não é reprovar.
+    expect(evaluateReadiness(snap).blockedHard).toBe(false);
+  });
+
+  it('fundo muito mais claro que o rosto reprova, com o que fazer', () => {
+    const c = evaluateReadiness(goodSnapshot({ contraluz: { razao: 4.2, nivel: 'forte' } }))
+      .checks.find((x) => x.id === 'contraluz');
+    expect(c?.status).toBe('fail');
+    expect(c?.message).toContain('cortina');
+    expect(c?.value).toBeCloseTo(4.2);
+  });
+
+  it('contraluz moderada é aviso, não reprovação', () => {
+    expect(statusOf(goodSnapshot({ contraluz: { razao: 2.1, nivel: 'atencao' } }), 'contraluz')).toBe('warn');
+  });
+
+  it('é independente do brilho do crop — que é justamente o ponto', () => {
+    // Crop bem exposto (a câmera compensou) E contraluz forte: o `lighting`
+    // aprova e o `contraluz` reprova. Antes desta checagem, o posto passava.
+    const r = evaluateReadiness(goodSnapshot({ brightness: 0.5, contraluz: { razao: 5, nivel: 'forte' } }));
+    expect(r.checks.find((c) => c.id === 'lighting')?.status).toBe('ok');
+    expect(r.checks.find((c) => c.id === 'contraluz')?.status).toBe('fail');
+  });
+});
 
 describe('evaluateReadiness — posto de uso ideal', () => {
   it('não acusa nada e libera o início', () => {

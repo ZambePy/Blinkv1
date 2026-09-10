@@ -32,6 +32,8 @@ import { ouvir, emitirFalaDoPaciente, type EventoDoPaciente } from './eventos';
 import { camposDeCalibracao, resumoDoRelatorio } from './sessao';
 import { falarComVozDoSistema } from '../services/voz/sistema';
 import { assinarEstadoDaVoz, estadoDaVoz, vozClonadaPronta } from '../services/voz';
+import { montarRelatorio } from '../services/diagnostico/relatorioDeSuporte';
+import { instalarRelatosAutomaticos, registrarEnviador } from '../services/diagnostico/relatosAutomaticos';
 import type { HelpKind, Message, MessageKind, PatientSettings, QuickPhrase, VinculoLocal } from './types';
 
 export interface CloudState {
@@ -58,6 +60,11 @@ export interface CloudActions {
   repetirUltimaMensagem: () => void;
   dispensarMensagemNaTela: () => void;
   carregarConversa: () => Promise<void>;
+  /**
+   * Envia o relatório de suporte agora (botão em Ajustes). Devolve se o
+   * servidor gravou. `false` sem vínculo, sem rede ou no teto anti-inundação.
+   */
+  enviarRelatorioDeSuporte: (motivo: 'erro' | 'manual', resumo?: string) => Promise<boolean>;
 }
 
 const estadoInicial: CloudState = {
@@ -80,6 +87,7 @@ const acoesInertes: CloudActions = {
   repetirUltimaMensagem: () => {},
   dispensarMensagemNaTela: () => {},
   carregarConversa: async () => {},
+  enviarRelatorioDeSuporte: async () => false,
 };
 
 const CloudContext = createContext<CloudState & CloudActions>({ ...estadoInicial, ...acoesInertes });
@@ -478,10 +486,31 @@ export const CloudProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   const repetirUltimaMensagem = useCallback(() => {
     const m = ultimaDoCuidadorRef.current;
-    if (m) void falar(m.text);
+    if (m) void falar(m.text).catch((e) => console.warn('[voz] falha ao falar:', e));
   }, []);
 
   const dispensarMensagemNaTela = useCallback(() => patch({ mensagemNaTela: null }), [patch]);
+
+  // Relatório de suporte → servidor. O conteúdo é o do relatório manual
+  // (`montarRelatorio`, que tem teste garantindo que nenhuma frase do paciente
+  // entra); aqui só se acrescenta o transporte. Não enfileirável: um relato de
+  // erro de ontem, reenviado hoje, é ruído.
+  const enviarRelatorioDeSuporte = useCallback(async (motivo: 'erro' | 'manual', resumo = ''): Promise<boolean> => {
+    if (!vinculoRef.current) return false;
+    let versao: string | null = null;
+    try { versao = (await infoDoApp()).version; } catch { /* sem versão */ }
+    const report = montarRelatorio({ versao, estadoDaVoz: estadoDaVoz() ?? null });
+    const r = await sync.enviar({ action: 'report.send', report, motivo, resumo });
+    return r.stored === true;
+  }, [sync]);
+
+  // Relatos automáticos (opt-in): o serviço decide QUANDO; este provider é
+  // quem sabe COMO enviar. Registrar/desregistrar segue o ciclo de vida.
+  useEffect(() => {
+    registrarEnviador((motivo, resumo) => enviarRelatorioDeSuporte(motivo, resumo));
+    instalarRelatosAutomaticos();
+    return () => registrarEnviador(null);
+  }, [enviarRelatorioDeSuporte]);
 
   // Voz em uso → app do cuidador (Ajustes → Voz). Só um rótulo: "clonada" ou
   // "do sistema"; nada do áudio sai daqui. Enfileirável, como as outras.
@@ -498,8 +527,8 @@ export const CloudProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const value = useMemo(
-    () => ({ ...estado, enviarFalaDoPaciente, pedirAjuda, repetirUltimaMensagem, dispensarMensagemNaTela, carregarConversa }),
-    [estado, enviarFalaDoPaciente, pedirAjuda, repetirUltimaMensagem, dispensarMensagemNaTela, carregarConversa],
+    () => ({ ...estado, enviarFalaDoPaciente, pedirAjuda, repetirUltimaMensagem, dispensarMensagemNaTela, carregarConversa, enviarRelatorioDeSuporte }),
+    [estado, enviarFalaDoPaciente, pedirAjuda, repetirUltimaMensagem, dispensarMensagemNaTela, carregarConversa, enviarRelatorioDeSuporte],
   );
 
   return <CloudContext.Provider value={value}>{children}</CloudContext.Provider>;

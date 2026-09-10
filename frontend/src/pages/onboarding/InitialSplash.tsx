@@ -98,7 +98,7 @@ export const InitialSplash: React.FC = () => {
         {!logoQuebrada ? (
           <img
             src="/LOGO.png"
-            alt="IrisFlow"
+            alt="IrisFlow Communicator"
             style={{
               width: 300,
               height: 'auto',
@@ -110,7 +110,7 @@ export const InitialSplash: React.FC = () => {
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', color: '#1B54A8' }}>
             <Eye size={44} color="#1B54A8" aria-hidden="true" />
             <span style={{ fontSize: '2.75rem', fontWeight: 900, letterSpacing: '0.02em' }}>
-              IrisFlow
+              IrisFlow Communicator
             </span>
           </div>
         )}
@@ -126,7 +126,7 @@ export const InitialSplash: React.FC = () => {
             clip: 'rect(0 0 0 0)',
           }}
         >
-          IrisFlow
+          IrisFlow Communicator
         </h1>
 
         <div

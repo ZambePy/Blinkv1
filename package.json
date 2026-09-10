@@ -29,11 +29,12 @@
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
+    "electron-updater": "^6.8.9",
     "koffi": "^2.16.0"
   },
   "build": {
     "appId": "com.irisflow.app",
-    "productName": "IrisFlow",
+    "productName": "IrisFlow Communicator",
     "directories": {
       "output": "release"
     },
@@ -46,13 +47,23 @@
       "node_modules/koffi/**"
     ],
     "win": {
-      "target": "nsis"
+      "target": "nsis",
+      "icon": "build/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "perMachine": false,
+      "shortcutName": "IrisFlow Communicator"
     },
     "mac": {
-      "target": "dmg"
+      "target": "dmg",
+      "icon": "build/icon.png"
     },
     "linux": {
-      "target": "AppImage"
+      "target": "AppImage",
+      "icon": "build/icon.png",
+      "category": "Utility"
     }
   }
 }

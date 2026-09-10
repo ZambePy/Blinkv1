@@ -31,6 +31,7 @@ export type CheckId =
   | 'centering'
   | 'headPose'
   | 'lighting'
+  | 'contraluz'
   | 'contrast'
   | 'glasses';
 
@@ -55,6 +56,14 @@ export interface ReadinessSnapshot {
   pose: { yaw: number; pitch: number; roll: number };
   brightness: number;
   contrast: number;
+  /**
+   * Razão entre a luminância do fundo e a do rosto, medida no quadro inteiro.
+   *
+   * Separada de `brightness` porque mede outra coisa: `brightness` é o crop
+   * ocular DEPOIS da exposição automática, e é por isso que ele não enxerga
+   * uma janela às costas do paciente. `undefined` = ainda não medido.
+   */
+  contraluz?: { razao: number; nivel: 'indefinido' | 'ok' | 'atencao' | 'forte' } | undefined;
   detectorConfidence: number;
   specularRatio: number;
   /**
@@ -507,6 +516,41 @@ export function evaluateReadiness(
             ? 'Rosto estourado de luz. Reduza a iluminação direta ou afaste a luminária.'
             : 'Iluminação adequada.',
       });
+    }
+
+    // ── contraluz ──────────────────────────────────────────────────────────
+    //
+    // A checagem que faltava. `lighting` mede o crop ocular já compensado pela
+    // câmera; com uma janela atrás da pessoa, ele aprova um rosto em silhueta.
+    // O sinal que denuncia isso é a razão fundo/rosto no quadro inteiro.
+    {
+      const c = snap.contraluz;
+      if (!c) {
+        checks.push({
+          id: 'contraluz', status: 'unknown', value: null,
+          message: 'Medindo a luz do ambiente…',
+        });
+      } else if (c.nivel === 'indefinido') {
+        // Rosto escuro demais para a razão significar alguma coisa. Publicar
+        // `ok` aqui seria afirmar "não há contraluz" sobre uma medição que não
+        // aconteceu — e é justamente no quarto escuro com janela ao fundo que
+        // isso mais mente.
+        checks.push({
+          id: 'contraluz', status: 'unknown', value: null,
+          message: 'Rosto escuro demais para medir a luz do ambiente. Acenda uma luz de frente.',
+        });
+      } else {
+        const status: CheckStatus = c.nivel === 'forte' ? 'fail' : c.nivel === 'atencao' ? 'warn' : 'ok';
+        checks.push({
+          id: 'contraluz', status, value: c.razao,
+          message:
+            c.nivel === 'forte'
+              ? `Luz forte atrás de você: o fundo está ${c.razao.toFixed(1)}× mais claro que o rosto. Feche a cortina ou vire a cadeira de costas para a janela.`
+              : c.nivel === 'atencao'
+                ? `O fundo está ${c.razao.toFixed(1)}× mais claro que o rosto. Fechar a cortina ou acender uma luz de frente melhora a leitura da íris.`
+                : 'Sem contraluz: o rosto está tão claro quanto o fundo.',
+        });
+      }
     }
 
     // ── contraste ──────────────────────────────────────────────────────────

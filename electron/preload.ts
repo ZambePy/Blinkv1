@@ -85,3 +85,16 @@ contextBridge.exposeInMainWorld('irisflowCloud', {
     version: string; hostname: string; platform: string; encryptionAvailable: boolean;
   }> => ipcRenderer.invoke('irisflow:app-info'),
 });
+
+// Atualização automática: estado para a faixa na tela e o botão de reiniciar.
+// A instalação só acontece por este canal (decisão do cuidador) ou ao fechar.
+contextBridge.exposeInMainWorld('irisflowAtualizacao', {
+  estado: (): Promise<unknown> => ipcRenderer.invoke('irisflow:atualizacao-estado'),
+  verificar: (): Promise<boolean> => ipcRenderer.invoke('irisflow:atualizacao-verificar'),
+  instalar: (): Promise<boolean> => ipcRenderer.invoke('irisflow:atualizacao-instalar'),
+  aoMudar: (cb: (estado: unknown) => void): (() => void) => {
+    const ouvinte = (_e: unknown, estado: unknown) => cb(estado);
+    ipcRenderer.on('irisflow:atualizacao-mudou', ouvinte);
+    return () => ipcRenderer.removeListener('irisflow:atualizacao-mudou', ouvinte);
+  },
+});

@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Mic, Download, Volume2, Trash2, ShieldCheck, Cpu, CheckCircle2, AlertTriangle, Loader2, Sparkles } from 'lucide-react';
 import { VOZ_MEMORIA_NECESSARIA_GB, VOZ_MEMORIA_TOTAL_MINIMA_GB, type EstadoDoMotorDeVoz } from '@tracker/voz/protocolo';
+import { classificarMaquina, TABELA_DE_HARDWARE } from '@tracker/voz/requisitos';
+import { useConfirmacao } from '../../components/ui/DialogoDeConfirmacao';
 import { PageHeader } from '../../components/ui/PageHeader';
 import { PrimaryButton } from '../../components/ui/PrimaryButton';
 import { useAuth } from '../../context/AuthContext';
@@ -36,6 +38,12 @@ const QUALIDADE = {
   aceitavel: { rotulo: 'Aceitável', cor: '#b45309' },
   fraca: { rotulo: 'Fraca', cor: '#b91c1c' },
 } as const;
+
+const celulaDaTabela: React.CSSProperties = {
+  padding: '0.4rem 0.6rem',
+  borderBottom: '1px solid var(--color-card-border, rgba(148,163,184,0.35))',
+  verticalAlign: 'top',
+};
 
 const caixa: React.CSSProperties = {
   background: 'var(--color-card-bg)',
@@ -93,10 +101,13 @@ export const VozScreen: React.FC = () => {
   const mq = estado?.maquina;
   const memoriaApertada = !!mq && mq.memoriaTotalGb > 0 && mq.memoriaTotalGb < VOZ_MEMORIA_TOTAL_MINIMA_GB;
   const memoriaLivreInsuficiente = !!mq && mq.memoriaTotalGb > 0 && mq.memoriaLivreGb < VOZ_MEMORIA_NECESSARIA_GB;
+  const nivelDaMaquina = classificarMaquina(mq);
+  const rotuloDoNivel = TABELA_DE_HARDWARE.find((f) => f.nivel === nivelDaMaquina)?.rotulo ?? '';
 
   const [termoAberto, setTermoAberto] = useState(false);
   const [aceito, setAceito] = useState(false);
   const [ocupado, setOcupado] = useState<null | 'importando' | 'amostra' | 'aquecendo' | 'removendo'>(null);
+  const { confirmar, dialogo } = useConfirmacao();
   const [ultimoResultado, setUltimoResultado] = useState<string | null>(null);
 
   // Espelha em `settings.voiceGender` para quem ainda lê esse campo — sem
@@ -130,6 +141,10 @@ export const VozScreen: React.FC = () => {
       const q = QUALIDADE[r.qualidade];
       setUltimoResultado(`Voz importada: ${r.duracaoS.toFixed(0)} s de fala útil, qualidade ${q.rotulo.toLowerCase()}.${r.avisos.length ? ' ' + r.avisos.join(' ') : ''}`);
       toast.success('Voz importada. Toque em "Ouvir amostra" para conferir.');
+      // Frases padrão (pictogramas e frases rápidas) vão para o cache em
+      // segundo plano: senão a primeira vez de cada uma sairia na voz do
+      // sistema, porque a geração em CPU passa do prazo de espera.
+      void aquecer(true);
     } finally {
       setOcupado(null);
     }
@@ -151,23 +166,48 @@ export const VozScreen: React.FC = () => {
     }
   };
 
-  const aquecer = async () => {
-    setOcupado('aquecendo');
+  const aquecer = async (emSegundoPlano = false) => {
+    if (!emSegundoPlano) setOcupado('aquecendo');
+    else toast.info('Preparando as frases rápidas e os pictogramas na voz nova… isso leva alguns minutos em CPU.');
     try {
       const [{ TEXTOS_DAS_FRASES_RAPIDAS }, { TEXTOS_DOS_PICTOGRAMAS }] = await Promise.all([
         import('../QuickPhrasesScreen'),
         import('../core/PictogramScreen'),
       ]);
-      const n = await aquecerCache([...TEXTOS_DOS_PICTOGRAMAS, ...TEXTOS_DAS_FRASES_RAPIDAS]);
+      // O que o paciente REALMENTE diz entra no cache junto com os textos de
+      // fábrica. Sem isto, a voz clonada saía nos pictogramas e falhava
+      // justamente nas frases dele — que são as que ele usa o dia inteiro.
+      const { carregarModelo } = await import('../../services/assistente');
+      const modelo = carregarModelo();
+      const doPaciente = Object.values(modelo.frases)
+        .sort((a, b) => b.n - a.n)
+        .slice(0, 30)
+        .map((f) => f.texto);
+      const { FRASES_DE_PARTIDA } = await import('@tracker/assistente');
+
+      const n = await aquecerCache([
+        ...TEXTOS_DOS_PICTOGRAMAS,
+        ...TEXTOS_DAS_FRASES_RAPIDAS,
+        ...doPaciente,
+        ...FRASES_DE_PARTIDA,
+        'Sim',
+        'Não',
+      ]);
       toast.success(n > 0 ? `${n} frases preparadas no cache.` : 'Nenhuma frase nova para preparar.');
     } finally {
-      setOcupado(null);
+      if (!emSegundoPlano) setOcupado(null);
     }
   };
 
   const remover = async () => {
     if (!ponte) return;
-    if (!window.confirm('Remover a voz importada? O áudio de referência e todas as frases geradas serão apagados deste computador.')) return;
+    const ok = await confirmar({
+      titulo: 'Remover a voz importada?',
+      descricao:
+        'O áudio de referência e todas as frases geradas são apagados deste computador. Para ter a voz de volta é preciso gravar e importar de novo.',
+      confirmar: 'Remover a voz',
+    });
+    if (!ok) return;
     setOcupado('removendo');
     try {
       await ponte.remover();
@@ -193,6 +233,26 @@ export const VozScreen: React.FC = () => {
       />
 
       <div style={{ maxWidth: 820, margin: '0 auto', display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+        {/* O selo vem antes de tudo, inclusive do bloqueio por plano: quem
+            chega aqui precisa saber o que está aceitando ANTES de baixar 1,5 GB
+            de modelo. "Experimental" aqui é um compromisso concreto, não um
+            aviso jurídico — a lista diz o que pode dar errado. */}
+        <section aria-labelledby="voz-experimental" style={{ ...caixa, borderColor: '#fbbf24', background: '#fffbeb' }}>
+          <h2
+            id="voz-experimental"
+            style={{ margin: 0, fontSize: '1.05rem', fontWeight: 800, display: 'flex', alignItems: 'center', gap: '0.6rem', color: '#92400e' }}
+          >
+            <AlertTriangle size={20} aria-hidden="true" /> Recurso experimental
+          </h2>
+          <p style={{ margin: 0, color: '#92400e', lineHeight: 1.6 }}>
+            A voz clonada já funciona, mas ainda não passou pela validação com pacientes. Neste estágio, espere:
+            a primeira frase de cada texto novo demora (o modelo roda no processador deste computador); a
+            semelhança com a voz original depende muito da gravação enviada; e frases longas podem sair com
+            entonação estranha. Em qualquer falha, o paciente continua falando com a voz do sistema —
+            a comunicação nunca fica parada esperando a voz clonada.
+          </p>
+        </section>
+
         {!liberada && (
           <Aviso tipo="alerta">
             O plano desta conta não inclui a voz personalizada. Ela faz parte do plano <strong>IrisFlow Voz</strong> — o cuidador pode
@@ -251,6 +311,42 @@ export const VozScreen: React.FC = () => {
                   <Download size={20} aria-hidden="true" /> Baixar o modelo agora
                 </PrimaryButton>
               )}
+
+              {/* Tabela de requisitos com a faixa deste computador destacada.
+                  Publicar a tabela é promessa do plano de produto; destacar a
+                  linha certa é o que a torna útil para quem está com o
+                  computador na frente. */}
+              <details style={{ marginTop: '0.25rem' }}>
+                <summary style={{ cursor: 'pointer', fontWeight: 700 }}>
+                  Requisitos de hardware{nivelDaMaquina ? ` — este computador: ${rotuloDoNivel}` : ''}
+                </summary>
+                <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '0.75rem', fontSize: '0.9rem' }}>
+                  <thead>
+                    <tr style={{ textAlign: 'left' }}>
+                      <th style={celulaDaTabela}>Faixa</th>
+                      <th style={celulaDaTabela}>Memória</th>
+                      <th style={celulaDaTabela}>Processador</th>
+                      <th style={celulaDaTabela}>O que esperar</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {TABELA_DE_HARDWARE.map((faixa) => {
+                      const atual = faixa.nivel === nivelDaMaquina;
+                      return (
+                        <tr key={faixa.nivel} style={atual ? { background: '#e0f2fe', fontWeight: 700 } : undefined}>
+                          <td style={celulaDaTabela}>
+                            {faixa.rotulo}
+                            {atual && <span style={{ color: '#0369a1' }}> ← este computador</span>}
+                          </td>
+                          <td style={celulaDaTabela}>{faixa.memoriaGb}</td>
+                          <td style={celulaDaTabela}>{faixa.nucleos}</td>
+                          <td style={celulaDaTabela}>{faixa.expectativa}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </details>
             </>
           )}
         </section>
@@ -295,7 +391,7 @@ export const VozScreen: React.FC = () => {
                 <PrimaryButton type="button" onClick={() => void ouvirAmostra()} disabled={ocupado !== null || !liberada}>
                   {ocupado === 'amostra' ? <Loader2 size={20} className="animate-spin" aria-hidden="true" /> : <Volume2 size={20} aria-hidden="true" />} Ouvir amostra
                 </PrimaryButton>
-                <PrimaryButton type="button" variant="secondary" onClick={() => void aquecer()} disabled={ocupado !== null || !liberada || !estado.ativa}>
+                <PrimaryButton type="button" variant="secondary" onClick={() => void aquecer(false)} disabled={ocupado !== null || !liberada || !estado.ativa}>
                   {ocupado === 'aquecendo' ? <Loader2 size={20} className="animate-spin" aria-hidden="true" /> : <Sparkles size={20} aria-hidden="true" />} Preparar frases rápidas
                 </PrimaryButton>
                 <PrimaryButton type="button" variant="secondary" onClick={() => setTermoAberto(true)} disabled={ocupado !== null}>
@@ -359,6 +455,7 @@ export const VozScreen: React.FC = () => {
           </PrimaryButton>
         </section>
       </div>
+      {dialogo}
     </main>
   );
 };

@@ -663,6 +663,54 @@ export function getDistanceRange(): DistanceRange | null {
   return lastDistanceRange;
 }
 
+/**
+ * A predição caiu FORA da tela antes do `softClamp`?
+ *
+ * Isto existe por causa da falha mais confusa que este aplicativo produzia:
+ * o paciente olha para baixo da borda da tela, a predição vai para y > 1, o
+ * `softClamp` devolve exatamente 1 em todo quadro, e o cursor fica imóvel
+ * grudado na borda — com o estado ainda em `tracking`, sem aviso nenhum. Quem
+ * está na frente da tela conclui que o programa travou; e não travou, ele está
+ * relatando fielmente um olhar que está fora da área útil.
+ *
+ * O clamp continua saturando (é ele que garante que o cursor não suma da
+ * tela). O que muda é que a saturação passa a ser OBSERVÁVEL, e a interface
+ * pode dizer a verdade: "você está olhando abaixo da tela".
+ */
+export interface SaturacaoDoOlhar {
+  /** A predição bruta estava fora de [0,1] em algum eixo. */
+  fora: boolean;
+  /** Para onde escapou. `null` quando dentro da tela. */
+  direcao: 'cima' | 'baixo' | 'esquerda' | 'direita' | null;
+  /** Quanto passou, em unidades normalizadas (0,1 ≈ 10% da tela). */
+  excesso: number;
+}
+
+const DENTRO_DA_TELA: SaturacaoDoOlhar = { fora: false, direcao: null, excesso: 0 };
+let ultimaSaturacao: SaturacaoDoOlhar = DENTRO_DA_TELA;
+
+export function getSaturacaoDoOlhar(): SaturacaoDoOlhar {
+  return ultimaSaturacao;
+}
+
+/**
+ * Classifica um ponto normalizado. Puro e exportado para o teste: a regra de
+ * qual borda "ganha" quando escapa nos dois eixos ao mesmo tempo é justamente
+ * o tipo de detalhe que se escreve errado uma vez e ninguém revisa de novo.
+ */
+export function avaliarSaturacao(x: number, y: number): SaturacaoDoOlhar {
+  const excessoX = x < 0 ? -x : x > 1 ? x - 1 : 0;
+  const excessoY = y < 0 ? -y : y > 1 ? y - 1 : 0;
+  if (excessoX === 0 && excessoY === 0) return DENTRO_DA_TELA;
+  // Empate vai para o eixo vertical: olhar para baixo (teclado, colo, a mão de
+  // quem cuida) é de longe o caso mais comum de sair da tela, e é o que o
+  // paciente precisa ouvir primeiro.
+  if (excessoY >= excessoX) {
+    return { fora: true, direcao: y > 1 ? 'baixo' : 'cima', excesso: excessoY };
+  }
+  return { fora: true, direcao: x > 1 ? 'direita' : 'esquerda', excesso: excessoX };
+}
+
 // ---------------------------------------------------------------------------
 // Estado de referência da calibração como parte do PERFIL.
 //
@@ -817,6 +865,13 @@ export function clearCalibration() {
   treinadoEmMs = null;
   // A referência do modelo descartado não pode sobreviver a ele.
   restoreReferenceStateFromProfile(null);
+  // Diagnósticos do último quadro do modelo que acabou de ser jogado fora.
+  // Sem isto, `getSaturacaoDoOlhar()` continuava dizendo "olhando para baixo"
+  // durante a recalibração inteira — hoje o consumidor mascara isso exigindo
+  // rastreamento ativo, mas estado de módulo sobrevivendo ao seu dono já
+  // mordeu este projeto antes.
+  ultimaSaturacao = DENTRO_DA_TELA;
+  lastDistanceRange = null;
 }
 
 export function getSampleCount(): number {
@@ -2925,6 +2980,10 @@ export function mapGaze(
         document.documentElement.clientHeight,
       )
     : comPose0;
+
+  // Registrado ANTES do clamp: depois dele a informação some, e é exatamente
+  // essa informação que explica o cursor parado na borda.
+  ultimaSaturacao = avaliarSaturacao(comPose.x, comPose.y);
 
   const avgNormX = softClamp(comPose.x);
   const avgNormY = softClamp(comPose.y);

@@ -120,7 +120,7 @@ export function pararFala(): void {
  * tempo é pior do que falar com a outra voz. A geração continua em segundo
  * plano: na próxima vez a frase sai clonada.
  */
-export const ORCAMENTO_DA_VOZ_CLONADA_MS = 2_500;
+export const ORCAMENTO_DA_VOZ_CLONADA_MS = 4_000;
 
 /** Contador de falas: uma fala nova invalida a anterior (a última vence). */
 let turno = 0;

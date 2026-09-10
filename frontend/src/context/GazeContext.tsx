@@ -29,6 +29,8 @@ import { rolarSobOOlhar } from '../rolarSobOOlhar';
 import { estiloDoCursor, limitarTamanho } from '@tracker/interaction/cursorStyle';
 import { geometriaDoAnel } from '@tracker/interaction/dwellRing';
 import { GazeFallback } from '@tracker/interaction/gazeFallback';
+import { DetectorDeOlharForaDaTela } from '@tracker/interaction/olharForaDaTela';
+import { DetectorDeOlhosFechados } from '@tracker/interaction/olhosFechados';
 import { preflight, podeComecar } from '@tracker/diagnostics/preflight';
 import { isAccuracyTesting } from '@tracker/accuracy';
 import { stepBlinkClick, criarEstadoBlinkClick } from '@tracker/interaction/blinkClick';
@@ -43,6 +45,7 @@ import {
   type CameraState,
   type TuningStep,
 } from '@tracker/cameraTuner';
+import { getSaturacaoDoOlhar } from '@tracker/calibration';
 import { detectFlicker, inferPowerLineHz } from '@tracker/flickerDetector';
 import { AvisoDeDistancia } from '@tracker/distanceAdvisory';
 import { useSettings } from './SettingsContext';
@@ -300,6 +303,21 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const fallbackRef = useRef(new GazeFallback());
   const [gazeLostMessage, setGazeLostMessage] = useState<string | null>(null);
   const gazeLostMessageRef = useRef<string | null>(null);
+
+  // Cursor parado na borda porque o olhar saiu da área da tela. Estado
+  // separado do `gazeLostMessage`: são sintomas parecidos na tela e causas
+  // opostas — ali o rosto sumiu, aqui o rosto está presente e o olhar está
+  // fora do monitor.
+  const foraDaTelaRef = useRef(new DetectorDeOlharForaDaTela());
+  const [avisoDeBorda, setAvisoDeBorda] = useState<string | null>(null);
+  const avisoDeBordaRef = useRef<string | null>(null);
+
+  // Pálpebra cobrindo a íris (o caso de olhar para baixo) ou olhos fechados
+  // por tempo demais: o cursor congela com o rosto presente e o dwell pausa,
+  // tudo correto e tudo silencioso.
+  const olhosFechadosRef = useRef(new DetectorDeOlhosFechados());
+  const [avisoDeOlhosFechados, setAvisoDeOlhosFechados] = useState<string | null>(null);
+  const avisoDeOlhosFechadosRef = useRef<string | null>(null);
   // O `<circle>` do anel de progresso, quando a flag está ligada.
   const anelRef = useRef<SVGCircleElement | null>(null);
   // Piscada como clique. Desligada por default; ver a flag.
@@ -979,6 +997,32 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
             setGazeLostMessage(fb.mensagem);
           }
 
+          // Aviso de borda. Só faz sentido com o rastreamento ativo: em
+          // `segurando`/perdido a posição na tela é projetada, não medida, e
+          // acusar "você está olhando para baixo" com base numa projeção seria
+          // inventar.
+          const sat = getSaturacaoDoOlhar();
+          const vereditoDeBorda = foraDaTelaRef.current.avaliar({
+            fora: fb.estado === 'ativo' && sat.fora,
+            direcao: sat.direcao,
+            temRosto: sample.hasFace === true,
+            tMs: now,
+          });
+          if (vereditoDeBorda.mensagem !== avisoDeBordaRef.current) {
+            avisoDeBordaRef.current = vereditoDeBorda.mensagem;
+            setAvisoDeBorda(vereditoDeBorda.mensagem);
+          }
+
+          const vereditoDeOlhos = olhosFechadosRef.current.avaliar({
+            estado: sample.eyeState ?? 'unknown',
+            temRosto: sample.hasFace === true,
+            tMs: now,
+          });
+          if (vereditoDeOlhos.mensagem !== avisoDeOlhosFechadosRef.current) {
+            avisoDeOlhosFechadosRef.current = vereditoDeOlhos.mensagem;
+            setAvisoDeOlhosFechados(vereditoDeOlhos.mensagem);
+          }
+
           if (!fb.mostrarCursor || fb.posicao === null) {
             cursorRef.current.style.transform = 'translate3d(-9999px,-9999px,0)';
             cursorRef.current.style.opacity = '0';
@@ -1511,6 +1555,8 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
         calibrationInvalidated={calibrationInvalidated}
         distanceAdvice={distanceAdvice}
         gazeLostMessage={gazeLostMessage}
+        avisoDeBorda={avisoDeBorda}
+        avisoDeOlhosFechados={avisoDeOlhosFechados}
       />
       {/* A varredura fica DENTRO do provider e FORA do `DwellContext`: ela não
           depende de dwell e não deve re-renderizar a cada alternância dele. */}

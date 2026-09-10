@@ -8,6 +8,9 @@ import { PreparoGate } from './pages/setup/PreparoGate';
 import { GraceBanner } from './components/ui/GraceBanner';
 import { SettingsProvider } from './context/SettingsContext';
 import { ToastProvider } from './context/ToastContext';
+import { FaixaDeApresentacao } from './components/FaixaDeApresentacao';
+import { ConviteDeRelatos } from './components/ConviteDeRelatos';
+import { FaixaDeAtualizacao } from './components/FaixaDeAtualizacao';
 import { ReminderProvider } from './context/ReminderContext';
 import { EmergencyProvider } from './context/EmergencyContext';
 import { CloudProvider } from './cloud/CloudContext';
@@ -77,7 +80,6 @@ const CalibrationCheck = lazyNamed(
   () => import('./pages/onboarding/CalibrationCheck'),
   'CalibrationCheck'
 );
-const ChatbotScreen = lazyNamed(() => import('./pages/ai/ChatbotScreen'), 'ChatbotScreen');
 const FollowTarget = lazyNamed(() => import('./pages/games/FollowTarget'), 'FollowTarget');
 const MemoryGame = lazyNamed(() => import('./pages/games/MemoryGame'), 'MemoryGame');
 const DrawingGame = lazyNamed(() => import('./pages/games/DrawingGame'), 'DrawingGame');
@@ -177,6 +179,9 @@ function App() {
               <ReminderProvider>
                 <AppRouter>
                   <EmergencyProvider>
+                    <FaixaDeApresentacao />
+                    <ConviteDeRelatos />
+                    <FaixaDeAtualizacao />
                     <GraceBanner />
                     <CloudBanners />
                     <DebugHUD />
@@ -312,14 +317,6 @@ function App() {
                           element={
                             <ProtectedRoute>
                               <PictogramScreen />
-                            </ProtectedRoute>
-                          }
-                        />
-                        <Route
-                          path="/chatbot"
-                          element={
-                            <ProtectedRoute>
-                              <ChatbotScreen />
                             </ProtectedRoute>
                           }
                         />

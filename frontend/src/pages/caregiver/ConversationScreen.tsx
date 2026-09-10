@@ -1,12 +1,17 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Check, X, Volume2, Keyboard, MessageSquare, Cloud, CloudOff, LogIn } from 'lucide-react';
+import { Check, X, Volume2, Keyboard, MessageSquare, Cloud, CloudOff, LogIn, Sparkles } from 'lucide-react';
 import { GazePageLayout } from '../../components/ui/GazePageLayout';
 import { GazeGrid } from '../../components/ui/GazeGrid';
 import { GazeButton } from '../../components/ui/GazeButton';
 import { useCloud } from '../../cloud/CloudContext';
 import { emitirFalaDoPaciente } from '../../cloud/eventos';
 import { falar } from '../../services/voz';
+import {
+  registrarFalaDoPaciente,
+  sugerirFrases,
+  ultimaPerguntaDoCuidador,
+} from '../../services/assistente';
 import type { Message } from '../../cloud/types';
 
 /**
@@ -45,10 +50,38 @@ export const ConversationScreen: React.FC = () => {
     return (remotas.length ? remotas : RESPOSTAS_PADRAO).slice(0, 6);
   }, [cloud.frasesRemotas]);
 
+  /**
+   * A pergunta que ainda está no ar. Some assim que o paciente responde — o
+   * assistente não deve continuar oferecendo "Sim, por favor" para uma pergunta
+   * que já foi respondida.
+   */
+  const perguntaNoAr = useMemo(() => ultimaPerguntaDoCuidador(cloud.mensagens), [cloud.mensagens]);
+
+  /**
+   * Seis alvos, uma decisão de prioridade: enquanto há pergunta no ar, as
+   * sugestões do assistente ocupam a frente e as frases rápidas completam o
+   * resto. Sem pergunta, valem as frases que o cuidador cadastrou — elas são
+   * escolha humana e ganham de qualquer heurística.
+   */
+  const respostas = useMemo(() => {
+    const sugeridas = perguntaNoAr
+      ? sugerirFrases({ mensagemDoCuidador: perguntaNoAr, maximo: 4 }).map((s) => s.texto)
+      : [];
+    const vistas = new Set(sugeridas.map((t) => t.toLowerCase()));
+    const complemento = respostasRapidas.filter((r) => !vistas.has(r.toLowerCase()));
+    return {
+      itens: [...sugeridas, ...complemento].slice(0, 6),
+      sugeridas: new Set(sugeridas),
+    };
+  }, [perguntaNoAr, respostasRapidas]);
+
   const responder = (texto: string, kind: Message['kind']) => {
     emitirFalaDoPaciente(texto, kind);
     // Resposta do paciente: sai na voz dele (clonada) quando houver.
-    void falar(texto, { rate: 1 });
+    void falar(texto, { rate: 1 }).catch((e) => console.warn('[voz] falha ao falar:', e));
+    // O assistente aprende PARA QUE pergunta esta resposta serviu — é o que faz
+    // a décima vez custar uma fixação em vez de uma frase inteira.
+    registrarFalaDoPaciente(texto, perguntaNoAr);
   };
 
   const nomeDoCuidador = 'cuidador';
@@ -56,7 +89,7 @@ export const ConversationScreen: React.FC = () => {
 
   if (!cloud.configurada || !cloud.vinculo) {
     return (
-      <GazePageLayout showBack backRoute="/menu" showEmergency>
+      <GazePageLayout showBack backRoute="/menu">
         <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: '1.5rem', textAlign: 'center' }}>
           <CloudOff size={72} color="#94a3b8" aria-hidden="true" />
           <h1 style={{ fontSize: '2.4rem', fontWeight: 900, margin: 0, color: 'var(--color-text-base)' }}>Conversa com o cuidador</h1>
@@ -76,7 +109,7 @@ export const ConversationScreen: React.FC = () => {
   }
 
   return (
-    <GazePageLayout showBack backRoute="/menu" showEmergency>
+    <GazePageLayout showBack backRoute="/menu">
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%', width: '100%', gap: '1rem', boxSizing: 'border-box' }}>
         <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '1rem' }}>
           <div>
@@ -162,13 +195,32 @@ export const ConversationScreen: React.FC = () => {
             </div>
             <div style={{ flex: 1, minHeight: 0 }}>
               <GazeGrid columns={3} rows={2} gap={12}>
-                {respostasRapidas.map((r) => (
-                  <GazeButton key={r} onClick={() => responder(r, 'frase')} style={{ height: '100%', borderRadius: '1.25rem' }}>
-                    <span style={{ fontSize: '1.15rem', fontWeight: 700, padding: '0 0.5rem', textAlign: 'center' }}>
-                      <MessageSquare size={18} style={{ verticalAlign: '-3px', marginRight: 6 }} />{r}
-                    </span>
-                  </GazeButton>
-                ))}
+                {respostas.itens.map((r) => {
+                  const sugerida = respostas.sugeridas.has(r);
+                  return (
+                    <GazeButton
+                      key={r}
+                      onClick={() => responder(r, 'frase')}
+                      style={{
+                        height: '100%',
+                        borderRadius: '1.25rem',
+                        // A sugestão do assistente se distingue por um contorno
+                        // âmbar, não por cor de fundo: o paciente precisa saber
+                        // de onde veio a frase sem que o alvo mude de peso visual.
+                        ...(sugerida ? { border: '3px solid #F0A030' } : {}),
+                      }}
+                    >
+                      <span style={{ fontSize: '1.15rem', fontWeight: 700, padding: '0 0.5rem', textAlign: 'center' }}>
+                        {sugerida ? (
+                          <Sparkles size={18} color="#F0A030" style={{ verticalAlign: '-3px', marginRight: 6 }} />
+                        ) : (
+                          <MessageSquare size={18} style={{ verticalAlign: '-3px', marginRight: 6 }} />
+                        )}
+                        {r}
+                      </span>
+                    </GazeButton>
+                  );
+                })}
               </GazeGrid>
             </div>
           </div>

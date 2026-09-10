@@ -76,7 +76,7 @@ describe('VozScreen', () => {
     expect(await screen.findByText(/Voz importada: 22 s de fala útil, qualidade boa/)).toBeInTheDocument();
   });
 
-  it('com voz importada mostra qualidade, liga/desliga e permite remover (com confirmação)', () => {
+  it('com voz importada mostra qualidade, liga/desliga e permite remover (com confirmação)', async () => {
     estadoMock.atual = { ...semVoz(), modelo: { baixado: true, baixando: false, progresso: null }, motor: 'pronto', dispositivo: 'cpu', voz: { importada: true, duracaoS: 18, qualidade: 'aceitavel', nomeDoArquivo: 'voz.opus', consentimentoEm: '2026-09-09T00:00:00Z' }, ativa: true };
     montar();
     expect(screen.getByText('Aceitável')).toBeInTheDocument();
@@ -86,12 +86,16 @@ describe('VozScreen', () => {
     fireEvent.click(toggle);
     expect(ponteMock.ativar).toHaveBeenCalledWith(false);
 
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(false);
+    // A confirmação agora é um diálogo do próprio app (o `confirm` nativo fica
+    // fora da árvore do documento e o olhar não o alcança). Cancelar não apaga.
     fireEvent.click(screen.getByText(/Remover voz/));
+    fireEvent.click(await screen.findByText('Cancelar'));
+    await waitFor(() => expect(screen.queryByRole('alertdialog')).toBeNull());
     expect(ponteMock.remover).not.toHaveBeenCalled();
-    vi.spyOn(window, 'confirm').mockReturnValueOnce(true);
+
     fireEvent.click(screen.getByText(/Remover voz/));
-    expect(ponteMock.remover).toHaveBeenCalled();
+    fireEvent.click(await screen.findByText('Remover a voz'));
+    await waitFor(() => expect(ponteMock.remover).toHaveBeenCalled());
   });
 
   it('termo cobre autorização, uso local e remoção', () => {

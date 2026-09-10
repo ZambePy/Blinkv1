@@ -1,0 +1,35 @@
+# Integração contínua do site.
+#
+# Roda sem nenhum segredo: o cliente do Supabase (src/lib/supabase.ts) trata a
+# ausência de VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY, então o build sai
+# igual e os testes usam um cliente mockado. O teste contra o projeto real
+# (`npm run test:integracao`) é manual e fica fora daqui de propósito.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Checar tipos
+        run: npx tsc --noEmit -p tsconfig.app.json
+
+      - name: Testes
+        run: npm test
+
+      - name: Build
+        run: npm run build

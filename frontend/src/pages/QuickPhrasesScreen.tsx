@@ -73,7 +73,7 @@ export const QuickPhrasesScreen: React.FC = () => {
   const [currentPage, setCurrentPage] = useState(0);
 
   const handleSpeak = (text: string) => {
-    void falar(text, { rate: 0.9 });
+    void falar(text, { rate: 0.9 }).catch((e) => console.warn('[voz] falha ao falar:', e));
     logSentence(text);
     emitirFalaDoPaciente(text, 'frase');
   };

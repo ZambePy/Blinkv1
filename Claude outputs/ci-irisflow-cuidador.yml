@@ -1,0 +1,44 @@
+# Verificação do app do cuidador: tipos e testes unitários.
+# Não faz build nativo (isso é `eas build`, com credenciais) — aqui só o que
+# roda em Node puro e falha rápido: `tsc --noEmit` e `jest` (preset jest-expo).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  # Um push novo na mesma branch cancela a execução anterior: o resultado antigo já não interessa.
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verificar:
+    name: Tipos e testes
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          # Mesma major usada no desenvolvimento (v22). `cache: npm` guarda o
+          # ~/.npm entre execuções, chaveado pelo package-lock.json.
+          node-version: 22
+          cache: npm
+
+      # `npm ci` (e não `install`): instala exatamente o package-lock.json e
+      # falha se ele estiver fora de sincronia com o package.json.
+      - run: npm ci
+
+      # Sem variáveis EXPO_PUBLIC_SUPABASE_*: o typecheck e os testes não
+      # precisam delas (os testes substituem o cliente Supabase por um falso).
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Testes
+        run: npm test -- --ci
+        env:
+          # Evita o watch/interatividade do jest-expo em CI.
+          CI: 'true'

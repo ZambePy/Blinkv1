@@ -41,6 +41,21 @@ interface Props {
    */
   gazeLostMessage?: string | null;
   /**
+   * Cursor parado na borda porque o olhar saiu da área da tela.
+   *
+   * Vem pronto do `DetectorDeOlharForaDaTela`, com histerese. É o sintoma que
+   * o paciente relata como "o cursor travou": a predição saiu de [0,1], o
+   * clamp devolve a borda em todo quadro e o cursor fica imóvel — sem nada na
+   * tela dizendo o motivo.
+   */
+  avisoDeBorda?: string | null;
+  /**
+   * Olhos fechados (ou pálpebra cobrindo a íris) por mais tempo que uma
+   * piscada. O cursor congela com o rosto presente — o mesmo sintoma visual do
+   * aviso de borda, causa diferente.
+   */
+  avisoDeOlhosFechados?: string | null;
+  /**
    * Aviso de distância fora da faixa de calibração. `null` quando a
    * distância está na faixa ou não há medição.
    *
@@ -83,6 +98,8 @@ export const GazeStatusBanner: React.FC<Props> = ({
   calibrationInvalidated,
   distanceAdvice = null,
   gazeLostMessage = null,
+  avisoDeBorda = null,
+  avisoDeOlhosFechados = null,
 }) => {
   // `state` continua no contrato e e IGNORADO: era a entrada do unico aviso que
   // saiu ("Ainda nao ha calibracao"). Fica no tipo porque o `GazeProvider`
@@ -113,6 +130,20 @@ export const GazeStatusBanner: React.FC<Props> = ({
     detalhe =
       'O rastreamento perdeu o rosto. O cursor volta assim que a câmera ' +
       'enxergar você de novo.';
+  } else if (avisoDeOlhosFechados) {
+    // Antes do aviso de borda: com o olho fechado a predição nem existe, então
+    // falar da borda seria falar de um número que não foi medido neste quadro.
+    tom = 'aviso';
+    titulo = 'O cursor está parado';
+    detalhe = avisoDeOlhosFechados;
+  } else if (avisoDeBorda) {
+    // Depois da perda de rosto e antes do aviso de distância. Com o rosto
+    // perdido, falar da borda seria errado — a posição na tela nem está sendo
+    // medida. E é 'aviso', não 'erro': nada quebrou, e a saída está a um
+    // movimento de olho de distância, que é o que a mensagem diz como fazer.
+    tom = 'aviso';
+    titulo = 'O cursor parou na borda';
+    detalhe = avisoDeBorda;
   } else if (distanceAdvice) {
     // o tom é 'aviso', não 'erro': o sistema continua funcionando, só
     // com precisão pior que a medida na calibração. Tratar isso como erro
