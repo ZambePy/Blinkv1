@@ -517,6 +517,34 @@ export class RidgeRegressor {
   }
 
   /**
+   * Junta as duas fontes de peso que existem — o equilíbrio entre alvos
+   * (`balanceTargets`) e a qualidade por amostra (sprint S1) — num vetor só.
+   *
+   * Multiplicativo porque as duas respondem perguntas diferentes: quanto este
+   * ALVO pesa contra os outros, e quanto esta AMOSTRA pesa dentro do alvo dela.
+   * Qualquer uma pode estar ausente; as duas ausentes devolvem `null`, que é o
+   * caminho sem pesos e continua bit-idêntico ao de antes desta sprint.
+   */
+  private static combinarPesos(
+    porAlvo: number[] | null,
+    porQualidade: readonly number[] | null | undefined,
+    m: number,
+  ): number[] | null {
+    if (porQualidade && porQualidade.length !== m) {
+      // Silêncio aqui seria treinar sem os pesos e ninguém saber: o vetor veio
+      // com comprimento errado, o que é bug de quem chamou, não configuração.
+      console.warn(
+        `[ridge] pesos de qualidade com ${porQualidade.length} entradas para ${m} amostras — ignorados.`,
+      );
+    }
+    const q = porQualidade && porQualidade.length === m ? porQualidade : null;
+    if (!porAlvo && !q) return null;
+    if (!q) return porAlvo;
+    if (!porAlvo) return [...q];
+    return porAlvo.map((p, i) => p * q[i]);
+  }
+
+  /**
    * @param gruposDeAlvo Chave do ALVO NOMINAL de cada amostra. Precisa vir de
    * fora quando os alvos de treino foram compensados por pose: aí cada amostra
    * tem coordenada própria, e derivar o grupo delas transformaria o
@@ -533,6 +561,13 @@ export class RidgeRegressor {
      *  ajuste, que mede a generalização do modelo TREINADO, não a de um
      *  modelo reajustado a cada dobra. */
     lambdaFixo?: { x: number; y: number },
+    /**
+     * Peso de qualidade de cada amostra (sprint S1), já normalizado por alvo
+     * em `normalizarPorGrupo`. Entra tanto no ajuste final quanto na validação
+     * cruzada — se entrasse só no ajuste, o λ seria escolhido para um problema
+     * diferente do que acaba sendo resolvido.
+     */
+    pesosDeQualidade?: readonly number[],
   ): void {
     const targets = targetsX.map((x, i) => ({ screenX: x, screenY: targetsY[i] }));
     const groups = gruposDeAlvo && gruposDeAlvo.length === targets.length
@@ -542,8 +577,12 @@ export class RidgeRegressor {
       ? lambdaFixo
       : RidgeRegressor.lambdaOverride != null
         ? { x: RidgeRegressor.lambdaOverride, y: RidgeRegressor.lambdaOverride }
-        : this.selectLambdaCV(features, targets, LAMBDA_GRID, groups);
-    const pesos = RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(groups) : null;
+        : this.selectLambdaCV(features, targets, LAMBDA_GRID, groups, pesosDeQualidade);
+    const pesos = RidgeRegressor.combinarPesos(
+      RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(groups) : null,
+      pesosDeQualidade,
+      features.length,
+    );
 
     const MAX_ESCALATIONS = 3;
     let lambdaX = bestLambdas.x;
@@ -584,6 +623,7 @@ export class RidgeRegressor {
     targets: { screenX: number; screenY: number }[],
     lambdas: readonly number[],
     groupKeys?: string[],
+    pesosDeQualidade?: readonly number[],
   ): { x: number; y: number } {
     const keys = groupKeys ?? targets.map(targetGroupKey);
     const targetsUnique: string[] = [];
@@ -627,9 +667,11 @@ export class RidgeRegressor {
         const trainFeatures: number[][] = [];
         const trainTargets: { screenX: number; screenY: number }[] = [];
         const trainGroups: string[] = [];
+        const trainQualidade: number[] = [];
         const testFeatures: number[][] = [];
         const testTargets: { screenX: number; screenY: number }[] = [];
 
+        const usaQualidade = !!pesosDeQualidade && pesosDeQualidade.length === features.length;
         const alreadyCached = foldCache.has(key);
         for (let i = 0; i < features.length; i++) {
           if (keys[i] === key) {
@@ -639,6 +681,7 @@ export class RidgeRegressor {
             trainFeatures.push(features[i]);
             trainTargets.push(targets[i]);
             trainGroups.push(keys[i]);
+            if (usaQualidade) trainQualidade.push(pesosDeQualidade![i]);
           }
         }
 
@@ -651,7 +694,11 @@ export class RidgeRegressor {
           : withinTargetPenalty(zTrain, trainGroups);
         const pesosFold = cached
           ? cached.pesos
-          : (RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(trainGroups) : null);
+          : RidgeRegressor.combinarPesos(
+              RidgeRegressor.balanceTargets ? RidgeRegressor.pesosPorAlvo(trainGroups) : null,
+              usaQualidade ? trainQualidade : null,
+              trainFeatures.length,
+            );
         const foldTargets = cached ? cached.trainTargets : trainTargets;
         const normalEquations = cached
           ? cached.normalEquations

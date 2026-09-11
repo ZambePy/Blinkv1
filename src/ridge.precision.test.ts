@@ -240,7 +240,7 @@ describe('Ridge precision — edges vs center', () => {
 // cabeçalho de `computeCalibrationTargets` em calibration.ts. Estes testes
 // afirmam as invariantes da grade.
 describe('Calibration targets — grade 3×3 dentro do orçamento angular', () => {
-  it('FULL cobre 3 posições distintas por eixo, simétricas em torno do centro', () => {
+  it('FULL cobre 3 posições distintas por eixo, simétricas em X e assimétricas em Y', () => {
     expect(CALIBRATION_TARGETS_FULL).toHaveLength(9);
     const xs = [...new Set(CALIBRATION_TARGETS_FULL.map(t => t.x))].sort((a, b) => a - b);
     const ys = [...new Set(CALIBRATION_TARGETS_FULL.map(t => t.y))].sort((a, b) => a - b);
@@ -249,7 +249,11 @@ describe('Calibration targets — grade 3×3 dentro do orçamento angular', () =
     expect(xs[1]).toBeCloseTo(0.5, 10);
     expect(ys[1]).toBeCloseTo(0.5, 10);
     expect(xs[0] + xs[2]).toBeCloseTo(1, 10);
-    expect(ys[0] + ys[2]).toBeCloseTo(1, 10);
+    // Em Y a grade é assimétrica desde a sprint S4: a linha de baixo sobe
+    // porque a pálpebra acompanha o olhar e a íris some do quadro. Ver
+    // MAX_ECCENTRICITY_DEG_BAIXO.
+    expect(ys[0] + ys[2]).toBeLessThan(1);
+    expect(0.5 - ys[0]).toBeGreaterThan(ys[2] - 0.5);
   });
 
   it('QUICK são os 4 cantos da mesma grade', () => {
@@ -259,7 +263,7 @@ describe('Calibration targets — grade 3×3 dentro do orçamento angular', () =
     expect(xs).toHaveLength(2);
     expect(ys).toHaveLength(2);
     expect(xs[0] + xs[1]).toBeCloseTo(1, 10);
-    expect(ys[0] + ys[1]).toBeCloseTo(1, 10);
+    expect(ys[0] + ys[1]).toBeLessThan(1);
   });
 
   it('QUICK targets are a subset of FULL targets', () => {

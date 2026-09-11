@@ -37,6 +37,9 @@ import { stepBlinkClick, criarEstadoBlinkClick } from '@tracker/interaction/blin
 import { GazeStatusBanner } from '../components/GazeStatusBanner';
 import { ScanningMode } from '../components/ScanningMode';
 import type { FilterPreset, FilterPresetV2 } from '@tracker/oneEuroFilter';
+import { aprenderComSelecao, deveAprender } from '@tracker/interaction/correcaoPorDwell';
+import { modoApresentacaoAtivo } from '../services/apresentacao';
+import { emergenciaAtiva } from '../services/estadoDeEmergencia';
 import { EXPERIMENT } from '@tracker/config/experiment';
 import {
   planTuningStep,
@@ -869,6 +872,42 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           const alvo = outcome.effect.targetKey as HTMLElement;
           clearDwellVisuals();
 
+          // ── Correção por dwell (sprint S3) ────────────────────────────
+          //
+          // O dwell acabou de declarar, sem que ninguém precisasse perguntar,
+          // onde a pessoa estava olhando: no centro deste botão. A diferença
+          // entre esse centro e a posição do cursor é o desvio corrente do
+          // sistema, e é de graça.
+          //
+          // Só de alvo ISOLADO: num teclado ocular o dwell concluído
+          // frequentemente não acertou a tecla pretendida, e aprender ali
+          // ensina o erro. As outras guardas (degradado, apresentação,
+          // emergência, alvo especial) estão em `deveAprender`.
+          if (
+            alvo.isConnected &&
+            deveAprender({
+              alvoIsolado: alvo.dataset.isolado === 'true',
+              degradado: isDegraded,
+              apresentacao: modoApresentacaoAtivo(),
+              emergencia: emergenciaAtiva(),
+              alvoEspecial: target?.isEmergency === true || target?.isRecovery === true,
+              // Quadro comprimido pelo softClamp não diz onde a pessoa olhava,
+              // diz onde o clamp a pôs — e aprender dele realimenta a saturação.
+              saturado: getSaturacaoDoOlhar().fora,
+            })
+          ) {
+            const r = alvo.getBoundingClientRect();
+            aprenderComSelecao({
+              centroDoAlvo: { x: r.left + r.width / 2, y: r.top + r.height / 2 },
+              olhar: { x: sample.x, y: sample.y },
+              agoraMs: now,
+              viewport: {
+                largura: document.documentElement.clientWidth,
+                altura: document.documentElement.clientHeight,
+              },
+            });
+          }
+
           // O refratário já está armado dentro de `outcome.state`, que foi
           // commitado ACIMA. Se o handler React lançar, o dwell não redispara
           // sob o mesmo olhar e o loop segue vivo.
@@ -1451,6 +1490,24 @@ export const GazeProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       // Alvos que ficaram fora do treino, para a tela avisar que a calibração
       // treinou sem parte da grade. Barato: não dispara o LOO.
       getTargetsSkipped: () => engineRef.current?.calibration.getTargetsSkipped() ?? [],
+      // Rodada extra nos alvos que o modelo pior generalizou (sprint S4).
+      // Barata: lê o `looByTarget` já em cache do treino que acabou.
+      iniciarRodadaDeReforco: () =>
+        engineRef.current?.calibration.iniciarRodadaDeReforco() ?? [],
+      // Segunda posição de cabeça (sprint S7). A tela precisa PEDIR a mudança
+      // de posição antes de chamar: sem isso a rodada duplica a mesma pose.
+      iniciarRodadaDeSegundaPose: () =>
+        engineRef.current?.calibration.iniciarRodadaDeSegundaPose() ?? [],
+      // Perseguição suave (sprint S8). A tela precisa atualizar o alvo a cada
+      // quadro; sem isso o quadro não é guardado, porque amostra sem rótulo
+      // não serve para nada.
+      iniciarPerseguicao: () => engineRef.current?.calibration.iniciarPerseguicao() ?? false,
+      definirAlvoDaPerseguicao: (x: number, y: number) =>
+        engineRef.current?.calibration.definirAlvoDaPerseguicao(x, y),
+      finalizarPerseguicao: () =>
+        engineRef.current?.calibration.finalizarPerseguicao() ?? {
+          aproveitados: 0, vistos: 0, fracaoSeguida: 0, correlacaoMediana: null, utilizavel: false,
+        },
       abort: () => engineRef.current?.calibration.abort(),
       clear: () => engineRef.current?.calibration.clear(),
       isCalibrated: () => engineRef.current?.calibration.isCalibrated() ?? false,

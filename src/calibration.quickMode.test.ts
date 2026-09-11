@@ -42,22 +42,26 @@ describe('modo rápido de calibração', () => {
   // (`computeCalibrationTargets`), que depende da tela e da distância.
   // Estes testes afirmam a ESTRUTURA da grade (simetria, contagem, extremos),
   // não os números mágicos de uma tela específica.
-  it('modo quick: os 4 alvos são os cantos da grade, simétricos em torno do centro', () => {
+  it('modo quick: os 4 alvos são os cantos da grade, simétricos na horizontal', () => {
     startCalibrationMode({ quick: true });
     const targets = getCalibrationTargets();
     const xs = [...new Set(targets.map((t) => t.x))].sort((a, b) => a - b);
     const ys = [...new Set(targets.map((t) => t.y))].sort((a, b) => a - b);
     expect(xs).toHaveLength(2);
     expect(ys).toHaveLength(2);
-    // Simetria em torno de 0.5 — o centro da tela é o centro da grade.
+    // Simetria em X: nada distingue esquerda de direita.
     expect(xs[0] + xs[1]).toBeCloseTo(1, 10);
-    expect(ys[0] + ys[1]).toBeCloseTo(1, 10);
+    // Em Y, NÃO: desde a sprint S4 a linha de baixo sobe, porque é a pálpebra
+    // — e não a geometria da tela — que decide até onde o olho continua
+    // visível. A soma menor que 1 é a assimetria, e ela é intencional.
+    expect(ys[0] + ys[1]).toBeLessThan(1);
+    expect(0.5 - ys[0]).toBeGreaterThan(ys[1] - 0.5);
     // 4 combinações distintas → cobre os 4 cantos da grade.
     const keys = new Set(targets.map((t) => `${t.x},${t.y}`));
     expect(keys.size).toBe(4);
   });
 
-  it('modo full: grade 3×3 simétrica com centro exato e cantos coincidindo com o quick', () => {
+  it('modo full: grade 3×3 com centro exato e cantos coincidindo com o quick', () => {
     startCalibrationMode();
     const full = getCalibrationTargets();
     const xs = [...new Set(full.map((t) => t.x))].sort((a, b) => a - b);
@@ -67,7 +71,9 @@ describe('modo rápido de calibração', () => {
     expect(xs[1]).toBeCloseTo(0.5, 10);
     expect(ys[1]).toBeCloseTo(0.5, 10);
     expect(xs[0] + xs[2]).toBeCloseTo(1, 10);
-    expect(ys[0] + ys[2]).toBeCloseTo(1, 10);
+    // Assimetria vertical deliberada — ver o teste do modo quick acima.
+    expect(ys[0] + ys[2]).toBeLessThan(1);
+    expect(0.5 - ys[0]).toBeGreaterThan(ys[2] - 0.5);
     // Centro presente, e as 9 combinações são distintas.
     expect(new Set(full.map((t) => `${t.x},${t.y}`)).size).toBe(9);
 

@@ -274,16 +274,36 @@ export function getRecentBlinkRatePerMinute(windowMs: number = 60000): number {
  *  qualquer dimensão mudar — é o que invalida perfis salvos. */
 export const FEATURE_FORMAT_VERSION = 2;
 
-export type FeatureSet = 'irisCore' | 'irisCore+l2cs' | 'compact';
+export type FeatureSet = 'irisCore' | 'irisCore+l2cs' | 'irisCore+l2csFull' | 'compact';
 
 const FEATURE_SET_INDICES: Record<Exclude<FeatureSet, 'compact'>, readonly number[]> = {
   'irisCore': [0, 1, 2, 3],
   'irisCore+l2cs': [0, 1, 2, 3, 37, 38],
+  /**
+   * O bloco angular INTEIRO (sprint S7).
+   *
+   * O conjunto de produção leva só `tan yaw` e `tan pitch` do bloco de sete
+   * dimensões. A expansão polinomial de grau 2 recria os quadrados e o cruzado
+   * dessas duas — mas NÃO recria os produtos com a distância (índices 39 e 40),
+   * que são justamente os que carregam geometria: o mesmo ângulo de olhar
+   * aponta para lugares diferentes conforme a cabeça esteja perto ou longe.
+   *
+   * Onze dimensões viram 77 depois da expansão, contra 27 hoje. Com nove alvos
+   * e ~15 amostras por alvo isso é território de decorar, e a validação cruzada
+   * leave-one-target-out é a única defesa. Se o λ escolhido encostar no teto da
+   * grade (1e3), o modelo está dizendo que não quer estas dimensões — e a
+   * resposta certa é aceitar, não insistir.
+   *
+   * Conjunto de ABLAÇÃO, não de produção: trocar o conjunto muda o
+   * `FEATURE_VECTOR_ID` e invalida os perfis salvos, por construção.
+   */
+  'irisCore+l2csFull': [0, 1, 2, 3, 37, 38, 39, 40, 41, 42, 43],
 };
 
 const FEATURE_SET_MIN_LENGTH: Record<Exclude<FeatureSet, 'compact'>, number> = {
   'irisCore': 4,
   'irisCore+l2cs': 39,
+  'irisCore+l2csFull': 44,
 };
 
 /** Índices do bloco L2CS no vetor completo. */
@@ -292,7 +312,11 @@ const L2CS_FULL_INDICES: readonly number[] = [37, 38, 39, 40, 41, 42, 43];
 /** Conjunto ativo. Resolvido uma vez no boot: sem L2CS, o modelo vê só as
  *  quatro dimensões de íris. */
 export const ACTIVE_FEATURE_SET: FeatureSet =
-  EXPERIMENT.l2cs === 'off' ? 'irisCore' : 'irisCore+l2cs';
+  EXPERIMENT.l2cs === 'off'
+    ? 'irisCore'
+    : EXPERIMENT.blocoL2csCompleto
+      ? 'irisCore+l2csFull'
+      : 'irisCore+l2cs';
 
 /** Posições do bloco L2CS dentro do vetor já projetado (vazio quando o
  *  conjunto não carrega bloco angular). */

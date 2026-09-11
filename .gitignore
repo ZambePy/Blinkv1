@@ -75,6 +75,7 @@ voice-engine/.pytest_cache/
 *.txt
 *.md
 !docs/MEDICOES.md
+!docs/INTEGRACAO.md
 
 # Duas exceções técnicas ao "*.txt" acima. Se quiser mesmo tirar as duas do
 # repositório, apague estas linhas — mas saiba o que cada uma quebra:

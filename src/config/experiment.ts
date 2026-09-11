@@ -33,8 +33,46 @@ export interface ExperimentConfig {
   geometricPoseCompensation: boolean;
   /** Compensação de translação lateral da cabeça. */
   lateralTranslationCompensation: boolean;
+  /**
+   * Correção contínua aprendida com os dwells concluídos (sprint S3).
+   *
+   * Ligada por padrão porque é o que segura a deriva no uso real. A flag existe
+   * para a medição: comparar uma rodada com e outra sem, sob o MESMO modelo, é
+   * o único jeito de saber quanto ela vale — e o protocolo de precisão, que
+   * calibra e mede em seguida, não a exercita.
+   */
+  correcaoPorDwell: boolean;
   /** Filtro temporal. `oneEuro` é o de produção; os outros existem para o benchmark. */
   filterMode: 'oneEuro' | 'kalman' | 'kalmanEma';
+  /**
+   * Estabilizador por estado do olho (sprint S5): durante a fixação a saída
+   * vira a média da janela de 200 ms; na sacada, volta a ser a amostra
+   * filtrada.
+   *
+   * Ligado por padrão porque a M1 mediu razão de filtro 0,99 — o One Euro em
+   * produção quase não suaviza, e esse espaço estava inteiro vazio. A flag
+   * existe para a medição comparar com e sem, sob o mesmo modelo.
+   */
+  estabilizarFixacao: boolean;
+  /**
+   * Cancela o roll da cabeça no recorte do L2CS (sprint S6).
+   *
+   * DESLIGADA por padrão, e por um motivo específico: o ganho só existe se esta
+   * normalização for a MESMA usada no treino do checkpoint empacotado.
+   * Normalização diferente da do dataset piora em vez de melhorar, e este
+   * projeto ainda não confirmou como o modelo foi treinado. Ligar isto é uma
+   * condição de medição — duas sessões, uma com e outra sem, com a cadeira
+   * reclinada uns 15°, que é onde o efeito existe.
+   */
+  normalizarRollNoCrop: boolean;
+  /**
+   * Usa as SETE dimensões do bloco angular do L2CS em vez de duas (sprint S7).
+   *
+   * Desligada por padrão: é uma ablação, e ela muda o `FEATURE_VECTOR_ID`, o
+   * que invalida todo perfil salvo — proteção, não obstáculo, mas que precisa
+   * de migração pensada antes de virar produção.
+   */
+  blocoL2csCompleto: boolean;
   /** Diâmetro do cursor de gaze, em px. */
   cursorSizePx: number;
   /** Anel de progresso do dwell desenhado ao redor do cursor. */
@@ -70,7 +108,11 @@ export const DEFAULTS: ExperimentConfig = {
   polynomialFeatures: true,
   geometricPoseCompensation: true,
   lateralTranslationCompensation: false,
+  correcaoPorDwell: true,
   filterMode: 'oneEuro',
+  estabilizarFixacao: true,
+  normalizarRollNoCrop: false,
+  blocoL2csCompleto: false,
   cursorSizePx: 48,
   dwellRingOnCursor: false,
   cursorNoTesteDePrecisao: false,

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import { definirEmergenciaAtiva } from '../services/estadoDeEmergencia';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { AlertOctagon } from 'lucide-react';
 import { GazeButton } from '../components/ui/GazeButton';
@@ -122,6 +123,13 @@ export const EmergencyProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     navigate('/emergency?autoTrigger=other');
   };
+
+  // Espelha o alarme num sinal de módulo, para o dispatcher de dwell poder
+  // consultá-lo sem depender deste contexto (ver `estadoDeEmergencia.ts`).
+  useEffect(() => {
+    definirEmergenciaAtiva(isConfirming);
+    return () => definirEmergenciaAtiva(false);
+  }, [isConfirming]);
 
   useEffect(() => {
     if (isConfirming) {

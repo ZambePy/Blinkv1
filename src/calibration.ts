@@ -1,3 +1,7 @@
+import { normalizarPorGrupo, pesoDaAmostra, resumoDePesos } from './calibration/pesoDaAmostra';
+import { EstabilidadeDoPonto, decidirFechamento } from './calibration/estabilidadeDoPonto';
+import { celulaDoAlvo, colher, type AmostraDePerseguicao, type ResultadoDaColheita } from './calibration/perseguicao';
+import { corrigirPorDwell, reiniciarCorrecao } from './interaction/correcaoPorDwell';
 import type { GazeRegressor } from './gazeRegressor';
 import {
   createRegressor,
@@ -78,6 +82,28 @@ export interface CalibrationPoint {
   featuresLeft: number[];
   featuresRight: number[];
   quality?: any | null;
+  /**
+   * Peso de qualidade da amostra (sprint S1), em (0, 1]. Calculado em
+   * `feedRawData`, onde o diagnóstico do bloco L2CS ainda é do quadro corrente
+   * — depois disso a informação já se perdeu. Ausente em perfis salvos por
+   * versões anteriores: quem lê trata como 1.
+   */
+  peso?: number;
+  /**
+   * Grupo de validação cruzada, quando ele NÃO pode ser derivado da coordenada
+   * (sprint S8).
+   *
+   * Na calibração por pontos, o grupo é o alvo — e `targetGroupKey` o deriva de
+   * `screenX/screenY`. Na perseguição suave o alvo é contínuo: cada quadro tem
+   * coordenada própria, e derivar o grupo dela daria UM GRUPO POR AMOSTRA. O
+   * leave-one-target-out viraria leave-one-sample-out, com λ otimista, a
+   * penalidade anisotrópica desligada por falta de grupo com duas amostras, e
+   * um custo de treino proporcional ao quadrado do número de quadros — foi
+   * medido em outra ocasião neste projeto e são ~50 s por olho.
+   *
+   * Por isso a perseguição carimba aqui uma célula grosseira da tela.
+   */
+  grupo?: string;
 }
 
 // Amostragem ponderada na periferia. `COLLECTION_MS_BASE` é a duração para o
@@ -90,6 +116,27 @@ export interface CalibrationPoint {
 const COLLECTION_MS_BASE = 1680;
 const COLLECTION_MS_RANGE = 1120;
 const COLLECTION_MS_FALLBACK = COLLECTION_MS_BASE + COLLECTION_MS_RANGE;
+
+/**
+ * Piso da janela útil (sprint S2).
+ *
+ * Abaixo disto o ponto não fecha nem com o olhar parado. Existe porque o
+ * critério de estabilidade olha para doze amostras — a 30 Hz, 400 ms de sinal —
+ * e uma janela curta demais pode declarar estável o intervalo entre duas
+ * correções, não a fixação inteira. 900 ms deixam margem de mais de duas
+ * janelas.
+ */
+const COLLECTION_MIN_MS = 900;
+
+/**
+ * Teto da janela útil (sprint S2). Antes o tempo de cada ponto era FIXO em
+ * `COLLECTION_MS_BASE + excentricidade`; agora esse mesmo valor vira teto, e o
+ * ponto fecha antes se a pessoa estabilizar. Nenhum ponto passa a demorar mais
+ * do que demorava — só pode demorar menos.
+ */
+function tetoDaJanela(collectionMs: number): number {
+  return Math.max(COLLECTION_MIN_MS, collectionMs);
+}
 
 /**
  * Janela descartada no início de cada ponto: sacada + acomodação, em ms.
@@ -374,6 +421,53 @@ let collectionStartTime = 0;
 let collectedFeaturesLeft: number[][] = [];
 let collectedFeaturesRight: number[][] = [];
 let collectedQualities: (any | null)[] = [];
+/** Peso de qualidade de cada amostra do ponto corrente (sprint S1). Anda em
+ *  paralelo com `collectedFeatures*`; qualquer caminho que limpe um precisa
+ *  limpar este. */
+let collectedPesos: number[] = [];
+/**
+ * Coleta por perseguição suave em curso (sprint S8).
+ *
+ * Enquanto está ativa, `feedRawData` desvia para cá em vez de acumular num
+ * alvo estático: cada quadro guarda as features e a posição do alvo naquele
+ * instante. Quem correlaciona é `finalizarPerseguicao`.
+ */
+let perseguicaoAtiva = false;
+let alvoDaPerseguicao: { x: number; y: number } | null = null;
+let quadrosDaPerseguicao: {
+  featuresLeft: number[];
+  featuresRight: number[];
+  quality: any | null;
+  peso: number;
+  amostra: AmostraDePerseguicao;
+}[] = [];
+
+/** Critério de parada por estabilidade do alvo corrente (sprint S2). */
+const estabilidadeDoAlvo = new EstabilidadeDoPonto();
+/** Tempo útil que cada alvo de fato consumiu, e quantos foram ao teto. */
+let tempoUtilPorAlvoMs: number[] = [];
+let pontosInstaveis = 0;
+/** Como o alvo corrente foi fechado — vai para o log do ponto. */
+let motivoDoFechamento: 'estavel' | 'teto' = 'teto';
+
+/**
+ * Retrato do modelo antes de uma rodada de reforço (sprint S4).
+ *
+ * `null` fora de um reforço. Ver `iniciarRodadaDeReforco`.
+ */
+/** Meta do último perfil persistido. Ver `persistActiveProfileToRegistry`. */
+let ultimaMetaPersistida: CalibrationProfileMeta | null = null;
+
+let modeloAntesDoReforco: {
+  left: RidgeModel | null;
+  right: RidgeModel | null;
+  scalerL: { means: number[]; stds: number[] };
+  scalerR: { means: number[]; stds: number[] };
+  meta: CalibrationProfileMeta | null;
+} | null = null;
+
+/** Resumo dos pesos do último treino, para o diagnóstico de ajuste. */
+let ultimoResumoDePesos: ReturnType<typeof resumoDePesos> = null;
 
 let currentTargetX = 0;
 let currentTargetY = 0;
@@ -828,8 +922,24 @@ export function abortCalibration(): void {
   collectedFeaturesLeft = [];
   collectedFeaturesRight = [];
   collectedQualities = [];
+  collectedPesos = [];
   collectionStartTime = 0;
   lastDecision = null;
+
+  // Perseguição em curso (sprint S8). A guarda dela em `feedRawData` vem ANTES
+  // do teste de `isCalibrating`, então sem esta limpeza um abort deixaria todo
+  // quadro seguinte sendo empurrado no buffer, para sempre — vazamento de
+  // memória sem teto, e `lastDecision` travado em "aceito".
+  perseguicaoAtiva = false;
+  alvoDaPerseguicao = null;
+  quadrosDaPerseguicao = [];
+
+  // Diagnóstico por sessão (sprint S2): sem isto, o relatório depois de um
+  // abort descreveria a sessão anterior.
+  tempoUtilPorAlvoMs = [];
+  pontosInstaveis = 0;
+  motivoDoFechamento = 'teto';
+  estabilidadeDoAlvo.reiniciar();
 
   // Contadores e baselines por ponto/sessão: sem isto, a próxima calibração
   // herdaria o baseline de pose e os contadores de gate da sessão abortada.
@@ -850,6 +960,15 @@ export function abortCalibration(): void {
 export function clearCalibration() {
   abortCalibration();
   profile = [];
+  tempoUtilPorAlvoMs = [];
+  pontosInstaveis = 0;
+  perseguicaoAtiva = false;
+  alvoDaPerseguicao = null;
+  quadrosDaPerseguicao = [];
+  ultimaMetaPersistida = null;
+  modeloAntesDoReforco = null;
+  // O deslocamento aprendido descrevia o modelo que acabou de ser descartado.
+  reiniciarCorrecao();
   regressorLeft = null;
   regressorRight = null;
   varianceFloorBreaches = 0;
@@ -1158,6 +1277,27 @@ function saveProfile() {
 // precisar de menos. Por isso é constante nomeada e `geometry.maxEccentricityDeg`.
 export const MAX_ECCENTRICITY_DEG = 16;
 
+/**
+ * Orçamento angular PARA BAIXO, menor que o dos outros lados (sprint S4).
+ *
+ * O padrão que motivou isto está registrado na §14.3 do `MEDICOES.md`: sete das
+ * nove calibrações do período deixaram alvos de `y = 0,95` fora do treino, e
+ * nunca outra linha. O diagnóstico foi que a causa não é rejeição de amostra —
+ * é PERDA DE ROSTO quando o olhar desce, porque a pálpebra acompanha o olhar e
+ * a íris some do quadro.
+ *
+ * A pálpebra não é simétrica, então o orçamento também não deveria ser. Doze
+ * graus para baixo contra dezesseis nas outras direções: o alvo inferior sobe o
+ * suficiente para a íris continuar visível, ao custo de o modelo cobrir menos
+ * tela para baixo.
+ *
+ * ⚠️ ESTE NÚMERO PRECISA CASAR COM O LAYOUT. Se a interface puser botão em
+ * `y = 0,95` e a calibração só chegar a `y ≈ 0,88`, a extrapolação apenas mudou
+ * de lugar — de dentro do modelo para fora dele. Os dois orçamentos, o da grade
+ * e o do layout do paciente, se decidem juntos.
+ */
+export const MAX_ECCENTRICITY_DEG_BAIXO = 12;
+
 /** Geometria física necessária para converter graus em fração de tela. */
 export interface CalibrationGeometry {
   screenWidthPx: number;
@@ -1168,6 +1308,8 @@ export interface CalibrationGeometry {
   viewingDistanceCm: number;
   /** Excentricidade máxima admitida, em graus. */
   maxEccentricityDeg?: number;
+  /** Excentricidade máxima PARA BAIXO. Ausente = `MAX_ECCENTRICITY_DEG_BAIXO`. */
+  maxEccentricityDegBaixo?: number;
 }
 
 // Fallback quando o caller não passa geometria. Em produção quem manda é
@@ -1225,11 +1367,24 @@ export function computeCalibrationTargets(
   const diagPx = Math.hypot(screenWidthPx, screenHeightPx);
   const pxPerCm = screenDiagonalIn > 0 ? diagPx / (screenDiagonalIn * 2.54) : 0;
 
+  const maxDegBaixo = geometry.maxEccentricityDegBaixo ?? MAX_ECCENTRICITY_DEG_BAIXO;
+
   const ex = eccentricityExtentFraction(screenWidthPx, pxPerCm, viewingDistanceCm, maxDeg);
   const ey = eccentricityExtentFraction(screenHeightPx, pxPerCm, viewingDistanceCm, maxDeg);
+  // Assimetria vertical (sprint S4): a linha de baixo sobe, porque é a pálpebra
+  // — e não o orçamento angular — que decide até onde o olho ainda é visível.
+  // Duas contas, e vale a menor. A angular sozinha não bastaria: o extent
+  // satura em `MAX_EXTENT_FRACTION`, e na bancada de referência tanto 16°
+  // quanto 12° batem no teto — a linha de baixo subiria 17 px, e num notebook
+  // de 15,6" a 50 cm não subiria NADA. A proporcional garante que o orçamento
+  // menor produza um alvo mais alto em qualquer geometria, que é o ponto.
+  const eyBaixo = Math.min(
+    eccentricityExtentFraction(screenHeightPx, pxPerCm, viewingDistanceCm, Math.min(maxDegBaixo, maxDeg)),
+    ey * (Math.min(maxDegBaixo, maxDeg) / maxDeg),
+  );
 
   const xs = [0.5 - ex, 0.5, 0.5 + ex];
-  const ys = [0.5 - ey, 0.5, 0.5 + ey];
+  const ys = [0.5 - ey, 0.5, 0.5 + eyBaixo];
 
   if (quick) {
     return [
@@ -1239,6 +1394,78 @@ export function computeCalibrationTargets(
   }
   const out: { x: number; y: number }[] = [];
   for (const y of ys) for (const x of xs) out.push({ x, y });
+  return out;
+}
+
+/**
+ * Alvos extras ao redor dos que o modelo pior aprendeu (sprint S4).
+ *
+ * A grade é uniforme, mas o erro não é: o `looByTarget` do diagnóstico já diz,
+ * ao fim da calibração, quais alvos o modelo não consegue prever a partir dos
+ * outros. Em vez de mandar refazer a calibração inteira — mais 26 segundos de
+ * fadiga, com a mesma grade que já falhou —, gasta-se o tempo onde ele falta.
+ *
+ * Os vizinhos são postos a meio caminho entre o alvo ruim e o centro, e entre
+ * ele e as bordas do orçamento, porque o que a região precisa é de DENSIDADE:
+ * o Ridge erra ali por interpolar longe demais, não por não ter visto o ponto.
+ */
+export function alvosDeReforco(
+  looByTarget: readonly { x: number; y: number; errorPx: number }[],
+  geometry: CalibrationGeometry,
+  opcoes?: { piores?: number; maximo?: number; razaoMinima?: number },
+): { x: number; y: number }[] {
+  const piores = opcoes?.piores ?? 2;
+  const maximo = opcoes?.maximo ?? 4;
+  const razaoMinima = opcoes?.razaoMinima ?? 1.5;
+
+  const validos = looByTarget.filter((t) => Number.isFinite(t.errorPx));
+  if (validos.length < 3) return [];
+
+  // Mediana como referência: com nove alvos e um outlier, a média já seria
+  // puxada por ele e a razão diria que ninguém está fora da curva.
+  const ordenados = [...validos].map((t) => t.errorPx).sort((a, b) => a - b);
+  const mediana = ordenados[ordenados.length >> 1];
+  if (!(mediana > 0)) return [];
+
+  const candidatos = [...validos]
+    .sort((a, b) => b.errorPx - a.errorPx)
+    .slice(0, piores)
+    .filter((t) => t.errorPx >= mediana * razaoMinima);
+  if (candidatos.length === 0) return [];
+
+  // O reforço obedece ao MESMO orçamento angular da grade — inclusive a
+  // assimetria para baixo. Um alvo de reforço fora do orçamento pediria do olho
+  // exatamente a excentricidade que a grade evita, e traria de volta o alvo
+  // pulado que esta sprint existe para eliminar.
+  const cantos = computeCalibrationTargets(geometry, true);
+  const limite = {
+    xMin: Math.min(...cantos.map((c) => c.x)),
+    xMax: Math.max(...cantos.map((c) => c.x)),
+    yMin: Math.min(...cantos.map((c) => c.y)),
+    yMax: Math.max(...cantos.map((c) => c.y)),
+  };
+
+  const out: { x: number; y: number }[] = [];
+  const jaExiste = (p: { x: number; y: number }) =>
+    out.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 0.03) ||
+    validos.some((q) => Math.hypot(q.x - p.x, q.y - p.y) < 0.03);
+
+  for (const alvo of candidatos) {
+    // Um a meio caminho do centro e outro um pouco além do alvo: o que a
+    // região precisa é de DENSIDADE, porque o Ridge erra ali por interpolar
+    // longe demais, não por nunca ter visto aquele ponto.
+    for (const t of [0.5, 1.35]) {
+      const p = {
+        x: 0.5 + (alvo.x - 0.5) * t,
+        y: 0.5 + (alvo.y - 0.5) * t,
+      };
+      if (p.x < limite.xMin || p.x > limite.xMax) continue;
+      if (p.y < limite.yMin || p.y > limite.yMax) continue;
+      if (jaExiste(p)) continue;
+      out.push(p);
+      if (out.length >= maximo) return out;
+    }
+  }
   return out;
 }
 
@@ -1277,6 +1504,7 @@ export function currentCalibrationGeometry(
     screenDiagonalIn: DEFAULT_SCREEN_DIAGONAL_IN,
     viewingDistanceCm: DEFAULT_VIEWING_DISTANCE_CM,
     maxEccentricityDeg: MAX_ECCENTRICITY_DEG,
+    maxEccentricityDegBaixo: MAX_ECCENTRICITY_DEG_BAIXO,
     // A da sessão vence os defaults; um `overrides` explícito vence tudo.
     ...(sessionGeometry ?? {}),
     ...overrides,
@@ -1348,6 +1576,15 @@ export function startCalibrationMode(
   eyeReliability = null;
   qualityGapWarned = false;
   profile = [];
+  tempoUtilPorAlvoMs = [];
+  pontosInstaveis = 0;
+  perseguicaoAtiva = false;
+  alvoDaPerseguicao = null;
+  quadrosDaPerseguicao = [];
+  ultimaMetaPersistida = null;
+  modeloAntesDoReforco = null;
+  // O deslocamento aprendido descrevia o modelo que acabou de ser descartado.
+  reiniciarCorrecao();
   regressorLeft = null;
   regressorRight = null;
   // Os regressores acabaram de ser descartados: o instante do treino deles não
@@ -1426,11 +1663,14 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   currentTargetX = x;
   currentTargetY = y;
   currentCollectionMs = getCollectionMsForPoint(x, y);
+  estabilidadeDoAlvo.reiniciar();
+  motivoDoFechamento = 'teto';
   isCollecting = true;
   collectionStartTime = performance.now();
   collectedFeaturesLeft = [];
   collectedFeaturesRight = [];
   collectedQualities = [];
+  collectedPesos = [];
   pointCompleteCallback = onDone;
   l2csRejects = 0;
   l2csRej = zerarRejeicoesL2cs();
@@ -1439,11 +1679,12 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
   currentPointFramesAccepted = 0;
   currentPointCameraDistances.length = 0;
 
-  const totalMs = duracaoTotalDoPonto(currentCollectionMs);
+  const totalMs = duracaoTotalDoPonto(tetoDaJanela(currentCollectionMs));
   console.log(
     `[calib] ▶ Coletando ponto (${(x * 100).toFixed(0)}%, ${(y * 100).toFixed(0)}%) — ` +
-    `${CALIBRATION_ACCLIMATION_MS}ms de acomodação + ${currentCollectionMs}ms de coleta útil ` +
-    `(${totalMs}ms no total)`,
+    `${CALIBRATION_ACCLIMATION_MS}ms de acomodação + ` +
+    `${COLLECTION_MIN_MS}..${tetoDaJanela(currentCollectionMs)}ms de coleta útil, ` +
+    `fechando por estabilidade (${totalMs}ms no pior caso)`,
   );
 
   // Timeout duro: se `feedRawData` nunca fechar o ponto (todos os frames
@@ -1453,6 +1694,12 @@ export function startCollectingPoint(x: number, y: number, onDone: (success: boo
     collectionTimeoutHandle = null;
     if (isCollecting) {
       console.warn(`[calib] ⏱ Timeout! isCollecting ainda true após ${totalMs + 800}ms. Amostras coletadas: ${collectedFeaturesLeft.length}`);
+      // O caminho do timeout também é um ponto que não estabilizou — e o
+      // `feedRawData` nem chegou a registrar o tempo, porque parou de ser
+      // chamado. Sem estas duas linhas o diagnóstico contaria a mais.
+      motivoDoFechamento = 'teto';
+      pontosInstaveis++;
+      tempoUtilPorAlvoMs.push(Math.round(totalMs - CALIBRATION_ACCLIMATION_MS));
       isCollecting = false;
       processStaticPoint();
     }
@@ -1566,6 +1813,48 @@ export function countDeadFeatures(
  * `l2csValidFraction` no relatório — dá para medir o estrago depois.
  */
 export function feedRawData(featuresLeft: number[], featuresRight: number[], quality?: any | null) {
+  // Perseguição suave (sprint S8): o quadro pertence a um alvo em MOVIMENTO,
+  // não a um ponto estático, e quem decide se ele vale é a correlação no fim.
+  // Vem antes de tudo porque nenhuma das regras de ponto estático — acomodação,
+  // estabilidade, teto de tempo — se aplica aqui.
+  if (perseguicaoAtiva) {
+    // O baseline de pose da sessão também se monta aqui: um perfil treinado
+    // inteiramente por perseguição ficaria sem referência, e a compensação
+    // geométrica de pose passaria a operar contra o nada.
+    if (!sessionBaselinePose && quality
+      && typeof quality.yaw === 'number' && typeof quality.pitch === 'number'
+      && typeof quality.roll === 'number') {
+      sessionPoseSamples.push({ yaw: quality.yaw, pitch: quality.pitch, roll: quality.roll });
+      if (sessionPoseSamples.length > 120) sessionPoseSamples.shift();
+    }
+    if (alvoDaPerseguicao && featuresLeft.length >= 2 && featuresRight.length >= 2) {
+      const blocoZeradoP = L2CS_SLOTS.length > 0
+        && L2CS_SLOTS.every((i) => featuresLeft[i] === 0 && featuresRight[i] === 0);
+      quadrosDaPerseguicao.push({
+        featuresLeft, featuresRight,
+        quality: quality ?? null,
+        peso: pesoDaAmostra({
+          qualidade: quality ?? null,
+          blocoZerado: blocoZeradoP,
+          l2csConfianca: blocoZeradoP ? null : ultimoDiagnosticoDoBloco().confidence,
+        }),
+        amostra: {
+          // Correlação de Pearson é invariante a ganho e deslocamento, então o
+          // deslocamento CRU da íris serve de "olhar" — e é o que existe antes
+          // de haver modelo nenhum, que é justamente o caso da calibração.
+          olhar: {
+            x: (featuresLeft[0] + featuresRight[0]) / 2,
+            y: (featuresLeft[1] + featuresRight[1]) / 2,
+          },
+          alvo: { ...alvoDaPerseguicao },
+          t: performance.now(),
+        },
+      });
+    }
+    lastDecision = { accepted: true, elapsedMs: 0 };
+    return;
+  }
+
   if (!isCalibrating || !isCollecting) {
     // A janela entre `startCalibrationMode` e o primeiro alvo (a UI espera
     // PREPARE_MS ali) é onde o baseline de pose da sessão é montado. Sem isto o
@@ -1631,7 +1920,9 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   // Bloco angular inválido (L2CS stale ou implausível) chega como zeros. Um
   // zero não é "sem informação" depois do StandardScaler: vira um z-score
   // grande que diz "olhar para o centro" num alvo periférico.
-  if (L2CS_SLOTS.length > 0 && L2CS_SLOTS.every((i) => featuresLeft[i] === 0 && featuresRight[i] === 0)) {
+  const blocoZerado = L2CS_SLOTS.length > 0
+    && L2CS_SLOTS.every((i) => featuresLeft[i] === 0 && featuresRight[i] === 0);
+  if (blocoZerado) {
     // CONTA, mas NÃO rejeita mais. A quebra por causa continua alimentando o
     // console e o relatório (`l2csValidFraction`), que é o que permite saber
     // depois quanta amostra entrou com o bloco angular zerado.
@@ -1647,6 +1938,15 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
   collectedFeaturesLeft.push(featuresLeft);
   collectedFeaturesRight.push(featuresRight);
   collectedQualities.push(quality ?? null);
+
+  // Peso de qualidade da amostra (sprint S1). Calculado AQUI porque é o único
+  // ponto onde o diagnóstico do bloco L2CS ainda descreve este quadro: um
+  // frame depois, `ultimoDiagnosticoDoBloco()` já fala de outro.
+  collectedPesos.push(pesoDaAmostra({
+    qualidade: quality ?? null,
+    blocoZerado,
+    l2csConfianca: blocoZerado ? null : ultimoDiagnosticoDoBloco().confidence,
+  }));
 
   // Contagem de frames com reflexo especular alto. Não rejeita nada;
   // só acumula para o sumário do ponto avisar.
@@ -1664,9 +1964,41 @@ export function feedRawData(featuresLeft: number[], featuresRight: number[], qua
     if (d !== null && Number.isFinite(d)) currentPointCameraDistances.push(d);
   }
 
-  // A coleta para depois da acomodação MAIS a janela útil, para o tempo de
-  // coleta prometido ser o tempo de coleta entregue.
-  if (elapsed >= duracaoTotalDoPonto(currentCollectionMs)) {
+  // Critério de parada (sprint S2). O tempo deixou de ser o único juiz: o ponto
+  // fecha quando o olhar PAROU, respeitados um piso de tempo, um mínimo de
+  // amostras e o teto — que é a antiga duração fixa. Nenhum ponto demora mais
+  // do que demorava; quem estabiliza cedo devolve tempo ao orçamento de fadiga.
+  //
+  // As duas primeiras dimensões do vetor são `offsetX`/`offsetY` da íris, que é
+  // o sinal proporcional ao olhar disponível ANTES de existir um modelo. A
+  // média dos dois olhos porque um olho pode estar semifechado.
+  if (featuresLeft.length >= 2 && featuresRight.length >= 2) {
+    estabilidadeDoAlvo.registrar(
+      (featuresLeft[0] + featuresRight[0]) / 2,
+      (featuresLeft[1] + featuresRight[1]) / 2,
+    );
+  }
+  const veredicto = estabilidadeDoAlvo.avaliar();
+  const decisao = decidirFechamento({
+    decorridoUtilMs: elapsed - CALIBRATION_ACCLIMATION_MS,
+    minUtilMs: COLLECTION_MIN_MS,
+    maxUtilMs: tetoDaJanela(currentCollectionMs),
+    amostrasAceitas: collectedFeaturesLeft.length,
+    minAmostras: MIN_ACCEPTED_SAMPLES,
+    estavel: veredicto.estavel,
+  });
+
+  if (decisao.fechar) {
+    motivoDoFechamento = decisao.motivo === 'estavel' ? 'estavel' : 'teto';
+    tempoUtilPorAlvoMs.push(Math.round(elapsed - CALIBRATION_ACCLIMATION_MS));
+    if (motivoDoFechamento === 'teto') pontosInstaveis++;
+    console.log(
+      `[calib] ponto fechado por ${motivoDoFechamento} em ` +
+      `${Math.round(elapsed - CALIBRATION_ACCLIMATION_MS)}ms úteis ` +
+      `(teto ${tetoDaJanela(currentCollectionMs)}ms) — ` +
+      `z=${veredicto.z === null ? '?' : veredicto.z.toFixed(2)} ` +
+      `razão=${veredicto.razao === null ? '?' : veredicto.razao.toFixed(2)}`,
+    );
     isCollecting = false;
     if (collectionTimeoutHandle !== null) {
       clearTimeout(collectionTimeoutHandle);
@@ -1810,6 +2142,7 @@ function processStaticPoint() {
       featuresLeft: collectedFeaturesLeft[i],
       featuresRight: collectedFeaturesRight[i],
       quality: collectedQualities[i] ?? null,
+      peso: collectedPesos[i] ?? 1,
     });
   }
 
@@ -1872,6 +2205,23 @@ export interface CalibrationFitDiagnostics {
    * `accuracy-report-1788225161304`, com o conjunto ativo em `irisCore`.
    */
   l2csValidFraction: number | null;
+  /**
+   * Pesos de qualidade do treino (sprint S1), já normalizados por alvo.
+   * `medio` fica perto de 1 por construção — o que interessa é `minimo` e
+   * `fracaoAbaixoDeMeio`: sessão com muita amostra abaixo de meio peso é
+   * sessão em que a imagem estava ruim, e o número do relatório precisa dizer
+   * isso antes de alguém culpar o modelo. `null` quando não houve amostra.
+   */
+  pesos: { medio: number; minimo: number; fracaoAbaixoDeMeio: number } | null;
+  /**
+   * Tempo útil de cada COLETA de alvo, em ms (sprint S2), e quantas foram até
+   * o teto sem estabilizar. Uma entrada por tentativa, não por alvo: um alvo
+   * refeito aparece duas vezes, e é assim que precisa ser — a soma é o custo
+   * real da calibração em tempo de paciente, a métrica de produto desta sprint. `pontosInstaveis` alto com
+   * erro alto aponta para quem não conseguiu fixar, e não para o modelo.
+   */
+  tempoUtilPorAlvoMs: number[];
+  pontosInstaveis: number;
   /** Amostras aceitas por alvo. Desequilíbrio grande enviesa o ajuste. */
   samplesPerTarget: number[];
   /** Alvos planejados pela grade, alvos que de fato treinaram e os que ficaram
@@ -1913,6 +2263,217 @@ function calcularTargetsSkipped(
 
 export function getCalibrationFitDiagnostics(): CalibrationFitDiagnostics | null {
   return lastFitDiagnostics;
+}
+
+/**
+ * Começa uma coleta por perseguição suave (sprint S8).
+ *
+ * A tela precisa chamar `definirAlvoDaPerseguicao` a cada quadro com a posição
+ * corrente do alvo — sem isso o quadro não é guardado, porque uma amostra sem
+ * rótulo não serve para nada.
+ */
+export function iniciarPerseguicao(): boolean {
+  // Uma calibração por pontos em curso não pode ser sequestrada: o ponto
+  // corrente ficaria sem receber quadro nenhum e estouraria o teto com zero
+  // amostras, aparecendo depois como alvo pulado sem causa aparente.
+  if (isCollecting) {
+    console.warn('[calib] iniciarPerseguicao ignorado: há uma coleta por pontos em curso.');
+    return false;
+  }
+  perseguicaoAtiva = true;
+  alvoDaPerseguicao = null;
+  quadrosDaPerseguicao = [];
+  isCalibrating = true;
+  console.log('[calib] perseguição suave iniciada');
+  return true;
+}
+
+/** Posição do alvo em fração de tela, atualizada a cada quadro pela tela. */
+export function definirAlvoDaPerseguicao(x: number, y: number): void {
+  if (!perseguicaoAtiva) return;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+  alvoDaPerseguicao = { x, y };
+}
+
+export interface ResumoDaPerseguicao {
+  /** Quadros que entraram no perfil de treino. */
+  aproveitados: number;
+  /** Quadros vistos. */
+  vistos: number;
+  fracaoSeguida: number;
+  correlacaoMediana: number | null;
+  /** A pessoa conseguiu perseguir o suficiente para isto valer? */
+  utilizavel: boolean;
+}
+
+/**
+ * Fração mínima de perseguição para a sessão valer.
+ *
+ * Abaixo disto o resultado é descartado inteiro. É a proteção clínica: em ELA
+ * avançada e em algumas lesões de tronco a perseguição degrada ANTES da
+ * fixação, e o pior desfecho possível é treinar com o pouco que sobrou e
+ * entregar um modelo ruim sem ninguém perceber.
+ */
+export const FRACAO_MINIMA_DE_PERSEGUICAO = 0.35;
+
+/**
+ * Teto de amostras por célula da grade de perseguição.
+ *
+ * Quadros consecutivos de uma perseguição são quase idênticos: o vigésimo da
+ * mesma célula não acrescenta informação, só custo de treino — e o treino é
+ * O(m·d²) na Gram mais um fold por grupo. Quarenta por célula, com 25 células,
+ * dão no máximo mil amostras, na mesma ordem das ~225 de uma calibração por
+ * pontos.
+ */
+export const MAX_AMOSTRAS_POR_CELULA = 40;
+
+/**
+ * Encerra a perseguição, correlaciona e leva o que prestou para o perfil.
+ *
+ * Nada é acrescentado ao perfil quando a fração seguida fica abaixo do mínimo:
+ * quem chama recebe `utilizavel: false` e precisa cair para o método de pontos
+ * — dizendo isso na tela, não em silêncio.
+ */
+export function finalizarPerseguicao(): ResumoDaPerseguicao {
+  // Sem perseguição em curso isto é chamada por engano — e mexer em
+  // `isCalibrating` aqui mataria em silêncio uma calibração por pontos.
+  if (!perseguicaoAtiva) {
+    return {
+      aproveitados: 0, vistos: 0, fracaoSeguida: 0, correlacaoMediana: null, utilizavel: false,
+    };
+  }
+  const vistos = quadrosDaPerseguicao.length;
+  const r: ResultadoDaColheita = colher(quadrosDaPerseguicao.map((q) => q.amostra));
+
+  const utilizavel = r.fracaoSeguida >= FRACAO_MINIMA_DE_PERSEGUICAO && r.amostras.length > 0;
+  let aproveitados = 0;
+  if (utilizavel) {
+    // Subamostragem por célula: uma perseguição de 20 s a 30 Hz dá ~600
+    // quadros, e quadros consecutivos de uma perseguição são quase idênticos —
+    // o vigésimo da mesma célula não acrescenta informação, só custo de treino.
+    const porCelula = new Map<string, number>();
+    for (const a of r.amostras) {
+      const grupo = celulaDoAlvo(a.alvo);
+      const n = porCelula.get(grupo) ?? 0;
+      if (n >= MAX_AMOSTRAS_POR_CELULA) continue;
+      porCelula.set(grupo, n + 1);
+
+      const q = quadrosDaPerseguicao[a.indice];
+      profile.push({
+        screenX: a.alvo.x,
+        screenY: a.alvo.y,
+        featuresLeft: q.featuresLeft,
+        featuresRight: q.featuresRight,
+        quality: q.quality,
+        peso: q.peso,
+        // O rótulo é a posição contínua; o GRUPO é a célula. Ver `celulaDoAlvo`.
+        grupo,
+      });
+      aproveitados++;
+    }
+  }
+
+  console.log(
+    `[calib] perseguição encerrada — ${aproveitados}/${vistos} quadros aproveitados ` +
+    `(${(r.fracaoSeguida * 100).toFixed(0)}%), correlação mediana ` +
+    `${r.correlacaoMediana === null ? '?' : r.correlacaoMediana.toFixed(2)}` +
+    `${utilizavel ? '' : ' — DESCARTADA, abaixo do mínimo'}`,
+  );
+
+  perseguicaoAtiva = false;
+  alvoDaPerseguicao = null;
+  quadrosDaPerseguicao = [];
+  isCalibrating = false;
+
+  return {
+    aproveitados,
+    vistos,
+    fracaoSeguida: r.fracaoSeguida,
+    correlacaoMediana: r.correlacaoMediana,
+    utilizavel,
+  };
+}
+
+/**
+ * Abre uma rodada extra dos quatro cantos, para ser coletada numa SEGUNDA
+ * POSIÇÃO DE CABEÇA (sprint S7).
+ *
+ * A pose está deliberadamente fora do vetor do modelo — como feature ela vira
+ * atalho correlacionado à ordem de coleta, e o projeto mediu 8,6% de piora.
+ * O preço dessa decisão correta é a fragilidade clássica do mapeamento 2D: ele
+ * vale para a pose em que foi treinado, e a compensação analítica `d·tan(Δ)`
+ * cobre só a primeira ordem.
+ *
+ * A saída é coletar os mesmos alvos com a cabeça noutra posição — a cadeira
+ * erguida depois de reclinada, por exemplo — e treinar tudo junto. O modelo
+ * aprende a ser plano na faixa de pose que aquela pessoa de fato ocupa, sem
+ * que a pose entre no vetor.
+ *
+ * Quatro alvos e não nove: o orçamento de fadiga é real, e os cantos são onde
+ * o efeito de pose é maior. Quem chama precisa PEDIR à pessoa que mude de
+ * posição antes — sem isso a rodada só duplica amostras da mesma pose, o que
+ * não ensina nada e ainda desequilibra o peso dos cantos.
+ */
+export function iniciarRodadaDeSegundaPose(): { x: number; y: number }[] {
+  if (isCalibrating || profile.length === 0) return [];
+
+  const cantos = computeCalibrationTargets(currentCalibrationGeometry(), true);
+  // Os cantos JÁ estão em `currentCalibrationTargets` — não são acrescentados
+  // de novo, senão `targetsSkipped` passaria a contar cada um duas vezes.
+  isCalibrating = true;
+  console.log(
+    `[calib] segunda pose: ${cantos.length} cantos, para o modelo aprender a ` +
+    `ser plano na faixa de pose que esta pessoa ocupa.`,
+  );
+  return cantos;
+}
+
+/**
+ * Abre uma rodada extra de alvos onde o modelo pior generalizou (sprint S4).
+ *
+ * Chamada DEPOIS de `completeCalibration` ter dado certo: ela lê o
+ * `looByTarget` já calculado e em cache, então não custa nada. Devolve os
+ * alvos extras e reabre a coleta — o perfil NÃO é limpo, de propósito: a
+ * segunda passada soma-se à primeira, e o `completeCalibration` seguinte treina
+ * com a grade inteira mais o reforço.
+ *
+ * Devolve lista vazia quando não há o que reforçar, e nesse caso não reabre
+ * nada. Quem chama pode simplesmente seguir para o teste.
+ */
+export function iniciarRodadaDeReforco(
+  opcoes?: { piores?: number; maximo?: number; razaoMinima?: number },
+): { x: number; y: number }[] {
+  const d = lastFitDiagnostics;
+  if (!d || isCalibrating) return [];
+
+  const extras = alvosDeReforco(d.looByTarget, currentCalibrationGeometry(), opcoes);
+  if (extras.length === 0) return [];
+
+  // RETRATO DO MODELO QUE JÁ FUNCIONA.
+  //
+  // A calibração que acabou treinou, passou e foi salva. O reforço vai chamar
+  // `completeCalibration` uma segunda vez, e um treino que lança (features
+  // degeneradas por reflexo nos alvos extras, por exemplo) zera os regressores
+  // no `catch` — o paciente perderia um modelo bom de trinta segundos atrás
+  // por causa de uma melhoria opcional. Com o retrato, a falha do reforço
+  // custa o reforço, e nada mais.
+  modeloAntesDoReforco = {
+    left: regressorLeft ? ridgeModelFromRegressor(regressorLeft) : null,
+    right: regressorRight ? ridgeModelFromRegressor(regressorRight) : null,
+    scalerL: featureScalerLeft.getParams(),
+    scalerR: featureScalerRight.getParams(),
+    meta: pendingProfileMeta,
+  };
+
+  // Os extras entram na lista de planejados: sem isto eles não contariam em
+  // `targetsSkipped` e um reforço que falhasse passaria despercebido.
+  currentCalibrationTargets = [...(currentCalibrationTargets ?? []), ...extras];
+  isCalibrating = true;
+  console.log(
+    `[calib] rodada de reforço: ${extras.length} alvo(s) extra(s) ao redor dos ` +
+    `de pior erro leave-one-target-out.`,
+  );
+  return extras;
 }
 
 /**
@@ -2009,15 +2570,32 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
   // penalidade anisotrópica por falta de grupo com 2+ amostras e faria o
   // treino custar ~50 s por olho em vez de ~0,2 s.
   const gruposDeAlvo = trainingProfile.map((p) =>
-    targetGroupKey({ screenX: p.screenX, screenY: p.screenY }));
+    p.grupo ?? targetGroupKey({ screenX: p.screenX, screenY: p.screenY }));
 
   const targetsX = trainTargets.map(t => t.screenX);
   const targetsY = trainTargets.map(t => t.screenY);
 
+  // Pesos de qualidade (sprint S1), normalizados DENTRO de cada alvo: a
+  // amostra ruim pesa menos que as vizinhas do mesmo ponto, mas o ponto inteiro
+  // continua valendo o que valia contra os outros. Sem essa normalização a
+  // linha inferior da grade — que tem qualidade pior em todas as amostras,
+  // porque a pálpebra desce junto com o olhar — perderia peso justamente onde
+  // o modelo mais precisa de dado.
+  const pesosBrutos = trainingProfile.map(
+    (p) => (typeof p.peso === 'number' && Number.isFinite(p.peso) ? p.peso : 1),
+  );
+  const pesosDeQualidade = normalizarPorGrupo(pesosBrutos, gruposDeAlvo);
+  // O resumo sai dos pesos BRUTOS, não dos normalizados. Os normalizados têm
+  // média 1 por construção: numa sessão inteira no escuro, com todas as
+  // amostras no piso, eles sairiam todos 1,0 e o relatório diria "peso mínimo
+  // 1,00, 0% abaixo de meio" — mentindo exatamente na sessão que o campo
+  // existe para denunciar.
+  ultimoResumoDePesos = resumoDePesos(pesosBrutos);
+
   regressorLeft = createRegressor();
-  regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY, gruposDeAlvo);
+  regressorLeft.train(scaledFeaturesLeft, targetsX, targetsY, gruposDeAlvo, undefined, pesosDeQualidade);
   regressorRight = createRegressor();
-  regressorRight.train(scaledFeaturesRight, targetsX, targetsY, gruposDeAlvo);
+  regressorRight.train(scaledFeaturesRight, targetsX, targetsY, gruposDeAlvo, undefined, pesosDeQualidade);
 
   // Peso por olho pelo inverso da variância do resíduo de treino. Com olhos
   // igualmente bons dá ~0,5/0,5; um olho ruim deixa de arrastar a média.
@@ -2078,6 +2656,7 @@ function trainScalersAndRegressors(trainingProfile: CalibrationPoint[]): Trainin
     `[calib] ajuste — treino=${d.trainErrorPx.toFixed(0)}px | LOO=${d.looErrorPx.toFixed(0)}px | ` +
     `λ=${d.lambda ? `${d.lambda.left}/${d.lambda.right}` : '?'} | dims=${d.dimsPerEye} | ` +
     `L2CS ${d.l2csValidFraction === null ? 'fora do conjunto' : `válido=${(d.l2csValidFraction * 100).toFixed(0)}%`} | ` +
+    `peso mín=${d.pesos ? d.pesos.minimo.toFixed(2) : '?'} (${d.pesos ? (d.pesos.fracaoAbaixoDeMeio * 100).toFixed(0) : '?'}% abaixo de 0,5) | ` +
     `amostras/alvo=[${d.samplesPerTarget.join(',')}]` +
     (d.targetsSkipped.length > 0 ? ` | ALVOS PULADOS: ${d.targetsSkipped.length}` : ''),
   );
@@ -2267,6 +2846,9 @@ export function computeFitDiagnostics(
     poseDrift: getSessionPoseDrift(),
     gridDiagnosis: diagnosticarGrade(looByTarget),
     l2csValidFraction,
+    pesos: ultimoResumoDePesos,
+    tempoUtilPorAlvoMs: [...tempoUtilPorAlvoMs],
+    pontosInstaveis,
     samplesPerTarget,
     targetsPlanned: planejados.length,
     targetsTrained: keys.length,
@@ -2590,8 +3172,28 @@ export function completeCalibration(
     if (!failure.ok) {
       console.error(`[calib] ✗ Calibração falhou (${failure.reason}): ${failure.detail}`);
     }
+    // Falhou uma rodada de REFORÇO? Então volta o modelo que já funcionava, e
+    // o desfecho passa a ser sucesso: o reforço é opcional, e perder a
+    // calibração inteira por causa dele seria trocar uma melhoria por um dano.
+    if (modeloAntesDoReforco) {
+      const b = modeloAntesDoReforco;
+      if (b.left && b.right) {
+        regressorLeft = ridgeRegressorFromModel(b.left);
+        regressorRight = ridgeRegressorFromModel(b.right);
+        featureScalerLeft.setParams(b.scalerL.means, b.scalerL.stds);
+        featureScalerRight.setParams(b.scalerR.means, b.scalerR.stds);
+        pendingProfileMeta = b.meta;
+        outcome = { ok: true };
+        console.warn(
+          '[calib] reforço falhou; a calibração anterior foi restaurada e segue valendo.',
+        );
+      }
+    }
   } finally {
     isCalibrating = false;
+    // O retrato serve a UMA chamada. Mantê-lo faria a próxima falha, de uma
+    // calibração nova e legítima, ressuscitar um modelo de outra sessão.
+    modeloAntesDoReforco = null;
     // Libera o modo. `getCalibrationTargets()` volta ao default 'full'.
     currentCalibrationMode = null;
     if (onComplete) onComplete(outcome!);
@@ -2608,8 +3210,15 @@ function persistActiveProfileToRegistry(summary: TrainingSummary): void {
     console.warn('[calib] persistActiveProfileToRegistry: regressors ausentes; nada a salvar.');
     return;
   }
-  const meta = pendingProfileMeta ?? profileRegistry.createMeta({ opticalCondition: 'desconhecido' });
+  const meta = pendingProfileMeta ?? ultimaMetaPersistida
+    ?? profileRegistry.createMeta({ opticalCondition: 'desconhecido' });
   pendingProfileMeta = null;
+  // Guardada para a rodada de reforço: ela chama `completeCalibration` uma
+  // segunda vez, e `pendingProfileMeta` já foi consumida na primeira. Sem
+  // isto, o segundo treino salvaria um perfil NOVO, com condição óptica
+  // 'desconhecido' e sem o rótulo que o cuidador escolheu — um perfil fantasma
+  // por calibração, e o aviso de lente progressiva perdido no caminho.
+  ultimaMetaPersistida = meta;
 
   const diag = getLambdaDiagnostics();
 
@@ -2713,6 +3322,11 @@ export function switchActiveProfile(id: string): CalibrationProfileMeta | null {
   }
   const stored = profileRegistry.switchTo(id);
   if (!stored) return null;
+  // O deslocamento aprendido por dwell descrevia o modelo ANTERIOR e a sessão
+  // anterior. Carregá-lo para o perfil novo põe o cursor de outra pessoa (ou
+  // da mesma pessoa de óculos) deslocado em até o teto, e leva minutos de
+  // dwells para desfazer — em quem só fala pelo olhar, isso é perda de fala.
+  reiniciarCorrecao();
   regressorLeft = ridgeRegressorFromModel(stored.modelLeft);
   regressorRight = ridgeRegressorFromModel(stored.modelRight);
   featureScalerLeft.setParams(stored.scalerParamsLeft.means, stored.scalerParamsLeft.stds);
@@ -2981,12 +3595,22 @@ export function mapGaze(
       )
     : comPose0;
 
+  // Correção aprendida com os dwells concluídos (sprint S3). Vem por último
+  // entre as correções e ANTES do clamp, pelo mesmo motivo das outras: o clamp
+  // é quem garante que o ponto caiba na tela.
+  //
+  // A ordem importa: esta correção aprende a partir do erro que SOBRA depois de
+  // distância, pose e translação. Aplicá-la antes delas faria o deslocamento
+  // aprendido ser reprocessado pelas compensações, e ele passaria a perseguir
+  // um alvo móvel.
+  const comDwell = corrigirPorDwell({ x: comPose.x, y: comPose.y }, performance.now());
+
   // Registrado ANTES do clamp: depois dele a informação some, e é exatamente
   // essa informação que explica o cursor parado na borda.
-  ultimaSaturacao = avaliarSaturacao(comPose.x, comPose.y);
+  ultimaSaturacao = avaliarSaturacao(comDwell.x, comDwell.y);
 
-  const avgNormX = softClamp(comPose.x);
-  const avgNormY = softClamp(comPose.y);
+  const avgNormX = softClamp(comDwell.x);
+  const avgNormY = softClamp(comDwell.y);
 
   const vw = document.documentElement.clientWidth;
   const vh = document.documentElement.clientHeight;

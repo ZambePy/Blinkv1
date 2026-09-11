@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { definirEmergenciaAtiva } from '../../services/estadoDeEmergencia';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertOctagon, HeartPulse, ShieldAlert, Thermometer, Wind } from 'lucide-react';
@@ -24,6 +25,16 @@ export const EmergencyEscalation: React.FC = () => {
   const { currentProfile } = useAuth();
   const [triggered, setTriggered] = useState<string | null>(null);
   const [escalated, setEscalated] = useState(false);
+
+  // Enquanto esta tela está aberta, há uma emergência em curso — e a correção
+  // por dwell (sprint S3) não pode aprender aqui. O `EmergencyContext` só
+  // marca a CONTAGEM REGRESSIVA; depois de confirmada, a navegação chega nesta
+  // tela e o sinal voltaria a false justamente durante o alarme, que é o pior
+  // momento possível para o sistema experimentar qualquer coisa.
+  useEffect(() => {
+    definirEmergenciaAtiva(true);
+    return () => definirEmergenciaAtiva(false);
+  }, []);
 
   const triggerAlert = (_id: string, label: string) => {
     setTriggered(label);

@@ -30,6 +30,21 @@
  */
 export const FATOR_DE_ALERTA = 1.6;
 
+/**
+ * Fração do teto da correção por dwell acima da qual o deslocamento acumulado
+ * deixa de ser deriva normal (sprint S3 / macete B2).
+ *
+ * A correção por dwell persegue o deslocamento sozinha e, enquanto ela dá
+ * conta, ninguém precisa recalibrar. O sinal de que ela NÃO está dando conta é
+ * o deslocamento colado no próprio teto: significa que a correção está pedindo
+ * mais do que pode entregar, e o que mudou não é deriva — é a cadeira, a luz ou
+ * a distância. É esse o momento de pedir recalibração, e não o relógio.
+ *
+ * 0,75 do teto: perto o bastante para avisar antes de saturar, longe o bastante
+ * para não disparar num dia de uso normal.
+ */
+export const FRACAO_DO_TETO_QUE_ALERTA = 0.75;
+
 export type VeredictoDaChecagem = 'seguir' | 'atencao' | 'recalibrar';
 
 export interface EntradaDaChecagem {
@@ -39,6 +54,12 @@ export interface EntradaDaChecagem {
   referenciaDeg: number | null;
   rostoEnquadrado: boolean;
   distanciaNaFaixa: boolean;
+  /**
+   * Deslocamento que a correção por dwell precisou acumular, como fração do
+   * teto dela (0..1). `null` quando a correção está desligada ou nunca
+   * aprendeu nada — e aí este critério simplesmente não opina.
+   */
+  fracaoDoTetoDaCorrecao?: number | null;
 }
 
 export interface ResultadoDoVeredicto {
@@ -69,7 +90,17 @@ export function veredictoDaChecagem(e: EntradaDaChecagem): ResultadoDoVeredicto 
     e.referenciaDeg !== null && Number.isFinite(e.referenciaDeg) && e.referenciaDeg > 0;
   if (!temReferencia) return { veredicto: 'seguir', motivo: null };
 
-  // 4. Piorou o bastante para avisar. `atencao` e não `recalibrar`: reprovar
+  // 4. O deslocamento acumulado saturou? Vem ANTES da comparação de erro
+  //    porque é um sinal independente e mais específico: o erro de três alvos
+  //    pode estar bom justamente PORQUE a correção está segurando a barra, e
+  //    nesse caso o critério de baixo aprovaria uma situação que já está no
+  //    limite. Só opina quando há número.
+  const fracao = e.fracaoDoTetoDaCorrecao;
+  if (typeof fracao === 'number' && Number.isFinite(fracao) && fracao >= FRACAO_DO_TETO_QUE_ALERTA) {
+    return { veredicto: 'atencao', motivo: 'deslocamentoAcumulado' };
+  }
+
+  // 5. Piorou o bastante para avisar. `atencao` e não `recalibrar`: reprovar
   //    sozinho tiraria a decisão do cuidador, que sabe coisas que o software
   //    não sabe. O que muda com "muito pior" é a ênfase, não o poder.
   if (e.erroDeg > (e.referenciaDeg as number) * FATOR_DE_ALERTA) {

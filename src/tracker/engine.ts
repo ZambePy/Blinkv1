@@ -5,6 +5,7 @@
 import { FilesetResolver, FaceLandmarker } from '@mediapipe/tasks-vision';
 import * as calibration from '../calibration';
 import { OneEuroFilter2D, FILTER_PRESETS, FILTER_PRESETS_V2 } from '../oneEuroFilter';
+import { EstabilizadorDeFixacao } from '../filters/estabilizadorDeFixacao';
 import { FilterChain } from '../filters/filterChain';
 import { BlinkHold } from '../filters/blinkHold';
 import { MedidorDeContraluz, type MedidaDeContraluz } from '../contraluz';
@@ -174,6 +175,20 @@ export interface CalibrationApi {
   getCalibrationFitDiagnostics(): import('../calibration').CalibrationFitDiagnostics | null;
   /** Alvos planejados que não entraram no treino. Barato. */
   getTargetsSkipped(): { x: number; y: number }[];
+  /**
+   * Abre uma rodada extra de alvos onde o modelo pior generalizou (sprint S4).
+   * Barato: lê o `looByTarget` já em cache. Lista vazia = nada a reforçar.
+   */
+  iniciarRodadaDeReforco(): { x: number; y: number }[];
+  /**
+   * Abre uma rodada dos quatro cantos para uma SEGUNDA posição de cabeça
+   * (sprint S7). Quem chama precisa pedir à pessoa que mude de posição antes.
+   */
+  iniciarRodadaDeSegundaPose(): { x: number; y: number }[];
+  /** Coleta por perseguição suave (sprint S8). Ver `calibration/perseguicao`. */
+  iniciarPerseguicao(): boolean;
+  definirAlvoDaPerseguicao(x: number, y: number): void;
+  finalizarPerseguicao(): import('../calibration').ResumoDaPerseguicao;
   /**
    * Encerra uma calibração em curso SEM treinar e sem descartar o
    * modelo anterior. A tela chama no unmount e quando a janela perde o foco;
@@ -455,6 +470,17 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
   let ultimoFiltroSec: number | null = null;
   let geometriaDeTela: GeometriaDeTela | null = null;
   let cadeia: FilterChain | null = null;
+  /**
+   * Estabilizador de fixação do caminho do One Euro (sprint S5).
+   *
+   * O One Euro NÃO passa pela `FilterChain` — ele tem caminho próprio, com os
+   * presets e o espaço normalizado. Sem esta instância aqui, o estabilizador
+   * existia só nos modos Kalman e a flag `estabilizarFixacao` mentia: ela
+   * dizia "ligado" num build de produção em que o estágio nunca rodava.
+   */
+  let estabilizadorOneEuro: EstabilizadorDeFixacao | null = null;
+  /** Roll do último quadro com rosto, para o crop do próximo (sprint S6). */
+  let ultimoRollRad: number | null = null;
   // Projeta a posição pelo Kalman durante a piscada, em vez de congelar. Só
   // tem efeito quando há Kalman — nunca no modo `'oneEuro'`.
   const blinkHold = new BlinkHold();
@@ -466,10 +492,17 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
 
   /** Constrói (ou reconstrói) a cadeia. Chamada quando a geometria aparece. */
   function montarCadeia(): void {
+    // O estabilizador é ortogonal ao filtro: vale para os três modos. No
+    // caminho do One Euro ele vive aqui; nos de Kalman, dentro da cadeia.
+    estabilizadorOneEuro =
+      EXPERIMENT.filterMode === 'oneEuro' && EXPERIMENT.estabilizarFixacao && geometriaDeTela
+        ? new EstabilizadorDeFixacao(geometriaDeTela)
+        : null;
     if (EXPERIMENT.filterMode === 'oneEuro') { cadeia = null; return; }
     cadeia = new FilterChain({
       mode: EXPERIMENT.filterMode,
       geometria: geometriaDeTela,
+      estabilizarFixacao: EXPERIMENT.estabilizarFixacao,
     });
   }
   montarCadeia();
@@ -607,6 +640,9 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
     oneEuro.reset();
     cadeia?.reset();
     ultimoFiltroSec = null;
+    // Roll de um rosto que já não está lá não descreve o rosto que voltar.
+    ultimoRollRad = null;
+    estabilizadorOneEuro?.reset();
     // Encerra qualquer episódio de hold em curso. O `predict` nunca é chamado
     // no ramo `piscando: false`, então o stub abaixo só existe para satisfazer
     // a assinatura sem forçar a cadeia a existir durante um reset.
@@ -840,6 +876,10 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
         // é 'no_face', não 'degraded'. Quando o rosto voltar, começa uma nova
         // janela de 500 ms antes de considerar degradado novamente.
         mapGazeNullSinceMs = null;
+        // O roll pertencia ao rosto que sumiu; aplicá-lo ao rosto que voltar
+        // rotacionaria o recorte pela inclinação de outro instante.
+        ultimoRollRad = null;
+        estabilizadorOneEuro?.reset();
         if (state === 'tracking' || state === 'degraded') setState('no_face');
         // Emite a CADA frame sem rosto, não uma vez por episódio: o dispatcher
         // de dwell decide entre pausar e zerar pela idade da perda, e sem os
@@ -951,6 +991,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
                 isMirrored: IS_VIDEO_MIRRORED,
                 context: cropCtx,
                 expandFactor: EXPERIMENT.expandFactor,
+                // Roll do quadro ANTERIOR: o recorte é montado antes de o
+                // extractor rodar, então o roll deste quadro ainda não existe.
+                // A 30 Hz a cabeça gira frações de grau entre quadros, e um
+                // atraso de 33 ms custa menos que não normalizar — mas está
+                // dito aqui para ninguém procurar um bug onde há uma escolha.
+                rollRad: EXPERIMENT.normalizarRollNoCrop ? ultimoRollRad : null,
               });
               stageTimer.end(STAGE.l2csCrop);
               if (l2csClient.submitTensor(tensor)) l2csFramesSubmitted++;
@@ -1061,6 +1107,8 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
 
           if (face) {
             diagPose = { yaw: face.yaw, pitch: face.pitch, roll: face.roll };
+            // Guardado para o recorte do PRÓXIMO quadro normalizar o roll.
+            if (Number.isFinite(face.roll)) ultimoRollRad = face.roll;
           }
           // Pose do quadro para a compensação geométrica em `mapGaze`. Enviada
           // sempre, inclusive `null`: uma pose velha de um quadro sem rosto
@@ -1153,6 +1201,12 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
             smoothed = { x: smoothedNorm.x * vwN, y: smoothedNorm.y * vhN };
           } else {
             smoothed = oneEuro.filter(targetX, targetY, now);
+          }
+          // Estabilizador de fixação no caminho do One Euro: durante a fixação
+          // a saída vira a média da janela; na sacada, volta a ser a amostra.
+          if (estabilizadorOneEuro) {
+            const e = estabilizadorOneEuro.processar(smoothed.x, smoothed.y, now * 1000);
+            smoothed = { x: e.x, y: e.y };
           }
           stageTimer.end(STAGE.filter);
           feedAccuracyFiltered(smoothed.x, smoothed.y);
@@ -1659,6 +1713,21 @@ export function createGazeEngine(mediapipeBaseUrl?: string): GazeEngine {
       },
       getCalibrationFitDiagnostics() {
         return calibration.getCalibrationFitDiagnostics();
+      },
+      iniciarRodadaDeReforco() {
+        return calibration.iniciarRodadaDeReforco();
+      },
+      iniciarRodadaDeSegundaPose() {
+        return calibration.iniciarRodadaDeSegundaPose();
+      },
+      iniciarPerseguicao() {
+        return calibration.iniciarPerseguicao();
+      },
+      definirAlvoDaPerseguicao(x: number, y: number) {
+        calibration.definirAlvoDaPerseguicao(x, y);
+      },
+      finalizarPerseguicao() {
+        return calibration.finalizarPerseguicao();
       },
       getTargetsSkipped() {
         return calibration.getTargetsSkipped();

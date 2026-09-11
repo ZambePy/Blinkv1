@@ -81,6 +81,10 @@ export const GazeButton: React.FC<GazeButtonProps> = ({
       data-emergency={emergency ? 'true' : undefined}
       data-recovery={recovery ? 'true' : undefined}
       data-no-dwell={disabled ? 'true' : undefined}
+      // Lido pelo dispatcher (sprint S3): só alvo isolado — grande e sem
+      // vizinho acionável — vira rótulo para a correção por dwell. A classe
+      // acima não serve para isso: `dataset` é o contrato com o dispatcher.
+      data-isolado={isolado ? 'true' : undefined}
       className={`gaze-button ${emergency ? 'emergency' : ''} ${isolado ? 'gaze-button--isolado' : ''} ${className}`}
       style={{
         width: width ? `${width}px` : undefined,

@@ -175,6 +175,8 @@ export const CalibrationCheck: React.FC = () => {
   // o state existe só para o JSX redesenhar. Os dois são escritos juntos e
   // nunca separadamente — ver `commitSessionTargets`.
   const activePointsRef = useRef<CalibrationPointUI[]>([]);
+  /** A rodada de reforço (sprint S4) acontece no máximo uma vez por sessão. */
+  const reforcoFeitoRef = useRef(false);
   const [sessionPoints, setSessionPoints] = useState<CalibrationPointUI[] | null>(null);
 
   const toUiPoints = (targets: readonly { x: number; y: number }[]): CalibrationPointUI[] =>
@@ -409,6 +411,33 @@ export const CalibrationCheck: React.FC = () => {
     );
   };
 
+  /**
+   * Roda uma sequência de alvos do começo ao fim.
+   *
+   * Usada pela calibração inteira e pela rodada de reforço (sprint S4) — as
+   * duas passam pela mesma máquina de coleta, embaralhamento e preparo, porque
+   * duplicar isso era o caminho mais curto para as duas divergirem.
+   */
+  const iniciarSequencia = (targets: readonly { x: number; y: number }[]) => {
+    const sessionTargets = commitSessionTargets(targets);
+    const order = sessionTargets.map((_, i) => i);
+    for (let i = order.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [order[i], order[j]] = [order[j], order[i]];
+    }
+    shuffleOrderRef.current = order;
+    setCompletedList([]);
+    setLastCompletedPoint(null);
+    setCurrentIndex(order[0]);
+
+    setPreparing(true);
+    setTimeout(() => {
+      if (!isMounted.current) return;
+      setPreparing(false);
+      startNextPoint(0);
+    }, PREPARE_MS);
+  };
+
   const startNextPoint = (step: number) => {
     if (!isMounted.current) return;
     const order = shuffleOrderRef.current;
@@ -447,6 +476,26 @@ export const CalibrationCheck: React.FC = () => {
               setStage('drift-warning');
               return;
             }
+            // ── Rodada de reforço (sprint S4) ─────────────────────────
+            //
+            // O `looByTarget` do treino que acabou já diz quais alvos o modelo
+            // não consegue prever a partir dos outros. Em vez de mandar refazer
+            // a calibração inteira — mais 26 s de fadiga, com a mesma grade que
+            // já falhou — gasta-se de 6 a 12 s onde o modelo é cego.
+            //
+            // `reforcoFeito` impede o laço: a segunda passada nunca pede uma
+            // terceira, mesmo que o erro continue concentrado.
+            if (!reforcoFeitoRef.current) {
+              const extras = calibration.iniciarRodadaDeReforco?.() ?? [];
+              if (extras.length > 0 && isMounted.current) {
+                reforcoFeitoRef.current = true;
+                console.log(`[React] Reforçando ${extras.length} alvo(s) difícil(eis)`);
+                setStage('calibrating');
+                iniciarSequencia(extras);
+                return;
+              }
+            }
+
             console.log('[React] Calibração concluída — disparando teste de precisão automático');
             setTimeout(() => {
               if (!isMounted.current) return;
@@ -610,6 +659,8 @@ export const CalibrationCheck: React.FC = () => {
     setStage('calibrating');
     calibracaoIniciadaEmRef.current = Date.now();
     setCompletedList([]);
+    // Nova calibração, novo direito a um reforço (sprint S4).
+    reforcoFeitoRef.current = false;
 
     // A distância MEDIDA nesta sessão manda, quando existe.
     // `viewingDistanceCm` posiciona os alvos pelo orçamento de excentricidade.
@@ -657,21 +708,7 @@ export const CalibrationCheck: React.FC = () => {
     });
 
     const targets = calibration.getCalibrationTargets?.() ?? [];
-    const sessionTargets = commitSessionTargets(targets);
-    const order = sessionTargets.map((_, i) => i);
-    for (let i = order.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [order[i], order[j]] = [order[j], order[i]];
-    }
-    shuffleOrderRef.current = order;
-    setCurrentIndex(order[0]);
-
-    setPreparing(true);
-    setTimeout(() => {
-      if (!isMounted.current) return;
-      setPreparing(false);
-      startNextPoint(0);
-    }, PREPARE_MS);
+    iniciarSequencia(targets);
   };
 
   const progressPct =
@@ -1276,15 +1313,19 @@ export const CalibrationCheck: React.FC = () => {
                           animation: 'cfHalo 3s linear infinite',
                         }}
                       />
-                      {/* Ponto central — azul, limpo, sem elementos sobre ele */}
+                      {/* Ponto central — azul, limpo, sem elementos sobre ele.
+                          Pisca durante a acomodação (600 ms) e só depois entra
+                          no pulso lento: ver `cfPiscarAlvo` nos keyframes. */}
                       <div
+                        className="cf-alvo-ativo"
                         style={{
                           width: 34,
                           height: 34,
                           borderRadius: '50%',
                           background: ACCENT,
                           boxShadow: `0 0 0 8px rgba(27, 84, 168, 0.18), 0 0 36px ${ACCENT}`,
-                          animation: 'cfPulse 1.2s infinite alternate',
+                          animation:
+                            'cfPiscarAlvo 600ms steps(1, end) 1 both, cfPulse 1.2s 600ms infinite alternate',
                         }}
                       />
                     </div>
@@ -1643,6 +1684,30 @@ export const CalibrationCheck: React.FC = () => {
           @keyframes cfFadeUp  { from { opacity:0; transform:translateY(16px); } to { opacity:1; transform:translateY(0); } }
           @keyframes cfScaleIn { from { opacity:0; transform:scale(0.4); } to { opacity:1; transform:scale(1); } }
           @keyframes cfPulseRed { from { opacity: 0.55; } to { opacity: 1; } }
+
+          /*
+           * Alvo piscante antes da coleta (sprint S2 / macete A6).
+           *
+           * O protocolo de Nyström pisca cada alvo 200 ms aceso / 200 ms
+           * apagado ANTES de exibi-lo estável, para garantir que o olho já
+           * esteja NO alvo quando a janela abre, em vez de chegando nele. Os
+           * 600 ms de acomodação que o engine descarta rendem mais assim.
+           *
+           * A duração é exatamente a da acomodação: aceso 200, apagado 200,
+           * aceso 200 — duas transições em 600 ms, abaixo do limite de três
+           * flashes por segundo da WCAG 2.3.1. Não aumentar a frequência.
+           */
+          @keyframes cfPiscarAlvo {
+            0%,   32.9%  { opacity: 1; }
+            33%,  65.9%  { opacity: 0.12; }
+            66%,  100%   { opacity: 1; }
+          }
+
+          /* Quem pediu menos movimento não recebe piscada: o alvo aparece
+             estável e a acomodação faz o trabalho sozinha. */
+          @media (prefers-reduced-motion: reduce) {
+            .cf-alvo-ativo { animation: none !important; opacity: 1 !important; }
+          }
         `}</style>
       </main>
     </>

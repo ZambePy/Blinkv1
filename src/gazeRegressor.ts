@@ -13,6 +13,8 @@ export interface GazeRegressor {
     targetsY: number[],
     gruposDeAlvo?: readonly string[],
     lambdaFixo?: { x: number; y: number },
+    /** Peso de qualidade por amostra (sprint S1), normalizado por alvo. */
+    pesosDeQualidade?: readonly number[],
   ): void;
   predict(features: number[]): { x: number; y: number };
 }

@@ -103,6 +103,9 @@ describe('DrawingGame — Desenho com Olhar', () => {
     expect(botao().getAttribute('aria-label')).toContain('Fina');
   });
 
+  // Timeout ampliado: o teste é síncrono e passa em ~460ms isolado, mas quando
+  // a suíte inteira roda em paralelo esta tela (6 GazeButtons + canvas) apanha
+  // contenção de CPU e chega perto do teto padrão de 5 s.
   it('mantém o desenho por mouse para quem testa sem rastreamento', () => {
     renderizar();
     const canvas = screen.getByLabelText('Área de desenho');
@@ -111,5 +114,5 @@ describe('DrawingGame — Desenho com Olhar', () => {
       fireEvent.mouseMove(canvas, { clientX: 160, clientY: 140 });
       fireEvent.mouseUp(canvas);
     }).not.toThrow();
-  });
+  }, 15000);
 });

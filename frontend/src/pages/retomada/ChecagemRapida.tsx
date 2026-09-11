@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { fracaoDoTetoDaCorrecao } from '@tracker/interaction/correcaoPorDwell';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { CheckCircle2, AlertTriangle, Info } from 'lucide-react';
@@ -160,6 +161,10 @@ export const ChecagemRapida: React.FC = () => {
         referenciaDeg: ref?.erroDeg ?? null,
         rostoEnquadrado: posicaoOk.current.rosto && !quebrou.current.rosto,
         distanciaNaFaixa: posicaoOk.current.distancia && !quebrou.current.distancia,
+        // Quanto do teto a correção por dwell já precisou gastar (sprint S3).
+        // Perto do teto, o erro de três alvos pode estar bom justamente porque
+        // a correção está segurando — e é aí que recalibrar vale a pena.
+        fracaoDoTetoDaCorrecao: fracaoDoTetoDaCorrecao(),
       })
     );
 
